@@ -68,7 +68,7 @@ header{
 /* message rows */
 .msg{display:flex; gap:14px; padding:14px 0}
 .msg .av{flex:0 0 30px; width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
-  font-size:13px; font-weight:700; margin-top:2px}
+  font-size:12px; font-weight:700; margin-top:2px}
 .msg.user .av{background:var(--user-bubble); color:var(--brand-ink)}
 .msg.rv .av{background:var(--brand); color:#fff}
 .msg .body{flex:1 1 auto; min-width:0}
@@ -191,9 +191,8 @@ function addRow(role){
   const row = document.createElement("div");
   row.className = "msg " + (role === "user" ? "user" : "rv");
   row.innerHTML =
-    '<div class="av">' + (role === "user" ? "You" : "RV") + '</div>' +
-    '<div class="body"><div class="who">' + (role === "user" ? "Aap" : "RV") + '</div>' +
-    '<div class="txt"></div></div>';
+    '<div class="av">' + (role === "user" ? "आप" : "RV") + '</div>' +
+    '<div class="body"><div class="txt"></div></div>';
   thread.appendChild(row);
   scrollDown();
   return row.querySelector(".txt");

@@ -100,6 +100,20 @@ def chat(request: ChatRequest):
     return quick_chat(request.message, request.history)
 
 
+@router.get("/chat/diag")
+def chat_diag():
+    """
+    Gemini setup ki sachchi report — key hai ya nahi, kaunse model available
+    hain, kaunsa chuna gaya, aur ek chhota test call chala ya nahi.
+
+    Kyun: pehle error par sirf "InvalidArgument" dikhta tha, jisse pata hi nahi
+    chalta tha ki galti key mein hai ya model ke naam mein. Ye endpoint kholo,
+    jawab mein saaf likha hoga.
+    """
+    from research_engine.gemini_model import diagnose
+    return diagnose()
+
+
 @router.get("/depth-modes")
 def depth_modes():
     """Har mode ka honest quota/limit disclosure (Spec Section 13 + 18)."""

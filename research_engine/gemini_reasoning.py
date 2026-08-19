@@ -47,8 +47,16 @@ class GeminiReasoning:
             import google.generativeai as genai  # lazy — import sasta rahe
             from dotenv import load_dotenv
 
+            from .gemini_model import resolve
+
             load_dotenv()
             genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
+            # Hard-coded naam ("gemini-flash-latest") kai keys par maujood nahi
+            # hota aur Google InvalidArgument/NotFound bhej deta hai. Isliye
+            # naam Google ki asli list se chunte hain. GEMINI_MODEL env set ho
+            # aur valid ho to wahi use hota hai.
+            if self.model_name == MODEL_NAME:
+                self.model_name = resolve(genai)
             self._model = genai.GenerativeModel(self.model_name)
         return self._model
 

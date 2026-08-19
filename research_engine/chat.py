@@ -17,6 +17,10 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
+from .gemini_model import candidates, friendly_error
+
+# Sirf reference ke liye — asli naam runtime par Google se poochh kar chunte hain
+# (dekho gemini_model.resolve). Hard-coded naam hi "InvalidArgument" ki wajah tha.
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
 
 _SYSTEM = """Tum "RV" ho — ek dost jaisa, samajhdaar AI assistant.
@@ -93,18 +97,38 @@ def quick_chat(message: str, history: Optional[List[Dict]] = None) -> Dict:
     try:
         import google.generativeai as genai  # lazy: import sasta rahe
         genai.configure(api_key=api_key)
-        model = genai.GenerativeModel(MODEL_NAME)
-        resp = model.generate_content(_build_prompt(message, history))
-        text = (getattr(resp, "text", "") or "").strip()
-        if not text:
-            return {"answer": "Hmm, is baar jawab khaali aaya. Ek baar phir poochho? 🙂",
-                    "mode": "QUICK", "ok": False}
-        return {"answer": text, "mode": "QUICK", "ok": True}
+        prompt = _build_prompt(message, history)
+
+        # Pehle wo model jo Google ki asli list se chuna gaya; agar wo bhi mana
+        # kar de to jo baaki available the. Isse "InvalidArgument" par baat
+        # khatam nahi hoti — jawab phir bhi aata hai.
+        tried: List[str] = []
+        last_exc: Optional[Exception] = None
+        for name in candidates(genai):
+            tried.append(name)
+            try:
+                resp = genai.GenerativeModel(name).generate_content(prompt)
+                text = (getattr(resp, "text", "") or "").strip()
+                if text:
+                    return {"answer": text, "mode": "QUICK", "ok": True,
+                            "model": name}
+                last_exc = RuntimeError("khaali jawab")
+            except Exception as exc:  # noqa: BLE001 — agla model try karo
+                last_exc = exc
+                low = str(exc).lower()
+                # key hi galat hai ya quota khatam — aage try karna bekaar
+                if ("api key not valid" in low or "api_key_invalid" in low
+                        or "quota" in low or "429" in low
+                        or "resource_exhausted" in low):
+                    break
+            if len(tried) >= 4:           # bahut der tak mat lagao
+                break
+
+        return {"answer": friendly_error(last_exc or RuntimeError("unknown")),
+                "mode": "QUICK", "ok": False,
+                "detail": f"{type(last_exc).__name__}: {last_exc}" if last_exc else "",
+                "models_tried": tried}
     except Exception as exc:  # noqa: BLE001 — kabhi crash nahi karna
-        name = type(exc).__name__
-        if "quota" in str(exc).lower() or "429" in str(exc):
-            msg = ("Thodi der ke liye free limit khatam ho gayi 😅 ek-do minute "
-                   "baad phir poochho.")
-        else:
-            msg = f"Ek dikkat aa gayi ({name}). Thodi der baad phir try karo."
-        return {"answer": msg, "mode": "QUICK", "ok": False}
+        return {"answer": friendly_error(exc), "mode": "QUICK", "ok": False,
+                "detail": f"{type(exc).__name__}: {exc}"}
+

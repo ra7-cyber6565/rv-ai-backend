@@ -40,8 +40,12 @@ def get_client():
 def get_gemini():
     global _gemini
     if _gemini is None:
+        from research_engine.gemini_model import resolve
+
         genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
-        _gemini = genai.GenerativeModel('gemini-flash-latest')
+        # Model ka naam Google ki asli list se — hard-coded naam kai keys par
+        # InvalidArgument/NotFound deta hai.
+        _gemini = genai.GenerativeModel(resolve(genai))
     return _gemini
 
 
