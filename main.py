@@ -55,5 +55,3 @@ def root():
 def health_check():
     """Health check for cloud deployment platforms (Render, Railway, etc)"""
     return {"status": "healthy", "service": "RV AI Backend", "version": app.version}
-        "endpoints": sorted(endpoints),
-    }

@@ -113,20 +113,6 @@ class Hypothesis:
             "disclaimer": ("UNTESTED HYPOTHESIS — asli validation lab/field test se "
                           "hi hoga, AI-generated assumption ko fact mat maano"),
         }
-            "statement": self.statement,
-            "reasoning": self.reasoning,
-            "supporting_evidence": self.supporting_evidence,
-            "contradicting_evidence": self.contradicting_evidence,
-            "novelty": self.novelty,
-            "prediction": pred,
-            "how_to_test": self.how_to_test,
-            "risks": self.risks,
-            "confidence_reasoning_based": self.confidence,
-            "is_testable": self.is_testable,
-            "has_prediction": self.has_prediction,
-            "disclaimer": "UNTESTED: ye AI-generated hypothesis hai — lab/clinical "
-                          "test nahi hui. Ise proven result ki tarah use na karein.",
-        }
 
 
 class HypothesisEngine:

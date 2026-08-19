@@ -1,6 +1,5 @@
 import fitz  # PyMuPDF
 import chromadb
-from sentence_transformers import SentenceTransformer
 import google.generativeai as genai
 from dotenv import load_dotenv
 import os
@@ -8,12 +7,43 @@ import re
 
 load_dotenv()
 
-# Models initialize करो
-embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
-client = chromadb.PersistentClient(path="./chroma_db")
+# ── LAZY LOADING (crash-proof boot) ──────────────────────────────────────────
+# Pehle yahan module import hote hi SentenceTransformer('all-MiniLM-L6-v2') load
+# ho jaata tha. Iska matlab: app start hote hi torch + model (~300MB+) memory
+# mein aa jaate the — free-tier server par ye slow boot ya OOM crash karta tha,
+# aur agar sentence-transformers install na ho to poora app hi crash.
+#
+# Ab ye teeno cheezein "lazy" hain: sirf pehli baar zaroorat padne par load
+# hoti hain (jab PDF upload/query ho). Isse app turant boot hota hai, /health
+# kaam karta hai, aur deep-research (jise embeddings ki zaroorat nahi) bina
+# torch ke chalta hai.
+_embedding_model = None
+_client = None
+_gemini = None
 
-genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
-gemini = genai.GenerativeModel('gemini-flash-latest')
+
+def get_embedding_model():
+    global _embedding_model
+    if _embedding_model is None:
+        from sentence_transformers import SentenceTransformer
+        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+    return _embedding_model
+
+
+def get_client():
+    global _client
+    if _client is None:
+        _client = chromadb.PersistentClient(path="./chroma_db")
+    return _client
+
+
+def get_gemini():
+    global _gemini
+    if _gemini is None:
+        genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
+        _gemini = genai.GenerativeModel('gemini-flash-latest')
+    return _gemini
+
 
 
 def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
@@ -35,8 +65,8 @@ def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
                 metadatas.append({"source": filename, "page": page_num + 1})
                 ids.append(chunk_id)
 
-    collection = client.get_or_create_collection(name=f"project_{project_id}")
-    embeddings = embedding_model.encode(chunks).tolist()
+    collection = get_client().get_or_create_collection(name=f"project_{project_id}")
+    embeddings = get_embedding_model().encode(chunks).tolist()
     collection.add(
         documents=chunks,
         embeddings=embeddings,
@@ -50,9 +80,9 @@ def ask_question(question: str, project_id: str) -> dict:
     """
     सवाल पूछो — relevant chunks ढूंढो — Gemini से जवाब लो
     """
-    collection = client.get_or_create_collection(name=f"project_{project_id}")
+    collection = get_client().get_or_create_collection(name=f"project_{project_id}")
 
-    q_embedding = embedding_model.encode([question]).tolist()
+    q_embedding = get_embedding_model().encode([question]).tolist()
     results = collection.query(query_embeddings=q_embedding, n_results=5)
 
     if not results["documents"][0]:
@@ -66,7 +96,7 @@ Apne general knowledge se jawab do, lekin:
 Sawal: {question}
 
 Jawab:"""
-        fallback_response = gemini.generate_content(fallback_prompt)
+        fallback_response = get_gemini().generate_content(fallback_prompt)
         return {
             "answer": fallback_response.text,
             "sources": [],
@@ -96,7 +126,7 @@ Documents:
 
 जवाब (source + page number के साथ):"""
 
-    response = gemini.generate_content(prompt)
+    response = get_gemini().generate_content(prompt)
 
     return {
         "answer": response.text,
@@ -125,8 +155,8 @@ def get_context_only(question: str, project_id: str, n_results: int = 8) -> dict
     """
     Sirf relevant documents dhoondo, Gemini ko call NAHI karo (free operation)
     """
-    collection = client.get_or_create_collection(name=f"project_{project_id}")
-    q_embedding = embedding_model.encode([question]).tolist()
+    collection = get_client().get_or_create_collection(name=f"project_{project_id}")
+    q_embedding = get_embedding_model().encode([question]).tolist()
     results = collection.query(query_embeddings=q_embedding, n_results=n_results)
 
     if not results["documents"][0]:
