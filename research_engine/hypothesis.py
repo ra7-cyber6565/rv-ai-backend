@@ -22,12 +22,12 @@ from .models import EvidencePack
 
 STATUS = "UNTESTED HYPOTHESIS"
 
-_H_SPLIT_RE = re.compile(r"^\s*#{2,4}\s*(?:hypothesis|hypothesis\s*\d+)\b.*$",
+_H_SPLIT_RE = re.compile(r"^\\s*#{2,4}\\s*(?:hypothesis|hypothesis\\s*\\d+)\\b.*$",
                          re.IGNORECASE | re.MULTILINE)
 _FIELD_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?\**\s*(statement|reasoning|supporting evidence|against|"
+    r"^\\s*(?:[-*]\\s*)?\\**\\s*(statement|reasoning|supporting evidence|against|"
     r"contradicting evidence|novelty|prediction|how to test|test|risks|confidence)"
-    r"\s*\**\s*[:\-]\s*(.+)$",
+    r"\\s*\\**\\s*[:\\-]\\s*(.+)$",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -113,20 +113,6 @@ class Hypothesis:
             "disclaimer": ("UNTESTED HYPOTHESIS — asli validation lab/field test se "
                           "hi hoga, AI-generated assumption ko fact mat maano"),
         }
-            "statement": self.statement,
-            "reasoning": self.reasoning,
-            "supporting_evidence": self.supporting_evidence,
-            "contradicting_evidence": self.contradicting_evidence,
-            "novelty": self.novelty,
-            "prediction": pred,
-            "how_to_test": self.how_to_test,
-            "risks": self.risks,
-            "confidence_reasoning_based": self.confidence,
-            "is_testable": self.is_testable,
-            "has_prediction": self.has_prediction,
-            "disclaimer": "UNTESTED: ye AI-generated hypothesis hai — lab/clinical "
-                          "test nahi hui. Ise proven result ki tarah use na karein.",
-        }
 
 
 class HypothesisEngine:
@@ -145,8 +131,8 @@ class HypothesisEngine:
     # ── PASS 5 prompt (Spec Section 10) ──────────────────────────────────────
     def prompt(self, question: str, analysis: str, pack: EvidencePack,
                plan: Dict, contradictions: Optional[List[Dict]] = None) -> str:
-        gaps = "\n".join(f"  - {c.get('summary', '')}" for c in (contradictions or [])[:5])
-        gap_block = f"\nEVIDENCE CONFLICTS jo mile:\n{gaps}\n" if gaps else ""
+        gaps = "\\n".join(f"  - {c.get('summary', '')}" for c in (contradictions or [])[:5])
+        gap_block = f"\\nEVIDENCE CONFLICTS jo mile:\\n{gaps}\\n" if gaps else ""
         fields = ", ".join(plan.get("relevant_fields", [])[:4]) or "relevant fields"
 
         return f"""Tum ek Hypothesis Generator ho. Tumhara kaam NAYI possibility
@@ -218,55 +204,6 @@ Format exactly aise:
 """
 
     # ── structured prediction parser ─────────────────────────────────────────
-    @staticmethod
-    def _parse_prediction(text: str) -> Optional[PredictionStructure]:
-        """
-        Try to extract structured prediction from free-text.
-
-        Example input:
-        "blood glucose will decrease by 20-30%, measured via HOMA-IR;
-         if no change after 12 weeks, hypothesis is rejected"
-        """
-        if not text or len(text) < 20:
-            return None
-
-        pred = PredictionStructure()
-        lower = text.lower()
-
-        # Variables: common measurement keywords
-        var_keywords = ["glucose", "insulin", "pressure", "weight", "temperature",
-                        "level", "rate", "count", "score", "index", "concentration"]
-        pred.variables = [kw for kw in var_keywords if kw in lower]
-
-        # Expected outcome: look for percentages, ranges, qualitative change
-        outcome_patterns = [
-            r"(increase|decrease|reduction|rise|drop|change).*?(\d+[-–]?\d*%?)",
-            r"(significant|no significant|positive|negative|elevated|reduced)",
-        ]
-        for pattern in outcome_patterns:
-            match = _re_module.search(pattern, lower)
-            if match:
-                pred.expected_outcome = match.group(0)
-                break
-
-        # Measurement: look for "measured via/by/using"
-        measure_match = re.search(r"measur\w*\s+(?:via|by|using|with)\s+([^;,\.]+)",
-                                  lower)
-        if measure_match:
-            pred.measurement_method = measure_match.group(1).strip()
-
-        # Falsification: "if no/if opposite/rejected if"
-        false_match = re.search(r"(?:if no|if opposite|reject\w* if|falsif\w* if)\s+([^;,\.]+)",
-                                lower)
-        if false_match:
-            pred.falsification_condition = false_match.group(0).strip()
-
-        # Only return if somewhat complete
-        if pred.variables or pred.expected_outcome:
-            return pred
-        return None
-
-    # ── parse ────────────────────────────────────────────────────────────────
     def _parse_prediction(self, text: str) -> tuple[Optional[PredictionStructure], str]:
         """
         Parse structured prediction from text.
@@ -278,7 +215,7 @@ Format exactly aise:
         - Measurement: HOMA-IR index
         - Falsification: no change after 12 weeks
         """
-        lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
+        lines = [l.strip() for l in (text or "").split("\\n") if l.strip()]
 
         variables = []
         outcome = ""
@@ -290,20 +227,20 @@ Format exactly aise:
             # Extract variables
             if any(kw in lower for kw in ["variable", "measure", "parameter", "factor"]):
                 # Extract comma-separated items or quoted items
-                items = re.findall(r'["\']([^"\']+)["\']|:\s*([^,\n]+)', line)
+                items = re.findall(r'["\\'']([^\"\\']+)["\\'']|:\\s*([^,\\n]+)', line)
                 variables.extend([i[0] or i[1] for i in items if i[0] or i[1]])
 
             # Expected outcome
             if any(kw in lower for kw in ["expect", "outcome", "result", "change", "effect"]):
                 # Extract percentage or numeric patterns
-                match = re.search(r'(\d+%|\d+\.\d+|\d+\s*(?:fold|times|unit|point|level))[^.]*', line)
+                match = re.search(r'(\\d+%|\\d+\\.\\d+|\\d+\\s*(?:fold|times|unit|point|level))[^.]*', line)
                 if match:
                     outcome = match.group(0).strip()
 
             # Measurement method
             if any(kw in lower for kw in ["measur", "assess", "index", "scale", "test", "method"]):
                 # Extract the measurement tool/method
-                match = re.search(r'(?:using|via|through|with|by)\s+([^,.\n]+)', line, re.IGNORECASE)
+                match = re.search(r'(?:using|via|through|with|by)\\s+([^,.\\n]+)', line, re.IGNORECASE)
                 if match:
                     measurement = match.group(1).strip()
                 elif ":" in line:
@@ -357,7 +294,7 @@ Format exactly aise:
                 elif key == "prediction":
                     h.prediction_text = value
                     # Try structured parse
-                    h.prediction = self._parse_prediction(value)
+                    h.prediction, _ = self._parse_prediction(value)
                 elif key in ("how to test", "test"):
                     h.how_to_test = value
                 elif key == "risks":
@@ -391,3 +328,4 @@ Format exactly aise:
                     f"Hypothesis {i} ke against koi evidence list nahi hui — "
                     "self-falsification adhoora hai.")
         return warnings
+
