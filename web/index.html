@@ -176,7 +176,9 @@ const thread = $("#thread"), scroll = $("#scroll"), welcome = $("#welcome");
 const input = $("#input"), sendBtn = $("#send");
 
 // "tum kaun ho" jaise sawaal — bina server ke, turant local jawab.
-const ID_RE = /\b(tum\s*kaun|kaun\s*ho|who\s*are\s*you|tumhara\s*naam|your\s*name|aap\s*kaun)\b/i;
+// Log "kaun" ko kaun/kon/koun/kaun sab tarah likhte hain, isliye spelling par
+// sakhti nahi — warna "tum kon ho" jaisa aam sawaal miss ho jaata hai.
+const ID_RE = /(k[ao]u?n\s*h[oy]|tum\s*k[ao]u?n|aap\s*k[ao]u?n|who\s*(are|r)\s*(you|u)|tumhara\s*naam|tumhaara\s*naam|your\s*name|naam\s*kya)/i;
 
 function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
 function toHTML(s){
