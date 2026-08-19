@@ -1,0 +1,539 @@
+<!doctype html>
+<html lang="hi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RV — deep research</title>
+<meta name="description" content="RV AI — sawaal poocho, RV papers, books, web aur datasets padh kar source ke saath jawab deta hai.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Mukta:wght@300;400;600;700&family=Tiro+Devanagari+Hindi&display=swap" rel="stylesheet">
+<style>
+:root{
+  color-scheme: light;
+  --ink:#16211C;
+  --paper:#F3F5F0;
+  --panel:#FFFFFF;
+  --ledger:#2E6B4F;
+  --saffron:#E39B1F;
+  --rust:#B0452C;
+  --muted:#6C7A71;
+  --line:#DDE3DA;
+  --display:"Tiro Devanagari Hindi", Georgia, serif;
+  --body:"Mukta", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono:"IBM Plex Mono", ui-monospace, Menlo, monospace;
+  --rail:14px;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:var(--body); font-size:17px; line-height:1.62;
+  display:flex; flex-direction:column;
+}
+:focus-visible{outline:2px solid var(--ledger); outline-offset:2px; border-radius:3px}
+/* ── top bar ─────────────────────────────────────────────── */
+.topbar{
+  display:flex; align-items:center; gap:18px; justify-content:space-between;
+  padding:14px 22px; border-bottom:1px solid var(--line);
+  background:rgba(243,245,240,.92); backdrop-filter:blur(8px);
+  position:sticky; top:0; z-index:5;
+}
+.brand{display:flex; align-items:center; gap:12px; min-width:0}
+.brand svg{width:34px; height:34px; flex:none}
+.wordmark{font-family:var(--display); font-size:25px; letter-spacing:.02em; line-height:1}
+.tag{font-family:var(--mono); font-size:11px; color:var(--muted); letter-spacing:.14em; text-transform:uppercase; white-space:nowrap}
+.controls{display:flex; align-items:center; gap:10px}
+.depth{
+  font-family:var(--mono); font-size:12px; letter-spacing:.08em; color:var(--ink);
+  background:var(--panel); border:1px solid var(--line); border-radius:2px;
+  padding:8px 10px; cursor:pointer;
+}
+.btn{
+  font-family:var(--mono); font-size:12px; letter-spacing:.08em; text-transform:uppercase;
+  background:var(--ledger); color:#fff; border:1px solid var(--ledger);
+  border-radius:2px; padding:9px 15px; cursor:pointer;
+}
+.btn:hover{background:#25573F}
+.btn:disabled{opacity:.45; cursor:not-allowed}
+.btn-ghost{background:transparent; color:var(--muted); border-color:var(--line)}
+.btn-ghost:hover{background:var(--panel); color:var(--ink)}
+/* ── thread ──────────────────────────────────────────────── */
+.thread{flex:1; overflow-y:auto; padding:32px 22px 20px}
+.col{max-width:760px; margin:0 auto; display:flex; flex-direction:column; gap:30px}
+.msg-user{
+  align-self:flex-end; max-width:82%; background:var(--ink); color:#F3F5F0;
+  padding:11px 16px; border-radius:14px 14px 3px 14px; font-size:16.5px;
+}
+/* signature: the evidence spine */
+.answer{display:grid; grid-template-columns:var(--rail) 1fr; gap:18px}
+.spine{position:relative; border-radius:2px; background:var(--line)}
+.spine-strong{background:var(--ledger)}
+.spine-mixed{background:var(--saffron)}
+.spine-weak{background:var(--rust)}
+.spine-label{
+  position:absolute; top:0; left:50%; transform:translateX(-50%);
+  writing-mode:vertical-rl; font-family:var(--mono); font-size:9.5px;
+  letter-spacing:.22em; text-transform:uppercase; color:#fff; padding:8px 0;
+}
+.answer-body h2{font-family:var(--display); font-size:21px; font-weight:400; margin:26px 0 6px; line-height:1.3}
+.answer-body h3{font-family:var(--mono); font-size:11.5px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin:22px 0 6px}
+.answer-body p{margin:0 0 12px}
+.answer-body ul,.answer-body ol{margin:0 0 12px; padding-left:22px}
+.answer-body li{margin:0 0 5px}
+.answer-body code{font-family:var(--mono); font-size:14px; background:var(--panel); border:1px solid var(--line); padding:1px 5px; border-radius:2px}
+.answer-body strong{font-weight:700}
+.answer-body>:first-child{margin-top:0}
+.cite{
+  font-family:var(--mono); font-size:12px; color:var(--ledger);
+  border:1px solid var(--line); background:var(--panel); border-radius:2px;
+  padding:1px 4px; cursor:pointer; white-space:nowrap;
+}
+.cite:hover{border-color:var(--ledger)}
+.cite-bad{color:var(--rust); border-color:var(--rust); text-decoration:line-through}
+/* ── meta + evidence ─────────────────────────────────────── */
+.meta{font-family:var(--mono); font-size:11px; letter-spacing:.06em; color:var(--muted); margin-top:14px; display:flex; flex-wrap:wrap; gap:14px}
+.ev{margin-top:16px; border-top:1px solid var(--line); padding-top:14px}
+.ev summary{
+  font-family:var(--mono); font-size:11.5px; letter-spacing:.14em; text-transform:uppercase;
+  color:var(--ledger); cursor:pointer; list-style:none;
+}
+.ev summary::-webkit-details-marker{display:none}
+.ev summary::before{content:"+ "; }
+.ev[open] summary::before{content:"– "; }
+.ev-block{margin-top:16px}
+.ev-title{font-family:var(--mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); margin-bottom:8px}
+.src-list{display:grid; gap:10px}
+.src{
+  background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--line);
+  border-radius:2px; padding:11px 13px; transition:border-color .18s, background .18s;
+}
+.src-hit{border-left-color:var(--saffron); background:#FFFDF7}
+.src-id{font-family:var(--mono); font-size:11px; color:var(--ledger); letter-spacing:.06em}
+.src-title{display:block; color:var(--ink); text-decoration:none; font-weight:600; font-size:15.5px; line-height:1.4; margin:2px 0 4px}
+.src-title:hover{text-decoration:underline}
+.src-meta{font-family:var(--mono); font-size:11px; color:var(--muted); display:flex; flex-wrap:wrap; gap:10px}
+.tick{font-family:var(--mono); font-size:10px; letter-spacing:.1em; text-transform:uppercase; border:1px solid var(--line); border-radius:2px; padding:1px 5px}
+.tick-peer{color:var(--ledger); border-color:var(--ledger)}
+.tick-full{color:var(--saffron); border-color:var(--saffron)}
+.hyp{background:var(--panel); border:1px solid var(--line); border-radius:2px; padding:13px; margin-bottom:10px}
+.hyp-badge{
+  display:inline-block; font-family:var(--mono); font-size:10px; letter-spacing:.16em;
+  text-transform:uppercase; background:var(--saffron); color:#2A1B00;
+  padding:2px 7px; border-radius:2px; margin-bottom:8px;
+}
+.hyp-row{font-size:15px; margin:6px 0 0}
+.hyp-row b{font-family:var(--mono); font-size:10.5px; letter-spacing:.12em; text-transform:uppercase; color:var(--muted); font-weight:500; display:block}
+.note{font-size:15px; color:var(--muted); margin:0 0 7px; padding-left:14px; border-left:2px solid var(--rust)}
+/* ── status while researching ────────────────────────────── */
+.status{display:grid; grid-template-columns:var(--rail) 1fr; gap:18px}
+.status .spine{background:repeating-linear-gradient(180deg,var(--line) 0 8px,transparent 8px 16px)}
+.stage{font-family:var(--mono); font-size:12px; letter-spacing:.1em; text-transform:uppercase; color:var(--ledger)}
+.stage-note{font-size:15px; color:var(--muted); margin:4px 0 0}
+.stage-steps{font-family:var(--mono); font-size:11px; color:var(--muted); margin-top:8px}
+@keyframes pulse{0%,100%{opacity:.25}50%{opacity:1}}
+.stage b{animation:pulse 1.4s ease-in-out infinite; font-weight:400}
+/* ── welcome ─────────────────────────────────────────────── */
+.welcome{padding:46px 0 10px; text-align:center}
+.welcome svg{width:96px; height:96px}
+.welcome-title{font-family:var(--display); font-size:32px; font-weight:400; margin:14px 0 6px}
+.mark path{stroke-dasharray:1}
+@keyframes draw{from{stroke-dashoffset:1}to{stroke-dashoffset:0}}
+.welcome .mark path{stroke-dashoffset:1; animation:draw .85s cubic-bezier(.65,.05,.36,1) forwards}
+.welcome .mark path:nth-child(2){animation-delay:.5s}
+.welcome .mark path:nth-child(3){animation-delay:.72s}
+.welcome-sub{color:var(--muted); max-width:430px; margin:0 auto 30px; font-size:16px}
+.examples{display:grid; grid-template-columns:1fr 1fr; gap:10px; text-align:left}
+.example{
+  background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--saffron);
+  border-radius:2px; padding:12px 14px; cursor:pointer; font-family:var(--body);
+  font-size:15.5px; color:var(--ink); line-height:1.45;
+}
+.example:hover{border-color:var(--ledger); border-left-color:var(--ledger)}
+.example span{display:block; font-family:var(--mono); font-size:10px; letter-spacing:.16em; text-transform:uppercase; color:var(--muted); margin-bottom:4px}
+/* ── composer ────────────────────────────────────────────── */
+.composer{border-top:1px solid var(--line); background:var(--paper); padding:14px 22px 16px}
+.composer-inner{max-width:760px; margin:0 auto}
+.field{display:flex; gap:10px; align-items:flex-end; background:var(--panel); border:1px solid var(--line); border-radius:3px; padding:8px 8px 8px 14px}
+.field:focus-within{border-color:var(--ledger)}
+textarea{
+  flex:1; border:0; outline:0; resize:none; background:transparent; color:var(--ink);
+  font-family:var(--body); font-size:17px; line-height:1.55; max-height:180px; padding:5px 0;
+}
+.hint{font-family:var(--mono); font-size:10.5px; color:var(--muted); margin:8px 0 0; letter-spacing:.04em}
+.err{color:var(--rust); font-size:15px; margin:0}
+/* ── responsive + motion ─────────────────────────────────── */
+@media (max-width:640px){
+  body{font-size:16px}
+  :root{--rail:8px}
+  .thread{padding:22px 14px 14px}
+  .composer{padding:10px 14px 14px}
+  .topbar{padding:11px 14px; gap:10px}
+  .tag{display:none}
+  .examples{grid-template-columns:1fr}
+  .welcome{padding:28px 0 6px}
+  .welcome svg{width:74px; height:74px}
+  .welcome-title{font-size:27px}
+  .answer,.status{gap:12px}
+  .spine-label{font-size:8.5px; letter-spacing:.14em}
+}
+@media (prefers-reduced-motion:reduce){
+  *{animation:none !important; transition:none !important}
+}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">
+    <svg class="mark" viewBox="0 0 100 100" fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path pathLength="1" stroke="#16211C" d="M22,78 V22 H42 C56,22 56,48 42,48 H22"/>
+      <path pathLength="1" stroke="#16211C" d="M42,48 L57,78"/>
+      <path pathLength="1" stroke="#E39B1F" d="M58,22 L72,78 L86,22"/>
+    </svg>
+    <span class="wordmark">RV</span>
+    <span class="tag">deep research engine</span>
+  </div>
+  <div class="controls">
+    <select class="depth" id="depth" aria-label="Research ki gehrai">
+      <option value="QUICK">QUICK · ~5 sources</option>
+      <option value="DEEP" selected>DEEP · ~10 sources</option>
+      <option value="MAXIMUM">MAXIMUM · ~18 sources</option>
+    </select>
+    <button class="btn btn-ghost" id="reset" type="button">Naya chat</button>
+  </div>
+</header>
+
+<main class="thread" id="thread">
+  <div class="col" id="col">
+    <section class="welcome" id="welcome">
+      <svg class="mark" viewBox="0 0 100 100" fill="none" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path pathLength="1" stroke="#16211C" d="M22,78 V22 H42 C56,22 56,48 42,48 H22"/>
+        <path pathLength="1" stroke="#16211C" d="M42,48 L57,78"/>
+        <path pathLength="1" stroke="#E39B1F" d="M58,22 L72,78 L86,22"/>
+      </svg>
+      <h1 class="welcome-title">Main RV hoon</h1>
+      <p class="welcome-sub">Sawaal poochho. Main papers, books, web aur public datasets padhta hoon,
+        phir source ke saath jawab deta hoon — aur ye bhi batata hoon ki evidence kitna pakka hai.</p>
+      <div class="examples" id="examples">
+        <button class="example" type="button" data-q="Kesar ke health benefits par asli research kya kehti hai?"><span>medical</span>Kesar ke health benefits par asli research kya kehti hai?</button>
+        <button class="example" type="button" data-q="Intermittent fasting weight loss ke liye kaam karta hai ya nahi?"><span>nutrition</span>Intermittent fasting weight loss ke liye kaam karta hai ya nahi?</button>
+        <button class="example" type="button" data-q="Vitamin D aur immunity ka rishta — evidence kitna strong hai?"><span>immunology</span>Vitamin D aur immunity ka rishta — evidence kitna strong hai?</button>
+        <button class="example" type="button" data-q="Climate models ki predictions kitni bharosemand hain?"><span>climate</span>Climate models ki predictions kitni bharosemand hain?</button>
+      </div>
+    </section>
+  </div>
+</main>
+
+<form class="composer" id="composer">
+  <div class="composer-inner">
+    <div class="field">
+      <textarea id="q" rows="1" placeholder="RV se kuch poochho…" aria-label="Apna sawaal likho"></textarea>
+      <button class="btn" id="send" type="submit">Bhejo</button>
+    </div>
+    <p class="hint">Enter = bhejo · Shift+Enter = nayi line · DEEP mode mein 1–2 minute lag sakte hain</p>
+  </div>
+</form>
+<script>
+"use strict";
+/* RV AI website — same-origin par chalti hai, isliye koi URL config nahi chahiye.
+   Backend endpoints: POST /api/v1/deep-research, GET /api/v1/progress/{id} */
+const API = "";
+const DEPTH_HINT = {QUICK:"~5 sources", DEEP:"~10 sources", MAXIMUM:"~18 sources"};
+const STAGE_HI = {
+  QUEUED:"line mein hai", PLANNING:"sawaal samajh raha hoon",
+  DISCOVERING:"sources dhoondh raha hoon", PROCESSING:"documents padh raha hoon",
+  READING:"full text padh raha hoon", EVIDENCE_ANALYSIS:"evidence tol raha hoon",
+  SPECIALIST_ANALYSIS:"gehra analysis kar raha hoon", CRITIQUE:"apne hi jawab ki jaanch",
+  HYPOTHESIS:"nayi hypothesis soch raha hoon", SYNTHESIS:"jawab likh raha hoon",
+  SAFETY_CHECK:"safety check", COMPLETE:"ho gaya"
+};
+const ID_RE = /(kaun ho|kon ho|tum kaun|aap kaun|who are you|tumhara naam|your name|apna naam)/i;
+
+let projectId = localStorage.getItem("rv_project");
+if (!projectId) {
+  projectId = "web-" + Math.random().toString(36).slice(2, 10);
+  localStorage.setItem("rv_project", projectId);
+}
+
+const thread = document.getElementById("thread");
+const col = document.getElementById("col");
+const welcome = document.getElementById("welcome");
+const depth = document.getElementById("depth");
+const qBox = document.getElementById("q");
+const sendBtn = document.getElementById("send");
+let busy = false;
+
+const savedDepth = localStorage.getItem("rv_depth");
+if (savedDepth && DEPTH_HINT[savedDepth]) depth.value = savedDepth;
+depth.addEventListener("change", () => localStorage.setItem("rv_depth", depth.value));
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+function scrollDown() { thread.scrollTop = thread.scrollHeight; }
+
+function inline(s) {
+  return s
+    .replace(/`([^`]+)`/g, '<code>$1</code>')
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
+    .replace(/\[NO-SOURCE\]/g, '<span class="tick" style="color:var(--rust);border-color:var(--rust)">no source</span>')
+    .replace(/\[(S\d+)\]/g, (m, id) => `<button class="cite" type="button" data-src="${id}">${id}</button>`);
+}
+function renderMd(src) {
+  const lines = esc(src).replace(/\r/g, "").split("\n");
+  let html = "", list = null;
+  const closeList = () => { if (list) { html += "</" + list + ">"; list = null; } };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) { closeList(); continue; }
+    let m;
+    if ((m = line.match(/^#{3,6}\s+(.*)$/))) { closeList(); html += `<h3>${inline(m[1])}</h3>`; continue; }
+    if ((m = line.match(/^#{1,2}\s+(.*)$/))) { closeList(); html += `<h2>${inline(m[1])}</h2>`; continue; }
+    if ((m = line.match(/^[-*•]\s+(.*)$/))) {
+      if (list !== "ul") { closeList(); html += "<ul>"; list = "ul"; }
+      html += `<li>${inline(m[1])}</li>`; continue;
+    }
+    if ((m = line.match(/^\d+[.)]\s+(.*)$/))) {
+      if (list !== "ol") { closeList(); html += "<ol>"; list = "ol"; }
+      html += `<li>${inline(m[1])}</li>`; continue;
+    }
+    closeList();
+    html += `<p>${inline(line)}</p>`;
+  }
+  closeList();
+  return html;
+}
+
+function addUser(text) {
+  if (welcome) welcome.remove();
+  const div = document.createElement("div");
+  div.className = "msg-user";
+  div.textContent = text;
+  col.appendChild(div);
+  scrollDown();
+}
+
+/* Jawab ka dhaancha: baayein "spine" (evidence level), dayein text. */
+function answerShell(level) {
+  const wrap = document.createElement("div");
+  wrap.className = "answer";
+  const cls = level === "STRONG" ? "spine-strong" : level === "MIXED" ? "spine-mixed"
+            : level === "WEAK" ? "spine-weak" : "";
+  wrap.innerHTML = `<div class="spine ${cls}"><span class="spine-label">${esc(level || "")}</span></div>`
+                 + `<div class="answer-body"></div>`;
+  col.appendChild(wrap);
+  return wrap.lastElementChild;
+}
+
+function levelOf(raw) {
+  const s = String(raw || "").toUpperCase();
+  if (s.includes("STRONG")) return "STRONG";
+  if (s.includes("MIXED")) return "MIXED";
+  if (s.includes("WEAK")) return "WEAK";
+  return "";
+}
+/* Live stage — banaya hua percentage nahi, sirf asli stage aur ginti. */
+function addStatus() {
+  const wrap = document.createElement("div");
+  wrap.className = "status";
+  wrap.innerHTML = `<div class="spine"></div><div>`
+    + `<div class="stage"><b>shuru ho raha hai…</b></div>`
+    + `<p class="stage-note">DEEP mode mein 1–2 minute lag sakte hain — page band mat karo.</p>`
+    + `<div class="stage-steps"></div></div>`;
+  col.appendChild(wrap);
+  scrollDown();
+  return wrap;
+}
+
+function startPolling(status) {
+  const stage = status.querySelector(".stage");
+  const steps = status.querySelector(".stage-steps");
+  let alive = true;
+  async function tick() {
+    if (!alive) return;
+    try {
+      const res = await fetch(`${API}/api/v1/progress/${encodeURIComponent(projectId)}`);
+      if (res.ok) {
+        const p = await res.json();
+        if (p && p.current_stage) {
+          const label = STAGE_HI[p.current_stage] || p.current_stage.toLowerCase();
+          stage.innerHTML = `<b>${esc(label)}</b>`;
+          const bits = [];
+          if (p.stages_total) bits.push(`stage ${(p.stages_completed || []).length}/${p.stages_total}`);
+          if (p.sources_discovered) bits.push(`${p.sources_discovered} sources mile`);
+          if (p.full_text_sources_read) bits.push(`${p.full_text_sources_read} ka full text padha`);
+          if (p.evidence_conflicts_found) bits.push(`${p.evidence_conflicts_found} conflict`);
+          steps.textContent = bits.join("  ·  ");
+        }
+      }
+    } catch (e) { /* poll fail ho to chup-chaap chhodo, jawab phir bhi aayega */ }
+    if (alive) setTimeout(tick, 1600);
+  }
+  setTimeout(tick, 900);
+  return () => { alive = false; };
+}
+
+function renderError(msg) {
+  const body = answerShell("WEAK");
+  body.innerHTML = `<p class="err">${esc(msg)}</p>`
+    + `<p class="stage-note">Dobara bhejo. Agar baar-baar ho, to QUICK mode try karo — `
+    + `usmein Gemini ka quota kam lagta hai.</p>`;
+  scrollDown();
+}
+function sourceCard(s, i) {
+  const id = s.source_id || "S" + (i + 1);
+  const ticks = [];
+  if (s.peer_reviewed === true) ticks.push('<span class="tick tick-peer">peer-reviewed</span>');
+  if (s.full_text_available || s.read_level === "full_text") ticks.push('<span class="tick tick-full">full text</span>');
+  if (s.retracted === true) ticks.push('<span class="tick" style="color:var(--rust);border-color:var(--rust)">retracted</span>');
+  const meta = [];
+  if (s.year) meta.push(esc(s.year));
+  if (s.venue || s.publisher) meta.push(esc(s.venue || s.publisher));
+  if (s.connector) meta.push(esc(s.connector));
+  if (typeof s.citation_count === "number") meta.push(esc(s.citation_count) + " citations");
+  if (s.locator) meta.push(esc(s.locator));
+  const title = esc(s.title || s.url || "bina naam ka source");
+  const link = s.url
+    ? `<a class="src-title" href="${esc(s.url)}" target="_blank" rel="noopener noreferrer">${title}</a>`
+    : `<span class="src-title">${title}</span>`;
+  return `<div class="src" data-id="${esc(id)}"><span class="src-id">[${esc(id)}]</span>${link}`
+       + `<div class="src-meta">${meta.map(m => `<span>${m}</span>`).join("")}${ticks.join("")}</div></div>`;
+}
+
+function hypCard(h) {
+  const pred = h.prediction && typeof h.prediction === "object"
+    ? (h.prediction.expected_outcome || h.prediction.text || "")
+    : (h.prediction || "");
+  const rows = [
+    ["statement", h.statement], ["prediction", pred],
+    ["kaise test karein", h.how_to_test], ["risks", h.risks],
+    ["confidence (reasoning-based, proof nahi)", h.confidence_reasoning_based || h.confidence]
+  ].filter(r => r[1]);
+  return `<div class="hyp"><span class="hyp-badge">untested hypothesis</span>`
+    + rows.map(r => `<p class="hyp-row"><b>${esc(r[0])}</b>${esc(r[1])}</p>`).join("")
+    + `</div>`;
+}
+
+function evBlock(title, inner) {
+  return inner ? `<div class="ev-block"><div class="ev-title">${esc(title)}</div>${inner}</div>` : "";
+}
+function renderAnswer(data) {
+  const level = levelOf(data.evidence_level);
+  const body = answerShell(level);
+  const sources = Array.isArray(data.sources) ? data.sources : [];
+  const hyps = Array.isArray(data.hypotheses) ? data.hypotheses : [];
+  const notes = []
+    .concat(Array.isArray(data.warnings) ? data.warnings : [])
+    .concat(Array.isArray(data.ungrounded_claims) ? data.ungrounded_claims : []);
+
+  const meta = [];
+  if (data.mode) meta.push(esc(data.mode) + " mode");
+  meta.push(sources.length + " sources");
+  if (typeof data.gemini_calls_used === "number") meta.push(data.gemini_calls_used + " gemini calls");
+  if (data.evidence_level) meta.push("evidence: " + esc(data.evidence_level));
+
+  const conflicts = Array.isArray(data.contradictions) ? data.contradictions : [];
+  const evParts = [
+    evBlock(`sources (${sources.length})`,
+      sources.length ? `<div class="src-list">${sources.map(sourceCard).join("")}</div>` : ""),
+    evBlock(`evidence aapas mein takra raha hai (${conflicts.length})`,
+      conflicts.map(c => `<p class="note">${esc(c.summary || c.note || JSON.stringify(c))}</p>`).join("")),
+    evBlock("nayi hypothesis — abhi test nahi hui", hyps.map(hypCard).join("")),
+    evBlock("imaandaar warnings", notes.map(w => `<p class="note">${esc(w)}</p>`).join(""))
+  ].filter(Boolean).join("");
+
+  body.innerHTML = renderMd(data.answer || "Jawab khaali aaya.")
+    + `<div class="meta">${meta.map(m => `<span>${m}</span>`).join("")}</div>`
+    + (evParts ? `<details class="ev"><summary>sources aur jaanch dekho</summary>${evParts}</details>` : "");
+
+  const bad = new Set(Array.isArray(data.invalid_citations) ? data.invalid_citations : []);
+  body.querySelectorAll(".cite").forEach(chip => {
+    const id = chip.dataset.src;
+    if (bad.has(id)) { chip.classList.add("cite-bad"); chip.title = "Ye citation verify nahi hui"; return; }
+    chip.title = "Source dekho";
+    chip.addEventListener("click", () => {
+      const panel = body.querySelector(".ev");
+      if (panel) panel.open = true;
+      const card = body.querySelector(`.src[data-id="${id}"]`);
+      if (!card) return;
+      body.querySelectorAll(".src-hit").forEach(c => c.classList.remove("src-hit"));
+      card.classList.add("src-hit");
+      card.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  });
+  scrollDown();
+}
+async function ask(question) {
+  if (busy || !question.trim()) return;
+  busy = true; sendBtn.disabled = true;
+  addUser(question);
+  qBox.value = ""; qBox.style.height = "auto";
+
+  /* "kaun ho tum" jaise sawaal ka jawab yahin — Gemini ka quota bachaane ke liye. */
+  if (ID_RE.test(question)) {
+    const body = answerShell("");
+    body.innerHTML = renderMd(
+      "Main **RV** hoon — ek deep research engine.\n\n"
+      + "Main sirf jawab nahi deta. Pehle papers, books, web aur public datasets "
+      + "padhta hoon, phir jawab ke saath source likhta hoon. Agar evidence kamzor ho "
+      + "ya do studies aapas mein ulta keh rahi hon, to wo bhi chhipata nahi hoon.\n\n"
+      + "Kuch bhi poochho — upar se gehrai (QUICK / DEEP / MAXIMUM) chun sakte ho.");
+    busy = false; sendBtn.disabled = false; scrollDown();
+    return;
+  }
+
+  const status = addStatus();
+  const stopPoll = startPolling(status);
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), 420000);
+  try {
+    const res = await fetch(`${API}/api/v1/deep-research`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question, project_id: projectId, depth_mode: depth.value }),
+      signal: ctrl.signal
+    });
+    if (!res.ok) throw new Error(`Server ne ${res.status} bheja. Thodi der baad dobara try karo.`);
+    const data = await res.json();
+    stopPoll(); clearTimeout(timer); status.remove();
+    renderAnswer(data);
+  } catch (err) {
+    stopPoll(); clearTimeout(timer); status.remove();
+    renderError(err.name === "AbortError"
+      ? "Bahut time lag gaya, isliye request rok di."
+      : (err.message || "Network problem — internet check karo."));
+  } finally {
+    busy = false; sendBtn.disabled = false;
+  }
+}
+document.getElementById("composer").addEventListener("submit", e => {
+  e.preventDefault();
+  ask(qBox.value);
+});
+
+qBox.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(qBox.value); }
+});
+
+qBox.addEventListener("input", () => {
+  qBox.style.height = "auto";
+  qBox.style.height = Math.min(qBox.scrollHeight, 180) + "px";
+});
+
+document.getElementById("examples").addEventListener("click", e => {
+  const card = e.target.closest(".example");
+  if (card) ask(card.dataset.q || card.textContent.trim());
+});
+
+document.getElementById("reset").addEventListener("click", () => {
+  if (busy) return;
+  location.reload();
+});
+
+qBox.focus();
+</script>
+</body>
+</html>
