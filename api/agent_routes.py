@@ -1,4 +1,4 @@
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 
 from fastapi import APIRouter
 from pydantic import BaseModel
@@ -9,6 +9,13 @@ from research_engine.depth import (BOOL_FIELDS, depth_limits,
 from utils.progress_tracker import get_progress
 
 router = APIRouter()
+
+
+class ChatRequest(BaseModel):
+    # QUICK mode = seedhi, turant baat-cheet. Koi deep research nahi.
+    message: str
+    history: Optional[List[Dict]] = None   # [{role, content}, ...] — pichhli baat
+    project_id: str = "default"            # UI compatibility ke liye (yahan use nahi)
 
 
 class DeepResearchRequest(BaseModel):
@@ -72,6 +79,25 @@ def deep_research(request: DeepResearchRequest):
         custom=_custom(request),
         job_id=request.project_id,
     )
+
+
+@router.post("/chat")
+def chat(request: ChatRequest):
+    """
+    QUICK chat — seedha, turant jawab. ChatGPT jaisi baat-cheet.
+
+    Ye deep-research engine ko HAATH tak nahi lagata: na chromadb, na torch,
+    na koi network connector. Sirf ek Gemini call. Isliye:
+      - turant jawab (koi bhaari model boot-time par load nahi hota)
+      - free server par OOM/crash nahi hota
+      - language mirror (Hindi/English/Hinglish jaisa user likhe)
+      - mood/emotion mirror (ChatGPT jaisi insaani vibe)
+
+    Gehri research chahiye to /deep-research (DEEP/MAXIMUM) use hota hai.
+    """
+    # lazy import: chat ka module bhi tabhi load ho jab pehli baar chat aaye
+    from research_engine.chat import quick_chat
+    return quick_chat(request.message, request.history)
 
 
 @router.get("/depth-modes")
