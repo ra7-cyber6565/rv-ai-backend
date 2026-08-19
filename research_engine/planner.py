@@ -16,6 +16,7 @@ import re
 from typing import Dict, List, Optional
 
 from .depth import DepthConfig
+from .local_language import normalize
 
 # ── Spec Section 1: question types ───────────────────────────────────────────
 QUESTION_TYPES: Dict[str, List[str]] = {
@@ -86,7 +87,9 @@ _BOOK_HINTS = ("book", "kitab", "kitaab", "granth", "mahagranth", "shastra", "ve
 class ResearchPlanner:
     # ── 1 + 2. classify + fields ──────────────────────────────────────────────
     def classify(self, question: str) -> Dict:
-        q = (question or "").lower()
+        # Pehle local shorthand khol lo — warna "reserch" ya "smjao" kisi keyword
+        # se match nahi karta aur sawaal galat classify ho jaata hai.
+        q = normalize(question or "").lower()
         detected: List[str] = []
         fields: List[str] = []
 
@@ -145,7 +148,9 @@ class ResearchPlanner:
 
     # ── 4. search queries ─────────────────────────────────────────────────────
     def clean_query(self, question: str) -> str:
-        q = " " + (question or "").lower().strip() + " "
+        # Shorthand khol kar search bhejo — "reserch ke bare me" se koi paper
+        # nahi milta, "research" se milta hai.
+        q = " " + normalize(question or "").lower().strip() + " "
         for phrase in _FILLER_PHRASES:
             q = q.replace(" " + phrase + " ", " ")
         tokens = [t for t in re.findall(r"[\w\-']+", q) if t not in _FILLER_WORDS]

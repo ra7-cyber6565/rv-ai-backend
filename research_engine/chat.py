@@ -18,6 +18,7 @@ import os
 from typing import Dict, List, Optional
 
 from .gemini_model import candidates, friendly_error
+from .local_language import normalize
 
 # Sirf reference ke liye — asli naam runtime par Google se poochh kar chunte hain
 # (dekho gemini_model.resolve). Hard-coded naam hi "InvalidArgument" ki wajah tha.
@@ -36,6 +37,24 @@ _SYSTEM = """Tum "RV" ho — ek dost jaisa, samajhdaar AI assistant.
   - User English mein -> tum English mein.
   - User Hinglish (Roman Hindi) mein -> tum bhi Hinglish (Roman) mein.
 - Apni marzi se bhasha mat badlo.
+
+# Local likhne ka andaaz samajhna (bahut zaroori)
+- Asli log shuddh spelling nahi likhte. Tumhe waise hi samajh jaana hai jaise
+  ek dost samajh jaata hai. Kabhi ye mat kaho ki "samajh nahi aaya" sirf
+  spelling ki wajah se.
+- Vowel gire hue shabd kholo: smjna=samajhna, nhi=nahi, jldi=jaldi, krke=karke,
+  kon/koun=kaun, kyu=kyun, kese=kaise, bnao=banao, bht=bahut, psnd=pasand,
+  h=hai, hu=hoon, mtlb=matlab, kch=kuch, btao=batao, pta=pata, thik=theek.
+- Angrezi jo kaan se likhi ho, wo pehchaano: lagvej/legvej=language,
+  opsion=option, reserch=research, maxiume=maximum, quek=quick,
+  deshbord=dashboard, emosion=emotion, personlty=personality, wbsite=website.
+- Ek hi vaakya mein Hindi+English mile ho to normal hai — aage badho.
+- Regional bol-chaal (Bhojpuri, Haryanvi, Marwari, Punjabi, Marathi, Bangla,
+  Tamil-mixed, jo bhi) aaye to ussi lehje mein, ussi apnepan se jawab do.
+- User ki spelling KABHI theek mat karo, uspar comment mat karo, aur grammar ka
+  lecture mat do. Tum khud saaf-suthra likho — bas.
+- Agar do matlab ban rahe hon, to jo zyada mumkin hai wahi maan kar jawab do.
+  Bilkul hi samajh na aaye tabhi chhota sa poochho — ek hi line mein.
 
 # Mood match karo (bahut zaroori)
 - User ke shabdon se uska mood padho aur ussi hisaab se baat karo:
@@ -74,7 +93,18 @@ def _history_block(history: Optional[List[Dict]]) -> str:
 def _build_prompt(message: str, history: Optional[List[Dict]]) -> str:
     convo = _history_block(history)
     convo_block = f"\n# Ab tak ki baat-cheet\n{convo}\n" if convo else ""
-    return f"{_SYSTEM}\n{convo_block}\n# User ka naya message\n{message}\n\n# RV ka jawab"
+
+    # Shorthand khula hua roop ek extra hint ke taur par. Isse mangled likhai
+    # (jaise "lokal lagvej bhi smjna chahiye") pakki tarah samajh mein aati hai.
+    # User ka asli message hi asli hai — hint sirf madad ke liye hai.
+    opened = normalize(message)
+    hint = ""
+    if opened.strip().lower() != message.strip().lower():
+        hint = (f"\n# (Andar ka hint — shorthand khola hua, sirf samajhne ke liye)\n"
+                f"{opened}\n")
+
+    return (f"{_SYSTEM}\n{convo_block}\n# User ka naya message\n{message}\n{hint}"
+            f"\n# RV ka jawab")
 
 
 def quick_chat(message: str, history: Optional[List[Dict]] = None) -> Dict:
