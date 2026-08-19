@@ -11,5 +11,7 @@ chromadb==0.5.23
 python-dotenv==1.0.1
 PyMuPDF==1.25.2
 Pillow==11.1.0
+scipy==1.15.1
+sympy==1.13.3
 numpy==2.2.2
 tiktoken==0.8.0
