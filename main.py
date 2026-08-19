@@ -48,6 +48,8 @@ def root():
         "version": app.version,
         "docs": "/docs",
         "endpoint_count": len(endpoints),
+        "endpoints": endpoints[:10]
+    }
 
 @app.get("/health")
 def health_check():
