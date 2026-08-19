@@ -215,7 +215,7 @@ Format exactly aise:
         - Measurement: HOMA-IR index
         - Falsification: no change after 12 weeks
         """
-        lines = [l.strip() for l in (text or "").split("\\n") if l.strip()]
+        lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
 
         variables = []
         outcome = ""
@@ -227,20 +227,20 @@ Format exactly aise:
             # Extract variables
             if any(kw in lower for kw in ["variable", "measure", "parameter", "factor"]):
                 # Extract comma-separated items or quoted items
-                items = re.findall(r'["\\'']([^\"\\']+)["\\'']|:\\s*([^,\\n]+)', line)
+                items = re.findall(r'["\'"]([^"\']+)["\'"]|:\s*([^,\n]+)', line)
                 variables.extend([i[0] or i[1] for i in items if i[0] or i[1]])
 
             # Expected outcome
             if any(kw in lower for kw in ["expect", "outcome", "result", "change", "effect"]):
                 # Extract percentage or numeric patterns
-                match = re.search(r'(\\d+%|\\d+\\.\\d+|\\d+\\s*(?:fold|times|unit|point|level))[^.]*', line)
+                match = re.search(r'(\d+%|\d+\.\d+|\d+\s*(?:fold|times|unit|point|level))[^.]*', line)
                 if match:
                     outcome = match.group(0).strip()
 
             # Measurement method
             if any(kw in lower for kw in ["measur", "assess", "index", "scale", "test", "method"]):
                 # Extract the measurement tool/method
-                match = re.search(r'(?:using|via|through|with|by)\\s+([^,.\\n]+)', line, re.IGNORECASE)
+                match = re.search(r'(?:using|via|through|with|by)\s+([^,.\n]+)', line, re.IGNORECASE)
                 if match:
                     measurement = match.group(1).strip()
                 elif ":" in line:
