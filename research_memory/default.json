@@ -1,0 +1,31 @@
+{
+  "project_id": "default",
+  "runs": [
+    {
+      "at": "2026-08-18 21:22:42",
+      "question": "If 2x + 5 = 15, what is x?",
+      "evidence_level": "🟡 MIXED — 4 independent source(s), limited scholarly evidence",
+      "source_count": 4,
+      "mode": "QUICK",
+      "connectors": [
+        "tavily"
+      ],
+      "summary": ""
+    }
+  ],
+  "hypotheses": [],
+  "dead_ends": [
+    {
+      "at": "2026-08-18",
+      "what": "full text: Solve for x 2x+5=15",
+      "why": "is host ke liye koi bharosemand free full-text route nahi hai (sirf snippet level tak padha)"
+    }
+  ],
+  "seen_urls": [
+    "https://askfilo.com/user-question-answers-smart-solutions/solve-for-x-2x-5-15-3338303839363836",
+    "https://www.cymath.com/answer.php?q=",
+    "https://www.facebook.com/groups/400882523984295/posts/2168269493912247",
+    "https://www.mathway.com/popular-problems/algebra/272399",
+    "https://www.quora.com/how-do-you-solve-for-x-in-the-equation-2x-5-15-11"
+  ]
+}

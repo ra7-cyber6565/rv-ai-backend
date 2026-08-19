@@ -1,0 +1,49 @@
+# Optional dependencies — in bina bhi Infinity Research AI chalta hai
+#
+#     pip install -r requirements-optional.txt
+#
+# Har entry ke saamne likha hai ki na hone par kya band rahega. Code har jagah
+# lazy import + graceful degrade karta hai, isliye ye missing hone par server
+# crash nahi hota — sirf us feature ka honest warning aata hai.
+
+# Scanned PDF / image se text (OCR)
+# Nahi hoga to: scanned pages "text nahi nikla" report honge, guess nahi hoga.
+# NOTE: pytesseract ko Tesseract ka Windows binary bhi chahiye —
+#   https://github.com/UB-Mannheim/tesseract/wiki
+pytesseract==0.3.10
+pillow==10.4.0
+
+# Word documents (.docx) padhne ke liye
+# Nahi hoga to: .docx upload par "unsupported format" saaf-saaf bolega.
+python-docx==1.1.2
+
+# YouTube ke MOJOOD captions (auto-generated ya uploaded)
+# Nahi hoga to: video URL par transcript pipeline skip ho jayegi.
+# NOTE: Ye default se BAND hai. Chalane ke liye .env mein:  ALLOW_YT_TRANSCRIPT=true
+#   Kyun band? Kai videos ke captions download karna unke terms ke against ho
+#   sakta hai. Ye tumhara conscious opt-in hona chahiye, chupke se nahi.
+youtube-transcript-api==0.6.2
+
+# Local audio/video ka speech-to-text (Spec Section 5) — /transcribe-audio
+# Nahi hoga to: /transcribe-audio 501 ke saath honest install hint dega; caption
+# files (.vtt/.srt) phir bhi /upload-document se chalti hain.
+# Dono FREE + offline hain (koi API key/quota nahi). Pehli baar model weights
+# download honge (ek baar internet). Inme se KOI EK kaafi hai:
+#   A) Halka (recommended): faster-whisper — CTranslate2, CPU par int8, torch
+#      ki zaroorat nahi. Laptop ke liye behtar.
+faster-whisper==1.0.3
+#   B) Ya bhaari alternative (torch ~2GB laata hai) — A na chale to hi:
+# openai-whisper==20231117
+# Model size .env se: WHISPER_MODEL=tiny|base|small|medium (default base),
+# WHISPER_DEVICE=cpu, WHISPER_COMPUTE_TYPE=int8 (CPU par sabse halka).
+
+# Entity/relation hints ke liye knowledge graph — spaCy ki ZAROORAT NAHI hai
+# knowledge/graph.py pura regex-based hai, isliye KG hints bina kisi extra
+# install ke chalte hain. Pehle yahan `spacy==3.7.5` likha tha — wo galat tha:
+# code mein spacy ek bhi jagah import nahi hota, yani install karne se kuch
+# on nahi hota tha, sirf ~500MB aur time jaata tha.
+#
+# spaCy jaan-boojh kar wapas nahi laaya gaya: en_core_web_sm English par train
+# hai aur Hinglish text par entities galat tag karta hai (asli test mein usne
+# "mein hua tha" ko PERSON bana diya tha). Isi wajah se KG ka output sirf HINT
+# hai — evidence ya citation kabhi nahi.

@@ -1,0 +1,605 @@
+"""
+DeepResearchEngine — Spec Section 6 + 16 (orchestrator.py)
+
+Poora pipeline yahan judta hai:
+
+    SAFETY → PLAN → DOCUMENTS → DISCOVERY (always) → EVIDENCE PACK
+    → [round 2/3 agar evidence kamzor] → CONTRADICTIONS
+    → GEMINI PASSES (budget ke andar) → CITATION VERIFY → VERIFICATION
+    → SYNTHESIS → MEMORY
+
+Do sabse important design decisions:
+
+1. DISCOVERY ALWAYS ON.
+   Purane research_agent.py mein external search sirf tab chalti thi jab PDF
+   context khaali ho (`if not retrieval["context"]`). Iska matlab PDF upload
+   karte hi poora internet/academic side band ho jaata tha — jo Spec Section 2
+   ka seedha ulta hai. Ab documents aur external sources DONO hamesha aate hain,
+   aur dono ek hi evidence pack mein ek jaisa treat hote hain.
+
+2. GEMINI KE BAHAR KI SACHCHAI.
+   Contradictions, verification, citation check, coverage — sab local engines se
+   aate hain. Isliye Gemini fail ho ya quota khatam ho, jawab ke ye hisse phir
+   bhi asli rehte hain (Spec Section 17/18: dikhawe ka Deep Research nahi).
+"""
+from __future__ import annotations
+
+import re
+from typing import Dict, List, Optional
+
+from .citation import CitationEngine
+from .content_fetcher import ContentFetcher
+from .contradiction import ContradictionEngine
+from .critic import Critic
+from .depth import get_depth_config, quota_note
+from .evidence import EvidenceEngine
+from .gemini_reasoning import GeminiReasoning, QuotaExhausted
+from .hypothesis import HypothesisEngine
+from .knowledge_graph import KnowledgeGraphAdapter
+from .models import EvidencePack, ResearchResult, SourceRecord
+from .planner import ResearchPlanner
+from .research_memory import ResearchMemory
+from .source_discovery import SourceDiscovery
+from .synthesizer import FinalSynthesizer
+from .vector_search import VectorSearch
+from .verification import VerificationEngine
+
+
+class DeepResearchEngine:
+    def __init__(self, project_id: str = "default", enable_kg: bool = True,
+                 enable_memory: bool = True):
+        self.project_id = project_id or "default"
+        self.planner = ResearchPlanner()
+        self.discovery = SourceDiscovery()
+        self.evidence = EvidenceEngine()
+        self.citations = CitationEngine()
+        self.contradictions = ContradictionEngine()
+        self.reader = ContentFetcher()
+        self.critic = Critic()
+        self.hypotheses = HypothesisEngine()
+        self.verifier = VerificationEngine()
+        self.synthesizer = FinalSynthesizer()
+        self.vectors = VectorSearch()
+        self.graph = KnowledgeGraphAdapter(enabled=enable_kg)
+        self.memory = ResearchMemory(self.project_id) if enable_memory else None
+
+    # ── helpers ──────────────────────────────────────────────────────────────
+    def _start_tracking(self, job_id: Optional[str], question: str) -> None:
+        """
+        Progress store mein job register karo.
+
+        Ye zaroori hai: progress_tracker.update_stage() us job ko chup-chaap
+        ignore kar deta hai jo register na ho. Pehle start_tracking sirf purane
+        research_agent.py shim mein tha, isliye naye pipeline mein
+        GET /progress/{id} hamesha "Job not found" deta tha.
+        """
+        if not job_id:
+            return
+        try:
+            from utils import progress_tracker
+            progress_tracker.start_tracking(job_id, question)
+        except Exception:
+            pass
+
+    def _track(self, job_id: Optional[str], stage: str, note: str = "") -> None:
+        if not job_id:
+            return
+        try:
+            from utils import progress_tracker
+            progress_tracker.update_stage(job_id, stage, note)
+        except Exception:
+            pass
+
+    def _counts(self, job_id: Optional[str], **kwargs) -> None:
+        if not job_id:
+            return
+        try:
+            from utils import progress_tracker
+            progress_tracker.set_counts(job_id, **kwargs)
+        except Exception:
+            pass
+
+    def _safety(self, question: str) -> Dict:
+        try:
+            from safety.checks import check_safety
+            return check_safety(question) or {}
+        except Exception:
+            return {"flags": [], "safe_to_proceed": True, "flag_count": 0}
+
+    # ── 1. documents ─────────────────────────────────────────────────────────
+    def _document_records(self, question: str, config) -> tuple:
+        retrieval = self.vectors.retrieve(question, self.project_id,
+                                          n_results=max(4, config.max_sources))
+        records = self.evidence.records_from_retrieval(retrieval)
+        note = (f"{len(records)} document chunks mile" if records
+                else "koi uploaded document match nahi hua")
+        if self.vectors.last_error:
+            note += f" (vector search error: {self.vectors.last_error[:80]})"
+        return records, note
+
+    # ── 2. discovery (always on, multi-round) ────────────────────────────────
+    def _discover(self, question: str, plan: Dict, config, doc_records: List[SourceRecord],
+                  job_id: Optional[str] = None) -> Dict:
+        external: List[SourceRecord] = []
+        logs: List[Dict] = []
+        connectors: List[str] = []
+        seen = set(self.memory.seen_urls()) if self.memory else set()
+        # Purane URLs ko discovery se skip nahi karte (wo abhi bhi relevant ho
+        # sakte hain) — sirf duplicate rokne ke liye is-run ka set use hota hai.
+        seen_this_run: set = set()
+        rounds_run = 0
+        sufficiency: Dict = {}
+        pack: Optional[EvidencePack] = None
+
+        for round_no in range(1, config.max_rounds + 1):
+            rounds_run = round_no
+            # `plan` classify() ke dict ka SUPERSET hai (planner.plan() mein
+            # **cls spread hota hai), isliye ise seedha cls ki jagah dena safe
+            # hai — planner ke andar saari fields .get() se padhi jaati hain.
+            queries = self.planner.search_queries(question, plan, round_no=round_no)
+            self._track(job_id, "DISCOVERING",
+                        f"round {round_no}: {', '.join(queries)[:120]}")
+
+            found = self.discovery.discover(
+                queries=queries,
+                plan=plan["connectors"],
+                max_per_connector=config.max_per_connector,
+                max_web=config.max_sources,
+                round_no=round_no,
+                exclude_urls=seen_this_run,
+                # Spec §13 — network par bhi rail. Har round ka apna budget.
+                budget_seconds=getattr(config, "discovery_seconds", None),
+            )
+            external.extend(found["records"])
+            logs.extend(found["log"])
+            connectors = sorted(set(connectors) | set(found["connectors_searched"]))
+            seen_this_run |= set(found.get("seen_urls", set()))
+
+            pack = self.evidence.build_pack(
+                question=question,
+                doc_records=doc_records,
+                external_records=external,
+                max_sources=config.max_sources,
+                max_per_origin=3,
+                connectors_searched=connectors,
+                rounds_run=round_no,
+                chars_per_source=config.chars_per_source,
+            )
+            self._counts(job_id, sources=len(pack.sources),
+                         documents=len(pack.document_sources()))
+
+            sufficiency = self.evidence.needs_another_round(
+                pack, is_scientific=plan.get("is_scientific", False))
+            if sufficiency.get("sufficient") or round_no >= config.max_rounds:
+                break
+
+        if pack is None:      # koi round hi nahi chala (max_rounds=0 jaisa case)
+            pack = self.evidence.build_pack(
+                question=question, doc_records=doc_records, external_records=[],
+                max_sources=config.max_sources, rounds_run=0,
+                chars_per_source=config.chars_per_source)
+
+        return {
+            "pack": pack, "log": logs, "rounds_run": rounds_run,
+            "connectors": connectors, "sufficiency": sufficiency,
+            "urls": sorted(seen_this_run - seen),
+        }
+
+    # ── 3. gemini passes (budget-aware) ──────────────────────────────────────
+    def _remember_dead_ends(self, question: str, discovered: Dict,
+                            reading: Dict) -> None:
+        """
+        Jo raaste is sawal par bekaar gaye, unhe memory mein likho.
+
+        Kya count hota hai dead end:
+          * koi connector error de kar gira (API down, code bug)
+          * koi connector CHALA HI NAHI (rate limit / key missing / timeout /
+            time budget) — ye alag line se likha jaata hai, kyunki ise
+            "0 result mila" likhna jhooth hai aur wo jhooth agle sawal ke
+            prompt tak pahunch jaata hai
+          * koi connector chala par sach mein 0 result diya
+          * kisi source ka full text na mil paya (paywall / no free route)
+
+        Ye BLOCK list nahi hai — agli baar connector phir bhi try hoga. Fayda
+        sirf ye hai ki `context_note()` mein ye baat prompt tak pahunchti hai,
+        aur user ko dikh jaata hai ki is topic par kya-kya nahi chala.
+        """
+        if not self.memory:
+            return
+        topic = question[:60]
+        try:
+            for entry in discovered.get("log", []):
+                name = entry.get("connector", "unknown")
+                reason = entry.get("reason") or ""
+                if reason in SourceDiscovery._STOPPED_REASONS:
+                    # search hui hi NAHI — ise "0 result mila" likhna jhooth hoga,
+                    # aur wo jhooth agli baar prompt tak pahunch jaata hai
+                    self.memory.remember_dead_end(
+                        f"{name} ({topic})",
+                        f"search chali hi nahi [{reason}]: {str(entry.get('error'))[:100]}")
+                elif entry.get("error"):
+                    self.memory.remember_dead_end(
+                        f"{name} ({topic})", f"fail: {str(entry['error'])[:120]}")
+                elif reason == "filtered":
+                    self.memory.remember_dead_end(
+                        f"{name} ({topic})",
+                        "result aaye par sab topic se door the (relevance guard)")
+                elif not entry.get("count"):
+                    self.memory.remember_dead_end(
+                        f"{name} ({topic})", "chala par 0 result mila")
+            for entry in reading.get("entries", []):
+                if not entry.get("ok") and entry.get("reason"):
+                    self.memory.remember_dead_end(
+                        f"full text: {(entry.get('title') or entry.get('url') or '')[:50]}",
+                        str(entry["reason"])[:120])
+        except Exception:
+            # memory likhna research fail karne ka kaaran nahi hona chahiye
+            pass
+
+    @staticmethod
+    def _split_hypotheses(text: str) -> tuple:
+        """
+        Synthesis output se '## Hypothesis N' blocks alag karo, taaki wo body
+        mein bhi na dohrayen aur structured section 8 mein saaf render hon.
+        """
+        match = re.search(r"^\s*#{2,4}\s*Hypothesis\b", text or "",
+                          re.IGNORECASE | re.MULTILINE)
+        if not match:
+            return text, ""
+        return text[:match.start()].rstrip(), text[match.start():].strip()
+
+    def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
+                    contradiction_dicts: List[Dict], memory_note: str,
+                    job_id: Optional[str] = None) -> Dict:
+        """
+        Budget mapping (free tier ka asli constraint):
+            1 call  → sirf analysis (wahi final answer banta hai)
+            2 calls → analysis + synthesis (critique synthesis prompt ke andar)
+            3 calls → analysis + [critique (+hypothesis)] + synthesis
+            4-5     → analysis + critique + dedicated hypothesis + synthesis
+                      (sirf CUSTOM mode, jahan user khud budget badha sakta hai)
+        """
+        brain = GeminiReasoning(budget=config.gemini_calls)
+        out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
+               "final": "", "errors": [], "calls": 0, "critique": {},
+               "hypotheses": []}
+
+        # grade_evidence ek human-readable string deta hai ("⚠️ MIXED — ..."),
+        # isliye keyword nikaal kar bhejte hain
+        graded = self.evidence.grade_evidence(pack) if pack.sources else ""
+        level_hint = next((word for word in ("UNVERIFIED", "VERIFIED", "STRONG",
+                                             "MIXED", "WEAK") if word in graded), "")
+        want_hypothesis = self.hypotheses.should_generate(
+            plan, pack, contradiction_dicts, level_hint)
+
+        # ── PASS A: analysis ────────────────────────────────────────────────
+        self._track(job_id, "SPECIALIST_ANALYSIS",
+                    f"{len(pack.sources)} sources par reasoning (budget {config.gemini_calls})")
+        try:
+            if pack.sources:
+                prompt = brain.prompt_analysis(question, pack, plan)
+                if memory_note:
+                    prompt = f"{memory_note}\n\n{prompt}"
+                out["analysis"] = brain.generate(prompt, "analysis")
+            else:
+                out["analysis"] = brain.generate(
+                    brain.prompt_no_sources(question, plan), "no-source answer")
+        except QuotaExhausted as exc:
+            out["errors"].append(str(exc))
+
+        # ── PASS B: critique (+hypothesis) ──────────────────────────────────
+        if out["analysis"] and brain.remaining >= 2 and config.use_red_team:
+            self._track(job_id, "CRITIQUE", "self-falsification pass")
+            prompt = self.critic.prompt(question, out["analysis"], pack, red_team=True)
+            if want_hypothesis:
+                self._track(job_id, "HYPOTHESIS", "hypothesis generation (same call)")
+                prompt += self.hypotheses.prompt_appendix()
+            try:
+                text = brain.generate(prompt, "critique")
+            except QuotaExhausted as exc:
+                text = ""
+                out["errors"].append(str(exc))
+            out["critique_raw"] = text
+            if want_hypothesis:
+                out["hypothesis_raw"] = text
+
+        # ── PASS B2: dedicated hypothesis pass (sirf jab budget bacha ho) ────
+        #
+        # Spec Section 10 chahta hai ki hypothesis generation apna step ho.
+        # 1-3 call wale modes mein iske liye call hi nahi bachti, isliye wahan
+        # hypothesis critique/synthesis prompt ke appendix mein maangi jaati hai
+        # (kam quota, wahi structured output). CUSTOM mode 5 calls tak jaa
+        # sakta hai — tab ye poora dedicated prompt chalta hai, jisme sirf
+        # hypothesis par focus hota hai.
+        #
+        # `remaining >= 2` zaroori hai: ek call synthesis ke liye bachani hai,
+        # warna final answer hi nahi banega.
+        if (want_hypothesis and not out["hypothesis_raw"] and out["analysis"]
+                and brain.remaining >= 2):
+            self._track(job_id, "HYPOTHESIS", "dedicated hypothesis pass (alag call)")
+            try:
+                out["hypothesis_raw"] = brain.generate(
+                    self.hypotheses.prompt(question, out["analysis"], pack, plan,
+                                           contradiction_dicts),
+                    "hypothesis")
+            except QuotaExhausted as exc:
+                out["errors"].append(str(exc))
+
+        # ── PASS C: synthesis ───────────────────────────────────────────────
+        if out["analysis"] and brain.remaining >= 1:
+            self._track(job_id, "SYNTHESIS", "final answer assemble ho raha hai")
+            critique_text = out["critique_raw"]
+            if not critique_text and config.use_red_team:
+                # 2-call mode: critique ke liye alag call nahi bachi, isliye
+                # synthesis prompt ke andar hi self-critique maang lete hain
+                critique_text = ("(Critic pass ke liye call nahi bachi — final answer "
+                                 "ke section 8 ke liye khud hi imaandaar weaknesses "
+                                 "nikalo, tareef mat karo.)")
+            prompt = self.synthesizer.prompt(question, out["analysis"], critique_text,
+                                             out["hypothesis_raw"], pack, plan,
+                                             memory_note)
+            # DEEP mode mein hypothesis ke liye alag call nahi hoti — usi
+            # synthesis call mein maang lete hain, aur baad mein body se
+            # nikaal kar structured section 7 mein daal dete hain
+            merge_hypothesis = want_hypothesis and not out["hypothesis_raw"]
+            if merge_hypothesis:
+                self._track(job_id, "HYPOTHESIS", "hypothesis (synthesis call ke andar)")
+                prompt += self.hypotheses.prompt_appendix()
+            try:
+                text = brain.generate(prompt, "synthesis")
+            except QuotaExhausted as exc:
+                text = ""
+                out["errors"].append(str(exc))
+            if merge_hypothesis and text:
+                body, hypothesis_part = self._split_hypotheses(text)
+                out["final"] = body
+                out["hypothesis_raw"] = hypothesis_part
+            else:
+                out["final"] = text
+
+        # ── parse ───────────────────────────────────────────────────────────
+        if out["critique_raw"]:
+            out["critique"] = self.critic.parse(out["critique_raw"]).to_dict()
+        if out["hypothesis_raw"]:
+            parsed = self.hypotheses.parse(out["hypothesis_raw"])
+            out["hypotheses"] = [h.to_dict() for h in parsed]
+            out["errors"].extend(self.hypotheses.honesty_check(parsed))
+
+        out["calls"] = brain.calls_used
+        out["errors"].extend(brain.errors)
+        return out
+
+    # ── main ─────────────────────────────────────────────────────────────────
+    def research(self, question: str, depth_mode: str = "DEEP",
+                 custom: Optional[Dict] = None, job_id: Optional[str] = None) -> Dict:
+        question = (question or "").strip()
+        config = get_depth_config(depth_mode, custom)
+        job_id = job_id or self.project_id
+        warnings: List[str] = []
+
+        if not question:
+            return ResearchResult(
+                question=question, answer="Sawal khaali hai.", mode=config.name,
+                evidence_level="⚠️ UNVERIFIED — koi sawal nahi tha").to_dict()
+
+        # 0. safety
+        self._start_tracking(job_id, question)
+        self._track(job_id, "PLANNING", "safety + classification")
+        safety = self._safety(question)
+
+        # 1. plan
+        plan = self.planner.plan(question, config)
+
+        # 2. documents (hamesha)
+        self._track(job_id, "PROCESSING", "uploaded documents check ho rahe hain")
+        doc_records, doc_note = self._document_records(question, config)
+
+        # 3. discovery (hamesha — PDF ho ya na ho)
+        discovered = self._discover(question, plan, config, doc_records, job_id)
+        pack: EvidencePack = discovered["pack"]
+        discovery_note = self.discovery.discovery_note(discovered["log"])
+        if not pack.sources:
+            warnings.append("Kisi bhi source se relevant result nahi mila — jawab "
+                            "sirf model ki general knowledge par hai, verified nahi.")
+        if doc_note:
+            discovery_note = f"{doc_note} | {discovery_note}"
+
+        sufficiency = discovered.get("sufficiency", {})
+        if sufficiency and not sufficiency.get("sufficient"):
+            for reason in sufficiency.get("reasons", [])[:3]:
+                warnings.append(f"Evidence limit: {reason}")
+
+        # 3b. READING (Spec Section 3/4/5) — top sources ka legally-free full
+        # text. Ye Gemini ki ek bhi call nahi kharchta; iska budget alag hai
+        # (config.max_fulltext). Yahi wo step hai jo "search kiya" ko "padha"
+        # banata hai — aur jo nahi padh paye, uska honest reason bhi deta hai.
+        self._track(job_id, "READING",
+                    f"top {config.max_fulltext} sources ka full text padha ja raha hai")
+        reading = self.reader.enrich(pack, max_sources=config.max_fulltext,
+                                     budget_chars=config.chars_per_source * 2)
+        if reading.get("note"):
+            discovery_note = f"{discovery_note} | Reading: {reading['note']}"
+        self._counts(job_id, full_text_read=reading.get("succeeded", 0))
+        if reading.get("attempted") and not reading.get("succeeded"):
+            warnings.append(
+                "Kisi bhi source ka full text nahi mil paya — jawab sirf "
+                "abstract/snippet level par hai. Wajah: "
+                + (reading.get("entries", [{}])[0].get("reason", "unknown"))[:120])
+
+        # 4. contradictions (local, free)
+        self._track(job_id, "EVIDENCE_ANALYSIS", "contradiction + independence check")
+        contradiction_objects = self.contradictions.detect(pack)
+        contradiction_dicts = [c.to_dict() for c in contradiction_objects]
+        consensus = self.contradictions.consensus_report(pack, contradiction_objects)
+        self._counts(job_id, conflicts=len(contradiction_dicts))
+
+        # 5. memory + knowledge graph hints
+        memory_note = self.memory.context_note(question) if self.memory else ""
+        graph_note = self.graph.related_note(question, self.project_id)
+        if graph_note:
+            memory_note = f"{memory_note}\n\n{graph_note}".strip()
+
+        # 6. gemini passes
+        passes = self._run_passes(question, pack, plan, config, contradiction_dicts,
+                                  memory_note, job_id)
+        warnings.extend(passes["errors"])
+        self._counts(job_id, gemini_calls=passes["calls"])
+
+        gemini_answer = passes["final"] or passes["analysis"]
+        if not gemini_answer:
+            gemini_answer = self.synthesizer.extractive_summary(question, pack)
+            warnings.append("Gemini reasoning available nahi thi — jawab mein sirf "
+                            "retrieved evidence ka extract hai, synthesis nahi.")
+
+        # 7. citation verification (structural, Gemini par bharosa nahi)
+        report = self.citations.verify(gemini_answer, pack)
+        annotated = self.citations.annotate(gemini_answer, pack)
+        claims = self.evidence.extract_claims(gemini_answer, pack)
+        if report.invalid_ids:
+            warnings.append(f"{len(report.invalid_ids)} citation invalid thi "
+                            f"({', '.join(report.invalid_ids[:5])}) — answer mein "
+                            f"mark kar diya gaya hai.")
+        if report.used_legacy_url_match:
+            warnings.append("Model ne [S#] format use nahi kiya — citations URL "
+                            "match se nikaali gayi hain, isliye kam bharosemand hain.")
+
+        # 8. verification (Spec Section 11)
+        self._track(job_id, "SAFETY_CHECK", "verification + honesty checks")
+        verification = self.verifier.verify(
+            gemini_answer, pack,
+            citation_ok=not report.invalid_ids,
+            ungrounded_count=len(report.ungrounded_claims),
+            hypotheses=passes["hypotheses"],
+            cited_ids=[c.get("source_id") for c in report.cited if c.get("source_id")],
+        ).to_dict()
+
+        # 9. grading + coverage
+        evidence_level = self.evidence.grade_evidence(pack, claims)
+        coverage = pack.coverage_report()
+        coverage["evidence_table"] = self.evidence.evidence_table(claims)
+        coverage["independence"] = self.evidence.independence_report(pack)
+        by_type: Dict[str, int] = {}
+        for source in pack.sources:
+            key = source.source_type.value
+            by_type[key] = by_type.get(key, 0) + 1
+        coverage["by_source_type"] = by_type
+        coverage["peer_reviewed"] = sum(1 for s in pack.sources if s.peer_reviewed is True)
+        coverage["full_text_available"] = sum(1 for s in pack.sources
+                                              if s.full_text_available)
+        # Spec Section 2 — "search kiya" vs "padha" ka farq numbers mein
+        coverage["reading"] = {
+            "attempted": reading.get("attempted", 0),
+            "succeeded": reading.get("succeeded", 0),
+            "failed": reading.get("failed", 0),
+            "skipped_over_budget": reading.get("skipped", 0),
+            "chars_read": reading.get("chars_read", 0),
+            "note": reading.get("note", ""),
+            "per_source": [
+                {"source_id": e.get("source_id", ""), "read": bool(e.get("ok")),
+                 "chars": e.get("chars", 0), "reason": e.get("reason", "")}
+                for e in reading.get("entries", [])
+            ],
+        }
+        honesty = {
+            "citations_verified": len(report.cited),
+            "cited": report.cited,
+            "summary": self.citations.honesty_report(report, pack),
+        }
+
+        # Spec Section 7 — retracted/withdrawn source ka warning top level par.
+        # Ye sirf coverage ke andar dabaana theek nahi hoga: agar jawab kisi
+        # retracted paper par tika hai, to ye sabse pehle dikhne wali baat hai.
+        retracted = pack.retracted_sources()
+        if retracted:
+            cited_ids = {c.get("source_id") for c in report.cited}
+            cited_retracted = [s.source_id for s in retracted if s.source_id in cited_ids]
+            detail = (f"aur inme se {len(cited_retracted)} ko jawab mein cite bhi kiya "
+                      f"gaya hai ({', '.join(cited_retracted)})"
+                      if cited_retracted else
+                      "inhe jawab mein cite nahi kiya gaya")
+            warnings.append(
+                f"{len(retracted)} source par retraction/withdrawal ka signal hai "
+                f"({', '.join(s.source_id for s in retracted if s.source_id)}) — "
+                f"{detail}. Retracted kaam ko evidence ki tarah use nahi karna chahiye.")
+
+        # 10. final answer assemble
+        answer = self.synthesizer.assemble(
+            gemini_answer=annotated,
+            pack=pack,
+            evidence_level=evidence_level,
+            confidence_note=self._confidence_note(pack, config, passes["calls"],
+                                                  sufficiency),
+            contradictions=contradiction_dicts,
+            hypotheses=passes["hypotheses"],
+            verification=verification,
+            coverage=coverage,
+            honesty=honesty,
+            consensus=consensus,
+            discovery_note=discovery_note,
+            quota_note=f"{passes['calls']}/{config.gemini_calls} calls used "
+                       f"({quota_note(config)})",
+            critique=passes["critique"],
+            warnings=warnings,
+        )
+
+        # 11. memory + graph write (best effort)
+        if self.memory:
+            self.memory.remember_run(
+                question=question, evidence_level=evidence_level,
+                source_count=len(pack.sources), mode=config.name,
+                connectors=discovered["connectors"],
+                summary=(passes["analysis"] or "")[:400])
+            if passes["hypotheses"]:
+                self.memory.remember_hypotheses(question, passes["hypotheses"])
+            self.memory.remember_urls(discovered["urls"])
+            # Dead ends bhi yaad rakho (Spec Section 16). Ye sirf ek note hai,
+            # block nahi — agli baar prompt mein dikh jaata hai ki is topic par
+            # kya pehle bekaar gaya tha, taaki wahi galti dohrayi na jaaye.
+            self._remember_dead_ends(question, discovered, reading)
+            self.memory.save()
+        self.graph.store(question, passes["analysis"] or gemini_answer, self.project_id)
+
+        self._track(job_id, "COMPLETE",
+                    f"{len(pack.sources)} sources, {passes['calls']} gemini calls")
+
+        cited_sources = [c for c in report.cited]
+        return ResearchResult(
+            question=question,
+            answer=answer,
+            sources=cited_sources or [s.to_dict() for s in pack.sources],
+            safety_flags=safety.get("flags", []),
+            evidence_level=evidence_level,
+            mode=config.name,
+            question_types=plan.get("question_types", []),
+            relevant_fields=plan.get("relevant_fields", []),
+            citations=report.cited,
+            uncited_sources=report.uncited,
+            invalid_citations=report.invalid_ids,
+            ungrounded_claims=report.ungrounded_claims,
+            contradictions=contradiction_dicts,
+            hypotheses=passes["hypotheses"],
+            verification=verification,
+            coverage=coverage,
+            gemini_calls_used=passes["calls"],
+            warnings=warnings,
+        ).to_dict()
+
+    # ── confidence note ──────────────────────────────────────────────────────
+    def _confidence_note(self, pack: EvidencePack, config, calls_used: int,
+                         sufficiency: Dict) -> str:
+        if not pack.sources:
+            return ("Koi source retrieve nahi hua. Is jawab ko unverified maanein.")
+        parts = [
+            f"{len(pack.sources)} sources use hue, jinke "
+            f"{pack.independent_source_count} independent origins hain.",
+        ]
+        peer = sum(1 for s in pack.sources if s.peer_reviewed is True)
+        if peer:
+            parts.append(f"{peer} peer-reviewed hain.")
+        if not sufficiency.get("sufficient", True):
+            parts.append("Evidence threshold poora nahi hua — confidence kam rakhein.")
+        if calls_used < config.gemini_calls:
+            parts.append(f"Reasoning ke {config.gemini_calls} planned passes mein se "
+                         f"{calls_used} chale.")
+        parts.append("Ye confidence retrieved evidence par hai, poore literature par nahi.")
+        return " ".join(parts)

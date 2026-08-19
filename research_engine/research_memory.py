@@ -1,0 +1,190 @@
+"""
+ResearchMemory — Spec Section 16 (research_memory.py)
+
+Har project ka apna JSON file. Isme wo cheezein rakhi jaati hain jo agli baar
+kaam aayengi:
+    * past research runs (sawal, evidence level, kitne sources)
+    * hypotheses aur unka status (UNTESTED / SUPPORTED_LATER / REJECTED)
+    * dead ends — kaun sa approach ya query kaam nahi karti
+    * seen source URLs — dobara wahi source discovery mein na aaye
+
+Deliberately simple: file-based JSON, koi DB nahi. Corrupt file ya missing dir
+se crash nahi hota — memory kabhi research ko block nahi karegi.
+"""
+from __future__ import annotations
+
+import json
+import os
+import re
+import time
+from typing import Dict, List, Optional
+
+_DEFAULT_DIR = os.getenv("RESEARCH_MEMORY_DIR", "./research_memory")
+_MAX_RUNS = 50
+_MAX_URLS = 400
+_STOP = {"kya", "hai", "the", "ka", "ki", "ke", "se", "mein", "aur", "what", "is",
+         "of", "and", "the", "how", "why", "does", "do", "a", "an", "for", "in", "to"}
+
+
+def _words(text: str) -> set:
+    return {w for w in re.findall(r"[\w']+", (text or "").lower())
+            if len(w) > 2 and w not in _STOP}
+
+
+class ResearchMemory:
+    def __init__(self, project_id: str = "default", directory: str = _DEFAULT_DIR):
+        self.project_id = project_id or "default"
+        self.directory = directory
+        self._data: Optional[Dict] = None
+
+    # ── storage ──────────────────────────────────────────────────────────────
+    @property
+    def path(self) -> str:
+        safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.project_id)
+        return os.path.join(self.directory, f"{safe}.json")
+
+    def _blank(self) -> Dict:
+        return {"project_id": self.project_id, "runs": [], "hypotheses": [],
+                "dead_ends": [], "seen_urls": []}
+
+    def load(self) -> Dict:
+        if self._data is not None:
+            return self._data
+        try:
+            with open(self.path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            for key, default in self._blank().items():
+                data.setdefault(key, default)
+            self._data = data
+        except Exception:
+            # File nahi hai ya corrupt hai — memory se research nahi rukni chahiye
+            self._data = self._blank()
+        return self._data
+
+    def save(self) -> bool:
+        data = self.load()
+        data["runs"] = data["runs"][-_MAX_RUNS:]
+        data["seen_urls"] = data["seen_urls"][-_MAX_URLS:]
+        try:
+            os.makedirs(self.directory, exist_ok=True)
+            with open(self.path, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            return True
+        except Exception:
+            return False
+
+    # ── writes ───────────────────────────────────────────────────────────────
+    def remember_run(self, question: str, evidence_level: str, source_count: int,
+                     mode: str, connectors: Optional[List[str]] = None,
+                     summary: str = "") -> None:
+        self.load()["runs"].append({
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "question": question,
+            "evidence_level": evidence_level,
+            "source_count": source_count,
+            "mode": mode,
+            "connectors": connectors or [],
+            "summary": (summary or "")[:400],
+        })
+
+    def remember_hypotheses(self, question: str, hypotheses: List[Dict]) -> None:
+        store = self.load()["hypotheses"]
+        existing = {h.get("statement", "")[:120] for h in store}
+        for h in hypotheses:
+            statement = h.get("statement", "")
+            if not statement or statement[:120] in existing:
+                continue
+            store.append({
+                "at": time.strftime("%Y-%m-%d"),
+                "question": question,
+                "statement": statement,
+                "how_to_test": h.get("how_to_test", ""),
+                "status": h.get("status", "UNTESTED HYPOTHESIS"),
+            })
+
+    def remember_dead_end(self, what: str, why: str) -> None:
+        store = self.load()["dead_ends"]
+        if any(d.get("what") == what for d in store):
+            return
+        store.append({"at": time.strftime("%Y-%m-%d"), "what": what, "why": why})
+
+    def remember_urls(self, urls: List[str]) -> None:
+        store = self.load()["seen_urls"]
+        known = set(store)
+        for url in urls:
+            key = (url or "").strip().rstrip("/").lower()
+            if key and key not in known:
+                known.add(key)
+                store.append(key)
+
+    # ── reads ────────────────────────────────────────────────────────────────
+    def recall_related(self, question: str, limit: int = 3) -> List[Dict]:
+        """Purane runs jo is sawal se milte-julte hain (keyword overlap)."""
+        target = _words(question)
+        if not target:
+            return []
+        scored = []
+        for run in self.load()["runs"]:
+            overlap = len(target & _words(run.get("question", "")))
+            if overlap >= 2:
+                scored.append((overlap, run))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [run for _, run in scored[:limit]]
+
+    def known_hypotheses(self, question: str, limit: int = 3) -> List[Dict]:
+        target = _words(question)
+        out = []
+        for h in self.load()["hypotheses"]:
+            if len(target & _words(h.get("question", "") + " " + h.get("statement", ""))) >= 2:
+                out.append(h)
+        return out[-limit:]
+
+    def dead_ends(self) -> List[Dict]:
+        return list(self.load()["dead_ends"])
+
+    def seen_urls(self) -> set:
+        return set(self.load()["seen_urls"])
+
+    def context_note(self, question: str) -> str:
+        """
+        Prompt mein daalne layak chhota note — pichhli baar kya hua tha.
+
+        Saare fields .get() se padhe jaate hain: memory file purane format mein
+        bhi ho sakti hai (ya haath se edit ho sakti hai), aur ek missing key ke
+        chalte poora memory feature chup-chaap band ho jaata tha (caller ke
+        try/except mein KeyError ghum ho jaata tha).
+        """
+        runs = self.recall_related(question)
+        hyps = self.known_hypotheses(question)
+        dead = self.related_dead_ends(question)
+        if not runs and not hyps and not dead:
+            return ""
+        lines = ["PICHHLI RESEARCH (isi project se):"]
+        for run in runs:
+            lines.append(
+                f"  - {run.get('at', 'kabhi')}: \"{(run.get('question') or '')[:90]}\" → "
+                f"evidence {run.get('evidence_level', 'pata nahi')}, "
+                f"{run.get('source_count', 0)} sources")
+        for h in hyps:
+            lines.append(f"  - purani hypothesis ({h.get('status', 'UNTESTED')}): "
+                         f"{(h.get('statement') or '')[:110]}")
+        for d in dead:
+            lines.append(f"  - pehle kaam nahi aaya: {(d.get('what') or '')[:60]} "
+                         f"({(d.get('why') or '')[:70]})")
+        lines.append("  (Ise dohraane ki zaroorat nahi — isse aage badho.)")
+        return "\n".join(lines)
+
+    def related_dead_ends(self, question: str, limit: int = 3) -> List[Dict]:
+        """Is sawal se milte-julte dead ends (keyword overlap)."""
+        target = _words(question)
+        if not target:
+            return []
+        out = []
+        for d in self.load()["dead_ends"]:
+            if len(target & _words(f"{d.get('what', '')} {d.get('why', '')}")) >= 1:
+                out.append(d)
+        return out[-limit:]
+
+    def clear(self) -> bool:
+        self._data = self._blank()
+        return self.save()
