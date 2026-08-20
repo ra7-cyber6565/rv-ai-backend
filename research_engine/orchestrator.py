@@ -28,6 +28,7 @@ import re
 from typing import Dict, List, Optional
 
 from .citation import CitationEngine
+from .claim_labels import downgrade as downgrade_labels
 from .content_fetcher import ContentFetcher
 from .contradiction import ContradictionEngine
 from .critic import Critic
@@ -38,6 +39,7 @@ from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .planner import ResearchPlanner
+from .requested import build_ledger, looks_like_chain, looks_like_math_model
 from .research_memory import ResearchMemory
 from .source_discovery import SourceDiscovery
 from .synthesizer import FinalSynthesizer
@@ -248,6 +250,74 @@ class DeepResearchEngine:
             return text, ""
         return text[:match.start()].rstrip(), text[match.start():].strip()
 
+    # ── maangi hui extra sections ka RECOVERY ────────────────────────────────
+    # Pichhle live run ka pattern: analysis pass (pehli call) mein model ne
+    # variables aur equations likhe the, par synthesis pass 429 ke baad adhoora
+    # raha aur final answer mein wo hissa gayab ho gaya. Us haalat mein wo kaam
+    # SACH MEIN ho chuka hai — use phenk dena do tarah se galat hai: user ki
+    # maangi hui cheez gum ho jaati hai, aur ledger jhooth-mooth "nahi bana"
+    # likhta hai. Isliye analysis se wahi block wapas nikaal kar canonical
+    # heading ke neeche jod dete hain. Kuch NAYA generate nahi hota — jo text
+    # pehle se model ne likha tha, wahi move hota hai.
+    _MATH_TITLE_RE = re.compile(
+        r"mathematic|optimi[sz]|equation|formula|model|गणित|समीकरण|मॉडल",
+        re.IGNORECASE)
+    _CHAIN_TITLE_RE = re.compile(
+        r"second[\s\-]?order|chain|ripple|cascad|knock[\s\-]?on|downstream|"
+        r"indirect|दूसरे\s*क्रम|श्रृंखला|अप्रत्यक्ष",
+        re.IGNORECASE)
+    _ANY_HEADING_RE = re.compile(r"^[ \t]{0,3}(#{1,6})[ \t]*(.+?)[ \t]*$", re.MULTILINE)
+
+    @classmethod
+    def _extract_block(cls, text: str, title_re) -> str:
+        """
+        Jis heading ka naam `title_re` se match kare, uska poora body lauta do
+        (agli same-ya-upar level ki heading tak). Heading khud nahi lautti —
+        canonical heading synthesizer lagata hai.
+        """
+        body = text or ""
+        matches = list(cls._ANY_HEADING_RE.finditer(body))
+        for index, match in enumerate(matches):
+            if not title_re.search(match.group(2)):
+                continue
+            level = len(match.group(1))
+            end = len(body)
+            for later in matches[index + 1:]:
+                if len(later.group(1)) <= level:
+                    end = later.start()
+                    break
+            block = body[match.end():end].strip()
+            if block:
+                return block
+        return ""
+
+    def _recover_extras(self, requests: Dict, answer: str, analysis: str) -> tuple:
+        """
+        `(naya_answer, notes)` — jo maanga tha aur final answer mein nahi hai,
+        par analysis mein hai, use wapas le aao.
+        """
+        text = answer or ""
+        notes: List[str] = []
+        plans = (
+            ("wants_math_model", looks_like_math_model, self._MATH_TITLE_RE,
+             "## Mathematical Model", "Mathematical model"),
+            ("wants_second_order", looks_like_chain, self._CHAIN_TITLE_RE,
+             "## Second-Order Effects", "Second-order effects ki chain"),
+        )
+        for key, detector, title_re, heading, label in plans:
+            if not (requests or {}).get(key):
+                continue
+            if detector(text):
+                continue
+            block = self._extract_block(analysis or "", title_re)
+            if not block or not detector(block):
+                continue
+            text = f"{text.rstrip()}\n\n{heading}\n{block}".strip()
+            notes.append(f"{label} final answer mein nahi aaya tha, par research "
+                         f"ke andar ban chuka tha — use wahan se wapas le kar "
+                         f"jod diya gaya (naya kuch nahi likha gaya).")
+        return text, notes
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
                     job_id: Optional[str] = None) -> Dict:
@@ -269,7 +339,23 @@ class DeepResearchEngine:
                # 429), phir bhi report "✅ VERIFIED" chhaap rahi thi. Ginti
                # `calls_used` se nahi le sakte — wo "kitni API call hui" batata
                # hai, "kaam poora hua ya nahi" nahi.
-               "planned_passes": [], "done_passes": []}
+               "planned_passes": [], "done_passes": [],
+               # user ne kya maanga tha — report ke ledger tak jaata hai
+               "requests": {}, "hypothesis_requested": False,
+               "hypothesis_count": 0, "attempts": 0, "models_tried": [],
+               "usage_note": "", "notes": []}
+
+        # ── user ki EXPLICIT requests (planner ne rule-based nikaali hain) ────
+        # Ye pichhle live run ka sabse bada sabak hai: prompt mein saaf likha tha
+        # "kam se kam 3 nayi hypotheses banao", par engine ka andar ka
+        # `should_generate()` heuristic "zaroorat nahi thi" keh kar 0 hypotheses
+        # de gaya. Explicit request heuristic se OOPAR hai — user ne maanga hai
+        # to banana hi hai, aur na bane to saaf likhna hai ki kyun nahi bana.
+        requests = plan.get("requests") if isinstance(plan, dict) else {}
+        requests = requests or {}
+        out["requests"] = requests
+        asked_count = int(requests.get("hypothesis_count") or 0)
+        explicit_hypotheses = bool(requests.get("wants_hypotheses")) or asked_count > 0
 
         # grade_evidence ek human-readable string deta hai ("⚠️ MIXED — ..."),
         # isliye keyword nikaal kar bhejte hain.
@@ -281,8 +367,12 @@ class DeepResearchEngine:
             pack, check_reasoning=False) if pack.sources else ""
         level_hint = next((word for word in ("UNVERIFIED", "VERIFIED", "STRONG",
                                              "MIXED", "WEAK") if word in graded), "")
-        want_hypothesis = self.hypotheses.should_generate(
+        want_hypothesis = explicit_hypotheses or self.hypotheses.should_generate(
             plan, pack, contradiction_dicts, level_hint)
+        # Kitni maangi thi: explicit number ho to wahi, warna purana default 2.
+        hypothesis_count = asked_count if asked_count else 2
+        out["hypothesis_requested"] = want_hypothesis
+        out["hypothesis_count"] = asked_count
 
         # ── kya-kya chalna THA (budget + config se, quota se pehle) ───────────
         # Ye list neeche ke `if` conditions ko hi dohrati hai, isliye budget
@@ -293,6 +383,11 @@ class DeepResearchEngine:
         out["planned_passes"].append("analysis")
         if config.use_red_team and config.gemini_calls >= 3:
             out["planned_passes"].append("critique")
+        # hypothesis ab LEDGER ka hissa hai. Pehle ye list mein hi nahi tha,
+        # isliye 0 hypotheses aane par kahin darj nahi hota tha ki ek plan kiya
+        # hua kaam fail hua hai — report seedha "zaroorat nahi thi" likh deti thi.
+        if want_hypothesis:
+            out["planned_passes"].append("hypothesis")
         if config.gemini_calls >= 2:
             out["planned_passes"].append("synthesis")
 
@@ -304,7 +399,22 @@ class DeepResearchEngine:
                 prompt = brain.prompt_analysis(question, pack, plan)
                 if memory_note:
                     prompt = f"{memory_note}\n\n{prompt}"
-                out["analysis"] = brain.generate(prompt, "analysis")
+                # EXPLICIT request ho to hypotheses PEHLI call mein hi maang lete
+                # hain. Wajah: quota kabhi bhi khatam ho sakti hai (429 pichhli
+                # baar pass 2 par hi laga tha). Pehli call sabse zyada chance
+                # wali call hai, isliye user ki saaf-saaf maangi hui cheez usi
+                # mein aani chahiye — baad ke passes par nahi chhodni chahiye.
+                if explicit_hypotheses:
+                    self._track(job_id, "HYPOTHESIS",
+                                f"{hypothesis_count} hypotheses (pehli call ke andar)")
+                    prompt += self.hypotheses.prompt_appendix(hypothesis_count)
+                text = brain.generate(prompt, "analysis")
+                if explicit_hypotheses and text:
+                    body, hypothesis_part = self._split_hypotheses(text)
+                    out["analysis"] = body or text
+                    out["hypothesis_raw"] = hypothesis_part
+                else:
+                    out["analysis"] = text
             else:
                 out["analysis"] = brain.generate(
                     brain.prompt_no_sources(question, plan), "no-source answer")
@@ -315,16 +425,17 @@ class DeepResearchEngine:
         if out["analysis"] and brain.remaining >= 2 and config.use_red_team:
             self._track(job_id, "CRITIQUE", "self-falsification pass")
             prompt = self.critic.prompt(question, out["analysis"], pack, red_team=True)
-            if want_hypothesis:
+            need_more = want_hypothesis and not out["hypothesis_raw"]
+            if need_more:
                 self._track(job_id, "HYPOTHESIS", "hypothesis generation (same call)")
-                prompt += self.hypotheses.prompt_appendix()
+                prompt += self.hypotheses.prompt_appendix(hypothesis_count)
             try:
                 text = brain.generate(prompt, "critique")
             except QuotaExhausted as exc:
                 text = ""
                 out["errors"].append(str(exc))
             out["critique_raw"] = text
-            if want_hypothesis:
+            if need_more:
                 out["hypothesis_raw"] = text
 
         # ── PASS B2: dedicated hypothesis pass (sirf jab budget bacha ho) ────
@@ -344,7 +455,8 @@ class DeepResearchEngine:
             try:
                 out["hypothesis_raw"] = brain.generate(
                     self.hypotheses.prompt(question, out["analysis"], pack, plan,
-                                           contradiction_dicts),
+                                           contradiction_dicts,
+                                           count=hypothesis_count),
                     "hypothesis")
             except QuotaExhausted as exc:
                 out["errors"].append(str(exc))
@@ -368,7 +480,7 @@ class DeepResearchEngine:
             merge_hypothesis = want_hypothesis and not out["hypothesis_raw"]
             if merge_hypothesis:
                 self._track(job_id, "HYPOTHESIS", "hypothesis (synthesis call ke andar)")
-                prompt += self.hypotheses.prompt_appendix()
+                prompt += self.hypotheses.prompt_appendix(hypothesis_count)
             try:
                 text = brain.generate(prompt, "synthesis")
             except QuotaExhausted as exc:
@@ -385,12 +497,24 @@ class DeepResearchEngine:
         if out["critique_raw"]:
             out["critique"] = self.critic.parse(out["critique_raw"]).to_dict()
         if out["hypothesis_raw"]:
-            parsed = self.hypotheses.parse(out["hypothesis_raw"])
+            parsed = self.hypotheses.parse(out["hypothesis_raw"],
+                                           max_count=hypothesis_count)
             out["hypotheses"] = [h.to_dict() for h in parsed]
             out["errors"].extend(self.hypotheses.honesty_check(parsed))
+        # Maangi thi 3, mili 1 — ye chup-chaap nahi jaana chahiye.
+        if asked_count and len(out["hypotheses"]) < asked_count:
+            out["errors"].append(
+                f"{len(out['hypotheses'])}/{asked_count} hypotheses hi ban paayi "
+                f"jo aapne maangi thi.")
 
         out["calls"] = brain.calls_used
         out["errors"].extend(brain.errors)
+        out["attempts"] = brain.attempts
+        out["models_tried"] = list(brain.models_tried)
+        out["usage_note"] = brain.usage_note()
+        # notes = "retry ke baad chal gaya" type imaandaar jaankari. Ye ERROR
+        # nahi hai, isliye warnings mein nahi daalte — audit section mein jaati hai.
+        out["notes"] = list(brain.notes)
 
         # ── kya-kya SACH MEIN hua ────────────────────────────────────────────
         # Output se naapte hain, intention se nahi: call ho kar bhi khaali text
@@ -399,6 +523,9 @@ class DeepResearchEngine:
         # ka na hona "failure" lagta — jabki wo design tha.
         produced = {"analysis": bool(out["analysis"]),
                     "critique": bool(out["critique_raw"]),
+                    # hypothesis "hua" tabhi maana jaata hai jab jitni maangi thi
+                    # utni mili — 3 maang kar 1 dena aadha kaam hai, poora nahi.
+                    "hypothesis": len(out["hypotheses"]) >= max(1, asked_count),
                     "synthesis": bool(out["final"])}
         out["done_passes"] = [name for name in out["planned_passes"]
                               if produced.get(name)]
@@ -500,6 +627,23 @@ class DeepResearchEngine:
             warnings.append("Gemini reasoning available nahi thi — jawab mein sirf "
                             "retrieved evidence ka extract hai, synthesis nahi.")
 
+        # 6b. maangi hui extra sections ka recovery (math model / second-order
+        # chain). Ye Gemini ki ek bhi nayi call nahi karta — sirf analysis pass
+        # ka pehle se likha hua block wapas laata hai.
+        engine_notes: List[str] = [str(n) for n in passes.get("notes", [])]
+        requests: Dict = passes.get("requests") or {}
+        gemini_answer, recovered = self._recover_extras(
+            requests, gemini_answer, passes["analysis"])
+        engine_notes.extend(recovered)
+
+        # 6c. LABEL GATE (intel ka rule): "[ESTABLISHED]" sirf full text padhe
+        # hue source par. Ye citation verify se PEHLE chalta hai, kyunki annotate
+        # baad mein isi text par lagta hai — warna downgrade annotate ke markers
+        # ko kaat sakta tha. Text kabhi nahi kaata jaata, sirf label badalta hai.
+        gemini_answer, label_report = downgrade_labels(gemini_answer, pack)
+        if label_report.get("note"):
+            warnings.append(label_report["note"])
+
         # 7. citation verification (structural, Gemini par bharosa nahi)
         report = self.citations.verify(gemini_answer, pack)
         annotated = self.citations.annotate(gemini_answer, pack)
@@ -571,6 +715,30 @@ class DeepResearchEngine:
                 f"({', '.join(s.source_id for s in retracted if s.source_id)}) — "
                 f"{detail}. Retracted kaam ko evidence ki tarah use nahi karna chahiye.")
 
+        # 9b. REQUESTED vs DELIVERED ledger. Delivered ko answer ke TEXT se
+        # naapa jaata hai, "humne maang liya tha" se nahi — pichhla run isi wajah
+        # se jhooth bol gaya tha. Wajah bhi asli record se aati hai (reasoning
+        # note + Gemini errors), andaaze se nahi.
+        ledger_reasons: List[str] = []
+        if not pack.reasoning_complete:
+            ledger_reasons.append(pack.reasoning_note())
+        ledger_reasons.extend(str(e) for e in passes["errors"])
+        ledger = build_ledger(
+            requests,
+            delivered={
+                "hypotheses": len(passes["hypotheses"]),
+                "math_model": looks_like_math_model(gemini_answer),
+                "second_order": looks_like_chain(gemini_answer),
+                "red_team": bool(passes["critique_raw"]),
+            },
+            reasons=ledger_reasons,
+        )
+        for item in ledger.get("unmet", []):
+            warnings.append(
+                f"Aapki request poori nahi hui: {item.get('what')} → "
+                f"{item.get('got')}."
+                + (f" {item.get('why')}" if item.get("why") else ""))
+
         # 10. final answer assemble
         answer = self.synthesizer.assemble(
             gemini_answer=annotated,
@@ -589,6 +757,11 @@ class DeepResearchEngine:
                        f"({quota_note(config)})",
             critique=passes["critique"],
             warnings=warnings,
+            ledger=ledger,
+            label_report=label_report,
+            notes=engine_notes,
+            usage_note=passes.get("usage_note", ""),
+            requests=requests,
         )
 
         # 11. memory + graph write (best effort)
@@ -629,6 +802,8 @@ class DeepResearchEngine:
             hypotheses=passes["hypotheses"],
             verification=verification,
             coverage=coverage,
+            requested_ledger=ledger,
+            label_report=label_report,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
         ).to_dict()

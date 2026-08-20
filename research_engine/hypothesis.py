@@ -24,9 +24,16 @@ STATUS = "UNTESTED HYPOTHESIS"
 
 _H_SPLIT_RE = re.compile(r"^\s*#{2,4}\s*(?:hypothesis|hypothesis\s*\d+)\b.*$",
                          re.IGNORECASE | re.MULTILINE)
+# NOTE: `simple explanation`, `assumptions`, `if true`, `if false` baad mein
+# add hue (2026-08-20) — intel ka rule: hypothesis ko aise samjhao jaise samne
+# baithe bande ne ye concept pehle kabhi suna hi nahi. Sirf ek-line statement
+# dena kaafi nahi hai.
+_FIELD_NAMES = (
+    r"statement|simple explanation|simple|reasoning|supporting evidence|against|"
+    r"contradicting evidence|novelty|assumptions?|prediction|how to test|test|"
+    r"if true|if false|risks|confidence")
 _FIELD_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?\**\s*(statement|reasoning|supporting evidence|against|"
-    r"contradicting evidence|novelty|prediction|how to test|test|risks|confidence)"
+    r"^\s*(?:[-*]\s*)?\**\s*(" + _FIELD_NAMES + r")"
     r"\s*\**\s*[:\-]\s*(.+)$",
     re.IGNORECASE | re.MULTILINE,
 )
@@ -40,8 +47,7 @@ _FIELD_RE = re.compile(
 # Isliye ab line-by-line scan hota hai: label mile to naya field shuru, warna
 # line pichhle field ke saath jud jaati hai (agli label ya `##` heading tak).
 _FIELD_LINE_RE = re.compile(
-    r"^\s*(?:[-*]\s*)?\**\s*(statement|reasoning|supporting evidence|against|"
-    r"contradicting evidence|novelty|prediction|how to test|test|risks|confidence)"
+    r"^\s*(?:[-*]\s*)?\**\s*(" + _FIELD_NAMES + r")"
     r"\s*\**\s*[:\-]\s*(.*)$",
     re.IGNORECASE,
 )
@@ -106,13 +112,17 @@ class PredictionStructure:
 @dataclass
 class Hypothesis:
     statement: str = ""
+    simple: str = ""              # "simple words mein" — user-facing explanation
     reasoning: str = ""
     supporting_evidence: str = ""
     contradicting_evidence: str = ""
     novelty: str = ""
+    assumptions: str = ""         # kya maan kar chal rahe hain
     prediction: Optional[PredictionStructure] = None  # spec §10: structured field
     prediction_text: str = ""                          # fallback: agar structured parse na ho
     how_to_test: str = ""
+    if_true: str = ""             # agar sahi nikli to kya badlega
+    if_false: str = ""            # agar galat nikli to kya matlab hoga
     risks: str = ""
     confidence: str = ""
     status: str = STATUS          # kabhi override nahi hota
@@ -139,13 +149,17 @@ class Hypothesis:
         return {
             "status": STATUS,
             "statement": self.statement,
+            "simple": self.simple,
             "reasoning": self.reasoning,
             "supporting_evidence": self.supporting_evidence,
             "contradicting_evidence": self.contradicting_evidence,
             "novelty": self.novelty,
+            "assumptions": self.assumptions,
             "prediction": pred,
             "has_prediction": self.has_prediction,
             "how_to_test": self.how_to_test,
+            "if_true": self.if_true,
+            "if_false": self.if_false,
             "is_testable": self.is_testable,
             "risks": self.risks,
             "confidence_reasoning_based": self.confidence,
@@ -168,11 +182,19 @@ class HypothesisEngine:
         return False
 
     # ── PASS 5 prompt (Spec Section 10) ──────────────────────────────────────
+    # `count` baad mein juda (2026-08-20): user ka prompt "kam se kam 3 nayi
+    # hypotheses banao" keh sakta hai. Pehle yahan hard-coded "Maximum 2" tha,
+    # yaani engine user ki explicit request KABHI poori nahi kar sakta tha.
+    # Default 2 hai taaki purani positional call (`prompt(q, a, pack, plan)`)
+    # bilkul waise hi chalti rahe.
     def prompt(self, question: str, analysis: str, pack: EvidencePack,
-               plan: Dict, contradictions: Optional[List[Dict]] = None) -> str:
+               plan: Dict, contradictions: Optional[List[Dict]] = None,
+               count: int = 2) -> str:
         gaps = "\n".join(f"  - {c.get('summary', '')}" for c in (contradictions or [])[:5])
         gap_block = f"\nEVIDENCE CONFLICTS jo mile:\n{gaps}\n" if gaps else ""
         fields = ", ".join(plan.get("relevant_fields", [])[:4]) or "relevant fields"
+        count = max(1, min(int(count or 2), 6))
+        blocks = "\n\n".join(self._format_block(i) for i in range(1, count + 1))
 
         return f"""Tum ek Hypothesis Generator ho. Tumhara kaam NAYI possibility
 propose karna hai — literature ka summary dohrana nahi.
@@ -197,49 +219,66 @@ Rules — ye tod'ne par output reject ho jaayega:
 6. {fields} ko cross-connect karke sochne ki koshish karo.
 7. Prediction concrete honi chahiye: "agar ye hypothesis sach hai to KYA
    observe hoga" — measurable, aur aisi ki galat nikle to pata chal jaaye.
+8. "Simple explanation" line har hypothesis mein ZAROORI hai: ekdum aam bhasha
+   mein, jaise samne baithe bande ne ye concept pehle kabhi suna hi na ho.
+   Jargon aaye to bracket mein uska matlab likho.
 
-Maximum 2 hypotheses do. Format exactly aise:
+{count} hypotheses do (isse kam nahi — agar {count} banane layak material nahi hai
+to jitni bani utni do aur alag line mein saaf likho: "sirf N ban sakti, kyunki ...").
+Format exactly aise:
 
-## Hypothesis 1
-- Statement: (ek line, testable)
-- Reasoning: (step-by-step chain)
-- Supporting evidence: ([S#] ke saath)
-- Contradicting evidence: (kya iske khilaf jaata hai)
-- Novelty: (ye existing literature se kaise different hai; agar pehle se known
-  ho sakta hai to saaf likho)
-- Prediction: (agar hypothesis sach hai to kya measurable cheez dikhegi — aur
-  kya dikhna hypothesis ko galat sabit kar dega)
-- How to test: (concrete experiment/analysis + falsification condition)
-- Risks: (safety, ethical, practical)
-- Confidence: (LOW/MEDIUM/HIGH — aur ye reasoning-based hai, proof nahi)
+{blocks}
 
 Ab hypothesis do:"""
 
-    def prompt_appendix(self) -> str:
+    @staticmethod
+    def _format_block(index: int) -> str:
+        """Ek hypothesis ka maanga hua format. Fields ke labels PARSER se match
+        karte hain (`_FIELD_NAMES`) — inhe badalna hai to dono jagah badlo."""
+        return f"""## Hypothesis {index}
+- Statement: (ek line, testable)
+- Simple explanation: (2-4 line, ekdum aam bhasha mein — "humara idea ye hai ki
+  ..."; koi jargon nahi, aur ek roz-marra ka example do)
+- Reasoning: (step-by-step chain: kis evidence se kaun sa step nikla)
+- Supporting evidence: ([S#] ke saath, aur ek line mein ye bhi ki wo source kya
+  kehta hai)
+- Contradicting evidence: (kya iske khilaf jaata hai — "kuch nahi mila" likhne se
+  pehle sach mein dhoondo)
+- Novelty: (existing literature se kaise different hai; pehle se known ho sakta
+  hai to saaf likho)
+- Assumptions: (kya maan kar chal rahe hain — jo maan liya wo galat ho sakta hai)
+- Prediction: (agar sach hai to kya measurable cheez dikhegi — aur kya dikhna ise
+  galat sabit kar dega)
+- How to test: (concrete experiment/analysis + falsification condition)
+- If true: (sahi nikli to practically kya badlega)
+- If false: (galat nikli to kya seekhne ko milega)
+- Risks: (safety, ethical, practical)
+- Confidence: (LOW/MEDIUM/HIGH — reasoning-based hai, proof nahi)"""
+
+    def prompt_appendix(self, count: int = 2) -> str:
         """
         Jab call budget kam ho (DEEP/MAXIMUM = 2-3 calls), tab hypothesis ke liye
         alag call nahi bachti. Ye chhota block critic prompt ke saath jod diya
         jaata hai, taaki ek hi response mein critique + hypothesis dono aa jaayein.
+
+        2026-08-20: `count` add hua. Live run mein user ne 3 hypotheses maangi
+        thi aur quota ki wajah se hypothesis pass hi nahi chala — ab ye appendix
+        ANALYSIS pass ke saath bhi jud sakta hai, isliye count honour karna
+        zaroori hai.
         """
+        count = max(1, min(int(count or 2), 6))
+        blocks = "\n\n".join(self._format_block(i) for i in range(1, count + 1))
         return f"""
 ---
-ISI RESPONSE MEIN, critique ke baad, maximum 2 nayi hypotheses bhi do.
+ISI RESPONSE MEIN, aakhir mein, {count} nayi hypotheses bhi do (isse kam nahi).
 Rules: hypothesis ko fact ki tarah mat likho; status "{STATUS}" hai; test design
 concrete ho; prediction measurable ho; medical/chemical ho to risks likho;
-[S#] se cite karo, warna [NO-SOURCE] लगाओ.
+[S#] se cite karo, warna [NO-SOURCE] likho. "Simple explanation" line skip mat
+karo — wahi line user asal mein padhta hai.
 
 Format exactly aise:
 
-## Hypothesis 1
-- Statement:
-- Reasoning:
-- Supporting evidence:
-- Contradicting evidence:
-- Novelty:
-- Prediction: (agar sach hai to kya observe hoga — measurable)
-- How to test:
-- Risks:
-- Confidence: (LOW/MEDIUM/HIGH — reasoning-based, proof nahi)
+{blocks}
 """
 
     # ── structured prediction parser (Spec §10) ──────────────────────────────
@@ -340,19 +379,29 @@ Format exactly aise:
             return pred
         return None
 
-    def parse(self, text: str) -> List[Hypothesis]:
+    def parse(self, text: str, max_count: Optional[int] = None) -> List[Hypothesis]:
+        """
+        Model ke text se hypotheses nikaalo.
+
+        `max_count` pehle hard-coded 3 tha. User "kam se kam 3" maange aur model
+        4 de de, to chauthi chup-chaap phenki jaati thi — isliye ab cap request
+        ke hisaab se badhta hai (kam kabhi nahi hota).
+        """
         if not text or not text.strip():
             return []
 
+        cap = max(3, int(max_count or 0))
         blocks = _H_SPLIT_RE.split(text)
         chunks = [b for b in blocks[1:] if b and b.strip()] if len(blocks) > 1 else [text]
 
         out: List[Hypothesis] = []
-        for chunk in chunks[:3]:
+        for chunk in chunks[:cap]:
             h = Hypothesis()
             for key, value in _fields(chunk):
                 if key == "statement":
                     h.statement = value
+                elif key in ("simple", "simple explanation"):
+                    h.simple = value
                 elif key == "reasoning":
                     h.reasoning = value
                 elif key == "supporting evidence":
@@ -361,12 +410,18 @@ Format exactly aise:
                     h.contradicting_evidence = value
                 elif key == "novelty":
                     h.novelty = value
+                elif key in ("assumption", "assumptions"):
+                    h.assumptions = value
                 elif key == "prediction":
                     h.prediction_text = value
                     # Try structured parse
                     h.prediction = self._parse_prediction(value)
                 elif key in ("how to test", "test"):
                     h.how_to_test = value
+                elif key == "if true":
+                    h.if_true = value
+                elif key == "if false":
+                    h.if_false = value
                 elif key == "risks":
                     h.risks = value
                 elif key == "confidence":
@@ -397,4 +452,11 @@ Format exactly aise:
                 warnings.append(
                     f"Hypothesis {i} ke against koi evidence list nahi hui — "
                     "self-falsification adhoora hai.")
+            if len((h.simple or "").strip()) < 40:
+                # Ye "galti" nahi hai, par user-facing quality ki kami hai:
+                # sirf ek-line statement se padhne wale ko idea samajh nahi aata.
+                warnings.append(
+                    f"Hypothesis {i} ka simple-language explanation nahi aaya — "
+                    "isliye ise aam bhasha mein samjhaya nahi ja saka, sirf "
+                    "technical statement hai.")
         return warnings

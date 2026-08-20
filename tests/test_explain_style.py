@@ -91,6 +91,61 @@ def test_style_block_protects_headings():
     assert "translate" in block
 
 
+def test_hinglish_gets_everyday_word_rules():
+    """§2: kitaabi/Sanskritized Hindi ban, aur GALAT->SAHI jodiyan prompt mein."""
+    block = style_block(HINGLISH)
+    assert "SHABDON KA CHUNAV" in block
+    assert "Sanskritized Hindi BILKUL nahi" in block
+    for wrong, right in (("संदेश प्रेषित करें", "message bhejo"),
+                         ("प्रमाण उपलब्ध है", "evidence milta hai"),
+                         ("परिकल्पना का परीक्षण", "hypothesis ko test karna"),
+                         ("शुभ प्रभात", "Good morning"),
+                         ("निष्कर्ष", "Final conclusion"),
+                         ("उपलब्ध साक्ष्यों के आधार पर",
+                          "jo evidence mila hai uske basis par")):
+        assert wrong in block, wrong
+        assert right in block, right
+    # Devanagari sawaal par bhi wahi rule jaana chahiye
+    assert "SHABDON KA CHUNAV" in style_block(HINDI)
+
+
+def test_word_rules_keep_common_english_words_english():
+    block = style_block(HINGLISH)
+    for word in ("research", "evidence", "hypothesis", "dataset", "message",
+                 "answer"):
+        assert word in block, word
+
+
+def test_teacher_voice_and_full_explanation_demanded():
+    """§3 + §5: teacher ki tarah bolo, aur har result ka poora matlab do."""
+    block = style_block(HINGLISH)
+    assert "teacher" in block
+    assert "Seedhi baat ye hai" in block and "Example se samjho" in block
+    assert "debug console" in block          # aisa MAT likho
+    for must in ("limitation", "evidence", "kyun hua"):
+        assert must in block, must
+
+
+def test_simple_does_not_mean_shallow():
+    """§17: aasan bhasha ka matlab halka jawab nahi."""
+    block = style_block(HINGLISH)
+    assert "halka jawab NAHI" in block
+    for must in ("uncertainty", "assumptions", "limitations"):
+        assert must in block, must
+    assert "causation" in block
+
+
+def test_english_question_gets_english_word_rules():
+    """English poochhne wale ko 'message bhejo' wale examples nahi jaane chahiye."""
+    block = style_block(ENGLISH)
+    assert "WORD CHOICE" in block
+    assert "SHABDON KA CHUNAV" not in block
+    assert "संदेश प्रेषित करें" not in block
+    assert "teacher" in block
+    assert "does NOT mean a thin answer" in block
+    assert "correlation is not causation" in block
+
+
 # ── prompts mein sach mein pahuncha ya nahi ──────────────────────────────────
 def _pack() -> EvidencePack:
     src = SourceRecord(title="Intermittent fasting and glycemic control",

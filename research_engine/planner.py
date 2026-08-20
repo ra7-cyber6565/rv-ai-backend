@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 from .depth import DepthConfig
 from .local_language import normalize
 from .query_builder import is_instruction_prompt, search_query, topic_terms
+from .requested import parse_requests
 
 # Query ki upper limit. OpenAlex ne live test mein HTTP 400 diya tha kyunki
 # poora 2000-character prompt URL parameter mein chala gaya tha.
@@ -285,6 +286,11 @@ class ResearchPlanner:
             "queries": self.search_queries(question, cls, round_no=1),
             "connectors": self.connector_plan(cls, config),
             "depth": config.to_dict(),
+            # Prompt mein user ne jo CHEEZEIN saaf-saaf maangi hain (3 hypotheses,
+            # mathematical model, second-order chain, red-team) — wo yahin plan ke
+            # andar aa jaati hain, taaki prompt banane wale aur report banane wale
+            # dono ek hi list dekhein. Ye rule-based hai, ek bhi Gemini call nahi.
+            "requests": parse_requests(question),
         }
 
 

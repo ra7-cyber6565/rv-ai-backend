@@ -2,8 +2,9 @@
 Comprehensive Test Suite for Missing Features
 All tests offline — zero Gemini quota needed
 """
+import os
 import sys
-sys.path.insert(0, "/sessions/vigilant-magical-cerf/mnt/infinity-research-ai-main/backend")
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from research_engine.paywall_detector import (
     is_likely_paywall, classify_read_level, estimate_content_quality
@@ -13,7 +14,7 @@ from research_engine.citation_counter import (
 )
 from research_engine.red_team_mode import RedTeamOrchestrator
 from research_engine.progress_api import (
-    track_job, update_stage, get_progress, complete_job
+    track_job, update_stage, set_counts, get_progress, complete_job
 )
 
 
@@ -29,7 +30,13 @@ def test_paywall_detector():
     <button>Sign up now</button>
     </body></html>"""
 
-    article_content = """
+    # NOTE (2026-08-20): ye sample pehle sirf ~340 char ka tha, aur test
+    # ummeed karta tha ki wo "ABSTRACT" ya "FULL_TEXT" nikle. Engine sahi tha,
+    # test galat: 340 char ka text SNIPPET hi hota hai, aur usko "abstract padh
+    # liya" bolna §13 ka jhooth ban jaata ("NEVER claim full-text reading if
+    # only a snippet was retrieved"). Isliye engine ke threshold ko chhua NAHI
+    # gaya — sample ko asli abstract-lambai (1.5k+ char) ka bana diya gaya hai.
+    article_content = ("""
     Abstract: This study examines bias in AI systems.
 
     Introduction: Machine learning models are increasingly used in hiring.
@@ -43,6 +50,9 @@ def test_paywall_detector():
     References:
     [1] Buolamwini & Gebru, 2018
     """
+    + "Discussion: The observed disparity persisted after controlling for "
+      "experience, education and role seniority in every subgroup we tested. "
+      * 12)
 
     # Test 1: Paywall detection
     assert is_likely_paywall(paywall_html) == True, "Should detect paywall"

@@ -62,6 +62,11 @@ _LABEL_TO_CLAIM = {
     "ESTABLISHED FACT": ClaimType.FACT,
     "FACT": ClaimType.FACT,
     "STRONG EVIDENCE": ClaimType.EVIDENCE,
+    # intel ka rule (2026-08-20): abstract/snippet-only evidence ka label
+    # "SOURCE-REPORTED" hai — source ye keh raha hai, humne full text padh kar
+    # confirm nahi kiya. Ye EVIDENCE hai, FACT nahi.
+    "SOURCE-REPORTED": ClaimType.EVIDENCE,
+    "SOURCE REPORTED": ClaimType.EVIDENCE,
     "EVIDENCE": ClaimType.EVIDENCE,
     "MIXED EVIDENCE": ClaimType.EVIDENCE,
     "WEAK EVIDENCE": ClaimType.EVIDENCE,
@@ -427,6 +432,12 @@ class EvidencePack:
                 meta.append(f"Location: {s.locator}")
             if s.url:
                 meta.append(f"URL: {s.url}")
+            # Read level prompt mein JAANA zaroori hai: claim_labels.py ka rule
+            # ("[ESTABLISHED] sirf full text par") model tabhi follow kar sakta
+            # hai jab use pata ho ki kis source ka kitna hissa padha gaya. Pehle
+            # ye line nahi thi, isliye model abstract-only source par bhi
+            # [ESTABLISHED] chipka deta tha.
+            meta.append(f"Read: {s.reading_level()}")
             body = (s.snippet or "").strip()[:max_chars_per_source]
             if body:
                 meta.append(f"Excerpt: {body}")
@@ -613,6 +624,11 @@ class ResearchResult:
     hypotheses: List[Dict] = field(default_factory=list)
     verification: Dict = field(default_factory=dict)
     coverage: Dict = field(default_factory=dict)
+    # "maanga vs mila" ka ledger aur label-gate ka report. Ye answer text mein
+    # bhi chhapte hain, par API/UI ko structured roop mein bhi chahiye — warna
+    # frontend ko dobara text parse karna padta.
+    requested_ledger: Dict = field(default_factory=dict)
+    label_report: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

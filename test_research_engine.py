@@ -574,11 +574,17 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
         quota_note="0/2 calls used", critique=critique,
         warnings=["test warning"])
 
-    for title in ("11. Confidence", "8. Evidence Against Hypotheses",
-                  "4. Conflicting Evidence", "7. New Hypotheses",
-                  "9. Verification", "12. Sources", "14. Coverage"):
-        check(f"section maujood: {title}", title in answer, "missing")
-    check("hypothesis par UNTESTED label", "UNTESTED HYPOTHESIS" in answer, "missing")
+    # NOTE (2026-08-20): neeche ka poora block pehle purane numbered headings
+    # ("1. Seedha Jawab", "4. Conflicting Evidence", "9. Verification",
+    # "12. Sources", "14. Coverage") par tika tha. §16 ke naye structure mein
+    # wahi cheezein naye naamon se aati hain — na koi section gaya, na koi
+    # feature. SIRF is test ki expectation naye headings par le aayi gayi hai.
+    # Section-level detail coverage tests/test_answer_structure.py mein hai.
+    from research_engine.synthesizer import SECTION_TITLES
+    for title in SECTION_TITLES:
+        check(f"section maujood: {title}", f"\n## {title}\n" in "\n" + answer,
+              "missing")
+    check("hypothesis par UNTESTED label", "UNTESTED" in answer, "missing")
     check("limits section imaandaar", "bypass nahi kiya gaya" in answer, "missing")
     check("independent human experts ka disclaimer", "independent " in answer
           and "human experts" in answer, "missing")
@@ -586,21 +592,20 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
     extractive = synthesizer.extractive_summary(QUESTION, pack)
     check("zero-gemini extract bana", "S1" in extractive, extractive[:80])
 
-    # ── Spec §14 ka section ORDER — spec ki literal 1 → 13 list (+14 hamara) ──
-    from research_engine.synthesizer import SECTION_TITLES
+    # ── §16 ka section ORDER ──────────────────────────────────────────────────
     gemini_body = (
         "Yahan model ne heading se pehle kuch likh diya.\n\n"
-        "## 1. Seedha Jawab (Direct Conclusion)\nHaan, bias real discrimination badha "
+        "## Seedha jawab\nHaan, bias real discrimination badha "
         "sakta hai [S1].\n\n"
-        "## 2. Established Facts\n- [ESTABLISHED] error rate zyada tha [S1]\n\n"
-        "## 3. Strong Evidence (Evidence Analysis)\nMethodology theek thi.\n\n"
-        "## 5. Cross-Disciplinary Explanation\nCS + public health.\n\n"
-        "## 6. Inferences (evidence se nikale gaye — fact nahi)\n"
-        "- [INFERENCE] deployment scale badhne se asar badhega [S1]\n\n"
-        "## 12. Sources / Citations\n- model ki apni banayi hui list (system isse "
+        "## Research se kya pata chala?\n"
+        "### Fact\n- [ESTABLISHED] error rate zyada tha [S1]\n"
+        "### Inference\n- [INFERENCE] deployment scale badhne se asar badhega [S1]\n\n"
+        "## Ye kyun hota hai?\nCS + public health dono taraf se yahi baat aati hai.\n\n"
+        "## Evidence kya kehta hai?\nMethodology theek thi.\n\n"
+        "## Sources\n- model ki apni banayi hui list (system isse "
         "replace karega)\n\n"
-        "## 10. Abhi Bhi Kya Unknown Hai\nLong-term effect pata nahi.\n\n"
-        "## 13. Suggested Next Research / Experiment\nAudit karo.\n\n"
+        "## Kya abhi unknown hai?\nLong-term effect pata nahi.\n\n"
+        "## Final conclusion\nAudit karo.\n\n"
         "## Random Extra Heading\nye canonical list mein nahi hai.")
     ordered = synthesizer.assemble(
         gemini_answer=gemini_body, pack=pack, evidence_level="🟡 MIXED",
@@ -610,29 +615,32 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
         consensus=consensus, discovery_note="mile: openalex(3)",
         quota_note="2/2 calls used", critique=critique, warnings=[])
 
-    positions = [(title, ordered.find(f"## {title}")) for title in SECTION_TITLES]
+    padded = "\n" + ordered
+    positions = [(title, padded.find(f"\n## {title}\n")) for title in SECTION_TITLES]
     missing = [title for title, pos in positions if pos < 0]
-    check("saare 14 sections final answer mein hain", not missing, str(missing))
+    check("saare canonical sections final answer mein hain", not missing, str(missing))
     found = [pos for _, pos in positions if pos >= 0]
-    check("sections spec ke literal 1→13 order mein hain (+14 honesty)",
-          found == sorted(found), str([(t.split('.')[0], p) for t, p in positions]))
-    check("Inferences ka apna heading hai aur model ka inference wahin gaya",
-          ordered.find("## 6. Inferences") >= 0
-          and "deployment scale badhne se asar badhega" in
-          ordered[ordered.find("## 6. Inferences"):ordered.find("## 7. New Hypotheses")],
+    check("sections §16 ke order mein hain", found == sorted(found),
+          str([(t, p) for t, p in positions]))
+    inference_zone = ordered[padded.find("\n## Research se kya pata chala?\n"):
+                             padded.find("\n## Ye kyun hota hai?\n")]
+    check("Inferences ka apna sub-heading hai aur model ka inference wahin gaya",
+          "### Inference" in inference_zone
+          and "deployment scale badhne se asar badhega" in inference_zone,
           "inferences section galat jagah hai")
-    check("model ka jawab section 1 mein hi hai",
-          ordered.find("Haan, bias real discrimination")
-          < ordered.find("## 2. Established Facts"),
-          "section 1 apni jagah nahi hai")
+    check("model ka jawab pehle section mein hi hai",
+          0 <= ordered.find("Haan, bias real discrimination")
+          < padded.find("\n## Research se kya pata chala?\n"),
+          "pehla section apni jagah nahi hai")
     check("heading se pehle likha text bhi bacha",
           "heading se pehle kuch likh diya" in ordered, "text kho gaya")
     check("model ki banayi Sources list system ki verified list ko replace nahi karti",
-          ordered.find("## 12. Sources / Citations") < ordered.find("model ki apni banayi hui list")
-          and "**[S1]**" in ordered, "system bibliography hat gayi")
-    check("hypothesis ke khilaf evidence section 8 mein hai, 7 mein nahi",
-          "Hypotheses ke khilaf" in
-          ordered[ordered.find("## 8. Evidence Against"):ordered.find("## 9. Verification")],
+          "**[S1]" in ordered and "Isse kya liya gaya" in ordered,
+          "system bibliography hat gayi")
+    against_zone = ordered[padded.find("\n## Iske against kya mila?\n"):
+                           padded.find("\n## Humari Hypotheses\n")]
+    check("hypothesis ke khilaf evidence 'Iske against kya mila?' mein hai",
+          "Hypotheses ke khilaf" in against_zone or "khilaf" in against_zone,
           "against evidence galat section mein hai")
     check("anjaan heading delete nahi hui, extra notes mein gayi",
           "Extra notes" in ordered and "ye canonical list mein nahi hai" in ordered,
@@ -640,14 +648,14 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
 
     # model kuch sections chhod de to jhoothi bharai nahi, saaf likha jaaye
     partial = synthesizer.assemble(
-        gemini_answer="## 1. Seedha Jawab (Direct Conclusion)\nSirf ek section diya.",
+        gemini_answer="## Seedha jawab\nSirf ek section diya.",
         pack=pack, evidence_level="🟡 MIXED", confidence_note="n",
         contradictions=[], hypotheses=[], verification=verification,
         coverage=coverage, honesty={}, consensus=consensus, discovery_note="",
         quota_note="1/2", critique={}, warnings=[])
     check("model ka chhoda hua section imaandaari se mark hota hai",
-          "_(Reasoning model ne ye section nahi diya.)_" in partial
-          and "## 2. Established Facts" in partial, partial[:200])
+          "Reasoning model ne ye section nahi diya" in partial
+          and "## Ye kyun hota hai?" in partial, partial[:200])
 
 
 # ── 10. end-to-end (poori tarah hermetic — na network, na Gemini) ────────────
@@ -708,9 +716,13 @@ def test_end_to_end():
                                      "gemini_calls_used")), str(list(result)))
         check("answer khaali nahi", len(result["answer"]) > 300,
               str(len(result["answer"])))
-        check("14. Coverage section aaya", "14. Coverage" in result["answer"],
+        # NOTE (2026-08-20): pehle "14. Coverage" / "12. Sources" dhoondte the.
+        # §16 ke baad wahi hissa "## Sources" aur "## Research quality /
+        # technical audit" ke naam se aata hai — content wahi hai.
+        check("audit (coverage) section aaya",
+              "## Research quality / technical audit" in result["answer"],
               "missing")
-        check("12. Sources section aaya", "12. Sources" in result["answer"], "missing")
+        check("Sources section aaya", "## Sources" in result["answer"], "missing")
         check("crash nahi hua", result["mode"] == "QUICK", result["mode"])
         check("Gemini fail hone par bhi honest warning aayi",
               any("Gemini" in w for w in result["warnings"]),
@@ -2416,10 +2428,17 @@ def test_quality_signals() -> None:
           "COI wiring enrich() mein nahi mili")
 
     # ── final report line ──
-    quality_line = FinalSynthesizer._quality_line(report7)
+    # NOTE (2026-08-20): ye line pehle machine-style thi ("strong design",
+    # "RETRACTION signal: 1"). §11 ke baad audit insaan ke padhne layak Hinglish
+    # mein likhti hai, aur signature (coverage, pack) ho gayi hai. Counts wahi
+    # aate hain — sirf is test ki expectation naye format par laayi gayi hai,
+    # koi feature nahi hataya gaya.
+    quality_line = FinalSynthesizer._quality_line(report7, pack7)
     check("coverage section quality line asli counts se banti hai",
-          "strong design" in quality_line and "RETRACTION signal: 1" in quality_line
-          and "design pata nahi chala: 1/3" in quality_line,
+          "2 source ka study design mazboot hai" in quality_line
+          and "1 source par retraction ka signal hai" in quality_line
+          and "1/3 sources ka study design metadata se pata nahi chala"
+          in quality_line,
           quality_line)
     check("orchestrator retracted source par top-level warning deta hai",
           "retraction/withdrawal ka signal hai"
@@ -2947,13 +2966,22 @@ def test_verification_dataset_stats():
     rep_sim = verifier.verify(
         "Humne ek simulation chalaya. Result: n = 240, p < 0.001 [S1].",
         sim_pack, citation_ok=True, ungrounded_count=0, cited_ids=["S1"])
-    rendered = FinalSynthesizer()._verification_section(rep_sim.to_dict())
+    # NOTE (2026-08-20): §16 restructure mein `_verification_section` ka naam
+    # aur jagah badal gayi — verification ab "## Research quality / technical
+    # audit" ke andar `_numbers_check` + `_audit_section` se render hoti hai.
+    # Ye check pehle "Statistics in sources"/"available data"/"LIMIT:" dhoondta
+    # tha; teeno cheezein AB BHI report mein jaati hain (statistics aur dataset
+    # list ko is commit mein wapas jodna pada — restructure ke waqt render hona
+    # band ho gaya tha), sirf wording insaan ke layak ho gayi hai.
+    rendered = FinalSynthesizer()._numbers_check(rep_sim.to_dict())
     check("verification section stats line dikhata hai",
           "Statistics in sources" in rendered, rendered[:200])
     check("verification section available-data (dataset) dikhata hai",
           "available data" in rendered.lower(), rendered[:400])
+    audit = FinalSynthesizer()._audit_section(sim_pack, rep_sim.to_dict(), {})
     check("verification section LIMIT line dikhata hai",
-          "LIMIT:" in rendered, rendered[:400])
+          "koi simulation, backtest ya numerical forecast KHUD nahi chalata"
+          in audit, audit[-600:])
 
 
 def test_live_round2_fixes():

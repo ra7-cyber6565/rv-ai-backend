@@ -120,6 +120,44 @@ PLAIN_STYLE_RULES = """# SAMJHANE KA TARIKA (jaise ek samajhdaar dost samjhata h
   nahi badalta, to hata do."""
 
 
+# ── shabdon ka chunav (user ka verbatim rule) ────────────────────────────────
+# Ye block sirf Hindi/Hinglish jawab ke liye hai. Wajah: user ki #1 shikayat
+# "kitaabi/Sanskritized Hindi" thi — "संदेश प्रेषित करें" jaisi Hindi padhne
+# mein zor lagti hai, aur wahi shabd log bolchaal mein English mein bolte hain.
+EVERYDAY_WORDS_RULES = """# SHABDON KA CHUNAV (ye sabse zyada dikhta hai)
+- Rozmarra ki bolchaal wali Hindi/Hinglish likho. Kitaabi, sarkari ya
+  Sanskritized Hindi BILKUL nahi.
+- Jo English shabd log normally bolte hain, unhe English mein hi rakho:
+  research, source, evidence, data, result, problem, idea, test, report, model,
+  system, technology, method, process, study, paper, book, video, PDF,
+  experiment, hypothesis, theory, fact, dataset, website, AI, computer,
+  software, risk, benefit, example, future, possible, important, reason,
+  message, answer.
+- Ye galtiyan mat karo (pehle GALAT, phir SAHI):
+  * "संदेश प्रेषित करें" -> "message bhejo"
+  * "प्रमाण उपलब्ध है" -> "evidence milta hai"
+  * "परिकल्पना का परीक्षण" -> "hypothesis ko test karna"
+  * "शुभ प्रभात" -> "Good morning"
+  * "निष्कर्ष" -> "Final conclusion"
+  * "उपलब्ध साक्ष्यों के आधार पर" -> "jo evidence mila hai uske basis par"
+- Aise likho jaise ek bahut achha teacher saamne baithkar samjha raha ho:
+  "Seedhi baat ye hai...", "Research karne par ye pata chala...", "Iska main
+  reason ye hai...", "Lekin yahan ek important problem hai...", "Iske support
+  mein ye evidence mila...", "Simple words mein...", "Example se samjho..."
+- Database, API response, debug console, legal document ya research paper jaisa
+  MAT likho.
+- HAR important result ke saath ye batao: kya hua, kyun hua, iske support mein
+  kya evidence hai, iske against kya mila, iska matlab kya hai, limitation kya
+  hai, aur aage kya test karna chahiye. Sirf result likh dena kaafi nahi.
+- Aasan bhasha ka matlab halka jawab NAHI hai. Numbers, uncertainty, ulta
+  evidence, method, assumptions, limitations aur cause-effect ka farak — sab
+  rakho, bas simple shabdon mein.
+- "Correlation ≠ causation" jaisi baat bhi samjha kar likho: "do cheezein ek
+  saath badh rahi hain, iska matlab ye zaroori nahi ki ek doosri ko cause kar
+  rahi hai."
+"""
+
+
 def heading_rule(section_titles) -> str:
     """
     Headings ko jaisa diya hai waisa hi rakhna — ye cosmetic nahi, PARSER ki
@@ -134,9 +172,46 @@ def heading_rule(section_titles) -> str:
             f"- Heading ke NEECHE ka text user ki bhasha mein likho.")
 
 
+# English jawab ke liye wahi baatein, par English shabdon mein — "Sanskritized
+# Hindi mat likho" wala rule wahan bematlab hai, baaki sab (teacher ki tarah
+# samjhao, har result ka matlab batao, simple ka matlab halka nahi) wahi hai.
+PLAIN_ENGLISH_RULES = """# WORD CHOICE
+- Write like a very good teacher explaining out loud, not like a database, API
+  response, debug console, legal document or research paper.
+- Use everyday words. "we found", "this means", "the catch is" — not
+  "it is imperative to note that the aforementioned findings indicate".
+- Openers that work: "The short answer is...", "What the research shows is...",
+  "The main reason for this is...", "But there's an important problem here...",
+  "In simple words...", "Here's an example..."
+- For EVERY important result also say: what happened, why, what evidence
+  supports it, what goes against it, what it means, what the limitation is, and
+  what should be tested next. Stating the result alone is not enough.
+- Simple language does NOT mean a thin answer. Keep the numbers, the
+  uncertainty, the contrary evidence, the method, the assumptions, the
+  limitations and the correlation-vs-causation difference — just say them in
+  plain words.
+- Spell out things like "correlation is not causation": "two things rising
+  together does not prove one is causing the other."
+"""
+
+
+def word_choice_rule(question: str) -> str:
+    """
+    Bhasha ke hisaab se shabd-chunav ka block.
+
+    Hindi/Hinglish -> EVERYDAY_WORDS_RULES (Sanskritized Hindi ban + English
+    shabd English mein). English -> PLAIN_ENGLISH_RULES, warna English poochhne
+    wale ko bhi "message bhejo" wale examples chale jaate the.
+    """
+    if detect_language(question) == "english":
+        return PLAIN_ENGLISH_RULES
+    return EVERYDAY_WORDS_RULES
+
+
 def style_block(question: str, section_titles=None) -> str:
-    """Bhasha + samjhane ka tarika (+ heading rule agar sections chahiye)."""
-    parts = [language_rule(question), PLAIN_STYLE_RULES]
+    """Bhasha + samjhane ka tarika + shabd chunav (+ heading rule)."""
+    parts = [language_rule(question), PLAIN_STYLE_RULES,
+             word_choice_rule(question)]
     if section_titles:
         parts.append(heading_rule(section_titles))
     return "\n\n".join(parts)

@@ -28,7 +28,8 @@ _BRACKET_RE = re.compile(r"\[([^\[\]]{1,60})\]")
 _SID_RE = re.compile(r"\bS\s?(\d{1,3})\b", re.IGNORECASE)
 _NO_SOURCE_RE = re.compile(r"\[\s*NO[\s\-_]?SOURCE\s*\]", re.IGNORECASE)
 _LABEL_RE = re.compile(
-    r"\[\s*(ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE|MIXED\s+EVIDENCE|"
+    r"\[\s*(ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE|SOURCE[\s\-]?REPORTED|"
+    r"MIXED\s+EVIDENCE|"
     r"WEAK\s+EVIDENCE|EVIDENCE|INFERENCE|HYPOTHESIS|SPECULATION|UNVERIFIED|UNKNOWN)\s*\]",
     re.IGNORECASE,
 )
@@ -326,4 +327,16 @@ CITATION_INSTRUCTION = """CITATION RULES (inhe follow karna zaroori hai):
 - Agar koi baat kisi bhi diye gaye source mein nahi hai, to uske saath [NO-SOURCE] likho
   aur usko [INFERENCE] ya [HYPOTHESIS] label karo — use fact ki tarah pesh mat karo.
 - Agar sources sawal ke liye relevant nahi hain, to saaf likho: "diye gaye sources is
-  sawal ke liye relevant nahi hain" — irrelevant source cite mat karo."""
+  sawal ke liye relevant nahi hain" — irrelevant source cite mat karo.
+- Label rule: `[ESTABLISHED]` sirf tab jab us source ka POORA text padha gaya ho
+  (source block mein "Read: full_text" likha hoga). Sirf abstract/snippet mila ho
+  to `[SOURCE-REPORTED]` likho — matlab "source ye report karta hai", confirmed
+  fact nahi. Ye rule todne par system label khud neeche kar dega.
+
+CITATION KO PADHNE LAYAK RAKHO:
+- Ek line mein 1-2 se zyada [S#] mat thoso. Poora URL, DOI ya lamba ID kabhi
+  answer ke andar mat likho — sirf [S1] jaisa chhota ID.
+- Har vaakya ke peeche citation ki zaroorat nahi. Ek paragraph ka mool claim
+  cite kar do; detail source section mein pehle se hai.
+- Jahan explanation chal rahi hai (example, "simple words mein" wala hissa),
+  wahan citation se vaakya todo mat."""

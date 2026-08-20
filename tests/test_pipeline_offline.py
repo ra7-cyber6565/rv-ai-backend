@@ -179,23 +179,26 @@ class _FakeGemini:
                     "ho sakti hai, fasting nahi.\n")
         if label == "synthesis":
             return (
-                "## 1. Seedha Jawab (Direct Conclusion)\n"
+                "## Seedha jawab\n"
                 "Haan, intermittent fasting se type 2 diabetes mein sugar control "
                 "thoda behtar hota hai [S1]. Par ye dawa ki jagah nahi hai.\n\n"
-                "## 2. Established Facts\n"
+                "## Research se kya pata chala?\n"
+                "### Fact\n"
                 "- **[S1] Randomized trial:** HbA1c (3 mahine ka average sugar) kam hua.\n"
-                "- **[S2] Meta-analysis:** 23 trials mein insulin sensitivity behtar mili.\n\n"
-                "## 3. Strong Evidence (Evidence Analysis)\n"
+                "- **[S2] Meta-analysis:** 23 trials mein insulin sensitivity behtar mili.\n"
+                "### Inference\n"
+                "- [INFERENCE] Fayda zyadatar weight kam hone se aata hai [S3].\n\n"
+                "## Ye kyun hota hai?\n"
+                "Medicine aur biology dono taraf se yahi baat aati hai [S2].\n\n"
+                "## Evidence kya kehta hai?\n"
                 "Do mein se ek trial randomized tha, yaani logon ko lottery se group "
                 "mila — isse bias kam hota hai [S1].\n\n"
-                "## 5. Cross-Disciplinary Explanation\n"
-                "Medicine aur biology dono taraf se yahi baat aati hai [S2].\n\n"
-                "## 6. Inferences (evidence se nikale gaye — fact nahi)\n"
-                "- [INFERENCE] Fayda zyadatar weight kam hone se aata hai [S3].\n\n"
-                "## 10. Abhi Bhi Kya Unknown Hai\n"
+                "## Iske against kya mila?\n"
+                "Ek review mein fayda bahut chhota tha [S4].\n\n"
+                "## Kya abhi unknown hai?\n"
                 "Insulin lene wale patients mein sugar bahut neeche girne ka khatra "
                 "kitna hai, ye saaf nahi [S4].\n\n"
-                "## 13. Suggested Next Research / Experiment\n"
+                "## Final conclusion\n"
                 "Insulin par chal rahe patients ka 2 saal ka trial chahiye. "
                 "Apne doctor se baat kiye bina fasting shuru na karein.\n")
         return ("## Factual Findings\n- [ESTABLISHED] Fasting se HbA1c kam hua [S1].\n"
@@ -234,12 +237,22 @@ def test_healthy_run_reaches_top_label():
 
 
 def test_healthy_run_answer_has_real_sections():
+    """
+    §16 ka naya structure. (Pehle ye test purane numbered headings —
+    "1. Seedha Jawab", "9. Verification Status" — dhoondta tha. Wo structure
+    intel ke naye instruction se badal gaya hai: ab pehla section `## Seedha
+    jawab` hai aur technical sab kuch aakhir mein. Feature kuch nahi hata,
+    sirf test ki expectation naye structure par le aayi gayi hai.)
+    """
     result, _ = _run(_records(ON_TOPIC), read_ok=True)
     answer = result["answer"]
-    for heading in ("1. Seedha Jawab", "9. Verification Status",
-                    "11. Confidence & Evidence Level", "12. Sources / Citations",
-                    "14. Coverage, Limits & Honesty Report"):
+    for heading in ("## Seedha jawab", "## Research se kya pata chala?",
+                    "## Final conclusion", "## Sources",
+                    "## Research quality / technical audit"):
         assert heading in answer, f"section gum: {heading}"
+    # insaan pehle, technical baad mein — audit sabse aakhir mein hona chahiye
+    assert answer.lstrip().startswith("## Seedha jawab"), answer[:80]
+    assert answer.find("## Research quality / technical audit") > answer.find("## Sources")
     assert "[S1]" in answer
 
 
