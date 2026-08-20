@@ -1,5 +1,10 @@
 ﻿import os
 
+# Storage paths must be configured before heavy libraries (transformers/chromadb)
+# are imported so their caches/models do not silently land on C:.
+from utils.storage_paths import configure_process_storage, storage_status
+STORAGE_STATUS = configure_process_storage()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -83,6 +88,7 @@ def api_info():
         "website": "/",
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "cors_origins": CORS_ORIGINS,
+        "storage": storage_status(),
         "endpoint_count": len(endpoints),
         "endpoints": sorted(endpoints),
     }
@@ -91,9 +97,11 @@ def api_info():
 @app.get("/health")
 def health_check():
     """Health check for cloud deployment platforms (Render, Railway, etc)"""
+    current_storage = storage_status()
     return {
-        "status": "healthy",
+        "status": "healthy" if current_storage.get("available") else "degraded",
         "service": "RV AI Backend",
         "version": app.version,
         "zero_cost_only": ZERO_COST_STATUS.enabled,
+        "storage": current_storage,
     }
