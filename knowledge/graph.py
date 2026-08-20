@@ -1,40 +1,36 @@
 """
 Knowledge Graph — Spec Section 16 (hint layer, EVIDENCE layer nahi)
 
-Ye file entities aur unke beech ke co-occurrence links ek JSON file mein rakhti
-hai. Do imaandaari ke rules yahan code mein baandhe gaye hain:
-
-  1. Relationship "co_occurs_with" hai, "related_to" nahi, aur har relationship
-     par `verified: False` likha rehta hai. Wajah: detection sirf itna dekhta hai
-     ki do naam EK HI sentence mein aaye — isse causation ya rishta sabit nahi
-     hota. Isi liye KnowledgeGraphAdapter iska output kabhi cite nahi karta.
-
-  2. Entity extraction regex-based hai (spaCy ka en_core_web_sm Hinglish par
-     galat tag karta hai — wo dead end memory mein documented hai).
-
-Do defects yahan theek kiye gaye the:
-  * GRAPH_FILE relative tha ("knowledge_graph.json"), yani file wahan banti thi
-    jahan se server start hua tha. Directory badalne par poora graph "gayab" ho
-    jaata tha. Ab path backend folder se anchor hota hai (env se override ho
-    sakta hai).
-  * Har dict access `e["project_id"]` jaisa tha. Purani ya haath se edit ki hui
-    graph file par ye KeyError deta tha, aur adapter ke try/except mein wo
-    chup-chaap ghum jaata tha — matlab feature bina bataye band. Ab sab .get()
-    se padha jaata hai aur corrupt file par blank graph se kaam chalta hai.
+Entities aur sentence-level co-occurrence links JSON mein store hote hain. Ye
+verified evidence nahi hain; relationships hamesha ``verified: False`` rehti hain.
+Runtime file ``KNOWLEDGE_GRAPH_FILE`` se aati hai. main.py ise centralized
+INFINITY_DATA_ROOT ke ``knowledge`` folder mein set karta hai taaki laptop ki
+system drive/repository silently na bhare.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import tempfile
 from typing import Dict, List
 
-# CWD par bharosa nahi — file hamesha backend/ ke andar (ya env se di gayi jagah)
-_DEFAULT_GRAPH_FILE = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-    "knowledge_graph.json",
-)
-GRAPH_FILE = os.getenv("KNOWLEDGE_GRAPH_FILE", _DEFAULT_GRAPH_FILE)
+
+def _default_graph_file() -> str:
+    configured = str(os.getenv("KNOWLEDGE_GRAPH_FILE", "")).strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    try:
+        from utils.storage_paths import ensure_layout
+        return os.path.join(ensure_layout()["knowledge"], "knowledge_graph.json")
+    except Exception:
+        return os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "knowledge_graph.json",
+        )
+
+
+GRAPH_FILE = _default_graph_file()
 
 _RELATION_NOTE = ("same sentence mein saath aaye — ye sirf co-occurrence hint hai, "
                   "proven rishta nahi")
@@ -45,7 +41,7 @@ def _blank_graph() -> Dict:
 
 
 def _load_graph() -> Dict:
-    """Corrupt/missing/purani file par bhi kaam karta hai — kabhi raise nahi karta."""
+    """Corrupt/missing/purani file par blank graph mile; research crash na ho."""
     try:
         if not os.path.exists(GRAPH_FILE):
             return _blank_graph()
@@ -62,22 +58,28 @@ def _load_graph() -> Dict:
 
 
 def _save_graph(graph: Dict) -> bool:
+    """Atomic save: half-written JSON ko final file kabhi replace nahi karega."""
     try:
         directory = os.path.dirname(GRAPH_FILE)
         if directory:
             os.makedirs(directory, exist_ok=True)
-        with open(GRAPH_FILE, "w", encoding="utf-8") as f:
-            json.dump(graph, f, ensure_ascii=False, indent=2)
+        fd, tmp = tempfile.mkstemp(prefix="knowledge_graph_", suffix=".json", dir=directory or None)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(graph, f, ensure_ascii=False, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, GRAPH_FILE)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
         return True
     except Exception:
         return False
 
 
 def extract_entities_nlp(text: str) -> List[Dict]:
-    """
-    Regex-based entity extraction — Hindi-English mix content ke liye.
-    Markdown formatting hataata hai, phir capitalized-word pattern use karta hai.
-    """
+    """Regex-based entity hints — Hindi-English mix content ke liye."""
     clean_text = re.sub(r'\*\*|##|\*|_', '', text or "")
 
     stopwords = {"Unke", "Unki", "Unka", "Ye", "Yeh", "Is", "Iske", "Uske", "Wo", "Woh",
@@ -100,11 +102,7 @@ def extract_entities_nlp(text: str) -> List[Dict]:
 
 
 def extract_relationships(text: str, entities: List[Dict]) -> List[Dict]:
-    """
-    Sentence-level co-occurrence. Naam jaan-boojh kar "co_occurs_with" hai:
-    ek sentence mein saath dikhna rishta nahi sabit karta, isliye ye layer
-    hint hai aur `verified: False` ke saath store hoti hai.
-    """
+    """Sentence-level co-occurrence hints, proven relationships nahi."""
     if len(entities) < 2:
         return []
 
@@ -121,7 +119,6 @@ def extract_relationships(text: str, entities: List[Dict]) -> List[Dict]:
                     "relation": "co_occurs_with",
                     "to": present[j],
                     "context": sent.strip()[:150],
-                    # Spec Section 7/17: hint ko evidence ki tarah pesh mat karo
                     "verified": False,
                     "evidence": _RELATION_NOTE,
                 })
@@ -130,10 +127,7 @@ def extract_relationships(text: str, entities: List[Dict]) -> List[Dict]:
 
 
 def extract_and_store(question: str, answer_text: str, project_id: str = "default") -> Dict:
-    """
-    Spec Section 16 — Knowledge Graph / Research Memory
-    Regex-based entity + relationship extraction (free, local, koi Gemini call nahi)
-    """
+    """Free/local knowledge-graph hint extraction + persistence."""
     graph = _load_graph()
     project_id = project_id or "default"
 
@@ -206,7 +200,7 @@ def get_entity_stats(project_id: str = "default") -> Dict:
 
 
 def get_entity_graph(project_id: str = "default") -> Dict:
-    """Spec Section 16 — poora Knowledge Graph structure (hint layer)."""
+    """Poora Knowledge Graph structure (hint layer)."""
     graph = _load_graph()
     project_relationships = [r for r in graph["relationships"]
                              if r.get("project_id") == project_id]
