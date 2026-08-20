@@ -4,10 +4,10 @@ Large uploads must never be read into RAM in one shot. This module keeps the
 size cap honest while writing incrementally to a temporary directory. It is
 provider-independent and uses no paid service.
 
-When ``INFINITY_WORK_ROOT`` is configured (recommended on the laptop as a D:
-folder), temporary upload directories are created there rather than on the
-system drive. If that configured root is unavailable, the code fails closed;
-it never silently falls back to C:.
+Laptop storage is centralized through ``INFINITY_DATA_ROOT`` (with the older
+``INFINITY_WORK_ROOT`` kept as an alias). When an explicit root is configured,
+temporary uploads stay under its ``temp`` directory and never silently fall
+back to C:.
 """
 from __future__ import annotations
 
@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Mapping, Protocol
 
 from fastapi import HTTPException
+
+from utils.storage_paths import configured_root, ensure_layout
 
 
 DEFAULT_CHUNK_BYTES = 1024 * 1024  # 1 MiB
@@ -30,31 +32,22 @@ class AsyncUpload(Protocol):
 
 
 def configured_work_root(env: Mapping[str, str] | None = None) -> str | None:
-    """Return the explicitly configured working root, or ``None``.
-
-    No hard-coded D: path is used because the backend also runs on Linux/cloud.
-    The laptop can set for example ``INFINITY_WORK_ROOT=D:\\InfinityResearchAI``.
-    """
-    source = env if env is not None else os.environ
-    raw = str(source.get("INFINITY_WORK_ROOT", "")).strip()
-    return os.path.abspath(os.path.expanduser(raw)) if raw else None
+    """Return explicit laptop storage root for backwards compatibility."""
+    root, explicit = configured_root(env)
+    return root if explicit else None
 
 
 def ensure_work_root(env: Mapping[str, str] | None = None) -> str | None:
-    """Create/validate the configured working root and fail closed if unusable."""
-    root = configured_work_root(env)
-    if not root:
+    """Validate explicit storage and return its temp directory.
+
+    When no explicit laptop root is configured, ``None`` is returned so callers
+    can retain normal OS-temp behaviour in isolated development contexts.
+    """
+    root, explicit = configured_root(env)
+    if not explicit:
         return None
-    try:
-        Path(root).mkdir(parents=True, exist_ok=True)
-        probe = Path(root) / ".infinity_write_probe"
-        probe.write_bytes(b"ok")
-        probe.unlink(missing_ok=True)
-    except Exception as exc:  # noqa: BLE001 - turn OS detail into a clear error
-        raise RuntimeError(
-            f"Configured INFINITY_WORK_ROOT is unavailable/unwritable: {root}"
-        ) from exc
-    return root
+    layout = ensure_layout(env)
+    return layout["temp"]
 
 
 async def save_upload_stream(
@@ -72,7 +65,7 @@ async def save_upload_stream(
     - rejects empty files with HTTP 400;
     - rejects files above ``max_bytes`` with HTTP 413;
     - removes the temporary directory on every failure path;
-    - when a work root is configured, never falls back to another drive.
+    - when a storage root is configured, never falls back to another drive.
 
     The caller owns the returned directory and should remove it after use with
     ``cleanup_upload_path``.
