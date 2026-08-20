@@ -127,6 +127,19 @@ class ArchiveManifest:
         item["updated_at"] = int(time.time())
         self._save(data)
 
+    def mark_local_deleted(self, sha256: str) -> None:
+        """Record that the verified local working copy was safely removed."""
+        data = self._load()
+        item = data["items"].get(sha256)
+        if not item:
+            raise KeyError(sha256)
+        if item.get("status") != "verified" or item.get("verified") is not True:
+            raise RuntimeError("Unverified archive item cannot be marked locally deleted")
+        item["local_deleted"] = True
+        item["local_deleted_at"] = int(time.time())
+        item["updated_at"] = int(time.time())
+        self._save(data)
+
     def safe_to_delete_local(self, sha256: str) -> bool:
         item = self._load()["items"].get(sha256) or {}
         return item.get("status") == "verified" and item.get("verified") is True
@@ -134,3 +147,9 @@ class ArchiveManifest:
     def get(self, sha256: str) -> dict[str, Any] | None:
         item = self._load()["items"].get(sha256)
         return dict(item) if item else None
+
+    def items(self) -> list[dict[str, Any]]:
+        """Return a snapshot of all archive records, oldest first."""
+        records = [dict(item) for item in self._load()["items"].values()]
+        records.sort(key=lambda item: int(item.get("updated_at", 0)))
+        return records
