@@ -9,21 +9,37 @@ Agar wo naam is API key / is SDK version ke liye maujood na ho, to Google
 Ab hum Google se ek baar poochhte hain ki "kaunse model available hain",
 usmein se sabse behtar flash model chunte hain, aur naam yaad rakh lete hain.
 Naam kabhi badal jaaye to code badalne ki zaroorat nahi — apne aap chal jaayega.
+
+§7 (2026-08-20 ki live failure ke baad) do cheezein add hui hain:
+
+  1. DYNAMIC DISCOVERY PEHLE, GUESS BAAD MEIN — `list_models()` se aaya naam
+     hamesha jeetta hai. Neeche jo `FALLBACKS` hain wo sirf tab use hote hain
+     jab list_models hi na chale (network/key issue). Isliye is list mein
+     purani generation ke naam (1.5-flash, pro-latest) rakhna nuksaan tha:
+     wo naam 404 dete the aur system unhe baar-baar try karta rehta tha.
+
+  2. DEAD-MODEL MEMORY (negative cache) — jo naam ek baar 404/"not supported"
+     de chuka, wo poore process ke liye chhod diya jaata hai (`mark_dead`).
+     Pehle `candidates()` usi mare hue naam ko har pass mein dobara offer
+     karta tha, jisse ek hi galti 3 pass × 3 retry = 9 bekaar HTTP call
+     ban jaati thi.
+
+₹0 rule: yahan sirf free-tier Gemini model hi aate hain, koi paid service nahi.
 """
 from __future__ import annotations
 
 import os
 from typing import Dict, List, Optional
 
-# Agar list_models na chale (network/key issue), to inhe try karte hain — order
-# mein: naye pehle, purane baad mein.
+# LAST RESORT ONLY — agar `list_models()` hi fail ho jaaye (network/key), tab
+# inhe try karte hain. Sirf current generation ke naam, kyunki mare hue naam
+# rakhne se system 404 par waqt barbaad karta hai. Asli source of truth Google
+# ki `list_models()` hai, ye list nahi.
 FALLBACKS: tuple = (
     "gemini-flash-latest",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
     "gemini-2.0-flash",
-    "gemini-1.5-flash-latest",
-    "gemini-1.5-flash",
-    "gemini-pro-latest",
 )
 
 # jo naam pehle pasand hain (substring match, order matters)
@@ -36,11 +52,39 @@ _PREFER = (
 
 _cache: Optional[str] = None
 _seen: List[str] = []          # jo model asli list mein mile the (yaad rakhe)
+# naam -> wajah. Ye process-wide hai: 404 ka matlab hai naam hi galat hai,
+# aur wo agle request mein bhi galat hi rahega.
+_dead: Dict[str, str] = {}
 
 
 def _clean(name: str) -> str:
     """`models/gemini-2.0-flash` -> `gemini-2.0-flash`."""
     return name.split("/", 1)[1] if name.startswith("models/") else name
+
+
+# ── dead-model memory (§7) ───────────────────────────────────────────────────
+def mark_dead(name: str, reason: str = "model_not_found") -> None:
+    """Is naam ko poore process ke liye chhod do (sirf permanent errors par)."""
+    if name:
+        _dead.setdefault(_clean(name), reason or "model_not_found")
+
+
+def is_dead(name: str) -> bool:
+    return _clean(name or "") in _dead
+
+
+def dead_models() -> Dict[str, str]:
+    """Audit/diag ke liye — kaun kis wajah se chhoda gaya."""
+    return dict(_dead)
+
+
+def forget_dead() -> None:
+    """Sirf test/diag ke liye — memory saaf karo."""
+    _dead.clear()
+
+
+def _alive(names: List[str]) -> List[str]:
+    return [n for n in names if not is_dead(n)]
 
 
 def available_models(genai) -> List[str]:
@@ -63,6 +107,7 @@ def available_models(genai) -> List[str]:
 
 
 def _pick(names: List[str]) -> Optional[str]:
+    names = _alive(names)
     for want in _PREFER:
         for n in names:
             if want in n.lower():
@@ -78,26 +123,32 @@ def resolve(genai, force: bool = False) -> str:
     Kaam karne wala model name lautata hai. Ek hi baar list_models chalta hai,
     phir yaad rakh liya jaata hai.
 
-    GEMINI_MODEL env set ho aur wo asli list mein ho to wahi izzat paata hai.
+    GEMINI_MODEL env set ho aur wo asli list mein ho to wahi izzat paata hai —
+    par agar wo naam mar chuka hai (404 de chuka hai), to uski izzat khatam:
+    env ki galti se poora research nahi rukna chahiye (§7).
     """
     global _cache, _seen
-    if _cache and not force:
+    if _cache and not force and not is_dead(_cache):
         return _cache
 
     wanted = (os.getenv("GEMINI_MODEL") or "").strip()
+    if wanted and is_dead(wanted):
+        wanted = ""
     try:
         names = available_models(genai)
     except Exception:                    # noqa: BLE001 — list na mile to guess
         names = []
     _seen = names
 
-    if names:
-        if wanted and any(wanted in n for n in names):
+    alive = _alive(names)
+    guess = next((n for n in FALLBACKS if not is_dead(n)), FALLBACKS[0])
+    if alive:
+        if wanted and any(wanted in n for n in alive):
             _cache = wanted
         else:
-            _cache = _pick(names) or (wanted or FALLBACKS[0])
+            _cache = _pick(alive) or (wanted or guess)
     else:
-        _cache = wanted or FALLBACKS[0]
+        _cache = wanted or guess
     return _cache
 
 
@@ -108,12 +159,24 @@ def candidates(genai) -> List[str]:
 
     Kyun: agar pehla model mana kar de to agla try wo hona chahiye jo asli list
     mein tha — na ki koi hard-coded naam jo maujood hi nahi.
+
+    §7: jo naam pehle 404 de chuka hai wo is list mein AATA HI NAHI. Aur agar
+    yaad rakhi hui list poori mar chuki ho, to ek baar Google se dobara
+    poochhte hain (naam badal gaye ho sakte hain).
     """
     first = resolve(genai)
-    order = [first]
-    for name in _seen + list(FALLBACKS):
+    order = [first] if not is_dead(first) else []
+    for name in _alive(_seen) + _alive(list(FALLBACKS)):
         if name not in order:
             order.append(name)
+    if not order:
+        # sab naam mar chuke — ho sakta hai Google ne naam badal diye hon.
+        # Ek dobara discovery, warna khaali haath.
+        try:
+            fresh = _alive(available_models(genai))
+        except Exception:                # noqa: BLE001
+            fresh = []
+        order = fresh
     return order
 
 
@@ -150,7 +213,7 @@ def diagnose() -> Dict:
     """
     report: Dict = {"key_present": False, "key_length": 0, "sdk_version": "",
                     "models_found": [], "chosen_model": "", "test_call": "",
-                    "error": ""}
+                    "dead_models": dead_models(), "error": ""}
     key = os.getenv("GEMINI_API_KEY", "")
     report["key_present"] = bool(key)
     report["key_length"] = len(key)
@@ -174,4 +237,5 @@ def diagnose() -> Dict:
             report["test_call"] = f"FAILED: {type(exc).__name__}: {exc}"
     except Exception as exc:  # noqa: BLE001
         report["error"] = f"{type(exc).__name__}: {exc}"
+    report["dead_models"] = dead_models()
     return report

@@ -309,9 +309,63 @@ def test_zero_full_text_blocks_top_label():
 
 
 def test_quota_failure_shows_warning_to_user():
+    """
+    EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§9, 2026-08-20).
+
+    Pehle ye test maangta tha ki warning mein "429" ya "quota" ka raw text ho.
+    Live run mein wahi cheez ulti pad gayi: user ko "Seedha jawab" ke neeche
+    seedha `ResourceExhausted: 429 ... quota_id: GenerateRequestsPerDay...`
+    dikha, jise intel ne saaf mana kiya. Naya vaada: warning INSAANI Hinglish
+    mein, aur raw protobuf line sirf `technical_details` mein (report ke sabse
+    neeche). Warning gayab bhi nahi hoti — dono baatein ek saath check hoti hain.
+    """
     result, _ = _run(_records(ON_TOPIC), read_ok=True, fail_after=1)
     joined = " ".join(result.get("warnings", []))
-    assert "429" in joined or "quota" in joined.lower(), joined
+    assert "free" in joined.lower() and "limit" in joined.lower(), joined
+    for raw in ("429", "ResourceExhausted", "quota_id", "Traceback"):
+        assert raw not in joined, f"user-facing warning mein raw error: {joined}"
+
+
+# ── TEST F (§16): insaani jawab mein raw API error kabhi nahi ────────────────
+def test_no_raw_api_error_in_the_human_answer():
+    """
+    Live report mein "Seedha jawab" ke turant neeche protobuf chhap gaya tha.
+    Ab raw text sirf sabse aakhir wale "Technical details" block mein hai.
+    """
+    result, _ = _run(_records(ON_TOPIC), read_ok=True, fail_after=1)
+    answer = result["answer"]
+    marker = "### Technical details"
+    human_part = answer.split(marker)[0]
+    for raw in ("ResourceExhausted", "quota_id", "quota_metric", "Traceback",
+                "retry_delay"):
+        assert raw not in human_part, f"insaani hisse mein raw error: {raw}"
+    # ...par imaandaari ke liye raw line report se GAYAB bhi nahi hui
+    assert marker in answer, "technical details block hi nahi bana"
+    assert "429" in answer.split(marker)[1], answer.split(marker)[1][:300]
+    assert result["technical_details"], "structured technical_details khaali hai"
+
+
+# ── TEST G (§16): reasoning fail ho to status INCOMPLETE ─────────────────────
+def test_status_is_incomplete_when_reasoning_fails():
+    result, _ = _run(_records(ON_TOPIC), read_ok=True, fail_after=1)
+    assert result["status"] == "RESEARCH INCOMPLETE", result["status"]
+    assert result["status_reason"], "status ki wajah khaali hai"
+    assert "synthesis" in result["missing_passes"], result["missing_passes"]
+    # top par banner, aur usmein "final answer na maanein" ki saaf baat
+    head = result["answer"][:1200]
+    assert "RESEARCH INCOMPLETE" in head, head[:300]
+    assert "final answer na maanein" in head, head[:300]
+    # UI ka label bhi jhooth na bole
+    assert "RESEARCH INCOMPLETE" in result["evidence_level"], result["evidence_level"]
+
+
+def test_healthy_run_status_is_complete():
+    """Ulta taala: sab theek ho to status COMPLETE hi rehna chahiye."""
+    result, _ = _run(_records(ON_TOPIC), read_ok=True)
+    assert result["status"] == "COMPLETE", (result["status"],
+                                           result["status_reason"])
+    assert not result["missing_passes"], result["missing_passes"]
+    assert "RESEARCH INCOMPLETE" not in result["answer"], "jhoothi warning lagi"
 
 
 def test_quick_mode_does_not_get_fake_incomplete_reasoning():

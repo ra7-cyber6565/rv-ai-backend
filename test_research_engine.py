@@ -38,6 +38,7 @@ from typing import Dict
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from research_engine.citation import CitationEngine
+from research_engine.consensus_gate import CONSENSUS_UNAVAILABLE
 from research_engine.contradiction import ContradictionEngine
 from research_engine.critic import Critic
 from research_engine.dedup import DeduplicationEngine
@@ -297,9 +298,25 @@ def test_contradictions(pack):
     check("stance conflict pakda", "STANCE" in kinds or "NUMERIC" in kinds, str(kinds))
 
     consensus = engine.consensus_report(pack, found)
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§11, 2026-08-20): pehle yahan sirf
+    # chaar level (APPARENT CONSENSUS / DISPUTED / LEANING / NO CLEAR STANCE)
+    # allowed the, yaani consensus HAMESHA ban jaata tha. Naya niyam: chhe
+    # shartein poori na hon to level banta hi nahi — "Consensus evaluate nahi
+    # kiya ja saka." Is fake pack mein reasoning passes hi nahi chale, isliye
+    # blocked hona hi SAHI jawab hai.
     check("consensus report bana", consensus["level"] in
-          ("APPARENT CONSENSUS", "DISPUTED", "LEANING", "NO CLEAR STANCE"),
-          str(consensus))
+          ("APPARENT CONSENSUS", "DISPUTED", "LEANING", "NO CLEAR STANCE",
+           CONSENSUS_UNAVAILABLE),
+          str(consensus["level"]))
+    if consensus["level"] == CONSENSUS_UNAVAILABLE:
+        check("gate ne wajah likhi (§11)", bool(consensus["unmet_conditions"]),
+              str(consensus["gate"]["unmet"]))
+        check("chhe shartein check hui", len(consensus["gate"]["checks"]) == 6,
+              str(len(consensus["gate"]["checks"])))
+        check("raw level developer ke liye bacha hua hai",
+              bool(consensus.get("level_if_gate_passed")))
+    else:
+        check("gate pass hone par hi level bana", consensus["gate_passed"] is True)
     print(f"     → consensus: {consensus['level']}, conflicts: {len(found)}")
     return [c.to_dict() for c in found], consensus
 
@@ -580,10 +597,31 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
     # wahi cheezein naye naamon se aati hain — na koi section gaya, na koi
     # feature. SIRF is test ki expectation naye headings par le aayi gayi hai.
     # Section-level detail coverage tests/test_answer_structure.py mein hai.
+    #
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§10, 2026-08-20): pehle yahan
+    # `for title in SECTION_TITLES` chal kar HAR heading maangi jaati thi — is
+    # run mein `gemini_answer=""` hai, isliye 3 section (Research se kya pata
+    # chala? / Ye kyun hota hai? / Kya abhi unknown hai?) mein andar kuch bhi
+    # nahi hota tha, sirf khaali heading + "_(Reasoning model ne ye section
+    # nahi diya.)_" chhapta tha. User ka §10 saaf kehta hai: khaali template
+    # section nahi chahiye. Ab aisa section CHHAPTA HI NAHI aur uska naam ek
+    # jagah (top banner + audit) list ho jaata hai. Isliye test do hisson mein:
+    #   * jin section mein system ka apna content hai -> zaroor maujood ho
+    #   * jin mein kuch nahi tha -> heading NA ho, par naam list mein ho
     from research_engine.synthesizer import SECTION_TITLES
-    for title in SECTION_TITLES:
-        check(f"section maujood: {title}", f"\n## {title}\n" in "\n" + answer,
-              "missing")
+    # index 1 = "Research se kya pata chala?", 2 = "Ye kyun hota hai?",
+    # 7 = "Kya abhi unknown hai?" — inme system ka apna computed content nahi
+    # hota, isliye model ke bina ye khaali hi rehte the.
+    empty_when_no_model = {SECTION_TITLES[1], SECTION_TITLES[2], SECTION_TITLES[7]}
+    for index, title in enumerate(SECTION_TITLES):
+        present = f"\n## {title}\n" in "\n" + answer
+        if title in empty_when_no_model and not present:
+            check(f"khaali section chhapa NAHI (§10): {title}", True)
+        else:
+            check(f"section maujood: {title}", present, "missing")
+    for title in sorted(empty_when_no_model):
+        check(f"chhoda hua section naam se list hua: {title}",
+              title in answer, "naam kahin nahi likha")
     check("hypothesis par UNTESTED label", "UNTESTED" in answer, "missing")
     check("limits section imaandaar", "bypass nahi kiya gaya" in answer, "missing")
     check("independent human experts ka disclaimer", "independent " in answer
@@ -653,9 +691,22 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
         contradictions=[], hypotheses=[], verification=verification,
         coverage=coverage, honesty={}, consensus=consensus, discovery_note="",
         quota_note="1/2", critique={}, warnings=[])
-    check("model ka chhoda hua section imaandaari se mark hota hai",
-          "Reasoning model ne ye section nahi diya" in partial
-          and "## Ye kyun hota hai?" in partial, partial[:200])
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§10, 2026-08-20): pehle yahan
+    # `"Reasoning model ne ye section nahi diya" in partial` aur
+    # `"## Ye kyun hota hai?" in partial` maanga jaata tha — yaani khaali
+    # heading + placeholder line. User ka §10 kehta hai ki 11 khaali heading
+    # padhne se kuch nahi milta. Naya vaada: aisi heading chhapti hi nahi, par
+    # us section ka NAAM ek jagah saaf likha jaata hai (top banner + audit ka
+    # "Kaunse hisse nahi ban paaye" block). Imaandaari kam nahi hui, ek jagah
+    # aa gayi.
+    check("model ka chhoda hua section khaali heading ban kar nahi chhapta",
+          "## Ye kyun hota hai?" not in partial, partial[:200])
+    check("chhoda hua section naam se ek jagah imaandaari se likha hai",
+          "Ye kyun hota hai?" in partial
+          and "nahi ban paaye" in partial, partial[:400])
+    check("purana placeholder text ab report mein nahi hai",
+          "Reasoning model ne ye section nahi diya" not in partial,
+          "placeholder wapas aa gaya")
 
 
 # ── 10. end-to-end (poori tarah hermetic — na network, na Gemini) ────────────

@@ -18,6 +18,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
+from .consensus_gate import CONSENSUS_UNAVAILABLE
+from .consensus_gate import evaluate as gate_consensus
 from .models import EvidencePack, SourceRecord
 
 _SUPPORT_CUES = (
@@ -309,9 +311,20 @@ class ContradictionEngine:
             unique.append(c)
         return unique[:10]
 
-    # ── consensus (Spec Section 7: copies != independent agreement) ───────────
+    # ── consensus (Spec Section 7 + §11 gate) ────────────────────────────────
     def consensus_report(self, pack: EvidencePack,
-                         contradictions: Optional[List[Contradiction]] = None) -> Dict:
+                         contradictions: Optional[List[Contradiction]] = None,
+                         contradiction_analysis_done: Optional[bool] = None,
+                         reasoning_complete: Optional[bool] = None,
+                         opposition_searched: Optional[bool] = None,
+                         queries: Optional[List[str]] = None) -> Dict:
+        """
+        Sehmati ka level — par SIRF tab, jab §11 ki chhe shartein poori hon.
+
+        `contradictions=None` = contradiction analysis chali hi nahi.
+        `contradictions=[]`   = chali, kuch nahi mila. Dono alag baat hain, aur
+        gate inhe alag hi treat karta hai.
+        """
         stance_counts = {"SUPPORT": 0, "OPPOSE": 0, "MIXED": 0, "HEDGED": 0, "NEUTRAL": 0}
         keys_by_stance: Dict[str, set] = {k: set() for k in stance_counts}
 
@@ -333,13 +346,31 @@ class ContradictionEngine:
         else:
             level = "LEANING"
 
-        return {
-            "level": level,
+        # §11 — gate. Shartein poori na hon to level chhapta hi nahi. Raw level
+        # `level_if_gate_passed` mein rehta hai (developer/audit ke liye), taaki
+        # jaankari na khoye — par user ke jawab mein sehmati ka daawa nahi jaata.
+        gate = gate_consensus(
+            pack, contradictions=contradictions,
+            contradiction_analysis_done=contradiction_analysis_done,
+            reasoning_complete=reasoning_complete,
+            opposition_searched=opposition_searched,
+            queries=queries,
+            independent_sources=pack.independent_source_count,
+        )
+        report = {
+            "level": level if gate.passed else CONSENSUS_UNAVAILABLE,
             "stance_counts": stance_counts,
             "independent_supporting_origins": independent_support,
             "independent_opposing_origins": independent_oppose,
             "contradictions_found": len(contradictions or []),
-            "note": "Consensus ka andaaza retrieved sources tak seemit hai. "
-                    "Ek hi info ki copies ko alag evidence nahi gina gaya, "
-                    "lekin ye poore literature ka survey bhi nahi hai.",
+            "contradiction_analysis_done": bool(
+                contradiction_analysis_done if contradiction_analysis_done is not None
+                else contradictions is not None),
+            "gate_passed": gate.passed,
+            "gate": gate.to_dict(),
+            "unmet_conditions": list(gate.unmet_reasons),
+            "note": gate.note(),
         }
+        if not gate.passed:
+            report["level_if_gate_passed"] = level
+        return report

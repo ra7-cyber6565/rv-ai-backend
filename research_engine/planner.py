@@ -16,6 +16,7 @@ import re
 from typing import Dict, List, Optional
 
 from .depth import DepthConfig
+from .domain import detect as domain_detect
 from .local_language import normalize
 from .query_builder import is_instruction_prompt, search_query, topic_terms
 from .requested import parse_requests
@@ -203,16 +204,47 @@ class ResearchPlanner:
     def search_queries(self, question: str, cls: Optional[Dict] = None,
                        round_no: int = 1) -> List[str]:
         """
-        Round 1: seedha cleaned query.
-        Round 2+: Spec Section 2 ka "search expand karo" — field terms aur
-        evidence/contradiction angle add karo.
+        §4 + §15 ke baad ka behaviour.
 
-        `cls` classify() ka dict ya uska superset (plan() ka dict) — dono chalte
-        hain, kyunki plan() ke andar **cls spread hota hai. Fields .get() se
-        padhte hain taaki round 2 kabhi KeyError se na ruke.
+        PURANA: round 1 mein SIRF ek query jaati thi (cleaned question), aur
+        broadening par arXiv ek hi ambiguous phrase par utar aata tha
+        (`all:"room-temperature"`), jisse room-temperature ferroelectricity
+        jaisi cheezein aa gayi.
+
+        AB: agar sawaal ka field pehchana gaya (domain.py), to round 1 mein hi
+        structured expansion jaati hai — har query domain anchor ke saath
+        ("room temperature superconductivity ambient pressure", "high pressure
+        hydride superconductivity", ...). Round 2/3 ke liye branch-wise queries
+        rotate hoti hain, aur ye sab DETERMINISTIC hai: reasoning model band ho
+        to bhi discovery refine hoti rehti hai.
         """
         cls = cls or self.classify(question)
         base = self.clean_query(question)
+        plan = domain_detect(question)
+
+        # §11 — round 2 se opposition side bhi dhoondhna ZAROORI hai. Pehle
+        # (known domain wale path par) sirf support-side branch queries jaati
+        # thi, aur phir bhi report "apparent agreement" likh deti thi. Ab
+        # criticism/contradictory query khud pipeline ka hissa hai, aur consensus
+        # gate isi query ko dekh kar decide karta hai.
+        counter_query = f"{base} contradictory findings criticism limitations"
+
+        if plan.is_known:
+            if round_no <= 1:
+                qs = plan.expanded_queries(base, limit=4)
+            else:
+                qs = ([base]
+                      + plan.fallback_queries(base, round_no=round_no, limit=2)
+                      + [counter_query])
+            out, seen = [], set()
+            for q in qs:
+                key = (q or "").strip().lower()
+                if q and key not in seen:
+                    seen.add(key)
+                    out.append(q)
+            if out:
+                return out[:4]
+
         if round_no <= 1:
             return [base]
 
@@ -222,6 +254,7 @@ class ResearchPlanner:
             if fields:
                 queries.append(f"{base} {fields[0]}")
             queries.append(f"{base} evidence study")
+            queries.append(counter_query)
             if cls.get("is_scientific"):
                 queries.append(f"{base} systematic review")
         else:
@@ -229,11 +262,21 @@ class ResearchPlanner:
                 queries.append(f"{base} {fields[1]}")
             queries.append(f"{base} criticism limitations")
             queries.append(f"{base} contradictory findings")
-        return [q for q in queries if q][:3]
+        return [q for q in queries if q][:4]
 
     # ── 5. connector plan ─────────────────────────────────────────────────────
-    def connector_plan(self, cls: Dict, config: DepthConfig) -> Dict:
-        """Har sawal pe har connector chalana bewakoofi hai — relevant chuno."""
+    def connector_plan(self, cls: Dict, config: DepthConfig,
+                       question: str = "") -> Dict:
+        """
+        §3 — domain-aware routing. Har sawal pe har connector chalana bewakoofi
+        hai; ab wo bewakoofi CODE mein rok di gayi hai.
+
+        Live failure: superconductivity ke sawaal par who_gho, world_bank aur
+        data_gov_in chale (kyunki "scientific" + MAXIMUM), aur unhone maternal
+        deaths, NHA estimate aur sunbed regulation laakar evidence pack ganda
+        kar diya. Ab domain profile decide karta hai kaun chalega — aur jo band
+        hua wo report mein wajah ke saath likha jaata hai (chupchaap nahi).
+        """
         papers: List[str] = []
         if config.use_papers:
             papers = ["openalex", "crossref"]
@@ -269,11 +312,30 @@ class ResearchPlanner:
             if config.name == "MAXIMUM":
                 datasets += ["world_bank", "huggingface", "data_gov_in"]
 
+        dplan = domain_detect(question or cls.get("question") or "")
+        papers, drop_p = dplan.route(sorted(set(papers)), "papers")
+        books, drop_b = dplan.route(sorted(set(books)), "books")
+        datasets, drop_d = dplan.route(sorted(set(datasets)), "datasets")
+        dropped = drop_p + drop_b + drop_d
+
+        # arXiv ko is field mein prathmikta chahiye to use sabse aage laao —
+        # discovery ka wall-clock budget pehle sabse kaam ke connector par lage.
+        prefer = list(dplan.profile.connectors)
+        if prefer:
+            papers.sort(key=lambda n: (prefer.index(n) if n in prefer else 99, n))
+
         return {
             "web": True,
-            "papers": sorted(set(papers)),
-            "books": sorted(set(books)),
-            "datasets": sorted(set(datasets)),
+            "papers": papers,
+            "books": books,
+            "datasets": datasets,
+            # §3 ka disclosure — kaun band hua aur kyun
+            "domain": dplan.key,
+            "domain_label": dplan.profile.label,
+            "sub_domains": [b.key for b in dplan.focus_branches()],
+            "useful_source_types": list(dplan.profile.source_types),
+            "skipped_connectors": sorted(set(dropped)),
+            "routing_note": dplan.routing_note(dropped),
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────
@@ -284,7 +346,7 @@ class ResearchPlanner:
             "topic_terms": self.topic_terms(question),
             "sub_questions": self.sub_questions(question, cls),
             "queries": self.search_queries(question, cls, round_no=1),
-            "connectors": self.connector_plan(cls, config),
+            "connectors": self.connector_plan(cls, config, question),
             "depth": config.to_dict(),
             # Prompt mein user ne jo CHEEZEIN saaf-saaf maangi hain (3 hypotheses,
             # mathematical model, second-order chain, red-team) — wo yahin plan ke

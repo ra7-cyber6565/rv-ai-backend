@@ -34,9 +34,11 @@ from typing import Dict, List, Optional, Union
 from .citation import CITATION_INSTRUCTION, CitationEngine
 from .claim_labels import LABEL_RULE_PROMPT
 from .claim_labels import human_note as label_human_note
+from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
+from .run_status import split_messages
 
 # §16 ka order — headings mein number NAHI hai, kyunki user ko `## Seedha jawab`
 # hi dikhna chahiye. Index hi order hai.
@@ -154,6 +156,9 @@ _WHY_DISAGREE = {
 class FinalSynthesizer:
     def __init__(self):
         self.citations = CitationEngine()
+        # §10 — pichhle assemble() mein kaun-kaun se section nahi ban paaye.
+        # Orchestrator ise ResearchResult mein bhejta hai.
+        self.last_missing_sections: List[str] = []
 
     # ── synthesis prompt — "teacher ki tarah samjhao" ────────────────────────
     def prompt(self, question: str, analysis: str, critique: str, hypothesis_text: str,
@@ -239,11 +244,17 @@ adhoori hai to yahi likho ki ye preliminary hai.)
 Ab jawab likho:"""
 
     # ── §15: adhoora run chhupana nahi hai ───────────────────────────────────
-    def _status_banner(self, pack: EvidencePack, ledger: Optional[Dict] = None) -> str:
+    def _status_banner(self, pack: EvidencePack, ledger: Optional[Dict] = None,
+                       status: Optional[Dict] = None,
+                       missing_sections: Optional[List[str]] = None) -> str:
         """
         Sabse pehle dikhne wali imaandaar line — par aam bhasha mein, log ki
         tarah nahi. Agar run poora hua hai to ye khaali rehti hai (bina wajah
         darana bhi theek nahi hai).
+
+        §9: `status` mila ho to uska banner SABSE PEHLE jaata hai (wahi ek line
+        hai jo user ko batati hai ki is result ko final answer na maane), aur
+        raw API error yahan kabhi nahi aata — wo report ke sabse neeche jaata hai.
         """
         reasons: List[str] = []
         if not pack.sources:
@@ -266,11 +277,28 @@ Ab jawab likho:"""
             if why:
                 line += f" ({why})"
             reasons.append(line)
-        if not reasons:
+        if missing_sections:
+            reasons.append("ye hisse is run mein ban hi nahi paaye: "
+                           + ", ".join(missing_sections[:6]))
+
+        head = str((status or {}).get("banner") or "").strip()
+        code = str((status or {}).get("status") or "").strip()
+        # §9 ka doosra taala: banner ke andar RAW API text kabhi nahi. Koi bhi
+        # caller galti se protobuf/429 line bhej de to wo yahin chhan jaati hai
+        # (uska ghar report ke sabse neeche "Technical details" hai).
+        reasons, _dropped = split_messages(reasons)
+        if not reasons and not head:
             return ""
-        lines = ["> ⚠️ **Ye research run complete nahi hua.**", ">"]
-        for reason in reasons[:6]:
-            lines.append(f"> - {reason}")
+
+        lines: List[str] = []
+        if head:
+            lines += [f"> ⚠️ **{code or 'RESEARCH INCOMPLETE'}**", ">", f"> {head}"]
+        else:
+            lines += ["> ⚠️ **Ye research run complete nahi hua.**"]
+        if reasons:
+            lines.append(">")
+            for reason in reasons[:6]:
+                lines.append(f"> - {reason}")
         lines += [
             ">",
             "> Isliye neeche diya gaya conclusion **preliminary** hai, fully "
@@ -902,7 +930,11 @@ Ab jawab likho:"""
                        ledger: Optional[Dict] = None,
                        label_report: Optional[Dict] = None,
                        notes: Optional[List[str]] = None,
-                       usage_note: str = "") -> str:
+                       usage_note: str = "",
+                       status: Optional[Dict] = None,
+                       technical_details: Optional[List[str]] = None,
+                       api_accounting: Optional[Dict] = None,
+                       missing_sections: Optional[List[str]] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -914,12 +946,30 @@ Ab jawab likho:"""
             source_bits.append(str(summary).strip())
         level = str((consensus or {}).get("level") or "").strip()
         if level:
-            source_bits.append(self._CONSENSUS_WORDS.get(
-                level.upper(),
-                f"Sources ke beech sehmati ka level: {level} — yaani ye baat sirf "
-                f"inhi sources par tiki hai, poore literature par nahi."))
+            # §11 — gate fail hua to level ki jagah wahi ek vaakya jaata hai, aur
+            # neeche shartein. "Sehmati ka level: Consensus evaluate nahi kiya ja
+            # saka." jaisa bewakoofi wala vaakya nahi banna chahiye.
+            if level == CONSENSUS_UNAVAILABLE or level.lower().startswith(
+                    "consensus evaluate nahi"):
+                bits = [CONSENSUS_UNAVAILABLE]
+                unmet = [str(u).strip() for u in
+                         ((consensus or {}).get("unmet_conditions") or [])
+                         if str(u or "").strip()]
+                if unmet:
+                    bits.append("Ye shartein poori nahi hui:\n"
+                                + "\n".join(f"- {u}" for u in unmet[:6]))
+                bits.append("Retrieved links ka dher scientific consensus nahi "
+                            "hota, isliye koi sehmati-level nahi banaya gaya.")
+                source_bits.append("\n\n".join(bits))
+            else:
+                source_bits.append(self._CONSENSUS_WORDS.get(
+                    level.upper(),
+                    f"Sources ke beech sehmati ka level: {level} — yaani ye baat sirf "
+                    f"inhi sources par tiki hai, poore literature par nahi."))
         consensus_note = str((consensus or {}).get("note") or "").strip()
-        if consensus_note:
+        if consensus_note and not str(
+                (consensus or {}).get("level") or "").strip().lower().startswith(
+                    "consensus evaluate nahi"):
             source_bits.append(consensus_note)
         independence = (coverage or {}).get("independence") or {}
         repeated = independence.get("repeated_origins") or {}
@@ -948,6 +998,11 @@ Ab jawab likho:"""
             reasoning_note = ""
         if reasoning_note:
             ai_bits.append(f"- {reasoning_note}")
+        code = str((status or {}).get("status") or "").strip()
+        if code:
+            ai_bits.append(f"- Is run ka status: **{code}**"
+                           + (f" — {(status or {}).get('reason')}"
+                              if (status or {}).get("reason") else ""))
         if quota_note:
             ai_bits.append(f"- {quota_note}")
         if usage_note:
@@ -960,10 +1015,27 @@ Ab jawab likho:"""
         if ai_bits:
             blocks.append("### Reasoning (AI) passes ka sach\n" + "\n".join(ai_bits))
 
-        real_warnings = [str(w).strip() for w in (warnings or []) if str(w).strip()]
-        if real_warnings:
+        # §14 — API ka hisaab bilkul saaf: logical pass vs asli HTTP attempts.
+        acc_text = self._api_accounting_block(api_accounting)
+        if acc_text:
+            blocks.append("### API calls ka asli hisaab\n" + acc_text)
+
+        # §10 — jo section ban hi nahi paayi, uska naam ek jagah (khaali heading
+        # chhapne se behtar hai naam gin kar bata dena)
+        if missing_sections:
+            blocks.append("### Kaunse hisse nahi ban paaye\n"
+                          + "\n".join(f"- {s}" for s in missing_sections[:11])
+                          + "\n\nInke liye reasoning model ka output nahi mila, "
+                            "isliye khaali heading chhapne ki jagah unhe hata "
+                            "diya gaya.")
+
+        # §9 — warning bhi insaani bhasha mein. Jo line technical hai wo yahan
+        # se nikal kar sabse neeche "technical details" mein chali jaati hai.
+        raw_warnings = [str(w).strip() for w in (warnings or []) if str(w).strip()]
+        human_warnings, tech_from_warnings = split_messages(raw_warnings)
+        if human_warnings:
             blocks.append("### Baaki warnings\n"
-                          + "\n".join(f"- ⚠️ {w}" for w in real_warnings[:10]))
+                          + "\n".join(f"- ⚠️ {w}" for w in human_warnings[:10]))
 
         limits = (verification or {}).get("limits") or []
         note = (verification or {}).get("note") or ""
@@ -985,8 +1057,56 @@ Ab jawab likho:"""
             "verification sources se hoti hai, roles se nahi.",
         ]
         blocks.append("### Is checking ki apni limits\n" + "\n".join(tail))
+
+        # ── SABSE NEECHE: raw technical detail (§9) ───────────────────────────
+        # Ye jaan-boojh kar report ka aakhri block hai. Pehle ye protobuf/429
+        # text seedha "Seedha jawab" ke neeche chhap raha tha, jo user ke liye
+        # bekaar aur darane wala tha.
+        tech_lines: List[str] = []
+        for line in list(technical_details or []) + list(tech_from_warnings):
+            clean = " ".join(str(line or "").split())
+            if clean and clean not in tech_lines:
+                tech_lines.append(clean)
+        for line in (status or {}).get("technical_details", []) or []:
+            clean = " ".join(str(line or "").split())
+            if clean and clean not in tech_lines:
+                tech_lines.append(clean)
+        if tech_lines:
+            blocks.append("### Technical details (developer ke liye — user ke jawab "
+                          "ka hissa nahi)\n"
+                          + "\n".join(f"- `{l[:300]}`" for l in tech_lines[:8]))
+
         return "\n\n".join(blocks) if blocks else (
             "Is run ka koi technical record available nahi hai.")
+
+    # ── §14: API ka hisaab (andaaza nahi, ginti) ─────────────────────────────
+    @staticmethod
+    def _api_accounting_block(accounting: Optional[Dict]) -> str:
+        if not accounting:
+            return ""
+        acc = dict(accounting)
+        rows = [
+            ("Reasoning pass (logical calls)",
+             f"{acc.get('logical_reasoning_calls', 0)}/{acc.get('budget', 0)}"),
+            ("Asli HTTP attempts", acc.get("actual_http_attempts", 0)),
+            ("Safal calls", acc.get("successful_calls", 0)),
+            ("Fail attempts", acc.get("failed_attempts", 0)),
+            ("Retry", acc.get("retries", 0)),
+        ]
+        lines = [f"- {label}: **{value}**" for label, value in rows]
+        tried = acc.get("models_tried") or []
+        if tried:
+            lines.append(f"- Model try kiye gaye: {', '.join(str(t) for t in tried)}")
+        blocked = acc.get("blocked_models") or {}
+        if blocked:
+            lines.append("- Is run mein band kiye gaye model: "
+                         + ", ".join(f"{n} ({k})" for n, k in sorted(blocked.items())))
+        summary = str(acc.get("failure_summary") or "").strip()
+        if summary:
+            lines.append(f"- Failure ka hisaab: {summary}")
+        if acc.get("stopped_early"):
+            lines.append("- API key/permission fail hone ke baad aage koshish nahi ki gayi.")
+        return "\n".join(lines)
 
     # ── model ke output ko sections mein baanto ──────────────────────────────
     @staticmethod
@@ -1074,6 +1194,10 @@ Ab jawab likho:"""
 
     # ── final report ─────────────────────────────────────────────────────────
     _MISSING = "_(Reasoning model ne ye section nahi diya.)_"
+    # §10 — sirf explainer/boilerplate wali section ko "bhari hui" nahi maanenge.
+    # Section 1 ke saath sirf label ka matlab samjhane wala block aata hai; wo
+    # content nahi hai, isliye model text na ho to poori section chhod dete hain.
+    _EXPLAINER_ONLY = {1}
 
     def assemble(self, gemini_answer: str, pack: EvidencePack, evidence_level: str,
                  confidence_note: str, contradictions: List[Dict],
@@ -1085,12 +1209,22 @@ Ab jawab likho:"""
                  label_report: Optional[Dict] = None,
                  notes: Optional[List[str]] = None,
                  usage_note: str = "",
-                 requests: Optional[Dict] = None) -> str:
+                 requests: Optional[Dict] = None,
+                 status: Optional[Dict] = None,
+                 technical_details: Optional[List[str]] = None,
+                 api_accounting: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
-        Naye parameters (ledger, label_report, notes, usage_note, requests) sab
-        optional hain, taaki purane callers bina badle chalte rahein.
+        Naye parameters (ledger, label_report, notes, usage_note, requests,
+        status, technical_details, api_accounting) sab optional hain, taaki
+        purane callers bina badle chalte rahein.
+
+        §10: jis section mein na model ka text hai, na system ka computed
+        content — wo section CHHAP HI NAHI hoti. Uska naam ek jagah (top banner
+        + audit) saaf likh diya jaata hai. Pehle wahan khaali heading aur
+        "_(Reasoning model ne ye section nahi diya.)_" chhapta tha, jisse report
+        bhari hui lagti thi par kuch batati nahi thi.
         """
         found, leftover = self.split_model_sections(gemini_answer or "")
         reasons = [str(n) for n in (notes or [])]
@@ -1103,47 +1237,89 @@ Ab jawab likho:"""
             if isinstance(item, dict) and item.get("why"):
                 reasons.append(str(item["why"]))
 
-        out: List[str] = []
+        # ── pehle har section ka content banao, phir decide karo kya chhapega ──
+        bodies: Dict[int, List[str]] = {}
+        missing_sections: List[str] = []
         for index, title in enumerate(SECTION_TITLES):
-            out.append(f"## {title}")
             model_text = str(found.get(index, "") or "").strip()
+            parts: List[str] = []
+            engine_text = ""
 
             if index == 0:
-                banner = self._status_banner(pack, ledger)
-                if banner:
-                    out.append(banner)
-                out.append(model_text or (
+                parts.append(model_text or (
                     "Is sawal ka pakka jawab is run se nahi nikla. Neeche jo mila wo "
                     "hai, aur jo nahi mil paaya wo bhi saaf likha hai."))
             elif index == 5:
-                out.append(self._hypothesis_section(hypotheses, requests, reasons, pack))
+                engine_text = self._hypothesis_section(hypotheses, requests,
+                                                       reasons, pack)
+                parts.append(engine_text)
             elif index == 9:
-                out.append(self._sources_section(pack, honesty))
+                engine_text = self._sources_section(pack, honesty)
+                parts.append(engine_text)
             elif index == 10:
-                out.append(self._audit_section(
+                engine_text = self._audit_section(
                     pack=pack, verification=verification, coverage=coverage,
                     honesty=honesty, consensus=consensus,
                     discovery_note=discovery_note, quota_note=quota_note,
                     warnings=warnings, ledger=ledger, label_report=label_report,
-                    notes=notes, usage_note=usage_note))
+                    notes=notes, usage_note=usage_note, status=status,
+                    technical_details=technical_details,
+                    api_accounting=api_accounting,
+                    missing_sections=missing_sections)
+                parts.append(engine_text)
             else:
-                out.append(model_text or self._MISSING)
                 if index == 1:
-                    out.append(_LABEL_EXPLAINER)
+                    engine_text = _LABEL_EXPLAINER
                 elif index == 3:
-                    out.append(self._access_block(coverage, pack))
+                    engine_text = self._access_block(coverage, pack)
                 elif index == 4:
-                    out.append(self._against_section(critique or {}, hypotheses,
-                                                     contradictions))
+                    engine_text = self._against_section(critique or {}, hypotheses,
+                                                        contradictions)
                 elif index == 6:
-                    out.append(self._test_section(hypotheses, verification))
+                    engine_text = self._test_section(hypotheses, verification)
                 elif index == 8:
-                    out.append(self._conclusion_block(evidence_level, confidence_note,
-                                                      pack, ledger))
+                    engine_text = self._conclusion_block(evidence_level,
+                                                         confidence_note, pack, ledger)
+                # §10: model ne kuch nahi diya aur system ka bhi asli content
+                # nahi hai -> section hi mat banao (naam neeche list ho jaayega)
+                usable_engine = (str(engine_text or "").strip()
+                                 and index not in self._EXPLAINER_ONLY)
+                if not model_text and not usable_engine:
+                    missing_sections.append(title)
+                    continue
+                if model_text:
+                    parts.append(model_text)
+                if str(engine_text or "").strip():
+                    parts.append(engine_text)
+
+            bodies[index] = [p for p in parts if str(p).strip()]
+
+        # ── ab asli output ────────────────────────────────────────────────────
+        # §10 ke saath ek khatra aaya: pehle extra sections (math model /
+        # second-order chain) aur model ka bina-heading text section 2 aur 8 ke
+        # "andar" chhapte the. Agar wahi section skip ho jaaye to ye content
+        # CHUP-CHAAP GAYAB ho jaata — aur "content kabhi delete nahi hota" is
+        # project ka pakka niyam hai. Isliye anchor wo section hai jo SACH MEIN
+        # chhap raha hai (uske aas-paas ka sabse kareebi).
+        printed = sorted(bodies)
+        first = printed[0] if printed else 0
+        extras_after = max([i for i in printed if i <= 2], default=first)
+        leftover_after = max([i for i in printed if i <= 8], default=extras_after)
+
+        out: List[str] = []
+        for index, title in enumerate(SECTION_TITLES):
+            if index not in bodies:
+                continue
+            out.append(f"## {title}")
+            if index == 0:
+                banner = self._status_banner(pack, ledger, status, missing_sections)
+                if banner:
+                    out.append(banner)
+            out.extend(bodies[index])
 
             # Explicitly maangi hui extra sections — "Ye kyun hota hai?" ke turant
             # baad, taaki wo main answer ka hissa lagein, technical tail ka nahi.
-            if index == 2:
+            if index == extras_after:
                 for key, heading in ((EXTRA_MATH, "Mathematical model — simple "
                                                   "shabdon mein"),
                                      (EXTRA_CHAIN, "Ek cheez se doosri cheez tak ka "
@@ -1154,10 +1330,13 @@ Ab jawab likho:"""
                         out.append(body)
 
             # Model ka bina-heading likha text kabhi delete nahi hota.
-            if index == 8 and leftover:
+            if index == leftover_after and leftover:
                 out.append("## Extra notes (model se, canonical sections ke bahar)")
                 out.append(leftover)
 
+        # Caller (orchestrator) ko bhi chahiye — API/UI mein `missing_sections`
+        # structured roop mein jaata hai, taaki frontend ko text parse na karna pade.
+        self.last_missing_sections = list(missing_sections)
         return "\n\n".join(part for part in out if str(part).strip())
 
     # ── Gemini bilkul na chale to bhi kuch dena hai ──────────────────────────

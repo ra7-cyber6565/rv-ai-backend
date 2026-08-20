@@ -62,7 +62,31 @@ from .quality_signals import (
 # hai — CONNECTOR_READ_TIMEOUT badhane par reading bhi patient ho jaati hai.
 _TIMEOUT = SLOW_TIMEOUT          # (connect, read) tuple
 
-_MAX_BYTES = 4 * 1024 * 1024     # 4 MB — isse badi file skip (memory safety)
+# §12 — byte-size par file "unusable" nahi hoti.
+#
+# PEHLE: `_MAX_BYTES = 4 MB` aur usse badi file par seedha
+#        "skip (memory safety)". Yaani 20 MB ka review ya 100 MB ki thesis
+#        kabhi padhi hi nahi jaati thi.
+# AB:    4 MB tak → poora document normal path se.
+#        4 MB se badi → download hoti hai, par PAGE-BY-PAGE stream hoti hai
+#        (processing/pdf_chunker.py): relevance se kaam ke pages chune jaate
+#        hain, poora text kabhi memory mein nahi aata.
+#        `_HARD_MAX_BYTES` sirf disk/bandwidth ki aakhri deewar hai — env
+#        `MAX_FETCH_MB` se badhaya ja sakta hai.
+_LARGE_BYTES = 4 * 1024 * 1024           # isse badi = streaming path
+
+
+def _hard_cap_bytes() -> int:
+    try:
+        mb = float(os.getenv("MAX_FETCH_MB", "120").strip() or 120)
+    except Exception:
+        mb = 120.0
+    return int(max(4.0, mb) * 1024 * 1024)
+
+
+# Purana naam zinda rakha gaya hai (koi bhi purana caller/test na toote), par
+# iska matlab badal gaya: ye "skip" ki line nahi, "streaming path" ki line hai.
+_MAX_BYTES = _LARGE_BYTES
 _MIN_USEFUL_CHARS = 400          # itne se kam mila to "full text" nahi kehna
 _UA = ("InfinityResearchAI/1.0 (educational research project; "
        "contact: local user) python-requests")
@@ -254,8 +278,16 @@ class ContentFetcher:
 
     # ── download ─────────────────────────────────────────────────────────────
     def _download(self, url: str, kind: str, directory: str) -> Dict:
-        """Bytes laao aur temp file mein likho. Size cap enforce hota hai."""
-        out = {"ok": False, "path": "", "error": "", "bytes": 0}
+        """
+        Bytes laao aur temp file mein likho.
+
+        §12: yahan se "4 MB se badi = skip" hat gaya hai. Ab do cheezein hoti
+        hain — file `large` mark ho jaati hai (aage streaming reading chalegi),
+        aur sirf HARD cap par (default 120 MB, `MAX_FETCH_MB` se badalta hai)
+        download rukta hai. Wo cap disk/bandwidth ki deewar hai, "ye document
+        bekaar hai" ka faisla nahi.
+        """
+        out = {"ok": False, "path": "", "error": "", "bytes": 0, "large": False}
         try:
             requests = self._requests()
         except Exception as exc:
@@ -291,19 +323,24 @@ class ContentFetcher:
             path = os.path.join(directory, f"fetched_{abs(hash(url)) % 10**8}{extension}")
 
             size = 0
+            hard_cap = _hard_cap_bytes()
             with open(path, "wb") as handle:
                 for chunk in resp.iter_content(chunk_size=64 * 1024):
                     if not chunk:
                         continue
                     size += len(chunk)
-                    if size > _MAX_BYTES:
-                        out["error"] = (f"file {_MAX_BYTES // (1024 * 1024)}MB se badi "
-                                        f"hai — skip (memory safety)")
+                    if size > hard_cap:
+                        # Ye "badi file" ka reject nahi hai — ye disk/bandwidth
+                        # ki aakhri deewar hai. Badhani ho to MAX_FETCH_MB.
+                        out["error"] = (
+                            f"file {hard_cap // (1024 * 1024)}MB (MAX_FETCH_MB) se "
+                            f"bhi badi hai — download roka gaya")
                         handle.close()
                         return out
                     handle.write(chunk)
 
-            out.update({"ok": size > 0, "path": path, "bytes": size})
+            out.update({"ok": size > 0, "path": path, "bytes": size,
+                        "large": size > _LARGE_BYTES})
             if not size:
                 out["error"] = "khaali response mila"
             return out
@@ -431,7 +468,10 @@ class ContentFetcher:
             else:
                 target = downloaded["path"]
 
-            processed = self._processor().process(target, use_ocr=True)
+            processed = self._processor().process(
+                target, use_ocr=True, question=question,
+                size_bytes=int(downloaded.get("bytes") or 0),
+                large=bool(downloaded.get("large")))
             if not processed.get("ok"):
                 entry["reason"] = f"processing fail: {processed.get('error', 'unknown')}"
                 return entry
@@ -452,6 +492,12 @@ class ContentFetcher:
                           "reason": plan.get("reason", ""),
                           "notes": processed.get("notes", []),
                           "kind": processed.get("kind", plan["kind"]),
+                          "bytes": int(downloaded.get("bytes") or 0),
+                          # §12 — badi file streaming (page-by-page) se padhi
+                          # gayi ya poori? Report mein yahi farak imaandaari se
+                          # dikhna chahiye.
+                          "streamed": bool(processed.get("streamed")),
+                          "selection": processed.get("selection") or {},
                           # Spec Section 7 — COI/funding sirf yahin pata chal
                           # sakte hain, kyunki abstract mein ye statements hoti
                           # hi nahi. Isliye full text padhne ka ek aur fayda.
@@ -512,6 +558,17 @@ class ContentFetcher:
             source.full_text_chars = entry["chars"]
             source.full_text_available = True
 
+            # §12 — agar file badi thi aur page-by-page padhi gayi, to yahan
+            # likh do ki kitne pages mein se kaun chune gaye. read_level
+            # "full_text" hi rehta hai (download + process asli mein hua), par
+            # ab uske saath scope ki line bhi chalti hai, taaki report ya model
+            # "poora 300-page document padh liya" na samjhe.
+            selection = entry.get("selection") or {}
+            if entry.get("streamed") and selection:
+                source.read_note = selection.get("note", "") or ""
+                source.pages_read = int(selection.get("pages_kept") or 0)
+                source.pages_total = int(selection.get("pages_total") or 0)
+
             # Spec Section 7 — jo signals sirf full text mein milte hain, unhe
             # ab record par likh do. Jo field connector pehle se bhar chuka hai
             # (API ka structured data) use overwrite NAHI karte; COI/funding ke
@@ -555,6 +612,23 @@ class ContentFetcher:
         if report.get("skipped"):
             bits.append(f"{report['skipped']} sources budget ke bahar the (sirf "
                         f"snippet/abstract level tak padhe gaye)")
+
+        # §12 — badi files ka hisaab alag se, kyunki inka "full text padha" ka
+        # matlab "chune hue pages padhe" hai. Ye farak chhupana hi purana bug tha.
+        streamed = [e for e in report.get("entries", [])
+                    if e.get("ok") and e.get("streamed")]
+        if streamed:
+            kept = sum(int((e.get("selection") or {}).get("pages_kept") or 0)
+                       for e in streamed)
+            total = sum(int((e.get("selection") or {}).get("pages_total") or 0)
+                        for e in streamed)
+            piece = (f"{len(streamed)} badi file page-by-page padhi gayi "
+                     f"(4MB+ file ab skip nahi hoti)")
+            if total:
+                piece += (f": {total} pages mein se sawaal se sabse milte-julte "
+                          f"{kept} pages process hue — poora document padha gaya "
+                          f"aisa dava nahi hai")
+            bits.append(piece)
         reasons: Dict[str, int] = {}
         for entry in report.get("entries", []):
             if not entry.get("ok"):
