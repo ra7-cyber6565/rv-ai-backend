@@ -11,6 +11,4 @@ services:
         value: 3.11.0
       - key: GEMINI_API_KEY
         sync: false
-      - key: OPENAI_API_KEY
-        sync: false
     healthCheckPath: /health
