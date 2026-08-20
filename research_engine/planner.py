@@ -17,6 +17,11 @@ from typing import Dict, List, Optional
 
 from .depth import DepthConfig
 from .local_language import normalize
+from .query_builder import is_instruction_prompt, search_query, topic_terms
+
+# Query ki upper limit. OpenAlex ne live test mein HTTP 400 diya tha kyunki
+# poora 2000-character prompt URL parameter mein chala gaya tha.
+_MAX_QUERY_CHARS = 200
 
 # ── Spec Section 1: question types ───────────────────────────────────────────
 QUESTION_TYPES: Dict[str, List[str]] = {
@@ -148,15 +153,51 @@ class ResearchPlanner:
 
     # ── 4. search queries ─────────────────────────────────────────────────────
     def clean_query(self, question: str) -> str:
-        # Shorthand khol kar search bhejo — "reserch ke bare me" se koi paper
-        # nahi milta, "research" se milta hai.
+        """
+        Sawaal se search-worthy query banao.
+
+        DO RAASTE, jaan-boojh kar:
+
+        1. LAMBA, instruction-style prompt ("...research papers khojo, 3
+           hypotheses banao, HYPOTHESIS label karo..."): iska poora text query
+           banana do galtiyan karta tha — (a) 2000-character query se OpenAlex ne
+           HTTP 400 diya, aur (b) connectors ke content_terms() ne prompt ke
+           PEHLE 6 shabd uthaye, jo filler the ("मान लो मानव सभ्यता को अगले 100
+           वर्षों"), isliye search "human civilization next years" par chali —
+           energy par nahi. Aise prompt ke liye query_builder topic terms
+           nikaalta hai.
+
+        2. CHHOTA, seedha sawaal ("cancer ki nai dawa par research kya kehti
+           hai"): iska purana filler-strip raasta pehle se theek kaam karta hai,
+           isliye use CHHEDA NAHI GAYA. Naya scoring chhote sawaal par lagane ki
+           koi zaroorat nahi thi, aur risk tha ki asli shabd ud jaaye.
+        """
+        if is_instruction_prompt(question):
+            topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
+            if len(topic) >= 3:
+                return topic
+
         q = " " + normalize(question or "").lower().strip() + " "
         for phrase in _FILLER_PHRASES:
             q = q.replace(" " + phrase + " ", " ")
         tokens = [t for t in re.findall(r"[\w\-']+", q) if t not in _FILLER_WORDS]
         cleaned = " ".join(tokens).strip()
         # Kabhi khaali query mat bhejo — warna search 0 results dega
-        return cleaned if len(cleaned) >= 3 else (question or "").strip()
+        if len(cleaned) < 3:
+            cleaned = (question or "").strip()
+        # Aur kabhi bahut LAMBI bhi mat bhejo — ye wahi 400 wali galti hai.
+        if len(cleaned) > _MAX_QUERY_CHARS:
+            topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
+            cleaned = topic if len(topic) >= 3 else \
+                cleaned[:_MAX_QUERY_CHARS].rsplit(" ", 1)[0]
+        return cleaned
+
+    def topic_terms(self, question: str, limit: int = 8) -> List[str]:
+        """
+        Sawaal ka topic — relevance guard aur report isi list ko dekhte hain.
+        (Wrapper hai taaki baaki code ko query_builder import na karna pade.)
+        """
+        return topic_terms(question, limit=limit)
 
     def search_queries(self, question: str, cls: Optional[Dict] = None,
                        round_no: int = 1) -> List[str]:
@@ -239,6 +280,7 @@ class ResearchPlanner:
         cls = self.classify(question)
         return {
             **cls,
+            "topic_terms": self.topic_terms(question),
             "sub_questions": self.sub_questions(question, cls),
             "queries": self.search_queries(question, cls, round_no=1),
             "connectors": self.connector_plan(cls, config),

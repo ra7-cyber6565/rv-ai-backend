@@ -31,6 +31,45 @@ _FIELD_RE = re.compile(
     re.IGNORECASE | re.MULTILINE,
 )
 
+# `_FIELD_RE` sirf EK line uthata hai (`.` newline match nahi karta). Gemini
+# aksar multi-line likhta hai — "Reasoning:" ke neeche step-by-step chain, aur
+# "Prediction:" ke neeche "Variables: / Expected outcome: / Measurement:" wali
+# labelled lines. Purana parser un continuation lines ko chup-chaap phenk deta
+# tha, isliye structured prediction kabhi complete nahi banti thi aur reasoning
+# chain ki pehli line ke baad sab gum ho jaata tha.
+# Isliye ab line-by-line scan hota hai: label mile to naya field shuru, warna
+# line pichhle field ke saath jud jaati hai (agli label ya `##` heading tak).
+_FIELD_LINE_RE = re.compile(
+    r"^\s*(?:[-*]\s*)?\**\s*(statement|reasoning|supporting evidence|against|"
+    r"contradicting evidence|novelty|prediction|how to test|test|risks|confidence)"
+    r"\s*\**\s*[:\-]\s*(.*)$",
+    re.IGNORECASE,
+)
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s")
+_MAX_FIELD_CHARS = 4000   # runaway continuation se bachne ke liye
+
+
+def _fields(chunk: str) -> List[tuple]:
+    """Ek hypothesis block se (key, multi-line value) nikaalo, order barkarar."""
+    found: List[list] = []
+    current: Optional[list] = None
+    for line in chunk.splitlines():
+        if _HEADING_RE.match(line):
+            current = None                      # naya section — field khatam
+            continue
+        match = _FIELD_LINE_RE.match(line)
+        if match:
+            current = [match.group(1).lower().strip(), [match.group(2).strip()]]
+            found.append(current)
+            continue
+        if current is not None and line.strip():
+            current[1].append(line.strip())
+    out = []
+    for key, lines in found:
+        value = "\n".join(l for l in lines if l).strip().strip("*").strip()
+        out.append((key, value[:_MAX_FIELD_CHARS]))
+    return out
+
 
 @dataclass
 class PredictionStructure:
@@ -203,119 +242,103 @@ Format exactly aise:
 - Confidence: (LOW/MEDIUM/HIGH — reasoning-based, proof nahi)
 """
 
-    # ── structured prediction parser ─────────────────────────────────────────
+    # ── structured prediction parser (Spec §10) ──────────────────────────────
+    # YAHAN EK ASLI BUG THA (2026-08-19 ko pakda gaya): is class mein
+    # `_parse_prediction` DO baar define tha. Python mein doosri definition pehli
+    # ko chup-chaap kha jaati hai, aur doosri `(PredictionStructure, text)` ka
+    # TUPLE lautati thi. `parse()` us tuple ko `h.prediction` mein rakh deta tha,
+    # aur `Hypothesis.to_dict()` mein `self.prediction.is_complete` par poora
+    # pipeline crash karta tha:
+    #     AttributeError: 'tuple' object has no attribute 'is_complete'
+    # Ye MAXIMUM mode ka asli raasta hai (hypothesis ban kar answer mein jaati
+    # hai), isliye ye live crash tha — sirf test ka issue nahi.
+    #
+    # Dono purani strategies bachi hui hain, ek hi function mein:
+    #   1. LABELLED lines ("Variables: x, y" / "Measurement: HOMA-IR") — Gemini
+    #      se hum yahi format maangte hain, isliye pehle ye.
+    #   2. Free-text heuristic (keywords + percentage regex) — jab model ne
+    #      labels na likhe ho.
+    # Jaan-boojh kar hataayi gayi sirf ek cheez: placeholder bharna
+    # ("expected_outcome = 'change expected'", "measurement = 'to be
+    # determined'"). Us se khaali prediction bhi `is_complete` ban jaati thi,
+    # yaani report jhooth bolti ki structured prediction maujood hai.
     @staticmethod
     def _parse_prediction(text: str) -> Optional[PredictionStructure]:
         """
-        Try to extract structured prediction from free-text.
+        Free-text prediction se structured prediction nikaalo (mile to).
 
-        Example input:
-        "blood glucose will decrease by 20-30%, measured via HOMA-IR;
-         if no change after 12 weeks, hypothesis is rejected"
+        Kuch na mile to None — tab `Hypothesis.prediction_text` (asli text) hi
+        aage jaata hai. Khaali structure banana mana hai.
         """
-        if not text or len(text) < 20:
+        if not text or len(text.strip()) < 20:
             return None
 
         pred = PredictionStructure()
         lower = text.lower()
 
-        # Variables: common measurement keywords
-        var_keywords = ["glucose", "insulin", "pressure", "weight", "temperature",
-                        "level", "rate", "count", "score", "index", "concentration"]
-        pred.variables = [kw for kw in var_keywords if kw in lower]
+        # ── 1. labelled lines ────────────────────────────────────────────────
+        for line in [l.strip() for l in text.split("\n") if l.strip()]:
+            low = line.lower()
+            if any(k in low for k in ("variable", "parameter", "factor")):
+                items = re.findall(r'["\']([^"\']+)["\']|:\s*([^,\n]+)', line)
+                for a, b in items:
+                    value = (a or b or "").strip()
+                    if value and value not in pred.variables:
+                        pred.variables.append(value)
+            if any(k in low for k in ("expect", "outcome", "result")):
+                match = re.search(
+                    r"(\d+%|\d+\.\d+|\d+\s*(?:fold|times|unit|point|level))[^.]*",
+                    line)
+                if match and not pred.expected_outcome:
+                    pred.expected_outcome = match.group(0).strip()
+            if any(k in low for k in ("measur", "assess", "index", "scale", "method")):
+                match = re.search(r"(?:using|via|through|with|by)\s+([^,.\n]+)",
+                                  line, re.IGNORECASE)
+                if match and not pred.measurement_method:
+                    pred.measurement_method = match.group(1).strip()
+                elif (":" in line and not pred.measurement_method
+                      # sirf tab jab LABEL hi measurement ka ho. Warna
+                      # "Variables: fasting glucose, HOMA-IR index" wali line
+                      # ("index" ki wajah se) measurement ban jaati thi.
+                      and any(k in low.split(":", 1)[0]
+                              for k in ("measur", "assess", "method"))):
+                    pred.measurement_method = line.split(":", 1)[1].strip()
+            if any(k in low for k in ("falsif", "disprove", "reject", "null",
+                                      "no change", "no effect")):
+                if not pred.falsification_condition:
+                    pred.falsification_condition = line.strip()
 
-        # Expected outcome: look for percentages, ranges, qualitative change
-        outcome_patterns = [
-            r"(increase|decrease|reduction|rise|drop|change).*?(\d+[-–]?\d*%?)",
-            r"(significant|no significant|positive|negative|elevated|reduced)",
-        ]
-        for pattern in outcome_patterns:
-            match = _re_module.search(pattern, lower)
+        # ── 2. free-text heuristic (labels na mile ho to) ────────────────────
+        if not pred.variables:
+            var_keywords = ["glucose", "insulin", "pressure", "weight",
+                            "temperature", "level", "rate", "count", "score",
+                            "index", "concentration", "gap", "error"]
+            pred.variables = [kw for kw in var_keywords if kw in lower]
+        if not pred.expected_outcome:
+            for pattern in (
+                r"(increase|decrease|reduction|rise|drop|change).*?(\d+[-–]?\d*%?)",
+                r"(significant|no significant|positive|negative|elevated|reduced)",
+            ):
+                match = _re_module.search(pattern, lower)
+                if match:
+                    pred.expected_outcome = match.group(0)
+                    break
+        if not pred.measurement_method:
+            match = re.search(
+                r"measur\w*\s+(?:via|by|using|with)\s+([^;,\.]+)", lower)
             if match:
-                pred.expected_outcome = match.group(0)
-                break
+                pred.measurement_method = match.group(1).strip()
+        if not pred.falsification_condition:
+            match = re.search(
+                r"(?:if no|if opposite|reject\w* if|falsif\w* if)\s+([^;,\.]+)",
+                lower)
+            if match:
+                pred.falsification_condition = match.group(0).strip()
 
-        # Measurement: look for "measured via/by/using"
-        measure_match = re.search(r"measur\w*\s+(?:via|by|using|with)\s+([^;,\.]+)",
-                                  lower)
-        if measure_match:
-            pred.measurement_method = measure_match.group(1).strip()
-
-        # Falsification: "if no/if opposite/rejected if"
-        false_match = re.search(r"(?:if no|if opposite|reject\w* if|falsif\w* if)\s+([^;,\.]+)",
-                                lower)
-        if false_match:
-            pred.falsification_condition = false_match.group(0).strip()
-
-        # Only return if somewhat complete
+        # kuch asli mila tabhi lautao — warna text fallback behtar hai
         if pred.variables or pred.expected_outcome:
             return pred
         return None
-
-    # ── parse ────────────────────────────────────────────────────────────────
-    def _parse_prediction(self, text: str) -> tuple[Optional[PredictionStructure], str]:
-        """
-        Parse structured prediction from text.
-        Returns: (PredictionStructure | None, fallback_text)
-
-        Looks for patterns like:
-        - Variables: x, y
-        - Expected outcome: 30% reduction
-        - Measurement: HOMA-IR index
-        - Falsification: no change after 12 weeks
-        """
-        lines = [l.strip() for l in (text or "").split("\n") if l.strip()]
-
-        variables = []
-        outcome = ""
-        measurement = ""
-        falsification = ""
-
-        for line in lines:
-            lower = line.lower()
-            # Extract variables
-            if any(kw in lower for kw in ["variable", "measure", "parameter", "factor"]):
-                # Extract comma-separated items or quoted items
-                items = re.findall(r'["\']([^"\']+)["\']|:\s*([^,\n]+)', line)
-                variables.extend([i[0] or i[1] for i in items if i[0] or i[1]])
-
-            # Expected outcome
-            if any(kw in lower for kw in ["expect", "outcome", "result", "change", "effect"]):
-                # Extract percentage or numeric patterns
-                match = re.search(r'(\d+%|\d+\.\d+|\d+\s*(?:fold|times|unit|point|level))[^.]*', line)
-                if match:
-                    outcome = match.group(0).strip()
-
-            # Measurement method
-            if any(kw in lower for kw in ["measur", "assess", "index", "scale", "test", "method"]):
-                # Extract the measurement tool/method
-                match = re.search(r'(?:using|via|through|with|by)\s+([^,.\n]+)', line, re.IGNORECASE)
-                if match:
-                    measurement = match.group(1).strip()
-                elif ":" in line:
-                    measurement = line.split(":", 1)[1].strip()
-
-            # Falsification condition
-            if any(kw in lower for kw in ["falsif", "disprove", "reject", "null", "no change", "no effect"]):
-                falsification = line.strip()
-
-        # Clean up extracted data
-        variables = [v.strip() for v in variables if v.strip()][:5]  # max 5
-
-        # If we got structured data, create PredictionStructure
-        if variables or outcome or measurement or falsification:
-            return (
-                PredictionStructure(
-                    variables=variables,
-                    expected_outcome=outcome or "change expected",
-                    measurement_method=measurement or "to be determined",
-                    falsification_condition=falsification or "no observable change"
-                ),
-                text  # also keep original text
-            )
-
-        # No structure found, return text only
-        return None, text
 
     def parse(self, text: str) -> List[Hypothesis]:
         if not text or not text.strip():
@@ -327,9 +350,7 @@ Format exactly aise:
         out: List[Hypothesis] = []
         for chunk in chunks[:3]:
             h = Hypothesis()
-            for raw_key, value in _FIELD_RE.findall(chunk):
-                key = raw_key.lower().strip()
-                value = value.strip().strip("*").strip()
+            for key, value in _fields(chunk):
                 if key == "statement":
                     h.statement = value
                 elif key == "reasoning":

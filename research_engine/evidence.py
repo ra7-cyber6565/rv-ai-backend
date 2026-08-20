@@ -117,6 +117,10 @@ class EvidenceEngine:
             all_candidates, question,
             max_sources=max_sources, max_per_origin=max_per_origin,
         )
+        # Ranking ne kya chhaanta — ye pack ke saath chalta hai. Pehle ye
+        # jaankari rank() ke andar hi mar jaati thi, isliye grade_evidence ko
+        # pata hi nahi tha ki sources topic ke hain ya nahi.
+        filter_info = dict(getattr(self.relevance, "last_filter", {}) or {})
         self.citation.assign_ids(ranked)
 
         passages: List[Passage] = []
@@ -136,6 +140,8 @@ class EvidenceEngine:
             rounds_run=rounds_run,
             discovered_count=discovered,
             searched_connectors=sorted(set(connectors_searched or [])),
+            topic_terms=list(filter_info.get("topic_terms") or []),
+            retrieval_filter=filter_info,
         )
 
     # ── 3. Claims + provenance (Spec Section 7) ──────────────────────────────
@@ -157,10 +163,55 @@ class EvidenceEngine:
         }
 
     # ── 4. Overall evidence grade ────────────────────────────────────────────
-    def grade_evidence(self, pack: EvidencePack, claims: Optional[List[Claim]] = None) -> str:
+    # Ye teen gate live failure (2026-08-19) ke baad lage. Us test mein report
+    # ne "✅ VERIFIED — 2 peer-reviewed + 4 independent sources" chhaapa, jabki:
+    #   * saare sources off-topic the (energy ke sawaal par Gagea naam ke phool
+    #     ki botany aur WHO ki surgeons-density),
+    #   * 5 mein se 0 ka full text pada gaya tha,
+    #   * 3 mein se sirf 1 reasoning pass chala tha (Gemini quota 429).
+    # Teeno galtiyan ek hi wajah se chhupi: grade sirf GINTI dekhta tha (peer
+    # review, independence, average quality), retrieval aur reading ka sach
+    # nahi. Ab "VERIFIED"/"STRONG" tab hi mil sakta hai jab ye teen sach saath
+    # dein. Sakhti jaan-boojh kar hai: galat "VERIFIED" se "MIXED" bolna hazaar
+    # guna behtar hai.
+    _MIN_AVG_RELEVANCE = 0.20     # is se neeche = retrieval bharosemand nahi
+    _MIN_ON_TOPIC = 2             # kam se kam itne sources sach mein topic ke ho
+
+    def _honesty_gate(self, pack: EvidencePack,
+                      check_reasoning: bool = True) -> Optional[str]:
+        """
+        Kya is pack ko "VERIFIED/STRONG" kehne ka haq hai?
+
+        None = haan, aage badho. String = nahi, aur ye us "nahi" ki wajah hai
+        (wajah user ko dikhayi jaati hai — chupchaap downgrade nahi hota).
+
+        `check_reasoning=False` SIRF ek jagah ke liye hai: orchestrator reasoning
+        se PEHLE ek kaccha grade nikaalta hai (hypothesis chahiye ya nahi, ye
+        decide karne ke liye). Us waqt reasoning ka 0/0 hona swabhavik hai, bug
+        nahi — usse "adhoora" bolna ek jhoothi wajah hoti aur hypothesis wala
+        faisla galat ho jaata. Final grade par ye gate HAMESHA lagta hai.
+        """
+        if pack.avg_relevance < self._MIN_AVG_RELEVANCE or \
+                pack.on_topic_count < self._MIN_ON_TOPIC:
+            return (f"sources topic se theek se match nahi karte "
+                    f"(average match {pack.avg_relevance:.2f}, "
+                    f"{pack.on_topic_count} source topic ke)")
+        if pack.full_text_read_count < 1:
+            return ("kisi bhi source ka poora text nahi pada ja saka — sirf "
+                    "title/abstract par 'verified' kehna galat hoga")
+        if check_reasoning and not pack.reasoning_complete:
+            return (f"reasoning adhoora raha "
+                    f"({pack.reasoning_done}/{pack.reasoning_planned} pass poore)")
+        return None
+
+    def grade_evidence(self, pack: EvidencePack, claims: Optional[List[Claim]] = None,
+                       check_reasoning: bool = True) -> str:
         """
         Purane system ka 'evidence_level' string, par ab real signals se banta hai
         (source count, independence, peer review, grounded ratio) — hardcoded nahi.
+
+        Aur sabse zaroori: TOP do labels ("VERIFIED", "STRONG") par honesty gate
+        lagta hai — dekho `_honesty_gate`.
         """
         if not pack.sources:
             return "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)"
@@ -175,10 +226,21 @@ class EvidenceEngine:
         if grounded_ratio is not None and grounded_ratio < 0.34:
             return (f"⚠️ WEAK — {independent} independent source(s) mile, par answer ke "
                     f"zyadatar claims kisi source se linked nahi hain")
-        if peer >= 2 and independent >= 3 and avg_q >= 0.7:
-            return f"✅ VERIFIED — {peer} peer-reviewed + {independent} independent sources"
-        if (scholarly >= 2 or docs >= 2) and independent >= 3:
+
+        deserves_top = (peer >= 2 and independent >= 3 and avg_q >= 0.7)
+        deserves_strong = ((scholarly >= 2 or docs >= 2) and independent >= 3)
+
+        if deserves_top or deserves_strong:
+            blocked = self._honesty_gate(pack, check_reasoning=check_reasoning)
+            if blocked:
+                # ginti se to top label banta tha, par sach usse rok raha hai —
+                # aur wajah saath likhi jaati hai, chhupayi nahi jaati.
+                return (f"🟡 MIXED — {independent} independent source(s) mile, par "
+                        f"'verified' nahi keh sakta: {blocked}")
+            if deserves_top:
+                return f"✅ VERIFIED — {peer} peer-reviewed + {independent} independent sources"
             return f"✅ STRONG — {scholarly} scholarly / {docs} document source(s), {independent} independent"
+
         if independent >= 2:
             return f"🟡 MIXED — {independent} independent source(s), limited scholarly evidence"
         return f"⚠️ WEAK — sirf {independent} independent source (aur verification baaki hai)"

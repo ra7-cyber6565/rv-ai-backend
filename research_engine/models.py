@@ -295,6 +295,20 @@ class EvidencePack:
     discovered_count: int = 0      # dedup/ranking se pehle kitne mile the
     searched_connectors: List[str] = field(default_factory=list)
 
+    # ── retrieval ki honest report (live failure 2026-08-19 ke baad add hui) ──
+    # Pehle pack ke paas ye pata hi nahi tha ki jo sources usme hain wo sawaal
+    # ke topic ke hain ya nahi. Isliye grade_evidence sirf ginti dekh kar
+    # "✅ VERIFIED" chhaap deta tha — jabki us test mein saare sources off-topic
+    # the (Gagea phool, surgeons density) aur 0/5 ka full text pada tha.
+    # Ab retrieval ka sach pack ke saath chalta hai.
+    topic_terms: List[str] = field(default_factory=list)
+    retrieval_filter: Dict = field(default_factory=dict)
+
+    # reasoning passes poore hue ya quota/error se adhoore reh gaye
+    reasoning_planned: int = 0
+    reasoning_done: int = 0
+    reasoning_failures: List[str] = field(default_factory=list)
+
     # ── lookups ──
     def by_id(self, source_id: str) -> Optional[SourceRecord]:
         for s in self.sources:
@@ -313,6 +327,77 @@ class EvidencePack:
 
     def document_sources(self) -> List[SourceRecord]:
         return [s for s in self.sources if s.source_type == SourceType.DOCUMENT]
+
+    # ── retrieval sach (VERIFIED ka gate inhi par lagta hai) ──
+    @property
+    def avg_relevance(self) -> float:
+        """Jo sources use ho rahe hain, wo topic se kitne match karte hain."""
+        if not self.sources:
+            return 0.0
+        return round(
+            sum(s.relevance_score for s in self.sources) / len(self.sources), 3)
+
+    @property
+    def on_topic_count(self) -> int:
+        """Kitne sources ka topic se theek-thaak match hai (0.25+)."""
+        return len([s for s in self.sources if s.relevance_score >= 0.25])
+
+    @property
+    def full_text_read_count(self) -> int:
+        """
+        Kitne sources ka POORA text asal mein padha gaya.
+
+        Ye ginti do tarah se ban sakti hai aur dono asli hain: internet se
+        legally-free full text download hua (full_text_chars > 0), ya user ka
+        apna uploaded document jo ingest ke waqt poora process hua tha.
+        """
+        return len([
+            s for s in self.sources
+            if s.full_text_chars > 0
+            or (s.source_type == SourceType.DOCUMENT
+                and s.reading_level() == "full_text")
+        ])
+
+    @property
+    def reasoning_complete(self) -> bool:
+        """
+        Jitne reasoning pass plan hue the, utne chale ya nahi.
+
+        `reasoning_planned == 0` ka matlab "kisi ne bataya hi nahi" hai —
+        us halat mein hum ise "poora ho gaya" NAHI maanenge, kyunki bina
+        jaankari ke shabaashi dena hi wo bug tha jise theek kar rahe hain.
+        """
+        return self.reasoning_planned > 0 and self.reasoning_done >= self.reasoning_planned
+
+    def relevance_note(self) -> str:
+        """Retrieval ne kya chhaanta — asli ginti se banti line, hardcoded nahi."""
+        if not self.sources:
+            return "Koi source select nahi hua."
+        info = self.retrieval_filter or {}
+        parts = [f"Topic terms: {', '.join(self.topic_terms) or '—'}."]
+        dropped = int(info.get("dropped_offtopic") or 0)
+        if dropped:
+            parts.append(f"{dropped} source topic se bilkul match nahi kar rahe the, "
+                         f"isliye hata diye gaye.")
+        parts.append(f"Jo {len(self.sources)} use ho rahe hain unka average topic "
+                     f"match {self.avg_relevance:.2f} hai "
+                     f"({self.on_topic_count} theek-thaak match).")
+        borderline = int(info.get("borderline_used") or 0)
+        if borderline:
+            parts.append(f"{borderline} source kamzor match ke hain — acche sources "
+                         f"kam pad gaye the, isliye majboori mein liye gaye.")
+        return " ".join(parts)
+
+    def reasoning_note(self) -> str:
+        if self.reasoning_planned <= 0:
+            return "Reasoning passes ki ginti record nahi hui."
+        if self.reasoning_complete:
+            return f"{self.reasoning_done}/{self.reasoning_planned} reasoning pass poore hue."
+        note = (f"SIRF {self.reasoning_done}/{self.reasoning_planned} reasoning pass "
+                f"poore ho sake — is jawab ka reasoning adhoora hai.")
+        if self.reasoning_failures:
+            note += " Wajah: " + "; ".join(self.reasoning_failures[:3])
+        return note
 
     def external_sources(self) -> List[SourceRecord]:
         return [s for s in self.sources if s.source_type != SourceType.DOCUMENT]
@@ -475,7 +560,17 @@ class EvidencePack:
             "research_rounds": self.rounds_run,
             "read_levels": self.read_level_counts(),
             "full_text_chars_read": sum(s.full_text_chars for s in self.sources),
+            "full_text_sources_read": self.full_text_read_count,
             "honesty_note": self.reading_note(),
+            # retrieval ka sach — inhi par VERIFIED/STRONG ka gate lagta hai
+            "topic_terms": list(self.topic_terms),
+            "avg_relevance": self.avg_relevance,
+            "on_topic_sources": self.on_topic_count,
+            "offtopic_dropped": int((self.retrieval_filter or {}).get(
+                "dropped_offtopic") or 0),
+            "relevance_note": self.relevance_note(),
+            "reasoning_passes": f"{self.reasoning_done}/{self.reasoning_planned}",
+            "reasoning_note": self.reasoning_note(),
             "methodologies": self.methodology_counts(),
             "retracted_sources": len(self.retracted_sources()),
             "strong_methodology_sources": len(self.strong_methodology_sources()),

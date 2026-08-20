@@ -33,6 +33,7 @@ import re
 from typing import Dict, List, Optional
 
 from .citation import CITATION_INSTRUCTION, CitationEngine
+from .explain_style import style_block
 from .models import EvidencePack
 
 SECTION_TITLES = [
@@ -106,49 +107,44 @@ SOURCES (cite using these IDs only):
 
 {CITATION_INSTRUCTION}
 
-**IMPORTANT RULES:**
-- Write in **simple, conversational Hindi/Hinglish** — like explaining to a friend, not a textbook
-- Use everyday examples where helpful
-- Keep sentences short and clear
-- Hypotheses must be marked "UNTESTED HYPOTHESIS"
-- Include critic findings honestly in section 8
-- Mark unsourced claims with [NO-SOURCE]
-- You have {len(pack.sources)} sources with {pack.independent_source_count} independent origins
+{style_block(question, SECTION_TITLES)}
+
+# BAAKI RULES
+- Hypotheses par "UNTESTED HYPOTHESIS" likhna zaroori hai.
+- Critic ke findings section 8 mein imaandaari se likho — apni tareef mat karo.
+- Jis baat ka source nahi hai use [NO-SOURCE] mark karo.
+- Tumhare paas {len(pack.sources)} sources hain, {pack.independent_source_count} independent origins ke.
+- Evidence kamzor ho to ghumao mat — pehli line mein hi saaf bol do.
 
 Write these 7 sections (system will add others):
 
 ## {SECTION_TITLES[0]}
-(2-4 clear lines answering the question. Simple language. If evidence is weak, say so clearly.)
+(2-4 lines. SEEDHA jawab, pehli line mein hi. Koi bhoomika nahi. Agar evidence
+kamzor hai to yahi bol do ki pakka jawab nahi hai.)
 
 ## {SECTION_TITLES[1]}
-(Bullet list of key facts. Each point: [S#] citation + simple explanation. Example:
-- **[S1] Study ka naam:** Kya paaya gaya — simple words mein)
+(Key facts ki bullet list. Har point: [S#] + simple explanation. Example:
+- **[S1] Study ka naam:** kya paaya gaya — aam shabdon mein)
 
 ## {SECTION_TITLES[2]}
-(Explain evidence quality in simple terms: kitne studies the, quality kaisi thi,
-bharosemand kyun hain. Avoid jargon — write like ChatGPT would explain it.)
+(Evidence ki quality simple shabdon mein: kitni studies thi, kis tarah ki thi,
+kitna bharosa kiya ja sakta hai aur kyun. Jargon aaye to uska matlab saath likho.)
 
 ## {SECTION_TITLES[4]}
-(How different fields ({", ".join(plan.get("relevant_fields", [])[:4]) or "relevant areas"})
-connect to answer this question. Keep it simple and practical.)
+(Alag-alag fields ({", ".join(plan.get("relevant_fields", [])[:4]) or "relevant areas"})
+is sawaal se kaise judti hain. Practical rakho — theory ka lecture nahi.)
 
 ## {SECTION_TITLES[5]}
-(Things we can reasonably conclude from the evidence, even if not explicitly stated.
-Each point: [INFERENCE] + which [S#] it comes from. Write naturally.)
+(Jo baatein evidence se nikalti hain par sources mein seedhe likhi nahi hain.
+Har point: [INFERENCE] + kis [S#] se nikli.)
 
 ## {SECTION_TITLES[9]}
-(Specific things we still don't know. Be concrete — not "more research needed" but
-"we don't know X because...")
+(Kya abhi bhi pata nahi hai — thos likho. "More research needed" nahi, balki
+"X pata nahi hai kyunki ...".)
 
 ## {SECTION_TITLES[12]}
-(Practical next steps: what experiment/study would answer remaining questions?
-If medical/legal, suggest consulting professionals. Keep it actionable.)
-
-**TONE:** Friendly, clear, helpful — like ChatGPT explaining something. Avoid:
-- Technical jargon without explanation
-- Overly formal language
-- Complex sentence structures
-- Assuming prior knowledge
+(Aage kya karna chahiye: kaunsa experiment/study bachi hui baat settle karega?
+Medical/legal ho to professional se milne ki salah do. Actionable rakho.)
 
 Write the answer now:"""
 

@@ -262,15 +262,39 @@ class DeepResearchEngine:
         brain = GeminiReasoning(budget=config.gemini_calls)
         out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
                "final": "", "errors": [], "calls": 0, "critique": {},
-               "hypotheses": []}
+               "hypotheses": [],
+               # Reasoning ka LEDGER — kaun-kaun se pass chalne the aur kaun sach
+               # mein chale. Ye evidence honesty gate ko chahiye: pichhle live
+               # test mein MAXIMUM ke 3 pass mein se sirf 1 chala tha (Gemini
+               # 429), phir bhi report "✅ VERIFIED" chhaap rahi thi. Ginti
+               # `calls_used` se nahi le sakte — wo "kitni API call hui" batata
+               # hai, "kaam poora hua ya nahi" nahi.
+               "planned_passes": [], "done_passes": []}
 
         # grade_evidence ek human-readable string deta hai ("⚠️ MIXED — ..."),
-        # isliye keyword nikaal kar bhejte hain
-        graded = self.evidence.grade_evidence(pack) if pack.sources else ""
+        # isliye keyword nikaal kar bhejte hain.
+        # check_reasoning=False jaan-boojh kar: ye grade reasoning se PEHLE nikal
+        # raha hai, to "reasoning adhoora hai" yahan har baar sach hoga aur
+        # hypothesis ka faisla galat kar dega. Final grade (step 9) par poora
+        # gate lagta hai.
+        graded = self.evidence.grade_evidence(
+            pack, check_reasoning=False) if pack.sources else ""
         level_hint = next((word for word in ("UNVERIFIED", "VERIFIED", "STRONG",
                                              "MIXED", "WEAK") if word in graded), "")
         want_hypothesis = self.hypotheses.should_generate(
             plan, pack, contradiction_dicts, level_hint)
+
+        # ── kya-kya chalna THA (budget + config se, quota se pehle) ───────────
+        # Ye list neeche ke `if` conditions ko hi dohrati hai, isliye budget
+        # badalne par dono jagah badalna padega — par yahi imaandaar tarika hai:
+        # "3 calls ka budget tha" aur "3 pass zaroori the" ek baat nahi hai
+        # (bina red team wale mode mein 3 pass plan hi nahi hote, aur unhe
+        # "adhoora" batana bhi jhooth hoga).
+        out["planned_passes"].append("analysis")
+        if config.use_red_team and config.gemini_calls >= 3:
+            out["planned_passes"].append("critique")
+        if config.gemini_calls >= 2:
+            out["planned_passes"].append("synthesis")
 
         # ── PASS A: analysis ────────────────────────────────────────────────
         self._track(job_id, "SPECIALIST_ANALYSIS",
@@ -367,6 +391,17 @@ class DeepResearchEngine:
 
         out["calls"] = brain.calls_used
         out["errors"].extend(brain.errors)
+
+        # ── kya-kya SACH MEIN hua ────────────────────────────────────────────
+        # Output se naapte hain, intention se nahi: call ho kar bhi khaali text
+        # aa sakta hai (safety block / parse fail), aur wo pass "poora hua" nahi
+        # hai. Sirf planned passes ko ginte hain, warna 2-call mode mein critique
+        # ka na hona "failure" lagta — jabki wo design tha.
+        produced = {"analysis": bool(out["analysis"]),
+                    "critique": bool(out["critique_raw"]),
+                    "synthesis": bool(out["final"])}
+        out["done_passes"] = [name for name in out["planned_passes"]
+                              if produced.get(name)]
         return out
 
     # ── main ─────────────────────────────────────────────────────────────────
@@ -444,6 +479,20 @@ class DeepResearchEngine:
                                   memory_note, job_id)
         warnings.extend(passes["errors"])
         self._counts(job_id, gemini_calls=passes["calls"])
+
+        # Reasoning ka sach pack mein daalo — grade_evidence ka teesra honesty
+        # gate ISI par tika hai. Pehle ye jaankari kahin record hi nahi hoti
+        # thi, isliye "1 of 3 passes ran (quota 429)" ke saath bhi report
+        # "✅ VERIFIED" chhaap deti thi. Ab adhoora reasoning top label rok deta
+        # hai aur wajah bhi likhta hai.
+        pack.reasoning_planned = len(passes["planned_passes"])
+        pack.reasoning_done = len(passes["done_passes"])
+        missing = [name for name in passes["planned_passes"]
+                   if name not in passes["done_passes"]]
+        pack.reasoning_failures = (
+            ([f"{', '.join(missing)} pass poora nahi hua"] if missing else [])
+            + [str(e) for e in passes["errors"]][:3]
+        )
 
         gemini_answer = passes["final"] or passes["analysis"]
         if not gemini_answer:
@@ -598,8 +647,17 @@ class DeepResearchEngine:
             parts.append(f"{peer} peer-reviewed hain.")
         if not sufficiency.get("sufficient", True):
             parts.append("Evidence threshold poora nahi hua — confidence kam rakhein.")
-        if calls_used < config.gemini_calls:
-            parts.append(f"Reasoning ke {config.gemini_calls} planned passes mein se "
-                         f"{calls_used} chale.")
+        # Retrieval ka sach — "kitne sources mile" se zyada zaroori hai "wo
+        # sawaal ke the ya nahi". Pichhli report mein 5 sources the aur ek bhi
+        # topic ka nahi tha, par confidence note usme se kuch nahi kehta tha.
+        parts.append(pack.relevance_note())
+        if pack.full_text_read_count < 1:
+            parts.append("Kisi source ka poora text nahi padha ja saka — ye jawab "
+                         "abstract/snippet level ka hai.")
+        # Budget (config.gemini_calls) ke bajaye ASLI planned passes se compare
+        # karo: 2-call mode mein critique plan hi nahi hota, use "nahi chala"
+        # batana galat hai.
+        if not pack.reasoning_complete:
+            parts.append(pack.reasoning_note())
         parts.append("Ye confidence retrieved evidence par hai, poore literature par nahi.")
         return " ".join(parts)

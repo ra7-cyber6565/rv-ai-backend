@@ -16,6 +16,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List
 
+from .explain_style import style_block
 from .models import EvidencePack
 
 _SECTION_RE = re.compile(r"^\s*#{1,4}\s*(.+?)\s*$", re.MULTILINE)
@@ -64,6 +65,8 @@ ANALYSIS jise criticise karna hai:
 
 AVAILABLE SOURCES (inke bahar ka koi source cite mat karo):
 {pack.to_prompt_block(max_chars_per_source=600)}
+
+{style_block(question, ["Weaknesses"])}
 
 Rules:
 1. Har weakness specific ho — "aur research chahiye" jaisi generic baat nahi.

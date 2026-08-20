@@ -17,6 +17,7 @@ import os
 from typing import Dict, List, Optional
 
 from .citation import CITATION_INSTRUCTION
+from .explain_style import style_block
 from .models import EvidencePack
 
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
@@ -81,6 +82,12 @@ class GeminiReasoning:
     def prompt_analysis(self, question: str, pack: EvidencePack, plan: Dict) -> str:
         fields = ", ".join(plan.get("relevant_fields", [])) or "General"
         subs = "\n".join(f"  - {s}" for s in plan.get("sub_questions", [])[:5])
+        # Bhasha + samjhane ka tarika yahan bhi zaroori hai, sirf synthesis mein
+        # nahi: jab quota synthesis tak nahi pahunchti (2 mein se 1 call, ya
+        # 429), tab YAHI analysis seedha final answer ban jaata hai
+        # (orchestrator: `passes["final"] or passes["analysis"]`). Pehle us
+        # halat mein user ko bilkul kaccha, jargon-bhara text milta tha.
+        style = style_block(question, ["Factual Findings"])
         return f"""Tum ek Research Analyst ho. {_ROLE_HONESTY}
 
 SAWAL: {question}
@@ -94,6 +101,8 @@ RETRIEVED SOURCES (sirf inhi ka istemal karo):
 {pack.to_prompt_block()}
 
 {CITATION_INSTRUCTION}
+
+{style}
 
 Ab ye passes karo:
 
@@ -123,6 +132,8 @@ Ab analysis do:"""
 relevant source NAHI mila (na document, na web, na academic database).
 
 SAWAL: {question}
+
+{style_block(question)}
 
 Rules:
 1. Shuru mein hi saaf likho: "Ye jawab retrieved sources se nahi, model ki

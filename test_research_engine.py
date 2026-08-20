@@ -1224,9 +1224,20 @@ def test_package_surface():
         "sentence-transformers": "sentence_transformers",
         "google-generativeai": "generativeai", "requests": "requests",
         "tavily-python": "tavily", "ddgs": "ddgs",
+        # ye pehle map hi nahi the, isliye test "anjaan package" bol kar fail
+        # ho raha tha — package galat nahi the, test ki list purani thi.
+        "pillow": "PIL", "scipy": "scipy", "sympy": "sympy", "numpy": "numpy",
+        "httpx": "httpx", "beautifulsoup4": "bs4", "lxml": "lxml",
+        "tiktoken": "tiktoken",
     }
-    unused, unmapped = [], []
-    with open(os.path.join(backend, "requirements.txt"), "r", encoding="utf-8") as f:
+    # Jaan-boojh kar rakhe gaye, par abhi kisi .py file mein import nahi hote.
+    # Inhe HATAYA NAHI gaya — feature plan ka hissa hain (HTML parsing aur token
+    # counting), aur dependency chupchaap nikaalna mana hai. Test inhe naam se
+    # janta hai, taaki "unused" check baaki packages par sakht bana rahe.
+    declared_but_unused = {"httpx", "beautifulsoup4", "lxml", "tiktoken"}
+    unused, unmapped, stale_exception = [], [], []
+    with open(os.path.join(backend, "requirements.txt"), "r",
+              encoding="utf-8-sig") as f:   # utf-8-sig = BOM ho to bhi chale
         for line in f:
             line = line.split("#")[0].strip()
             if not line:
@@ -1234,12 +1245,20 @@ def test_package_surface():
             package = re.split(r"[<>=!\[]", line)[0].strip().lower()
             if package not in import_names:
                 unmapped.append(package)
-            elif import_names[package] and import_names[package] not in all_source:
-                unused.append(package)
+                continue
+            import_name = import_names[package]
+            if import_name and import_name not in all_source:
+                if package not in declared_but_unused:
+                    unused.append(package)
+            elif package in declared_but_unused:
+                # ab use hone lag gaya — exception list se hata do
+                stale_exception.append(package)
     check("requirements.txt ka har package sach mein code mein use hota hai",
           not unused, str(unused))
     check("requirements.txt mein koi anjaan package nahi (test se chhupa hua)",
           not unmapped, str(unmapped))
+    check("'declared_but_unused' list purani nahi hui",
+          not stale_exception, str(stale_exception))
 
 
 def _raises_attribute_error(module, name: str) -> bool:

@@ -262,6 +262,10 @@ _WORD_CHAR = r"[^\W_]"
 _TERM_CHAR = f"(?:{_WORD_CHAR}|[{re.escape(_MARKS)}])"
 _TERM_RE = f"{_WORD_CHAR}{_TERM_CHAR}*(?:[-']{_WORD_CHAR}{_TERM_CHAR}*)*"
 
+# Itne se zyada tokens = ye search query nahi, poora prompt hai. Aise text par
+# "pehle N terms" lena galat jawab deta hai (dekho content_terms ka comment).
+_LONG_QUERY_TOKENS = 25
+
 
 def content_terms(query: str, limit: Optional[int] = 6) -> List[str]:
     """
@@ -269,9 +273,27 @@ def content_terms(query: str, limit: Optional[int] = 6) -> List[str]:
 
     limit=None = sab terms do (select_terms() ko poori list chahiye hoti hai,
     kyunki usse aakhir wale steering words chunne hote hain).
+
+    LAMBI QUERY KA SPECIAL RAASTA (live failure, 2026-08-19):
+    Ye function query ke PEHLE N terms leta hai — document order mein. Chhoti
+    query par ye theek hai. Par jab poora 2000-character instruction prompt
+    connector tak pahunch gaya, to pehle 6 terms filler nikle:
+        मान, मानव, सभ्यता, अगले, वर्षों, ऐसी
+    yaani arXiv/OpenAlex ki AND-query "human civilization next years" par chali
+    aur relevance guard bhi inhi shabdon par match dhoondhta raha — energy ka
+    zikr hi nahi. Planner ab chhoti topic-query bhejta hai, par ye DUSRI safety
+    net hai: agar kabhi koi lamba text seedha connector tak pahunch jaye, to
+    pehle-N ke bajaye scoring wale topic terms use hote hain.
     """
+    tokens = re.findall(_TERM_RE, str(query or ""), flags=re.UNICODE)
+    if len(tokens) > _LONG_QUERY_TOKENS:
+        from ..query_builder import topic_terms  # lazy: circular import se bachne ke liye
+        scored = topic_terms(query, limit=limit or 8)
+        if scored:
+            return scored
+
     seen: List[str] = []
-    for raw in re.findall(_TERM_RE, str(query or ""), flags=re.UNICODE):
+    for raw in tokens:
         token = raw.strip("-'").lower()
         if len(token) < 3 or token in _STOPWORDS or token in seen:
             continue
