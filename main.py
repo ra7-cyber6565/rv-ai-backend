@@ -1,5 +1,11 @@
 ﻿import os
 
+# .env must be loaded BEFORE storage routing. Otherwise a laptop setting such as
+# INFINITY_DATA_ROOT=D:\InfinityResearchAI would be seen too late and caches
+# could already have chosen the system drive.
+from dotenv import load_dotenv
+load_dotenv()
+
 # Storage paths must be configured before heavy libraries (transformers/chromadb)
 # are imported so their caches/models do not silently land on C:.
 from utils.storage_paths import configure_process_storage, storage_status
@@ -67,14 +73,7 @@ def website():
 
 @app.get("/api")
 def api_info():
-    """
-    Live endpoint list.
-
-    Pehle yahan haath se likhi hui 5 endpoints ki list thi jo purani ho gayi
-    thi (14 registered the). Ab list app ke asli routing table se banti hai,
-    isliye ye kabhi jhooth nahi bol sakti — naya endpoint jodo, yahan khud
-    dikhega.
-    """
+    """Live endpoint list + important runtime safety state."""
     endpoints = []
     for route in app.routes:
         path = getattr(route, "path", "")
@@ -96,7 +95,7 @@ def api_info():
 
 @app.get("/health")
 def health_check():
-    """Health check for cloud deployment platforms (Render, Railway, etc)"""
+    """Health check including the configured storage drive."""
     current_storage = storage_status()
     return {
         "status": "healthy" if current_storage.get("available") else "degraded",
