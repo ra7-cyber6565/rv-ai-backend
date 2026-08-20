@@ -7,10 +7,12 @@ from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from knowledge.routes import router as knowledge_router
 from utils.zero_cost_guard import enforce_zero_cost_config
+from utils.security_config import allowed_cors_origins
 
 # Project policy: zero-cost mode is ON by default. If a known paid-provider
 # credential is accidentally configured, fail at startup instead of risking a bill.
 ZERO_COST_STATUS = enforce_zero_cost_config()
+CORS_ORIGINS = allowed_cors_origins()
 
 app = FastAPI(
     title="RV AI",
@@ -18,11 +20,15 @@ app = FastAPI(
     version="0.2.0"
 )
 
+# Website isi FastAPI origin se serve hoti hai, isliye browser CORS default se
+# closed rakha gaya hai. Separate frontend ho to CORS_ALLOWED_ORIGINS mein exact
+# http(s) origins comma-separated set karo; wildcard deliberately reject hota hai.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 
 # RAG routes — PDF upload & basic Q&A
@@ -76,6 +82,7 @@ def api_info():
         "docs": "/docs",
         "website": "/",
         "zero_cost_only": ZERO_COST_STATUS.enabled,
+        "cors_origins": CORS_ORIGINS,
         "endpoint_count": len(endpoints),
         "endpoints": sorted(endpoints),
     }
