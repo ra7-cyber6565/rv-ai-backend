@@ -6,6 +6,11 @@ from fastapi.responses import FileResponse
 from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from knowledge.routes import router as knowledge_router
+from utils.zero_cost_guard import enforce_zero_cost_config
+
+# Project policy: zero-cost mode is ON by default. If a known paid-provider
+# credential is accidentally configured, fail at startup instead of risking a bill.
+ZERO_COST_STATUS = enforce_zero_cost_config()
 
 app = FastAPI(
     title="RV AI",
@@ -70,6 +75,7 @@ def api_info():
         "version": app.version,
         "docs": "/docs",
         "website": "/",
+        "zero_cost_only": ZERO_COST_STATUS.enabled,
         "endpoint_count": len(endpoints),
         "endpoints": sorted(endpoints),
     }
@@ -78,4 +84,9 @@ def api_info():
 @app.get("/health")
 def health_check():
     """Health check for cloud deployment platforms (Render, Railway, etc)"""
-    return {"status": "healthy", "service": "RV AI Backend", "version": app.version}
+    return {
+        "status": "healthy",
+        "service": "RV AI Backend",
+        "version": app.version,
+        "zero_cost_only": ZERO_COST_STATUS.enabled,
+    }
