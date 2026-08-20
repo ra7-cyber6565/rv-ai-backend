@@ -41,6 +41,8 @@ from .models import EvidencePack, ResearchResult, SourceRecord
 from .planner import ResearchPlanner
 from .requested import build_ledger, looks_like_chain, looks_like_math_model
 from .research_memory import ResearchMemory
+from .run_status import INCOMPLETE, evaluate as evaluate_status
+from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
 from .synthesizer import FinalSynthesizer
 from .vector_search import VectorSearch
@@ -132,6 +134,9 @@ class DeepResearchEngine:
         rounds_run = 0
         sufficiency: Dict = {}
         pack: Optional[EvidencePack] = None
+        # §11 — jo queries sach mein chali, unka record. Consensus gate isse
+        # dekhta hai ki opposition-side search hui thi ya nahi.
+        queries_run: List[str] = []
 
         for round_no in range(1, config.max_rounds + 1):
             rounds_run = round_no
@@ -139,6 +144,9 @@ class DeepResearchEngine:
             # **cls spread hota hai), isliye ise seedha cls ki jagah dena safe
             # hai — planner ke andar saari fields .get() se padhi jaati hain.
             queries = self.planner.search_queries(question, plan, round_no=round_no)
+            for q in queries:
+                if q and q not in queries_run:
+                    queries_run.append(q)
             self._track(job_id, "DISCOVERING",
                         f"round {round_no}: {', '.join(queries)[:120]}")
 
@@ -166,6 +174,7 @@ class DeepResearchEngine:
                 connectors_searched=connectors,
                 rounds_run=round_no,
                 chars_per_source=config.chars_per_source,
+                queries=queries_run,
             )
             self._counts(job_id, sources=len(pack.sources),
                          documents=len(pack.document_sources()))
@@ -179,12 +188,13 @@ class DeepResearchEngine:
             pack = self.evidence.build_pack(
                 question=question, doc_records=doc_records, external_records=[],
                 max_sources=config.max_sources, rounds_run=0,
-                chars_per_source=config.chars_per_source)
+                chars_per_source=config.chars_per_source, queries=queries_run)
 
         return {
             "pack": pack, "log": logs, "rounds_run": rounds_run,
             "connectors": connectors, "sufficiency": sufficiency,
             "urls": sorted(seen_this_run - seen),
+            "queries": queries_run,
         }
 
     # ── 3. gemini passes (budget-aware) ──────────────────────────────────────
@@ -343,7 +353,10 @@ class DeepResearchEngine:
                # user ne kya maanga tha — report ke ledger tak jaata hai
                "requests": {}, "hypothesis_requested": False,
                "hypothesis_count": 0, "attempts": 0, "models_tried": [],
-               "usage_note": "", "notes": []}
+               "usage_note": "", "notes": [],
+               # §9/§14 — wajah insaani bhasha mein + raw detail alag
+               "failure_kind": "", "failure_reason": "",
+               "technical_details": [], "api_accounting": {}}
 
         # ── user ki EXPLICIT requests (planner ne rule-based nikaali hain) ────
         # Ye pichhle live run ka sabse bada sabak hai: prompt mein saaf likha tha
@@ -512,6 +525,12 @@ class DeepResearchEngine:
         out["attempts"] = brain.attempts
         out["models_tried"] = list(brain.models_tried)
         out["usage_note"] = brain.usage_note()
+        # §9 — raw error user tak nahi jaata: wajah insaani bhasha mein, aur
+        # protobuf/429 wali line sirf report ke sabse neeche.
+        out["failure_kind"] = brain.failure_kind()
+        out["failure_reason"] = brain.failure_reason()
+        out["technical_details"] = brain.technical_details()
+        out["api_accounting"] = brain.api_accounting()
         # notes = "retry ke baad chal gaya" type imaandaar jaankari. Ye ERROR
         # nahi hai, isliye warnings mein nahi daalte — audit section mein jaati hai.
         out["notes"] = list(brain.notes)
@@ -592,7 +611,6 @@ class DeepResearchEngine:
         self._track(job_id, "EVIDENCE_ANALYSIS", "contradiction + independence check")
         contradiction_objects = self.contradictions.detect(pack)
         contradiction_dicts = [c.to_dict() for c in contradiction_objects]
-        consensus = self.contradictions.consensus_report(pack, contradiction_objects)
         self._counts(job_id, conflicts=len(contradiction_dicts))
 
         # 5. memory + knowledge graph hints
@@ -604,7 +622,25 @@ class DeepResearchEngine:
         # 6. gemini passes
         passes = self._run_passes(question, pack, plan, config, contradiction_dicts,
                                   memory_note, job_id)
-        warnings.extend(passes["errors"])
+        # §9 — engine ke raw error (429/protobuf/exception class) warnings mein
+        # nahi jaate. Warning insaani bhasha mein, raw line report ke sabse
+        # neeche. Pichhle live run mein yahi text "Seedha jawab" ke neeche
+        # chhap gaya tha.
+        human_errors, technical_errors = split_messages(passes["errors"])
+        warnings.extend(human_errors)
+        # Wajah insaani bhasha mein. Ledger se aaye to wahan se, warna raw line
+        # se padh kar — par kisi bhi haalat mein user ko warning MILNI chahiye.
+        # Pehle raw line hat jaati thi aur uski jagah kuch nahi aata tha, yaani
+        # failure chup-chaap gayab ho jaati thi.
+        failure_reason = (passes.get("failure_reason")
+                          or human_reason(passes["errors"]))
+        if failure_reason and not any(failure_reason in w for w in warnings):
+            warnings.append(
+                f"AI reasoning model se poora kaam nahi ho paaya — "
+                f"{failure_reason}.")
+        elif technical_errors and not failure_reason:
+            warnings.append("AI reasoning model se poora kaam nahi ho paaya — "
+                            "kuch reasoning pass adhoore reh gaye.")
         self._counts(job_id, gemini_calls=passes["calls"])
 
         # Reasoning ka sach pack mein daalo — grade_evidence ka teesra honesty
@@ -616,10 +652,30 @@ class DeepResearchEngine:
         pack.reasoning_done = len(passes["done_passes"])
         missing = [name for name in passes["planned_passes"]
                    if name not in passes["done_passes"]]
+        # §9 — `reasoning_failures` seedha user ke saamne aata hai (banner,
+        # confidence note, evidence level). Isliye yahan RAW error line kabhi
+        # nahi daalte: sirf insaani wajah. Raw text ka ek hi ghar hai —
+        # report ke sabse neeche "Technical details".
         pack.reasoning_failures = (
             ([f"{', '.join(missing)} pass poora nahi hua"] if missing else [])
-            + [str(e) for e in passes["errors"]][:3]
+            + ([failure_reason] if failure_reason else [])
+            + human_errors[:2]
         )
+
+        # §11 — consensus AB banta hai, reasoning ke BAAD. Pehle ye step 4 mein
+        # banta tha, jahan ye pata hi nahi hota tha ki reasoning pass poore honge
+        # ya quota se mar jayenge — aur wahi adhoora run "apparent agreement"
+        # chhaap deta tha. Gate ko dono jaankari chahiye: contradiction analysis
+        # chali (list mili, None nahi) aur reasoning poora hua ya nahi.
+        consensus = self.contradictions.consensus_report(
+            pack, contradiction_objects,
+            contradiction_analysis_done=True,
+            reasoning_complete=pack.reasoning_complete,
+            queries=list(pack.search_queries or discovered.get("queries") or []),
+        )
+        if not consensus.get("gate_passed"):
+            self._track(job_id, "EVIDENCE_ANALYSIS",
+                        "consensus gate: shartein poori nahi — level nahi banaya")
 
         gemini_answer = passes["final"] or passes["analysis"]
         if not gemini_answer:
@@ -722,7 +778,11 @@ class DeepResearchEngine:
         ledger_reasons: List[str] = []
         if not pack.reasoning_complete:
             ledger_reasons.append(pack.reasoning_note())
-        ledger_reasons.extend(str(e) for e in passes["errors"])
+        # §9 — ledger ka "why" bhi user ko dikhta hai, isliye insaani wajah hi
+        # jaati hai (pehle yahan poora `passes["errors"]` raw chala jaata tha).
+        if failure_reason:
+            ledger_reasons.append(failure_reason)
+        ledger_reasons.extend(human_errors)
         ledger = build_ledger(
             requests,
             delivered={
@@ -740,6 +800,31 @@ class DeepResearchEngine:
                 + (f" {item.get('why')}" if item.get("why") else ""))
 
         # 10. final answer assemble
+        #
+        # §1 — status pehle nikalta hai, phir report banti hai. Pehle report
+        # "poori" lagti thi chahe 3 mein se 1 hi pass chala ho; ab UI ko
+        # `RESEARCH INCOMPLETE` machine-readable roop mein milta hai aur wahi
+        # baat report ke top par insaani bhasha mein bhi likhi jaati hai.
+        run_status = evaluate_status(
+            planned_passes=passes["planned_passes"],
+            done_passes=passes["done_passes"],
+            failure_kind=passes.get("failure_kind", ""),
+            failure_reason=passes.get("failure_reason", ""),
+            source_count=len(pack.sources),
+            errors=passes["errors"],
+            technical_details=list(passes.get("technical_details") or [])
+            + technical_errors,
+        )
+        status_dict = run_status.to_dict()
+
+        # §1 — adhoore run par top label "VERIFIED" nahi ho sakta, chahe
+        # citations theek hon. Grading already reasoning-gate lagata hai, ye
+        # doosra taala hai taaki koi bhi raasta bacha na rah jaaye. Grader ki
+        # apni wajah MITAYI nahi jaati — sirf status uske aage lag jaata hai.
+        if run_status.code == INCOMPLETE and INCOMPLETE not in evidence_level:
+            base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
+            evidence_level = f"⚠️ {INCOMPLETE} — {base}" if base else f"⚠️ {INCOMPLETE}"
+
         answer = self.synthesizer.assemble(
             gemini_answer=annotated,
             pack=pack,
@@ -762,7 +847,14 @@ class DeepResearchEngine:
             notes=engine_notes,
             usage_note=passes.get("usage_note", ""),
             requests=requests,
+            status=status_dict,
+            technical_details=run_status.technical,
+            api_accounting=passes.get("api_accounting") or {},
         )
+        # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
+        # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
+        run_status.missing_sections = list(
+            getattr(self.synthesizer, "last_missing_sections", []) or [])
 
         # 11. memory + graph write (best effort)
         if self.memory:
@@ -806,6 +898,13 @@ class DeepResearchEngine:
             label_report=label_report,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
+            status=run_status.code,
+            status_reason=run_status.reason,
+            failure_kind=run_status.failure_kind,
+            missing_passes=list(run_status.missing_passes),
+            missing_sections=list(run_status.missing_sections),
+            technical_details=list(run_status.technical),
+            api_accounting=passes.get("api_accounting") or {},
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

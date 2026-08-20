@@ -22,6 +22,7 @@ from typing import Dict, List, Optional
 from .ocr_processor import OCRProcessor
 from .pdf_processor import PDFProcessor
 from .transcript_processor import TranscriptProcessor
+from . import pdf_chunker
 
 TEXT_EXTENSIONS = (".txt", ".md", ".markdown", ".text")
 TRANSCRIPT_EXTENSIONS = (".vtt", ".srt")
@@ -39,7 +40,19 @@ class DocumentProcessor:
         self.ocr_max_pages = ocr_max_pages
 
     # ── dispatch ─────────────────────────────────────────────────────────────
-    def process(self, file_path: str, use_ocr: bool = True) -> Dict:
+    def process(self, file_path: str, use_ocr: bool = True,
+                question: str = "", size_bytes: int = 0,
+                large: bool = False) -> Dict:
+        """
+        File → text + citation-ready chunks.
+
+        §12 ke naye (optional) arguments:
+          question   — badi PDF mein kaun se pages rakhne hain, ye isse tay hota
+                       hai. Khaali chhod do to purana behaviour (poora document).
+          size_bytes — file ka size (caller ke paas pehle se hota hai)
+          large      — caller zabardasti streaming path chun sakta hai
+        Purane callers ne ye kuch nahi bheja tha, aur unke liye kuch nahi badla.
+        """
         base = {"ok": False, "error": "", "text": "", "chunks": [], "notes": [],
                 "kind": "", "file": os.path.basename(file_path or "")}
 
@@ -50,7 +63,8 @@ class DocumentProcessor:
         extension = os.path.splitext(file_path)[1].lower()
 
         if extension == ".pdf":
-            return self._process_pdf(file_path, use_ocr, base)
+            return self._process_pdf(file_path, use_ocr, base, question=question,
+                                     size_bytes=size_bytes, large=large)
         if extension in TRANSCRIPT_EXTENSIONS:
             return self._process_transcript(file_path, base)
         if extension in TEXT_EXTENSIONS:
@@ -65,8 +79,25 @@ class DocumentProcessor:
         return base
 
     # ── pdf ──────────────────────────────────────────────────────────────────
-    def _process_pdf(self, file_path: str, use_ocr: bool, base: Dict) -> Dict:
+    def _process_pdf(self, file_path: str, use_ocr: bool, base: Dict,
+                     question: str = "", size_bytes: int = 0,
+                     large: bool = False) -> Dict:
         base["kind"] = "pdf"
+
+        # §12: byte-size par file skip karna band. Badi file ka matlab ab
+        # "streaming page-by-page padho" hai, "chhod do" nahi.
+        if not size_bytes:
+            try:
+                size_bytes = os.path.getsize(file_path)
+            except Exception:
+                size_bytes = 0
+        pages_hint = self.pdf.page_count(file_path)
+        if large or pdf_chunker.is_large(size_bytes=size_bytes,
+                                        page_count=pages_hint):
+            return self._process_pdf_streaming(file_path, use_ocr, base,
+                                               question=question,
+                                               size_bytes=size_bytes)
+
         result = self.pdf.extract(file_path)
         base["notes"].append(self.pdf.coverage_note(result))
 
@@ -102,6 +133,57 @@ class DocumentProcessor:
         if not base["ok"]:
             base["error"] = ("PDF mein padhne layak text nahi mila (poora document "
                              "scanned ho sakta hai aur OCR available nahi tha)")
+        return base
+
+    # ── pdf, badi file ka streaming path (§12) ───────────────────────────────
+    def _process_pdf_streaming(self, file_path: str, use_ocr: bool, base: Dict,
+                               question: str = "", size_bytes: int = 0) -> Dict:
+        """
+        20 MB / 100 MB / 3000-page document — ab bhi usable.
+
+        Poora text ek string mein nahi banate. Pages stream hote hain, sawaal se
+        milte-julte pages chune jaate hain, aur report mein saaf likha jaata hai
+        ki kitne pages dekhe aur kaun rakhe gaye. Ye "poora document padh liya"
+        ka daawa nahi karta — spec ki honesty isi mein hai.
+        """
+        base["kind"] = "pdf"
+        base["streamed"] = True
+        result = self.pdf.extract_relevant(file_path, question,
+                                           size_bytes=size_bytes)
+        base["notes"].append(self.pdf.coverage_note(result))
+        base["selection"] = result.get("selection", {})
+        base["page_count"] = result.get("page_count", 0)
+
+        chunks = [{"locator": c["locator"], "text": c["text"],
+                   "header": c.get("header", "")}
+                  for c in (result.get("chunks") or []) if c.get("text")]
+        text_parts = [result.get("text") or ""]
+
+        # Scanned pages: badi file par poora OCR budget se bahar hai. Isliye OCR
+        # sirf tab, jab text ki taraf se kuch bhi na mila ho — aur tab bhi sirf
+        # pehle kuch pages. Feature band nahi kiya, seemit kiya hai.
+        scanned = result.get("scanned_pages") or []
+        if scanned and use_ocr and not chunks:
+            budget = min(self.ocr_max_pages, 5)
+            ocr_result = self.ocr.ocr_pdf_pages(file_path, scanned[:budget],
+                                                max_pages=budget)
+            base["notes"].append(self.ocr.note(ocr_result))
+            if ocr_result.get("text"):
+                text_parts.append(ocr_result["text"])
+                chunks += [
+                    {"locator": f"p.{page['page']} (OCR)", "text": page["text"],
+                     "header": f"[Source: {base['file']}, Page {page['page']}]"}
+                    for page in ocr_result["pages"] if page.get("text")
+                ]
+        elif scanned and not use_ocr:
+            base["notes"].append(f"{len(scanned)} scanned pages skip hue (OCR off tha)")
+
+        base["text"] = "\n\n".join(part for part in text_parts if part)
+        base["chunks"] = chunks
+        base["ok"] = bool(base["text"])
+        if not base["ok"]:
+            base["error"] = result.get("error") or (
+                "badi PDF ke chune hue pages se bhi padhne layak text nahi mila")
         return base
 
     # ── transcript ───────────────────────────────────────────────────────────

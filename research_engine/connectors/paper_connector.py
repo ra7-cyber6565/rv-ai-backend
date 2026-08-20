@@ -34,6 +34,31 @@ from .base import (BaseConnector, ConnectorHTTPError, content_terms, http_get,
                    select_terms, term_overlap)
 
 
+def domain_filter(records: List[SourceRecord], query: str) -> List[SourceRecord]:
+    """
+    §2 ka domain guard, connector level par.
+
+    Lexical overlap kaafi nahi hai: "Room-temperature ferroelectricity in ..."
+    query se 2 term share karta hai (room, temperature) par superconductivity
+    ka koi anchor nahi rakhta. Field pata ho (strict profile) to anchor-less
+    result yahin gir jaata hai — aage padhne ka waqt bhi bachta hai.
+
+    Domain pata na ho to kuch nahi hatta (bina samajh ke filter karna andha
+    filter hai).
+    """
+    if not records:
+        return records
+    try:
+        from ..domain import detect as _detect
+        plan = _detect(query or "")
+        if not plan.strict:
+            return records
+        return [r for r in records
+                if not plan.assess(r.title, r.snippet).rejected]
+    except Exception:
+        return records
+
+
 # ── arXiv ────────────────────────────────────────────────────────────────────
 class ArxivConnector(BaseConnector):
     """
@@ -88,9 +113,45 @@ class ArxivConnector(BaseConnector):
             return waited
 
     @staticmethod
-    def build_search_query(query: str, max_terms: int = 5) -> str:
-        """Testable — network ke bina bhi assert kar sakte hain."""
+    def anchor_terms(query: str, limit: int = 2) -> List[str]:
+        """Is query ke domain anchors (domain.py se) — search ke liye."""
+        try:
+            from ..domain import anchor_terms as _anchors
+            return [a for a in _anchors(query or "", limit) if a]
+        except Exception:
+            return []
+
+    @classmethod
+    def build_search_query(cls, query: str, max_terms: int = 5) -> str:
+        """
+        Testable — network ke bina bhi assert kar sakte hain.
+
+        §4 ka fix: query dheeli karte waqt bhi DOMAIN ANCHOR nahi girta.
+        Pehle ladder ka aakhri step query ka PEHLA content term le leta tha:
+
+            query : "room-temperature superconductivity ambient pressure"
+            step 3: all:"room-temperature"        <- anchor gaayab
+            result: "Room-temperature FERROELECTRICITY..."   (galat field)
+
+        Ab anchor sabse aage rehta hai:
+
+            step 3: all:"superconductivity"
+        """
         terms = select_terms(query, max_terms=max_terms)
+        anchors = cls.anchor_terms(query, limit=1 if max_terms <= 2 else 2)
+        if anchors:
+            merged: List[str] = []
+            for term in anchors + terms:
+                if term not in merged:
+                    merged.append(term)
+            keep = max(max_terms, len(anchors))
+            if len(merged) > keep:
+                if keep <= 1:
+                    merged = merged[:1]          # sirf anchor — ye ladder ka aakhri step
+                else:
+                    # select_terms ki tarah aakhri (steering) term bacha kar rakho
+                    merged = merged[: keep - 1] + [merged[-1]]
+            terms = merged
         if not terms:
             cleaned = " ".join(str(query or "").split())
             return f'all:"{cleaned}"'
@@ -155,14 +216,14 @@ class ArxivConnector(BaseConnector):
         """
         terms = content_terms(query, limit=6)
         if not terms:
-            return records
+            return domain_filter(records, query)
         needed = 2 if len(terms) >= 3 else 1
         if used_terms:
             needed = min(needed, max(1, used_terms))
-        return [
+        return domain_filter([
             r for r in records
             if term_overlap(terms, f"{r.title} {r.snippet}") >= needed
-        ]
+        ], query)
 
     def search(self, query: str, max_results: int = 3) -> List[SourceRecord]:
         total_terms = len(content_terms(query, limit=None))
@@ -678,14 +739,14 @@ class PubMedConnector(BaseConnector):
         """
         terms = content_terms(query, limit=6)
         if not terms:
-            return records
+            return domain_filter(records, query)
         needed = 2 if len(terms) >= 3 else 1
         if used_terms:
             needed = min(needed, max(1, used_terms))
-        return [
+        return domain_filter([
             r for r in records
             if term_overlap(terms, f"{r.title} {r.snippet}") >= needed
-        ]
+        ], query)
 
     def search(self, query: str, max_results: int = 3) -> List[SourceRecord]:
         total_terms = len(content_terms(query, limit=None))

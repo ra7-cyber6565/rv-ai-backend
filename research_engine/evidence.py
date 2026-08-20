@@ -109,6 +109,7 @@ class EvidenceEngine:
         connectors_searched: Optional[List[str]] = None,
         rounds_run: int = 1,
         chars_per_source: int = 1200,
+        queries: Optional[List[str]] = None,
     ) -> EvidencePack:
         all_candidates = list(doc_records) + list(external_records)
         discovered = len(all_candidates)
@@ -142,6 +143,8 @@ class EvidenceEngine:
             searched_connectors=sorted(set(connectors_searched or [])),
             topic_terms=list(filter_info.get("topic_terms") or []),
             retrieval_filter=filter_info,
+            # §11 — kaun-kaun query chali, ye pack ke saath chalta hai
+            search_queries=[q for q in (queries or []) if str(q or "").strip()],
         )
 
     # ── 3. Claims + provenance (Spec Section 7) ──────────────────────────────

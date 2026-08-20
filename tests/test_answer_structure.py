@@ -298,15 +298,23 @@ def main() -> int:
     check("fallback saaf batata hai ki model nahi chala",
           "nahi chala" in summary)
 
-    print("\n[10] Model section missing ho to placeholder")
+    print("\n[10] Model section missing ho to khaali heading nahi, naam list")
     thin = synth.assemble(
         gemini_answer="## Seedha jawab\nHaan.", pack=pack,
         evidence_level="WEAK", confidence_note="", contradictions=[],
         hypotheses=[], verification=ver, coverage=cov, honesty=hon,
         consensus=cons,
     )
-    check("missing section par placeholder aata hai",
-          "Reasoning model ne ye section nahi diya" in thin)
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§10, 2026-08-20): pehle yahan
+    # placeholder line ("Reasoning model ne ye section nahi diya") maangi jaati
+    # thi. Naya niyam: khaali section chhapta hi nahi — uska NAAM ek jagah
+    # (top banner + audit ka "Kaunse hisse nahi ban paaye") likha jaata hai.
+    check("khaali section ki heading nahi chhapti",
+          "## Ye kyun hota hai?" not in thin)
+    check("chhode hue section ka naam imaandaari se likha hai",
+          "Ye kyun hota hai?" in thin and "nahi ban paaye" in thin)
+    check("purana placeholder text hat gaya",
+          "Reasoning model ne ye section nahi diya" not in thin)
     check("purane kwargs ke bina bhi assemble chalta hai",
           thin.lstrip().startswith("## Seedha jawab"))
 

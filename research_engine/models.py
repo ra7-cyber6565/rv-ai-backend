@@ -131,12 +131,36 @@ class SourceRecord:
     read_level: str = ""
     full_text_chars: int = 0               # asli mein kitne chars process hue
 
+    # §12 (2026-08-20): badi PDF poori nahi, PAGE-BY-PAGE padhi jaati hai —
+    # sawaal se milte-julte pages chun kar. Aisi haalat mein sirf "full_text"
+    # likhna adhoori baat hoti, isliye yahan ek line rehti hai jo saaf batati
+    # hai kitne pages mein se kaun padhe gaye. Khaali = poora document padha
+    # gaya (ya reading hui hi nahi).
+    read_note: str = ""
+    pages_read: int = 0                    # streaming reading mein chune hue pages
+    pages_total: int = 0                   # document mein kul pages (agar pata ho)
+
     # Engine ke bhare hue scores
     source_id: str = ""                    # "S1", "S2" ... CitationEngine isse map karta hai
     quality_score: float = 0.0
     relevance_score: float = 0.0
     combined_score: float = 0.0
     round_found: int = 1                   # kis research round mein mila
+
+    # ── §6 (2026-08-20): content se nikala hua ASLI document kind ────────────
+    # `source_type` (upar) routing/dedup ka mota label hai — connector se aata
+    # hai. Ye teen field content + metadata se bante hain (source_kind.py) aur
+    # pata na ho to imaandaari se "unknown" rehte hain. Purana field hataya
+    # NAHI gaya: dono saath chalte hain.
+    doc_kind: str = ""                     # "review_article" | "preprint" | "unknown" ...
+    doc_kind_label: str = ""               # user ko dikhane wala Hinglish label
+    doc_kind_confidence: str = ""          # "high" | "medium" | "low"
+
+    # ── §2/§5: domain-level faisla, poori wajah ke saath ────────────────────
+    # relevance kyun mili/nahi mili — ye report aur test dono padhte hain.
+    domain_verdict: Dict = field(default_factory=dict)
+    relevance_parts: Dict = field(default_factory=dict)
+    rejected_reason: str = ""              # khaali = reject nahi hua
 
     # ── helpers ──
     @property
@@ -175,7 +199,10 @@ class SourceRecord:
         if self.source_type == SourceType.DOCUMENT:
             bits.append("tumhara uploaded document")
         else:
-            bits.append(self.source_type.value)
+            # §6: content se nikala hua kind pehle. Connector-based mota label
+            # (source_type) tab hi bolte hain jab content kuch pakka na bata
+            # sake — warna "review" ko "dataset" keh dena jhooth ban jaata hai.
+            bits.append(self.doc_kind_label or self.source_type.value)
         if self.peer_reviewed is True:
             bits.append("peer-reviewed")
         if self.methodology:
@@ -309,6 +336,11 @@ class EvidencePack:
     topic_terms: List[str] = field(default_factory=list)
     retrieval_filter: Dict = field(default_factory=dict)
 
+    # §11 — jo queries SACH MEIN chali. Consensus gate isse dekh kar batata hai
+    # ki opposition/criticism side ki search hui thi ya sirf support side ki.
+    # Pehle ye jaankari discovery loop ke andar hi mar jaati thi.
+    search_queries: List[str] = field(default_factory=list)
+
     # reasoning passes poore hue ya quota/error se adhoore reh gaye
     reasoning_planned: int = 0
     reasoning_done: int = 0
@@ -438,6 +470,11 @@ class EvidencePack:
             # ye line nahi thi, isliye model abstract-only source par bhi
             # [ESTABLISHED] chipka deta tha.
             meta.append(f"Read: {s.reading_level()}")
+            # §12: badi PDF page-by-page padhi gayi ho to model ko yahi batana
+            # zaroori hai, warna wo "poora document padha gaya" maan kar
+            # [ESTABLISHED] label laga deta hai.
+            if s.read_note:
+                meta.append(f"Read scope: {s.read_note}")
             body = (s.snippet or "").strip()[:max_chars_per_source]
             if body:
                 meta.append(f"Excerpt: {body}")
@@ -483,6 +520,17 @@ class EvidencePack:
             note += (f" {len(own_docs)} aapke apne uploaded document ka hissa hai — "
                      f"wo file upload ke waqt poori process hui thi, yahan uske "
                      f"sabse relevant hisse hain.")
+
+        # §12: jin badi files ko page-by-page padha gaya, unka dava "poora
+        # document padh liya" nahi ho sakta. Ginti asli fields se banti hai.
+        streamed = [s for s in self.sources if s.pages_read and s.pages_total]
+        if streamed:
+            pages_read = sum(s.pages_read for s in streamed)
+            pages_total = sum(s.pages_total for s in streamed)
+            note += (f" {len(streamed)} badi file(s) page-by-page padhi gayi: "
+                     f"{pages_total} pages mein se sawaal se sabse milte-julte "
+                     f"{pages_read} pages hi process hue — inka poora document "
+                     f"padha gaya aisa dava nahi hai.")
 
         if counts.get("full_text", 0) < len(self.sources):
             note += (" Baaki sources ka poora text NAHI padha gaya — un par sirf "
@@ -631,6 +679,20 @@ class ResearchResult:
     label_report: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
+
+    # §1 — run ka imaandaar status, UI ke liye machine-readable.
+    # "COMPLETE" / "PARTIAL" / "RESEARCH INCOMPLETE". Pehle adhoora run bhi
+    # normal jawab jaisa dikhta tha; ab frontend seedha `status` dekh kar
+    # warning banner laga sakta hai bina answer text parse kiye.
+    status: str = "COMPLETE"
+    status_reason: str = ""              # ek line, insaani bhasha (raw error nahi)
+    failure_kind: str = ""               # daily_quota / auth_failure / ...
+    missing_passes: List[str] = field(default_factory=list)
+    missing_sections: List[str] = field(default_factory=list)
+    # §9 — raw API/protobuf text SIRF yahan (aur report ke sabse neeche).
+    # Ye kabhi bhi user-facing jawab ka hissa nahi banta.
+    technical_details: List[str] = field(default_factory=list)
+    api_accounting: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return asdict(self)
