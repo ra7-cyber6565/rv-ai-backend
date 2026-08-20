@@ -50,6 +50,25 @@ def ensure_work_root(env: Mapping[str, str] | None = None) -> str | None:
     return layout["temp"]
 
 
+def _reserve_configured_capacity(max_bytes: int, *, custom_work_root: bool) -> None:
+    """Fail before reading when the configured local workspace is already full.
+
+    This is intentionally skipped for an explicit ``work_root`` argument used by
+    isolated tests/callers because storage_quota tracks the configured Infinity
+    root, not arbitrary temporary directories.
+    """
+    if custom_work_root:
+        return
+    _, explicit = configured_root()
+    if not explicit:
+        return
+    try:
+        from utils.storage_quota import StorageQuotaError, assert_capacity
+        assert_capacity(max_bytes)
+    except StorageQuotaError as exc:
+        raise HTTPException(status_code=507, detail=str(exc)) from exc
+
+
 async def save_upload_stream(
     upload: AsyncUpload,
     *,
@@ -64,6 +83,8 @@ async def save_upload_stream(
     - never buffers the whole upload in application memory;
     - rejects empty files with HTTP 400;
     - rejects files above ``max_bytes`` with HTTP 413;
+    - rejects new configured-root writes with HTTP 507 when the bounded local
+      workspace cannot safely reserve the endpoint's maximum upload size;
     - removes the temporary directory on every failure path;
     - when a storage root is configured, never falls back to another drive.
 
@@ -74,6 +95,8 @@ async def save_upload_stream(
         raise ValueError("max_bytes must be positive")
     if chunk_bytes <= 0:
         raise ValueError("chunk_bytes must be positive")
+
+    _reserve_configured_capacity(max_bytes, custom_work_root=work_root is not None)
 
     root = work_root if work_root is not None else ensure_work_root()
     if root:
