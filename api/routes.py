@@ -14,9 +14,6 @@ BADLAV (Spec Section 4/5 ka missing wiring):
     docx, plain text, HTML aur timestamped transcripts sach mein kaam karte hain.
 """
 import os
-import shutil
-import tempfile
-from typing import Optional
 
 from fastapi import APIRouter, UploadFile, File, HTTPException, Form
 from pydantic import BaseModel
@@ -24,6 +21,7 @@ from pydantic import BaseModel
 from rag.pipeline import ask_question
 from research_engine.vector_search import VectorSearch
 from research_engine.agent_manager import manager  # ✅ ADD: Deep research engine
+from utils.upload_safety import cleanup_upload_path, save_upload_stream
 
 router = APIRouter()
 
@@ -31,7 +29,7 @@ router = APIRouter()
 SUPPORTED = (".pdf", ".docx", ".txt", ".md", ".markdown", ".text",
              ".html", ".htm", ".vtt", ".srt")
 
-# Upload size cap — bina cap ke ek badi file server ki memory kha sakti hai
+# Upload size cap — streaming helper cap cross hote hi read rok deta hai.
 MAX_UPLOAD_BYTES = 60 * 1024 * 1024      # 60 MB
 # Audio/podcast files documents se badi hoti hain — inke liye alag, bada cap
 MAX_AUDIO_BYTES = 200 * 1024 * 1024      # 200 MB
@@ -49,27 +47,6 @@ class YouTubeRequest(BaseModel):
     video: str                            # URL ya sirf video id
     project_id: str = "default"
     title: str = ""
-
-
-def _save_upload(file: UploadFile, content: bytes) -> str:
-    """Bytes ko temp file mein likho, extension bachaate hue."""
-    extension = os.path.splitext(file.filename or "")[1].lower() or ".bin"
-    directory = tempfile.mkdtemp(prefix="infinity_upload_")
-    path = os.path.join(directory, f"upload{extension}")
-    with open(path, "wb") as handle:
-        handle.write(content)
-    return path
-
-
-async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="File khaali hai.")
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File {max_bytes // (1024 * 1024)}MB se badi hai.")
-    return content
 
 
 def _ingest(file_path: str, filename: str, project_id: str, use_ocr: bool) -> dict:
@@ -110,9 +87,8 @@ async def upload_audio(file: UploadFile = File(...),
                    f"Supported: {', '.join(AUDIO_SUPPORTED)}"
         )
 
-    content = await _read_upload(file, MAX_AUDIO_BYTES)
-    file_path = _save_upload(file, content)
-
+    file_path = await save_upload_stream(file, max_bytes=MAX_AUDIO_BYTES)
+    result = None
     try:
         from research_engine.memory.speech_to_text import transcribe_to_vtt
 
@@ -141,13 +117,16 @@ async def upload_audio(file: UploadFile = File(...),
         }
 
     finally:
-        # Cleanup
+        # Upload temp directory hamesha clean hoti hai. Generated VTT agar
+        # upload temp ke bahar bana ho to use bhi best-effort remove karo.
         try:
-            os.remove(file_path)
-            if result.get("vtt_path"):
-                os.remove(result["vtt_path"])
+            if result and result.get("vtt_path"):
+                vtt_path = os.path.abspath(result["vtt_path"])
+                if os.path.exists(vtt_path):
+                    os.remove(vtt_path)
         except Exception:
             pass
+        cleanup_upload_path(file_path)
 
 
 @router.post("/upload-document")
@@ -169,12 +148,11 @@ async def upload_document(file: UploadFile = File(...),
             detail=f"'{extension or 'unknown'}' supported nahi hai. "
                    f"Supported: {', '.join(SUPPORTED)}")
 
-    content = await _read_upload(file)
-    path = _save_upload(file, content)
+    path = await save_upload_stream(file, max_bytes=MAX_UPLOAD_BYTES)
     try:
         result = _ingest(path, filename, project_id, use_ocr)
     finally:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        cleanup_upload_path(path)
 
     return {
         "message": f"'{filename}' process ho gayi",
@@ -199,12 +177,11 @@ async def upload_pdf(file: UploadFile = File(...),
         raise HTTPException(status_code=400,
                             detail="Sirf PDF files allowed hain. Dusre formats ke "
                                    "liye /upload-document use karein.")
-    content = await _read_upload(file)
-    path = _save_upload(file, content)
+    path = await save_upload_stream(file, max_bytes=MAX_UPLOAD_BYTES)
     try:
         result = _ingest(path, filename, project_id, use_ocr=True)
     finally:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        cleanup_upload_path(path)
 
     return {
         "message": f"✅ '{filename}' successfully processed",
@@ -298,12 +275,11 @@ async def transcribe_audio(file: UploadFile = File(...),
             "reason": status.get("reason", ""),
         })
 
-    content = await _read_upload(file, MAX_AUDIO_BYTES)
-    path = _save_upload(file, content)
+    path = await save_upload_stream(file, max_bytes=MAX_AUDIO_BYTES)
     try:
         result = stt.process_file(path, lang=(lang.strip() or None))
     finally:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        cleanup_upload_path(path)
 
     if not result.get("ok"):
         raise HTTPException(status_code=422, detail={
