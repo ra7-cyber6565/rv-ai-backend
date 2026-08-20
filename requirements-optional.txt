@@ -11,7 +11,9 @@
 # NOTE: pytesseract ko Tesseract ka Windows binary bhi chahiye —
 #   https://github.com/UB-Mannheim/tesseract/wiki
 pytesseract==0.3.10
-pillow==10.4.0
+# Pillow base requirements.txt mein already pinned hai. Yahan duplicate pin nahi
+# rakha gaya, warna optional install base Pillow version ko downgrade/conflict
+# kara sakta tha.
 
 # Word documents (.docx) padhne ke liye
 # Nahi hoga to: .docx upload par "unsupported format" saaf-saaf bolega.
