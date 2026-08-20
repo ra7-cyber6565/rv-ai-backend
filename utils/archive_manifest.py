@@ -100,6 +100,18 @@ class ArchiveManifest:
         item["updated_at"] = int(time.time())
         self._save(data)
 
+    def mark_verification_failed(self, sha256: str, error: str) -> None:
+        """Persist verification failure without counting a second upload attempt."""
+        data = self._load()
+        item = data["items"].get(sha256)
+        if not item:
+            raise KeyError(sha256)
+        item["status"] = "uploaded_unverified"
+        item["verified"] = False
+        item["last_error"] = str(error)[:1000]
+        item["updated_at"] = int(time.time())
+        self._save(data)
+
     def mark_verified(self, sha256: str, *, remote_size: int, remote_sha256: str | None = None) -> None:
         data = self._load()
         item = data["items"].get(sha256)
