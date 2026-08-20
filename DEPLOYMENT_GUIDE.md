@@ -1,93 +1,108 @@
-# 🚀 DEPLOYMENT INSTRUCTIONS
+# Infinity Research AI — Deployment & Storage Guide
 
-## OPTION 1: Render.com (Recommended - Free)
+## Hard rules
 
-### Step 1: Create GitHub Repository
-```bash
+- Runtime cost target: **₹0**. `ZERO_COST_ONLY=true` stays enabled.
+- Never add a paid AI provider as a silent fallback.
+- Never commit real API keys, access tokens, client secrets, private secrets, user uploads, research-memory JSON, model files, vector databases, or runtime logs to GitHub.
+- Hosting/provider pricing and free-tier limits can change. Verify the provider's current official terms before every deployment; this guide deliberately does **not** promise that any named host is permanently free.
+
+## Laptop setup (recommended while TeraBox API approval is pending)
+
+Create a working folder on D:
+
+```text
+D:\InfinityResearchAI
+```
+
+In the backend's private `.env` file:
+
+```env
+ZERO_COST_ONLY=true
+GEMINI_API_KEY=your_real_key_here
+INFINITY_DATA_ROOT=D:\InfinityResearchAI
+CORS_ALLOWED_ORIGINS=
+```
+
+Do **not** put real secrets in `.env.example` or GitHub.
+
+When `INFINITY_DATA_ROOT` is set, the backend routes these heavy/runtime locations below that root:
+
+```text
+D:\InfinityResearchAI\
+  archive\
+  cache\
+  knowledge\
+  logs\
+  models\
+  research_memory\
+  temp\
+  uploads\
+  vector_db\
+```
+
+This includes ChromaDB, sentence-transformer/Hugging Face/Torch model caches, temporary uploads, research memory, project metadata and archive verification metadata. If the explicitly configured root is unavailable or unwritable, the app fails closed instead of silently moving that workload to C:.
+
+## Run locally
+
+```bat
 cd C:\Users\intel\Music\infinity-research-ai-main\infinity-research-ai-main\backend
-
-# Initialize git (if not already)
-git init
-git add .
-git commit -m "Initial commit - RV AI Backend"
-
-# Create repo on GitHub.com
-# Then push:
-git remote add origin https://github.com/YOUR_USERNAME/rv-ai-backend.git
-git branch -M main
-git push -u origin main
+venv\Scripts\activate
+python -m uvicorn main:app --reload
 ```
 
-### Step 2: Deploy on Render.com
-1. Go to: https://render.com/
-2. Sign up with GitHub
-3. Click: **New → Web Service**
-4. Connect your `rv-ai-backend` repository
-5. Settings:
-   - **Name:** rv-ai-backend
-   - **Environment:** Python 3
-   - **Build Command:** `pip install -r requirements.txt`
-   - **Start Command:** `uvicorn main:app --host 0.0.0.0 --port $PORT`
-6. Add Environment Variables:
-   - `GEMINI_API_KEY` = your_key_here
-   - `OPENAI_API_KEY` = your_key_here (optional)
-7. Click: **Create Web Service**
+Check:
 
-### Step 3: Wait for Deployment (5-10 min)
-- Render will build and deploy
-- You'll get URL: `https://rv-ai-backend-xxxxx.onrender.com`
-
-### Step 4: Update Android App
-```kotlin
-// File: RetrofitClient.kt
-private const val BASE_URL = "https://rv-ai-backend-xxxxx.onrender.com/"
+```text
+http://127.0.0.1:8000/health
 ```
 
----
+The health response includes `zero_cost_only` and storage status. Confirm that the reported storage root is the intended D: location before large uploads or model downloads.
 
-## OPTION 2: Railway.app (Alternative - Free)
+## Cloud deployment
 
-### Similar process:
-1. https://railway.app/
-2. New Project → Deploy from GitHub
-3. Select backend repo
-4. Add environment variables
-5. Get URL: `https://rv-ai-backend.railway.app/`
+The repository includes `render.yaml`, but a configuration file saying `plan: free` is **not** a guarantee that the vendor's current terms are free. Before deployment:
 
----
+1. Check the chosen host's current official pricing/quota page.
+2. Confirm there is no automatic paid overage/billing path you do not want.
+3. Set `ZERO_COST_ONLY=true`.
+4. Set `GEMINI_API_KEY` only if the key/project is configured for the genuinely free usage you intend.
+5. Do not set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in zero-cost mode; startup deliberately rejects them.
+6. Treat container-local disk as temporary unless the host explicitly provides durable storage under terms you have verified.
 
-## OPTION 3: PythonAnywhere (Slower but Stable)
+Cloud start command:
 
-1. https://www.pythonanywhere.com/
-2. Upload code
-3. Configure WSGI
-4. Get URL: `https://yourusername.pythonanywhere.com/`
-
----
-
-## ⚠️ IMPORTANT: Environment Variables
-
-**Must set these on deployment platform:**
-```
-GEMINI_API_KEY=your_actual_gemini_key
-OPENAI_API_KEY=your_actual_openai_key (optional)
+```text
+uvicorn main:app --host 0.0.0.0 --port $PORT
 ```
 
-**Get Gemini key:** https://aistudio.google.com/apikey
+Health path:
 
----
-
-## ✅ VERIFICATION:
-
-After deployment, test:
-```
-https://your-deployed-url.onrender.com/health
-
-Response: {"status": "healthy", "service": "RV AI Backend"}
+```text
+/health
 ```
 
----
+## TeraBox archive integration
 
-## 🎯 NEXT: Update Android App
+TeraBox is planned as the large archive layer, but automatic API upload is **not enabled yet**. We are waiting for official developer/API access. No guessed/private endpoint is hard-coded.
 
-Main tumhe exact URL de dunga deployment ke baad!
+Once official credentials are approved, the intended flow is:
+
+```text
+D: working file
+  -> register SHA-256/size in archive manifest
+  -> official TeraBox upload
+  -> remote verification
+  -> manifest status = VERIFIED
+  -> only then may the D: working copy be deleted
+```
+
+If upload or verification fails, the local working copy must remain and the item stays pending/failed for retry.
+
+## GitHub's role
+
+GitHub is for source code, tests, configuration templates and version history. It is **not** the bulk-data store. Runtime files and heavy caches are excluded by `.gitignore` going forward.
+
+## Android app
+
+When the backend URL is stable, configure the Android client's base URL to that backend. Keep all provider/API secrets on the backend; never package private API keys inside the Android APK.
