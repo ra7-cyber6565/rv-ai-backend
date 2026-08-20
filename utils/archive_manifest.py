@@ -1,8 +1,7 @@
 """Durable archive manifest for cloud-first storage.
 
 This module tracks whether a local working file is safe to delete. A file must
-be marked uploaded *and* verified before cleanup is allowed. The manifest itself
-is small JSON metadata and should live under INFINITY_WORK_ROOT on the laptop.
+be marked uploaded *and* verified before cleanup is allowed.
 
 The provider upload implementation is intentionally separate: TeraBox tokens and
 account-specific API details must never be hard-coded in this repository.
@@ -17,7 +16,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from utils.upload_safety import ensure_work_root
+from utils.storage_paths import ensure_layout
 
 
 def sha256_file(path: str, chunk_bytes: int = 1024 * 1024) -> str:
@@ -32,12 +31,7 @@ def sha256_file(path: str, chunk_bytes: int = 1024 * 1024) -> str:
 
 
 def default_manifest_path() -> str:
-    root = ensure_work_root()
-    if root:
-        folder = Path(root) / "archive"
-    else:
-        # Cloud/Linux development can still run without a Windows D: setting.
-        folder = Path(tempfile.gettempdir()) / "infinity_research_ai" / "archive"
+    folder = Path(ensure_layout()["archive"])
     folder.mkdir(parents=True, exist_ok=True)
     return str(folder / "manifest.json")
 
