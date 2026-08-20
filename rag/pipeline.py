@@ -10,13 +10,7 @@ load_dotenv()
 # ── LAZY LOADING (crash-proof boot) ──────────────────────────────────────────
 # Pehle yahan module import hote hi SentenceTransformer('all-MiniLM-L6-v2') load
 # ho jaata tha. Iska matlab: app start hote hi torch + model (~300MB+) memory
-# mein aa jaate the — free-tier server par ye slow boot ya OOM crash karta tha,
-# aur agar sentence-transformers install na ho to poora app hi crash.
-#
-# Ab ye teeno cheezein "lazy" hain: sirf pehli baar zaroorat padne par load
-# hoti hain (jab PDF upload/query ho). Isse app turant boot hota hai, /health
-# kaam karta hai, aur deep-research (jise embeddings ki zaroorat nahi) bina
-# torch ke chalta hai.
+# mein aa jaate the — free-tier server par ye slow boot ya OOM crash karta tha.
 _embedding_model = None
 _client = None
 _gemini = None
@@ -26,14 +20,23 @@ def get_embedding_model():
     global _embedding_model
     if _embedding_model is None:
         from sentence_transformers import SentenceTransformer
-        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
+        _embedding_model = SentenceTransformer(
+            'all-MiniLM-L6-v2',
+            cache_folder=cache_folder,
+        )
     return _embedding_model
 
 
 def get_client():
     global _client
     if _client is None:
-        _client = chromadb.PersistentClient(path="./chroma_db")
+        # main.py configures CHROMA_DB_DIR from INFINITY_DATA_ROOT before this
+        # module is imported. Standalone use still has a backwards-compatible
+        # repository-local fallback.
+        db_path = os.getenv("CHROMA_DB_DIR", "./chroma_db")
+        os.makedirs(db_path, exist_ok=True)
+        _client = chromadb.PersistentClient(path=db_path)
     return _client
 
 
@@ -49,10 +52,9 @@ def get_gemini():
     return _gemini
 
 
-
 def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
     """
-    PDF को chunks में तोड़ो और ChromaDB में store करो
+    PDF ko chunks mein todo aur ChromaDB mein store karo.
     """
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     chunks, metadatas, ids = [], [], []
@@ -82,7 +84,7 @@ def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
 
 def ask_question(question: str, project_id: str) -> dict:
     """
-    सवाल पूछो — relevant chunks ढूंढो — Gemini से जवाब लो
+    Sawal poocho — relevant chunks dhoondo — Gemini se jawab lo.
     """
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
 
@@ -90,7 +92,6 @@ def ask_question(question: str, project_id: str) -> dict:
     results = collection.query(query_embeddings=q_embedding, n_results=5)
 
     if not results["documents"][0]:
-        # Koi document nahi mila -> General Knowledge se jawab do
         fallback_prompt = f"""Tum ek research assistant ho. Tumhare paas is sawal ke liye koi document/PDF nahi hai.
 Apne general knowledge se jawab do, lekin:
 1. Saaf batao ki ye jawab documents se nahi, tumhare general knowledge se hai
@@ -119,16 +120,16 @@ Jawab:"""
 
     context = "\n\n".join(context_parts)
 
-    prompt = f"""तुम एक research assistant हो। नीचे दिए गए documents के आधार पर सवाल का जवाब दो।
-हर बात के साथ source और page number ज़रूर बताओ।
-अगर जवाब documents में नहीं है तो साफ़ बोलो।
+    prompt = f"""Tum ek research assistant ho. Neeche diye gaye documents ke base par sawal ka jawab do.
+Har important baat ke saath source aur page number batao.
+Agar jawab documents mein nahi hai to saaf bolo.
 
 Documents:
 {context}
 
-सवाल: {question}
+Sawal: {question}
 
-जवाब (source + page number के साथ):"""
+Jawab (source + page number ke saath):"""
 
     response = get_gemini().generate_content(prompt)
 
@@ -169,10 +170,6 @@ def get_context_only(question: str, project_id: str, n_results: int = 8) -> dict
     context_parts = []
     sources = []
     for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-        # .get() jaan-boojh kar: metadata ab do jagah se aata hai — purana
-        # ingest_pdf ({"source","page"}) aur naya ingest_chunks (jahan "page"
-        # mein timestamp jaisa locator ho sakta hai). Direct meta['page'] karne
-        # se ek missing key poori retrieval gira deti thi.
         meta = meta or {}
         source_name = meta.get("source", "unknown")
         page = meta.get("page", "?")
