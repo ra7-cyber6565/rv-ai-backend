@@ -57,21 +57,19 @@ class ArchiveService:
             )
         except Exception as exc:  # noqa: BLE001 - preserve local file on any cloud failure
             current = self.manifest.get(key) or {}
-            # If upload had not yet been recorded, record this failed attempt.
+            message = f"{type(exc).__name__}: {exc}"[:1000]
             if current.get("status") == "pending":
-                self.manifest.mark_upload_attempt(key, error=f"{type(exc).__name__}: {exc}")
+                # Upload itself failed (or failed before we could confirm success).
+                self.manifest.mark_upload_attempt(key, error=message)
             elif current.get("status") != "verified":
-                # Keep failure reason without pretending a second upload attempt happened.
-                data_error = f"verification failed: {type(exc).__name__}: {exc}"
-                # mark_upload_attempt increments attempts, so only use it when the
-                # upload itself was still pending. Verification errors surface here.
-                current["verification_error"] = data_error[:1000]
+                # Upload returned, but remote stat/size/checksum verification failed.
+                self.manifest.mark_verification_failed(key, message)
             return {
                 "ok": False,
                 "verified": False,
                 "local_retained": os.path.exists(local_path),
                 "sha256": key,
-                "error": f"{type(exc).__name__}: {exc}"[:1000],
+                "error": message,
             }
 
         return {
