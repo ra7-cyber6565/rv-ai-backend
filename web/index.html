@@ -2,393 +2,93 @@
 <html lang="hi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RV</title>
-<meta name="description" content="RV — turant baat-cheet, aur chaaho to sources ke saath deep research.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Infinity Research AI</title>
+<meta name="description" content="Simple chat aur source-based deep research.">
 <style>
-:root{
-  color-scheme: light;
-  --bg:#ffffff;
-  --bg-soft:#f7f7f8;
-  --user-bubble:#f0f4f9;
-  --ink:#1f2328;
-  --muted:#6b7280;
-  --line:#e7e8ec;
-  --brand:#10a37f;
-  --brand-ink:#0d8a6c;
-  --danger:#b0452c;
-  --font:"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --maxw:760px;
-}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0}
-body{
-  background:var(--bg); color:var(--ink);
-  font-family:var(--font); font-size:16px; line-height:1.6;
-  -webkit-font-smoothing:antialiased;
-  display:flex; flex-direction:column; height:100vh;
-}
-/* ---------- header ---------- */
-header{
-  flex:0 0 auto; border-bottom:1px solid var(--line);
-  display:flex; align-items:center; gap:14px;
-  padding:10px 16px; background:var(--bg); position:sticky; top:0; z-index:10;
-}
-.brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px}
-.brand .dot{
-  width:28px; height:28px; border-radius:8px; background:var(--brand);
-  color:#fff; display:grid; place-items:center; font-size:14px; font-weight:700;
-}
-.modes{display:flex; gap:4px; background:var(--bg-soft); padding:4px; border-radius:10px; margin-left:auto}
-.modes button{
-  border:0; background:transparent; color:var(--muted); cursor:pointer;
-  font:inherit; font-weight:600; font-size:13px; padding:6px 14px; border-radius:8px;
-}
-.modes button.on{background:#fff; color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.mode-hint{font-size:12px; color:var(--muted); padding:0 16px 8px; text-align:center}
-
-/* ---------- chat scroll area ---------- */
-#scroll{flex:1 1 auto; overflow-y:auto; scroll-behavior:smooth}
-#thread{max-width:var(--maxw); margin:0 auto; padding:24px 16px 8px}
-
-/* welcome */
-.welcome{text-align:center; margin:12vh auto 0; max-width:520px; color:var(--ink)}
-.welcome .big{width:56px;height:56px;border-radius:16px;background:var(--brand);color:#fff;
-  display:grid;place-items:center;font-size:26px;font-weight:700;margin:0 auto 18px}
-.welcome h1{font-size:26px; margin:0 0 8px}
-.welcome p{color:var(--muted); margin:0 0 24px}
-.chips{display:flex; flex-wrap:wrap; gap:10px; justify-content:center}
-.chip{border:1px solid var(--line); background:var(--bg-soft); border-radius:12px;
-  padding:10px 14px; cursor:pointer; font-size:14px; color:var(--ink); text-align:left; max-width:240px}
-.chip:hover{border-color:var(--brand)}
-
-/* message rows */
-.msg{display:flex; gap:14px; padding:14px 0}
-.msg .av{flex:0 0 30px; width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
-  font-size:12px; font-weight:700; margin-top:2px}
-.msg.user .av{background:var(--user-bubble); color:var(--brand-ink)}
-.msg.rv .av{background:var(--brand); color:#fff}
-.msg .body{flex:1 1 auto; min-width:0}
-.msg .who{font-weight:600; font-size:13px; margin-bottom:2px}
-.msg .txt{white-space:pre-wrap; word-wrap:break-word}
-.msg .txt p{margin:0 0 10px}
-.msg .txt p:last-child{margin-bottom:0}
-
-/* thinking dots */
-.thinking{display:inline-flex; gap:5px; align-items:center; height:22px}
-.thinking span{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.4;
-  animation:blink 1.4s infinite both}
-.thinking span:nth-child(2){animation-delay:.2s}
-.thinking span:nth-child(3){animation-delay:.4s}
-@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:.9}}
-
-/* error note (friendly, not scary) */
-.note{background:#fdf6ee; border:1px solid #f0d9b8; color:#8a5a1a; border-radius:10px;
-  padding:10px 12px; font-size:14px; margin-top:6px}
-
-/* progress panel (deep/max) */
-.progress{border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-top:6px; background:var(--bg-soft)}
-.progress .stage{font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px}
-.progress .bar{height:6px; background:#e3e6ea; border-radius:99px; overflow:hidden; margin:10px 0 4px}
-.progress .fill{height:100%; background:var(--brand); width:0; transition:width .4s ease}
-.progress .log{font-size:12px; color:var(--muted); margin-top:6px; max-height:80px; overflow-y:auto; white-space:pre-wrap}
-
-/* sources */
-.sources{margin-top:14px}
-.sources h4{font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px}
-.src{border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px}
-.src a{color:var(--brand-ink); text-decoration:none; font-weight:600; font-size:14px}
-.src a:hover{text-decoration:underline}
-.src .meta{font-size:12px; color:var(--muted); margin-top:2px}
-
-/* ---------- composer ---------- */
-footer{flex:0 0 auto; padding:8px 16px 16px; background:linear-gradient(transparent, var(--bg) 24px)}
-.composer{max-width:var(--maxw); margin:0 auto; border:1px solid var(--line); border-radius:16px;
-  padding:8px 8px 8px 16px; display:flex; align-items:flex-end; gap:8px; box-shadow:0 2px 10px rgba(0,0,0,.04)}
-.composer:focus-within{border-color:var(--brand)}
-.composer textarea{flex:1 1 auto; border:0; outline:0; resize:none; font:inherit; font-size:16px;
-  line-height:1.5; max-height:180px; background:transparent; color:var(--ink); padding:6px 0}
-.send{flex:0 0 auto; width:36px; height:36px; border-radius:10px; border:0; cursor:pointer;
-  background:var(--brand); color:#fff; font-size:18px; display:grid; place-items:center}
-.send:disabled{background:#cbd5d0; cursor:default}
-.foot-note{max-width:var(--maxw); margin:8px auto 0; text-align:center; font-size:11px; color:var(--muted)}
+:root{color-scheme:light;--bg:#fff;--soft:#f7f7f8;--ink:#202123;--muted:#6b7280;--line:#e5e7eb;--brand:#10a37f;--warn:#fff7e8;--warnink:#845b14;--max:820px;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:12px;flex:0 0 auto}.brand{font-weight:750;display:flex;align-items:center;gap:9px}.logo{width:30px;height:30px;border-radius:9px;background:var(--brand);color:white;display:grid;place-items:center;font-size:13px}.modes{margin-left:auto;background:var(--soft);border-radius:10px;padding:4px;display:flex;gap:3px}.modes button{border:0;background:transparent;padding:7px 13px;border-radius:8px;font-weight:650;color:var(--muted);cursor:pointer}.modes button.on{background:white;color:var(--ink);box-shadow:0 1px 3px #0001}
+.hint{font-size:12px;color:var(--muted);text-align:center;padding:6px 12px;border-bottom:1px solid #f1f1f1;flex:0 0 auto}
+#scroll{flex:1;overflow:auto}#thread{max-width:var(--max);margin:auto;padding:24px 16px 120px}.welcome{text-align:center;max-width:590px;margin:11vh auto}.welcome h1{font-size:29px;margin:0 0 10px}.welcome p{color:var(--muted);margin:0}.chips{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px}.chip{border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:10px 13px;cursor:pointer;font-size:14px}.chip:hover{border-color:var(--brand)}
+.msg{display:flex;gap:12px;padding:15px 0}.av{width:30px;height:30px;flex:0 0 30px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:750}.user .av{background:#eef2f7}.rv .av{background:var(--brand);color:#fff}.body{min-width:0;flex:1}.txt{line-height:1.68;overflow-wrap:anywhere;white-space:normal}.txt p{margin:0 0 11px}.txt p:last-child{margin-bottom:0}
+.thinking{display:inline-flex;gap:5px}.thinking i{width:7px;height:7px;border-radius:50%;background:#8b8b8b;animation:p 1.25s infinite}.thinking i:nth-child(2){animation-delay:.18s}.thinking i:nth-child(3){animation-delay:.36s}@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
+footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
+@media(max-width:600px){header{padding:0 10px}.brand span:last-child{display:none}.modes button{padding:7px 10px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
 <body>
-
 <header>
-  <div class="brand"><span class="dot">RV</span> RV</div>
-  <div class="modes" id="modes">
-    <button data-mode="QUICK" class="on">Chat</button>
+  <div class="brand"><span class="logo">IR</span><span>Infinity Research AI</span></div>
+  <div class="modes">
+    <button class="on" data-mode="QUICK">Chat</button>
     <button data-mode="DEEP">Deep</button>
     <button data-mode="MAXIMUM">Max</button>
   </div>
 </header>
-<div class="mode-hint" id="modeHint">Chat — turant seedha jawab.</div>
-
-<div id="scroll">
-  <div id="thread">
-    <div class="welcome" id="welcome">
-      <div class="big">RV</div>
-      <h1>Main RV hoon 🙂</h1>
-      <p>Kuch bhi poocho — main aapki hi bhasha mein jawab dunga. Gehri, source-wale jawab ke liye upar <b>Deep</b> ya <b>Max</b> chuno.</p>
-      <div class="chips">
-        <div class="chip" data-q="Tum kaun ho?">Tum kaun ho?</div>
-        <div class="chip" data-q="Aaj mera mann thoda udaas hai, baat karoge?">Mann udaas hai, baat karoge?</div>
-        <div class="chip" data-q="Explain black holes simply">Explain black holes simply</div>
-        <div class="chip" data-q="Ek chhoti si productivity tip do">Ek productivity tip do</div>
-      </div>
+<div class="hint" id="hint">Chat — turant seedha jawab.</div>
+<div id="scroll"><main id="thread">
+  <section class="welcome" id="welcome">
+    <h1>Kya research karni hai?</h1>
+    <p>Normal baat ke liye Chat. Sources, evidence aur cross-check ke liye Deep ya Max.</p>
+    <div class="chips">
+      <button class="chip" data-q="Explain black holes simply">Black holes simple words mein</button>
+      <button class="chip" data-q="Room-temperature superconductors ka future evidence ke saath research karo">Superconductors research</button>
+      <button class="chip" data-q="AI bias real world decisions ko kaise affect karta hai?">AI bias research</button>
     </div>
-  </div>
-</div>
-
+  </section>
+</main></div>
 <footer>
-  <div class="composer">
-    <textarea id="input" rows="1" placeholder="RV se kuch poocho…" autofocus></textarea>
-    <button class="send" id="send" title="Bhejo">↑</button>
-  </div>
-  <div class="foot-note">RV galti kar sakta hai — zaroori baatein khud bhi jaanch lena.</div>
+  <div class="composer"><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
+  <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
 </footer>
-
 <script>
 "use strict";
+const API="", IS_FILE=location.protocol==="file:";
+const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
+const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
+const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — sabse gehri available research. Isme zyada time lag sakta hai."};
+let mode="QUICK",busy=false;const history=[];const PROJECT_ID="web-"+Math.random().toString(36).slice(2,10);
+const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+function htmlText(s){return esc(s).split(/\n{2,}/).map(p=>"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");}
+function down(){scroll.scrollTop=scroll.scrollHeight;}
+function row(role){const w=$("#welcome");if(w)w.remove();const el=document.createElement("div");el.className="msg "+role;el.innerHTML='<div class="av">'+(role==="user"?"You":"IR")+'</div><div class="body"><div class="txt"></div></div>';thread.appendChild(el);down();return el.querySelector(".txt");}
+function thinking(el){el.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';}
+function answer(el,text){el.innerHTML=htmlText(text);down();}
+function note(el,text){const n=document.createElement("div");n.className="note";n.textContent=text;el.appendChild(n);}
+function friendly(el,text="Abhi server se baat nahi ho paayi. Thodi der baad phir try karo."){answer(el,IS_FILE?"Ye page file se khula hai. Backend server ke URL se page kholo, tab research chalegi.":text);}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+async function jsonFetch(url,opts){const r=await fetch(url,opts);let data={};try{data=await r.json();}catch(_){data={};}return {r,data};}
 
-// Same-origin: website aur API ek hi server se aate hain, isliye koi URL config nahi.
-const API = "";
-const IS_FILE = location.protocol === "file:";
+async function runChat(message,el){thinking(el);try{const {r,data}=await jsonFetch(API+"/api/v1/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,history,project_id:PROJECT_ID})});if(!r.ok)throw new Error("chat failed");const text=data.answer||"Is baar jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});}catch(e){friendly(el);}}
 
-const MODE_HINTS = {
-  QUICK:   "Chat — turant seedha jawab.",
-  DEEP:    "Deep — kuch sources padh kar, hawaale ke saath jawab (thoda time lagega).",
-  MAXIMUM: "Max — poori research: kai sources, cross-check, aur hawaale (sabse zyada time)."
-};
+function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
+function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
 
-let mode = "QUICK";
-const history = [];              // {role:'user'|'rv', content:''}
-let busy = false;
-const PROJECT_ID = "web-" + Math.random().toString(36).slice(2, 9);
-
-const $ = (s) => document.querySelector(s);
-const thread = $("#thread"), scroll = $("#scroll"), welcome = $("#welcome");
-const input = $("#input"), sendBtn = $("#send");
-
-// "tum kaun ho" jaise sawaal — bina server ke, turant local jawab.
-// Log "kaun" ko kaun/kon/koun/kaun sab tarah likhte hain, isliye spelling par
-// sakhti nahi — warna "tum kon ho" jaisa aam sawaal miss ho jaata hai.
-const ID_RE = /(k[ao]u?n\s*h[oy]|tum\s*k[ao]u?n|aap\s*k[ao]u?n|who\s*(are|r)\s*(you|u)|tumhara\s*naam|tumhaara\s*naam|your\s*name|naam\s*kya)/i;
-
-function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
-function toHTML(s){
-  // plain text ko paragraphs mein todo (double newline = naya para)
-  return esc(s).split(/\n{2,}/).map(p => "<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");
-}
-function scrollDown(){ scroll.scrollTop = scroll.scrollHeight; }
-
-// ---------- rendering ----------
-function addRow(role){
-  if (welcome) welcome.remove();
-  const row = document.createElement("div");
-  row.className = "msg " + (role === "user" ? "user" : "rv");
-  row.innerHTML =
-    '<div class="av">' + (role === "user" ? "आप" : "RV") + '</div>' +
-    '<div class="body"><div class="txt"></div></div>';
-  thread.appendChild(row);
-  scrollDown();
-  return row.querySelector(".txt");
-}
-
-function showThinking(txt){
-  txt.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
-  scrollDown();
-}
-
-function setAnswer(txt, answer){
-  txt.innerHTML = toHTML(answer);
-  scrollDown();
-}
-
-function showNote(txt, message){
-  const div = document.createElement("div");
-  div.className = "note";
-  div.textContent = message;
-  txt.appendChild(div);
-  scrollDown();
-}
-
-// ---------- QUICK chat ----------
-async function runChat(message, txt){
-  showThinking(txt);
-  try{
-    const r = await fetch(API + "/api/v1/chat", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ message, history, project_id: PROJECT_ID })
-    });
-    const data = await r.json();
-    const answer = (data && data.answer) ? data.answer : "Hmm, jawab nahi mila. Ek baar phir poochho?";
-    setAnswer(txt, answer);
-    history.push({ role:"rv", content: answer });
-  }catch(e){
-    friendlyError(txt);
+async function runResearch(question,el){const ui=progressPanel(el);let jobId="";try{
+  const start=await jsonFetch(API+"/api/v1/research-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question,project_id:PROJECT_ID,depth_mode:mode})});
+  if(!start.r.ok||!start.data.job_id)throw new Error("job start failed");jobId=start.data.job_id;
+  while(true){
+    const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId));
+    if(!status.r.ok)throw new Error("job status lost");
+    const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress");
+    if(prog.r.ok)paintProgress(ui,prog.data.progress);
+    if(status.data.status==="completed")break;
+    if(status.data.status==="failed")throw new Error(status.data.error||"research failed");
+    await sleep(1200);
   }
-}
+  const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result");
+  if(!res.r.ok)throw new Error("result unavailable");renderResearch(el,res.data);
+}catch(e){friendly(el,"Research complete nahi ho paayi. Jo kaam hua tha uska progress server par ho sakta hai; dubara try kar sakte ho.");}}
 
-// samne wale ko dara dene wale "Failed to fetch" ki jagah pyaari baat.
-function friendlyError(txt){
-  txt.innerHTML = "";
-  if (IS_FILE){
-    setAnswer(txt, "Lagta hai aapne page ko file se seedha khola hai. RV tab chalega jab ye server URL se khule (jaise aapka Railway link). Us link par kholo, phir baat karte hain 🙂");
-  } else {
-    setAnswer(txt, "Abhi server se baat nahi ho paayi. Thodi der baad phir bhejo — main yahin hoon 🙂");
-  }
-}
+function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),url=s.url?esc(s.url):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
 
-// ---------- DEEP / MAX research ----------
-const STAGE_LABEL = {
-  QUEUED:"Line mein…", PLANNING:"Sawaal samajh raha hoon", DISCOVERING:"Sources dhoondh raha hoon",
-  PROCESSING:"Documents padh raha hoon", READING:"Full text padh raha hoon",
-  EVIDENCE_ANALYSIS:"Saboot jaanch raha hoon", SPECIALIST_ANALYSIS:"Alag-alag angle se soch raha hoon",
-  CRITIQUE:"Khud ko cross-check kar raha hoon", HYPOTHESIS:"Nayi soch bana raha hoon",
-  SYNTHESIS:"Jawab likh raha hoon", SAFETY_CHECK:"Aakhri jaanch", COMPLETE:"Ho gaya"
-};
-const TOTAL_STAGES = 12;
-
-async function runResearch(question, txt){
-  // progress panel
-  txt.innerHTML =
-    '<div class="progress"><div class="stage"><span class="thinking"><span></span><span></span><span></span></span> <span class="stg">Shuru kar raha hoon…</span></div>' +
-    '<div class="bar"><div class="fill"></div></div>' +
-    '<div class="log"></div></div>';
-  const stg = txt.querySelector(".stg"), fill = txt.querySelector(".fill"), logEl = txt.querySelector(".log");
-  scrollDown();
-
-  let done = false;
-  async function poll(){
-    while(!done){
-      try{
-        const p = await (await fetch(API + "/api/v1/progress/" + encodeURIComponent(PROJECT_ID))).json();
-        if(p && p.current_stage){
-          stg.textContent = STAGE_LABEL[p.current_stage] || p.current_stage;
-          fill.style.width = Math.round((p.stages_done/TOTAL_STAGES)*100) + "%";
-          if(Array.isArray(p.log) && p.log.length){
-            const last = p.log.slice(-3).map(l => "• " + (STAGE_LABEL[l.stage]||l.stage) + (l.note? " — "+l.note : "")).join("\n");
-            logEl.textContent = last;
-          }
-          scrollDown();
-        }
-      }catch(e){ /* poll fail chalega, ignore */ }
-      await new Promise(r => setTimeout(r, 1200));
-    }
-  }
-  poll();
-
-  try{
-    const r = await fetch(API + "/api/v1/deep-research", {
-      method:"POST", headers:{"Content-Type":"application/json"},
-      body: JSON.stringify({ question, project_id: PROJECT_ID, depth_mode: mode })
-    });
-    const data = await r.json();
-    done = true;
-    renderResearch(txt, data);
-  }catch(e){
-    done = true;
-    friendlyError(txt);
-  }
-}
-
-function renderResearch(txt, data){
-  const answer = (data && data.answer) ? data.answer : "Is baar jawab nahi ban paaya. Ek baar phir poochho?";
-  txt.innerHTML = toHTML(answer);
-  history.push({ role:"rv", content: answer });
-
-  const sources = (data && Array.isArray(data.sources)) ? data.sources : [];
-  if(sources.length){
-    const wrap = document.createElement("div");
-    wrap.className = "sources";
-    let html = "<h4>Sources (" + sources.length + ")</h4>";
-    sources.slice(0, 12).forEach(s => {
-      const title = esc(s.title || s.url || "Source");
-      const url = s.url ? esc(s.url) : "";
-      const who = s.authors && s.authors.length ? esc(s.authors.slice(0,3).join(", ")) : "";
-      html += '<div class="src">' +
-        (url ? '<a href="'+url+'" target="_blank" rel="noopener">'+title+'</a>' : '<span>'+title+'</span>') +
-        (who ? '<div class="meta">'+who+'</div>' : '') + '</div>';
-    });
-    wrap.innerHTML = html;
-    txt.appendChild(wrap);
-  }
-  if(data && data.evidence_level){
-    const div = document.createElement("div");
-    div.className = "note";
-    div.textContent = "Saboot ka star: " + data.evidence_level;
-    txt.appendChild(div);
-  }
-  scrollDown();
-}
-
-// ---------- send flow ----------
-async function send(){
-  const message = input.value.trim();
-  if(!message || busy) return;
-  busy = true; sendBtn.disabled = true;
-  input.value = ""; autosize();
-
-  // user ka message dikhao
-  const uTxt = addRow("user");
-  uTxt.textContent = message;
-  history.push({ role:"user", content: message });
-
-  // "tum kaun ho" — turant local jawab, server ki zaroorat nahi
-  if(ID_RE.test(message)){
-    const txt = addRow("rv");
-    const ans = "Main RV hoon 🙂 Aapki madad ke liye yahin hoon. Kya jaanna chahoge?";
-    setAnswer(txt, ans);
-    history.push({ role:"rv", content: ans });
-    busy = false; sendBtn.disabled = false; input.focus();
-    return;
-  }
-
-  const txt = addRow("rv");
-  if(mode === "QUICK") await runChat(message, txt);
-  else await runResearch(message, txt);
-
-  busy = false; sendBtn.disabled = false; input.focus();
-}
-
-// ---------- UI wiring ----------
-function autosize(){
-  input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, 180) + "px";
-}
-input.addEventListener("input", autosize);
-input.addEventListener("keydown", (e) => {
-  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); send(); }
-});
-sendBtn.addEventListener("click", send);
-
-document.querySelectorAll(".modes button").forEach(b => {
-  b.addEventListener("click", () => {
-    document.querySelectorAll(".modes button").forEach(x => x.classList.remove("on"));
-    b.classList.add("on");
-    mode = b.dataset.mode;
-    $("#modeHint").textContent = MODE_HINTS[mode];
-  });
-});
-
-// welcome chips
-document.addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if(chip){ input.value = chip.dataset.q; autosize(); send(); }
-});
-
-// file:// warning upfront
-if(IS_FILE){
-  const t = addRow("rv");
-  setAnswer(t, "Namaste! Ek baat — abhi ye page file se khula hai, isliye main server se baat nahi kar paunga. Apna live link (Railway URL) kholo, phir main poori tarah kaam karunga 🙂");
-}
-
+async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");if(mode==="QUICK")await runChat(message,r);else await runResearch(message,r);busy=false;send.disabled=false;input.focus();}
+function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);
+document.querySelectorAll(".modes button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.mode;$("#hint").textContent=HINT[mode];}));document.addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){input.value=c.dataset.q;resize();submit();}});
+if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");}
 input.focus();
 </script>
 </body>
