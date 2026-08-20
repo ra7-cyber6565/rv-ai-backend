@@ -8,18 +8,32 @@ kaam aayengi:
     * dead ends — kaun sa approach ya query kaam nahi karti
     * seen source URLs — dobara wahi source discovery mein na aaye
 
-Deliberately simple: file-based JSON, koi DB nahi. Corrupt file ya missing dir
-se crash nahi hota — memory kabhi research ko block nahi karegi.
+Deliberately simple: file-based JSON, koi paid DB/service nahi. Runtime path
+``RESEARCH_MEMORY_DIR`` se aata hai; main.py ise INFINITY_DATA_ROOT ke andar
+set karta hai, taaki laptop par memory files project folder/C: ko na bharen.
 """
 from __future__ import annotations
 
 import json
 import os
 import re
+import tempfile
 import time
 from typing import Dict, List, Optional
 
-_DEFAULT_DIR = os.getenv("RESEARCH_MEMORY_DIR", "./research_memory")
+
+def _default_dir() -> str:
+    configured = str(os.getenv("RESEARCH_MEMORY_DIR", "")).strip()
+    if configured:
+        return os.path.abspath(os.path.expanduser(configured))
+    # Standalone/test import ke liye centralized fallback use karo.
+    try:
+        from utils.storage_paths import ensure_layout
+        return ensure_layout()["research_memory"]
+    except Exception:
+        return os.path.abspath("./research_memory")
+
+
 _MAX_RUNS = 50
 _MAX_URLS = 400
 _STOP = {"kya", "hai", "the", "ka", "ki", "ke", "se", "mein", "aur", "what", "is",
@@ -32,9 +46,9 @@ def _words(text: str) -> set:
 
 
 class ResearchMemory:
-    def __init__(self, project_id: str = "default", directory: str = _DEFAULT_DIR):
+    def __init__(self, project_id: str = "default", directory: Optional[str] = None):
         self.project_id = project_id or "default"
-        self.directory = directory
+        self.directory = os.path.abspath(directory or _default_dir())
         self._data: Optional[Dict] = None
 
     # ── storage ──────────────────────────────────────────────────────────────
@@ -53,8 +67,11 @@ class ResearchMemory:
         try:
             with open(self.path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("research memory root must be an object")
             for key, default in self._blank().items():
-                data.setdefault(key, default)
+                if key not in data or not isinstance(data[key], type(default)):
+                    data[key] = default
             self._data = data
         except Exception:
             # File nahi hai ya corrupt hai — memory se research nahi rukni chahiye
@@ -67,8 +84,16 @@ class ResearchMemory:
         data["seen_urls"] = data["seen_urls"][-_MAX_URLS:]
         try:
             os.makedirs(self.directory, exist_ok=True)
-            with open(self.path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            fd, tmp = tempfile.mkstemp(prefix="memory_", suffix=".json", dir=self.directory)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(tmp, self.path)
+            finally:
+                if os.path.exists(tmp):
+                    os.remove(tmp)
             return True
         except Exception:
             return False
@@ -146,14 +171,7 @@ class ResearchMemory:
         return set(self.load()["seen_urls"])
 
     def context_note(self, question: str) -> str:
-        """
-        Prompt mein daalne layak chhota note — pichhli baar kya hua tha.
-
-        Saare fields .get() se padhe jaate hain: memory file purane format mein
-        bhi ho sakti hai (ya haath se edit ho sakti hai), aur ek missing key ke
-        chalte poora memory feature chup-chaap band ho jaata tha (caller ke
-        try/except mein KeyError ghum ho jaata tha).
-        """
+        """Prompt mein daalne layak chhota note — pichhli baar kya hua tha."""
         runs = self.recall_related(question)
         hyps = self.known_hypotheses(question)
         dead = self.related_dead_ends(question)
