@@ -8,7 +8,7 @@ load_dotenv()
 
 # Storage paths must be configured before heavy libraries (transformers/chromadb)
 # are imported so their caches/models do not silently land on C:.
-from utils.storage_paths import configure_process_storage, storage_status
+from utils.storage_paths import configure_process_storage, public_storage_status
 STORAGE_STATUS = configure_process_storage()
 
 from fastapi import FastAPI, Request
@@ -29,11 +29,12 @@ from utils.reasoning_status import reasoning_status
 ZERO_COST_STATUS = enforce_zero_cost_config()
 CORS_ORIGINS = allowed_cors_origins()
 
-# This value is deliberately honest. It must not be changed to "production_ready"
-# until the integrated offline gate, live zero-cost benchmark and final review have
-# actually passed. Runtime health and release readiness are different concepts.
-RELEASE_STATE = os.getenv("INFINITY_RELEASE_STATE", "foundation_verification_pending").strip() \
-    or "foundation_verification_pending"
+# Release readiness is deliberately fail-closed. An environment variable alone
+# must never be able to turn an unverified build into "production_ready". When
+# the integrated offline gate + live zero-cost benchmark + final review are all
+# actually green, this constant is changed in a reviewed commit (or replaced by
+# a future signed/validated release-proof mechanism).
+RELEASE_STATE = "foundation_verification_pending"
 
 app = FastAPI(
     title="RV AI",
@@ -97,7 +98,7 @@ INDEX_HTML = os.path.join(WEB_DIR, "index.html")
 
 
 def _runtime_safety_status() -> dict:
-    """Aggregate only non-secret operational state for API/health responses."""
+    """Aggregate only non-secret/public-safe operational state."""
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "release_state": RELEASE_STATE,
@@ -105,7 +106,9 @@ def _runtime_safety_status() -> dict:
         "rate_limiter": limiter.stats(),
         "reasoning_resilience": reasoning_status(),
         "cloud_archive": provider_status(),
-        "storage": storage_status(),
+        # Never expose STORAGE_STATUS/storage_status() directly: internal status
+        # includes absolute filesystem paths and may include raw OS error text.
+        "storage": public_storage_status(),
     }
 
 
@@ -141,7 +144,7 @@ def api_info():
 
 @app.get("/health")
 def health_check():
-    """Health check including storage and non-secret archive/reasoning readiness."""
+    """Health check including public-safe storage/archive/reasoning readiness."""
     safety = _runtime_safety_status()
     current_storage = safety["storage"]
     archive = safety["cloud_archive"]
