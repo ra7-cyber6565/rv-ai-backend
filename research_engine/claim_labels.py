@@ -195,6 +195,61 @@ def downgrade(
     return "\n".join(out_lines), report
 
 
+def merge_reports(strict: Optional[Dict], depth: Optional[Dict]) -> Dict:
+    """Merge the two sequential label gates without losing A-E accounting.
+
+    ``enforce_strict_labels`` runs first. A line it turns into UNVERIFIED no
+    longer contains a strong label when ``downgrade`` runs, so simply returning
+    the second report under-counts real work. Claude's cross-domain benchmark
+    caught that audit bug. This integration keeps that fix while preserving the
+    stricter A-E counters introduced on this branch.
+
+    The merge is deliberately conservative: strict downgrades are added once;
+    checked is the maximum (same original answer, sequential passes), details are
+    deduplicated, and A-E counters remain those of the depth/A-E pass rather than
+    being invented from the older strict entailment proxy.
+    """
+    strict = dict(strict or {})
+    depth = dict(depth or {})
+    out: Dict = {
+        "checked": int(depth.get("checked") or 0),
+        "downgraded": int(depth.get("downgraded") or 0),
+        "to_source_reported": int(depth.get("to_source_reported") or 0),
+        "to_unverified": int(depth.get("to_unverified") or 0),
+        "a_e_checked": int(depth.get("a_e_checked") or 0),
+        "a_e_failed": int(depth.get("a_e_failed") or 0),
+        "entailment_blocked": int(depth.get("entailment_blocked") or 0),
+        "strict_unverified": 0,
+        "details": list(depth.get("details") or []),
+        "note": str(depth.get("note") or "").strip(),
+    }
+
+    strict_checked = int(strict.get("checked") or 0)
+    strict_unverified = int(strict.get("to_unverified") or 0)
+    out["checked"] = max(out["checked"], strict_checked)
+    out["downgraded"] += strict_unverified
+    out["to_unverified"] += strict_unverified
+    out["strict_unverified"] = strict_unverified
+
+    seen = set(out["details"])
+    for line in strict.get("details") or []:
+        detail = f"{line} — poora text mila par strict support check fail hua"
+        if detail in seen:
+            continue
+        if len(out["details"]) >= 8:
+            break
+        out["details"].append(detail)
+        seen.add(detail)
+
+    notes: List[str] = []
+    for value in (strict.get("note"), depth.get("note")):
+        clean = str(value or "").strip()
+        if clean and clean not in notes:
+            notes.append(clean)
+    out["note"] = " ".join(notes)
+    return out
+
+
 def human_note(report: Optional[Dict]) -> str:
     """Audit section ke liye normal bhasha, raw PASS/FAIL log nahi."""
     r = report or {}
