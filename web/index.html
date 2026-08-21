@@ -380,10 +380,15 @@ async function matchingAnswers(question){
 // Connection toot gaya — par server abhi bhi kaam kar raha ho sakta hai.
 // Yahan sirf INTEZAAR hota hai: koi nayi request nahi jaati (quota safe),
 // bas progress dekhi jaati hai aur history se jawab uthane ki koshish hoti hai.
+//
+// Intezaar ka niyam: jab tak progress AAGE badh rahi hai, hum rukte hain (MAX
+// mode sach mein 20+ minute le sakta hai). Chhodte sirf teen soorat mein hain —
+// job hi na mile, progress bilkul jam jaaye, ya 30 minute nikal jaayein.
 async function recoverAnswer(question, baseline, onStatus){
-  const DEADLINE = Date.now() + 12 * 60 * 1000;   // 12 minute se zyada nahi
-  let notFound = 0;
-  while(Date.now() < DEADLINE){
+  const HARD_DEADLINE = Date.now() + 30 * 60 * 1000;
+  const STALL_MS = 6 * 60 * 1000;      // itni der kuch na hile to jam maana
+  let notFound = 0, lastSeen = "", lastChange = Date.now();
+  while(Date.now() < HARD_DEADLINE){
     const found = await matchingAnswers(question);
     if(found.length > baseline) return found[found.length - 1];
 
@@ -395,9 +400,14 @@ async function recoverAnswer(question, baseline, onStatus){
       if(++notFound >= 2) return null;
     }else{
       notFound = 0;
+      const mark = String(p.current_stage || "") + ":" + (Number(p.stages_done) || 0)
+                 + ":" + (Array.isArray(p.log) ? p.log.length : 0);
+      if(mark !== lastSeen){ lastSeen = mark; lastChange = Date.now(); }
+      else if(Date.now() - lastChange > STALL_MS) return null;
+
       if(typeof onStatus === "function"){
         onStatus(STAGE_LABEL[p.current_stage] || p.current_stage || "",
-                 Number(p.stages_done) || 0);
+                 Number(p.stages_done) || 0, p.log);
       }
       if(p.current_stage === "COMPLETE"){
         // COMPLETE ke baad history likhne mein ek pal lagta hai — thoda ruk
@@ -411,6 +421,15 @@ async function recoverAnswer(question, baseline, onStatus){
     await sleep(3000);
   }
   return null;
+}
+
+// Progress ka log — ek hi jagah se likha jaata hai, taaki normal chalna aur
+// recovery dono ek jaise dikhein.
+function renderLog(logEl, log){
+  if(!logEl || !Array.isArray(log) || !log.length) return;
+  logEl.textContent = log.slice(-3)
+    .map(l => "• " + (STAGE_LABEL[l.stage] || l.stage) + (l.note ? " — " + l.note : ""))
+    .join("\n");
 }
 
 async function runResearch(question, txt){
@@ -430,14 +449,12 @@ async function runResearch(question, txt){
   async function poll(){
     while(!done){
       const prog = await getJSON("/api/v1/progress/" + encodeURIComponent(PROJECT_ID));
+      if(done) return;              // recovery ne control le liya — aage mat likho
       const p = prog.data;
       if(p && p.current_stage){
         stg.textContent = STAGE_LABEL[p.current_stage] || p.current_stage;
         fill.style.width = Math.round((p.stages_done/TOTAL_STAGES)*100) + "%";
-        if(Array.isArray(p.log) && p.log.length){
-          const last = p.log.slice(-3).map(l => "• " + (STAGE_LABEL[l.stage]||l.stage) + (l.note? " — "+l.note : "")).join("\n");
-          logEl.textContent = last;
-        }
+        renderLog(logEl, p.log);
         scrollDown();
       }
       await sleep(1200);
@@ -450,8 +467,15 @@ async function runResearch(question, txt){
   const res = await postJSON("/api/v1/deep-research",
     { question, project_id: PROJECT_ID, depth_mode: mode }, 20 * 60 * 1000);
 
+  // POST khatam ho gaya (safal ho ya nahi) — purana poller ABHI band karo.
+  // INTEL KI REPORT (2026-08-21): recovery ke waqt status "aata tha phir hat
+  // jaata tha". Wajah: `done` recovery ke BAAD set hota tha, isliye purana
+  // poll() aur recovery ka onStatus dono usi `.stg` line par likhte rehte the —
+  // ek "(connection toota tha…)" likhta, doosra 1.2 second baad usse mita deta.
+  // Ab ek waqt par sirf EK hi likhne wala hota hai.
+  done = true;
+
   if(res.ok && answerFrom(res.data)){
-    done = true;
     renderResearch(txt, res.data);
     return;
   }
@@ -459,12 +483,12 @@ async function runResearch(question, txt){
   // Jawab HTTP par kho gaya. Ab bina naya kaam karwaye, server ka apna nateeja
   // wapas laane ki koshish.
   stg.textContent = "Connection toot gaya — jawab server se wapas la raha hoon…";
-  logEl.textContent = "";
-  const saved = await recoverAnswer(question, baseline, (label, stagesDone) => {
+  const saved = await recoverAnswer(question, baseline, (label, stagesDone, log) => {
     stg.textContent = (label ? label + " " : "") + "(connection toota tha, jawab wapas laa raha hoon…)";
     fill.style.width = Math.round((stagesDone/TOTAL_STAGES)*100) + "%";
+    renderLog(logEl, log);
+    scrollDown();
   });
-  done = true;
 
   if(saved){
     renderResearch(txt, {

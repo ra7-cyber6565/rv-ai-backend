@@ -281,6 +281,27 @@ def main():
         check("raw server error text page par nahi dikhta",
               "res.raw" not in page.split("function reasonLine(")[-1][:1200])
 
+        # INTEL KI DOOSRI REPORT: recovery ke waqt status "aata tha phir hat
+        # jaata tha" — kyunki purana progress poller aur recovery dono ek hi
+        # `.stg` line par likh rahe the. Ek waqt par sirf EK likhne wala ho.
+        check("progress poller POST ke turant baad band hota hai",
+              code.count("done = true;") == 1
+              and 0 < code.index("done = true;")
+                    < code.index("await recoverAnswer(question"),
+              f"count={code.count('done = true;')}")
+        check("poller apni aakhri likhai bhi rok deta hai",
+              "if(done) return;" in code)
+        check("status aur log dono ek hi jagah se bante hain (renderLog)",
+              "function renderLog(logEl, log){" in code
+              and "renderLog(logEl, p.log);" in code
+              and "renderLog(logEl, log);" in code)
+        check("recovery ke waqt log khaali nahi kiya jaata",
+              'logEl.textContent = ""' not in code)
+        check("MAX mode ke liye intezaar kaafi lamba hai (30 min)",
+              "HARD_DEADLINE" in code and "30 * 60 * 1000" in code)
+        check("progress jam jaaye to bekaar intezaar nahi (stall guard)",
+              "STALL_MS" in code and "lastChange" in code)
+
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

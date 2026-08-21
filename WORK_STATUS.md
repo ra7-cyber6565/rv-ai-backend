@@ -300,9 +300,24 @@ Kya badla:
 | `research_engine/gemini_reasoning.py` | deep-research ki call bhi ab `gemini_model.generate()` se jaati hai. Timeout `model_errors.classify` ke liye TRANSIENT hai, isliye purana retry/backoff hi chalta hai — model band nahi hota. |
 | `web/index.html` | naya non-throwing network layer (`readBody`/`postJSON`/`getJSON`), `reasonLine(res)` jo status ko insaani "Wajah: …" banata hai, QUICK par ek automatic retry, "Phir bhejo" button (sawaal dobara type nahi karna padta), aur DEEP/MAX ke liye `matchingAnswers()` + `recoverAnswer()` jo `GET /api/v1/history/{project_id}` se kho gaya jawab wapas le aata hai (baseline ginti se, taaki purana jawab na uthe; sirf GET, nayi research trigger nahi hoti). |
 
-Naya test: `python3 tests/test_chat_resilience.py` — 10 stage, **43 check**, poora
+Naya test: `python3 tests/test_chat_resilience.py` — 10 stage, **49 check**, poora
 offline (na network, na API key). Mutation proof: `generate()` se timeout hataane
 par 4 FAIL, purani style wali `index.html` dene par 12 FAIL.
+
+Commit: **a14bc94** (pehla hissa) + follow-up (neeche wala flicker fix).
+
+**Follow-up (usi din, intel ki doosri report):** recovery chal rahi thi par status
+line "aati thi phir hat jaati thi". Wajah bug nahi, **do likhne wale** the —
+`done = true` recovery ke BAAD set hota tha, isliye purana `poll()` (1.2s) aur
+recovery ka `onStatus` (3s) dono usi `.stg` element par likhte rehte the: ek
+"(connection toota tha…)" likhta, doosra usse mita deta. Ab `done = true` POST ke
+turant baad hai, `poll()` apni aakhri likhai bhi `if(done) return;` se rokta hai,
+aur status+log dono ek hi `renderLog()` se bante hain (recovery ke waqt log ab
+khaali nahi hota — server ka asli kaam dikhta rehta hai). Saath hi recovery ka
+intezaar MAX mode ke hisaab se lamba kiya gaya: hard deadline 12 → **30 minute**,
+plus ek **stall guard** (6 minute tak progress bilkul na hile to chhod dete hain)
+— yaani lamba MAX run beech mein chhoda nahi jaata, par jam jaane par bekaar
+intezaar bhi nahi hota.
 
 Regression (sab is sandbox mein 2026-08-21 ko, sab `rc=0`):
 `tests/benchmark_cross_domain.py` **633/633**,
