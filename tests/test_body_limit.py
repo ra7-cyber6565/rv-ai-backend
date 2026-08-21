@@ -127,7 +127,38 @@ def test_under_limit_chunked_body_reaches_downstream():
     assert sent[0]["status"] == 204
 
 
-def test_main_wires_raw_body_limit_before_route_parsing():
+def test_fastapi_integration_rejects_before_json_handler():
+    from fastapi import FastAPI, Request
+    from fastapi.testclient import TestClient
+
+    called = {"value": False}
+    app = FastAPI()
+    app.add_middleware(RequestBodyLimitMiddleware)
+
+    @app.post("/api/v1/chat")
+    async def endpoint(request: Request):
+        called["value"] = True
+        await request.body()
+        return {"ok": True}
+
+    client = TestClient(app)
+    response = client.post(
+        "/api/v1/chat",
+        content=b"x" * (256 * 1024 + 1),
+        headers={"Content-Type": "application/octet-stream"},
+    )
+    assert response.status_code == 413
+    assert called["value"] is False
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_main_wires_raw_body_limit_outermost_before_route_parsing():
     text = (ROOT / "main.py").read_text(encoding="utf-8")
     assert "from utils.body_limit import RequestBodyLimitMiddleware" in text
-    assert "app.add_middleware(RequestBodyLimitMiddleware)" in text
+    body_guard = text.index("app.add_middleware(RequestBodyLimitMiddleware)")
+    quota_middleware = text.index('@app.middleware("http")')
+    first_router = text.index("app.include_router(")
+    # Starlette inserts newly-added user middleware at the outside of the stack.
+    # Body limit must therefore be added after the decorator middleware but
+    # before routers/runtime starts serving requests.
+    assert quota_middleware < body_guard < first_router
