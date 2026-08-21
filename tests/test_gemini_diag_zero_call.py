@@ -7,11 +7,25 @@ import types
 from research_engine import gemini_model
 
 
+_BACKUP_VARS = [
+    "GEMINI_API_KEY_BACKUP",
+    "GEMINI_API_KEY_FALLBACK",
+    "GEMINI_API_KEYS",
+    "GEMINI_API_KEY_LIST",
+    "GEMINI_BACKUP_KEYS",
+]
+_BACKUP_VARS += [f"GEMINI_API_KEY_{i}" for i in range(2, 10)]
+_BACKUP_VARS += [f"GEMINI_API_KEY{i}" for i in range(2, 10)]
+
+
 def _env(monkeypatch, *, key="fake-key", confirmed="false"):
     monkeypatch.setenv("ZERO_COST_ONLY", "true")
     monkeypatch.setenv("GEMINI_API_KEY", key)
     monkeypatch.setenv("GEMINI_ZERO_COST_CONFIRMED", confirmed)
     monkeypatch.delenv("GEMINI_MODEL", raising=False)
+    for name in _BACKUP_VARS:
+        monkeypatch.delenv(name, raising=False)
+    gemini_model.reset_for_new_key()
 
 
 def test_default_diagnose_is_zero_network_and_hides_key_length(monkeypatch):
@@ -23,11 +37,32 @@ def test_default_diagnose_is_zero_network_and_hides_key_length(monkeypatch):
     monkeypatch.setattr(gemini_model, "available_models", explode)
     report = gemini_model.diagnose()
     assert report["key_present"] is True
+    assert report["keys_available"] == 1
+    assert report["keys"] == ["free key #1"]
     assert report["network_calls"] == 0
     assert report["generation_calls"] == 0
     assert report["status"] == "configured_not_probed"
     assert "key_length" not in report
     assert "fake-key" not in repr(report)
+
+
+def test_backup_only_diagnose_is_configured_without_value_or_network(monkeypatch):
+    _env(monkeypatch, key="", confirmed="true")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "SECRET-BACKUP-VALUE")
+
+    def explode(_):
+        raise AssertionError("passive diagnostics must not list models")
+
+    monkeypatch.setattr(gemini_model, "available_models", explode)
+    report = gemini_model.diagnose()
+    assert report["key_present"] is True
+    assert report["keys_available"] == 1
+    assert report["keys"] == ["free key #1"]
+    assert report["status"] == "configured_not_probed"
+    assert report["network_calls"] == 0
+    assert report["generation_calls"] == 0
+    assert "SECRET-BACKUP-VALUE" not in repr(report)
+    assert "key_length" not in report
 
 
 def test_active_discovery_blocked_until_zero_cost_confirmation(monkeypatch):
@@ -63,6 +98,7 @@ def test_active_discovery_lists_models_but_never_generate_content(monkeypatch):
 
     class ForbiddenGenerativeModel:
         def __init__(self, *args, **kwargs):  # noqa: ARG002
+            calls["generate"] += 1
             raise AssertionError("diagnostic must never instantiate GenerativeModel")
 
     fake_genai.configure = configure
