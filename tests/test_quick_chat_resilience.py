@@ -129,6 +129,7 @@ def test_route_uses_quick_research_when_chat_models_all_fail(monkeypatch):
     from api import agent_routes
     import research_engine.chat as quick_module
 
+    monkeypatch.setattr(agent_routes, "require_project_access", lambda *_args: None)
     monkeypatch.setattr(
         quick_module,
         "quick_chat",
@@ -148,8 +149,9 @@ def test_route_uses_quick_research_when_chat_models_all_fail(monkeypatch):
             "mode": "QUICK",
         },
     )
-    request = agent_routes.ChatRequest(message="hard factual question", project_id="p1")
-    result = agent_routes.chat(request)
+    project = "p_" + "a" * 24
+    request = agent_routes.ChatRequest(message="hard factual question", project_id=project)
+    result = agent_routes.chat(request, "project-token")
     assert result["ok"] is True
     assert result["degraded"] is True
     assert result["chat_fallback"] == "quick_evidence_research"
@@ -160,6 +162,7 @@ def test_route_never_leaks_research_exception(monkeypatch):
     from api import agent_routes
     import research_engine.chat as quick_module
 
+    monkeypatch.setattr(agent_routes, "require_project_access", lambda *_args: None)
     monkeypatch.setattr(
         quick_module,
         "quick_chat",
@@ -170,8 +173,9 @@ def test_route_never_leaks_research_exception(monkeypatch):
         raise RuntimeError("SECRET SDK traceback protobuf 429")
 
     monkeypatch.setattr(agent_routes.manager, "research", explode)
-    request = agent_routes.ChatRequest(message="question")
-    result = agent_routes.chat(request)
+    project = "p_" + "b" * 24
+    request = agent_routes.ChatRequest(message="question", project_id=project)
+    result = agent_routes.chat(request, "project-token")
     assert result["ok"] is True
     assert result["degraded"] is True
     text = str(result)
