@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from research_engine.depth import BOOL_FIELDS, depth_limits
+from research_engine.quality_release import enforce_quality_release
 from utils.admin_guard import require_admin
 from utils.job_access import job_access
 from utils.progress_tracker import STAGES, get_progress
@@ -217,8 +218,16 @@ def research_job_result(
     if not isinstance(result, dict):
         return result
     response = dict(result)
-    response["research_progress"] = _progress_result_snapshot(job_id)
-    return response
+    progress = _progress_result_snapshot(job_id)
+    response["research_progress"] = progress
+    # Final research quality is enforced on the user-facing copy, after the
+    # bounded progress snapshot is attached.  Persisted job bytes are never
+    # mutated and a recovered/legacy result cannot keep a false VERIFIED badge.
+    return enforce_quality_release(
+        response,
+        recovery_used=bool(response.get("recovered") or response.get("recovery_used")),
+        progress_snapshot=progress,
+    )
 
 
 @router.get("/research-jobs")
