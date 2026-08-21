@@ -8,7 +8,7 @@ from scripts import audit_provider_bypass as audit
 
 def test_real_repo_has_no_unapproved_direct_provider_surface():
     report = audit.scan(audit.ROOT)
-    assert report.passed, report.hits
+    assert report.passed, {"hits": report.hits, "parse_failures": report.parse_failures}
 
 
 def test_direct_gemini_call_outside_allowlist_fails(tmp_path):
@@ -42,19 +42,18 @@ def test_allowed_provider_adapter_is_not_flagged(tmp_path):
 def test_direct_openrouter_url_outside_router_fails(tmp_path):
     (tmp_path / "rag").mkdir()
     bad = tmp_path / "rag" / "old.py"
-    bad.write_text(
-        'URL = "https://openrouter.ai/api/v1/chat/completions"\n',
-        encoding="utf-8",
-    )
+    bad.write_text('URL = "https://openrouter.ai/api/v1/chat/completions"\n', encoding="utf-8")
     report = audit.scan(tmp_path)
     assert report.passed is False
     assert any(row["marker"] == "openrouter_endpoint" for row in report.hits)
 
 
-def test_comments_do_not_create_false_positive(tmp_path):
+def test_comments_and_docstrings_do_not_create_false_positive(tmp_path):
     (tmp_path / "api").mkdir()
     path = tmp_path / "api" / "comment.py"
     path.write_text(
+        '"""Legacy docs mention google.generativeai and .generate_content( and '
+        'https://openrouter.ai/api/v1/chat/completions but execute none."""\n'
         "# legacy example: google.generativeai and .generate_content(\n"
         "VALUE = 1\n",
         encoding="utf-8",
@@ -62,11 +61,20 @@ def test_comments_do_not_create_false_positive(tmp_path):
     assert audit.scan(tmp_path).passed is True
 
 
+def test_syntax_error_fails_closed(tmp_path):
+    (tmp_path / "api").mkdir()
+    (tmp_path / "api" / "broken.py").write_text("def broken(:\n", encoding="utf-8")
+    report = audit.scan(tmp_path)
+    assert report.passed is False
+    assert report.parse_failures
+
+
 def test_json_write_is_atomic(tmp_path):
     report = audit.BypassReport(
-        schema_version=1,
+        schema_version=2,
         passed=False,
         scanned_files=1,
+        parse_failures=[],
         allowlist=[],
         hits=[{"path": "api/x.py", "marker": "gemini_generate", "line": 2}],
     )
