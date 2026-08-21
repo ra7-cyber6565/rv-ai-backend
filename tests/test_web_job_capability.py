@@ -31,7 +31,35 @@ def test_chat_and_job_start_send_private_project_header():
     text = _text()
     assert 'function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}' in text
     assert 'headers:projectHeaders()' in text
-    assert 'project_id:PROJECT.id' in text
+    assert 'project_id:projectId' in text
+    assert 'projectPost("/api/v1/chat"' in text
+    assert 'projectPost("/api/v1/research-jobs"' in text
+
+
+def test_stale_project_capability_gets_exactly_one_session_refresh_attempt():
+    text = _text()
+    start = text.index("async function projectPost")
+    end = text.index("async function runChat", start)
+    block = text[start:end]
+
+    assert "for(let attempt=0;attempt<2;attempt++)" in block
+    assert "out.r.status!==404||attempt===1" in block
+    assert "resetProjectSession();" in block
+    assert "await ensureSession();" in block
+    # Retry is only for project-scoped POST creation paths. Job polling must keep
+    # its original per-job capability and must not silently start a new job.
+    run_start = text.index("async function runResearch")
+    run_end = text.index("function renderResearch", run_start)
+    polling = text[run_start:run_end]
+    assert "projectPost(" not in polling[polling.index("const pollOpts"):]
+
+
+def test_reset_project_session_clears_only_in_memory_capability():
+    text = _text()
+    assert 'function resetProjectSession(){PROJECT.id="";PROJECT.token="";sessionPromise=null;}' in text
+    low = text.lower()
+    assert "localstorage" not in low
+    assert "sessionstorage" not in low
 
 
 def test_deep_max_client_requires_job_access_token_from_start_response():
