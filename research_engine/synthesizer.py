@@ -7,7 +7,9 @@ facade keeps those features and adds ChatGPT's stricter user-facing safeguards:
 1. selected-page large-PDF reading is never described as the whole document;
 2. full-text ACCESS is never confused with claim verification;
 3. the deterministic A-L presentation guard runs before the report is returned;
-4. incomplete runs get an explicit opening warning if the model omitted it.
+4. incomplete runs get an explicit opening warning if the model omitted it;
+5. if every reasoning provider is unavailable, retrieved evidence is still
+   turned into a conservative cited answer by the local deterministic reasoner.
 """
 from __future__ import annotations
 
@@ -15,6 +17,7 @@ import re
 from typing import Dict, List, Optional
 
 from .models import EvidencePack
+from .offline_reasoner import OfflineEvidenceReasoner
 from .presentation_guard import PresentationGuard
 from .synthesizer_claude import *  # noqa: F401,F403 - compatibility exports
 from .synthesizer_claude import FinalSynthesizer as _ClaudeFinalSynthesizer
@@ -26,7 +29,19 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.presentation_guard = PresentationGuard()
+        self.offline_reasoner = OfflineEvidenceReasoner()
         self.last_presentation_check: Dict = {}
+
+    def extractive_summary(self, question: str, pack: EvidencePack) -> str:
+        """No-model fallback used by the orchestrator when every AI pass is empty.
+
+        The old fallback was a thin extract. This replacement remains fully
+        deterministic/₹0 but ranks actual retrieved evidence, keeps [S#]
+        provenance, avoids invented causal/hypothesis claims and produces useful
+        human-readable sections so quota exhaustion does not turn into a blank
+        answer or server error.
+        """
+        return self.offline_reasoner.synthesize(question, pack)
 
     @staticmethod
     def _is_partial_large_source(source) -> bool:
