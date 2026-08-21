@@ -27,6 +27,37 @@ def test_window_expires_and_allows_again():
     assert limiter.check("c", "b", limit, now=16.0)[0] is True
 
 
+def test_bucket_table_is_bounded_and_fails_closed_for_new_clients():
+    limiter = SlidingWindowLimiter(max_buckets=100, cleanup_interval_seconds=999999)
+    limit = Limit(requests=2, window_seconds=3600)
+    for i in range(100):
+        assert limiter.check(f"client-{i}", "research", limit, now=100.0)[0] is True
+    allowed, retry = limiter.check("client-over-cap", "research", limit, now=101.0)
+    assert allowed is False
+    assert retry > 0
+    stats = limiter.stats()
+    assert stats["active_buckets"] == 100
+    assert stats["capacity_rejections"] == 1
+
+
+def test_global_cleanup_releases_expired_idle_buckets():
+    limiter = SlidingWindowLimiter(max_buckets=100, cleanup_interval_seconds=1)
+    limit = Limit(requests=1, window_seconds=10)
+    assert limiter.check("old", "research", limit, now=0.0)[0] is True
+    # Global cleanup uses the longest configured policy window (1 hour), so
+    # advance beyond that to prove old client keys are removed entirely.
+    assert limiter.check("new", "research", limit, now=4000.0)[0] is True
+    assert limiter.stats()["active_buckets"] == 1
+
+
+def test_stats_never_expose_client_keys():
+    limiter = SlidingWindowLimiter(max_buckets=100)
+    limiter.check("203.0.113.99", "bucket", Limit(1, 60), now=1.0)
+    stats = limiter.stats()
+    assert "203.0.113.99" not in repr(stats)
+    assert set(stats) == {"active_buckets", "max_buckets", "capacity_rejections"}
+
+
 def test_get_requests_are_not_limited():
     assert limit_for("GET", "/api/v1/research-jobs") is None
 
