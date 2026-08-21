@@ -16,7 +16,9 @@ Important honesty rules:
   a fake model/research failure. It remains available in memory for the current
   process and reports that durability was not achieved;
 - the JSON job ledger is single-writer. A cross-process OS lock fails closed if
-  a second Python worker tries to own the same durable store.
+  a second Python worker tries to own the same durable store;
+- persisted result filenames are treated as untrusted metadata and are never
+  allowed to escape the managed ``results`` directory.
 """
 from __future__ import annotations
 
@@ -63,6 +65,7 @@ _SECRET_VALUE_RE = re.compile(
 )
 _GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_-]{20,}")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_SAFE_RESULT_FILE_RE = re.compile(r"^[A-Za-z0-9._-]{1,160}\.json\.gz$")
 
 
 def _safe_error(exc: Exception, *, limit: int = 240) -> str:
@@ -259,7 +262,7 @@ class Job:
             "started_at": self.started_at,
             "finished_at": self.finished_at,
             "error": self.error,
-            "result_durable": self.durable,
+            "result_durable": bool(self.durable and self.status == "completed"),
             "result_compacted": self.result_compacted,
             "result_bytes": self.result_bytes,
             "storage_warning": self.storage_warning,
@@ -328,12 +331,22 @@ class ResearchJobRunner:
         except ValueError:
             return False
 
-    def _result_path(self, job: Job) -> str:
-        if not job.result_file:
+    def _safe_result_path_from_name(self, filename: str) -> str:
+        name = str(filename or "").strip()
+        if not name or os.path.isabs(name) or name != os.path.basename(name):
             return ""
-        if os.path.isabs(job.result_file):
-            return job.result_file
-        return os.path.join(self._result_dir, job.result_file)
+        if not _SAFE_RESULT_FILE_RE.fullmatch(name):
+            return ""
+        candidate = os.path.abspath(os.path.join(self._result_dir, name))
+        try:
+            if os.path.commonpath([candidate, os.path.abspath(self._result_dir)]) != os.path.abspath(self._result_dir):
+                return ""
+        except ValueError:
+            return ""
+        return candidate
+
+    def _result_path(self, job: Job) -> str:
+        return self._safe_result_path_from_name(job.result_file)
 
     def _persist_result_locked(self, job: Job) -> None:
         if not self._persist_enabled or job.status != "completed" or job.result is None:
@@ -344,7 +357,9 @@ class ResearchJobRunner:
             assert_capacity(len(compressed))
 
         final_name = f"{job.job_id}.json.gz"
-        final_path = os.path.join(self._result_dir, final_name)
+        final_path = self._safe_result_path_from_name(final_name)
+        if not final_path:
+            raise RuntimeError("Generated research result path invalid hai")
         fd, temp_path = tempfile.mkstemp(prefix=f"{job.job_id}_", suffix=".json.gz.tmp", dir=self._result_dir)
         try:
             with os.fdopen(fd, "wb") as handle:
@@ -371,6 +386,9 @@ class ResearchJobRunner:
             return job.result
         path = self._result_path(job)
         if not path:
+            job.durable = False
+            if job.result_file:
+                job.storage_warning = "Persisted result path invalid tha; unsafe path ko refuse kiya gaya."
             return None
         try:
             with gzip.open(path, "rt", encoding="utf-8") as handle:
@@ -397,40 +415,69 @@ class ResearchJobRunner:
         except OSError:
             pass
 
-    def _load_persisted(self) -> None:
+    def _quarantine_corrupt_store(self) -> None:
         if not self._store_path or not os.path.exists(self._store_path):
             return
         try:
+            broken = f"{self._store_path}.corrupt-{int(time.time())}"
+            os.replace(self._store_path, broken)
+        except OSError:
+            pass
+
+    def _read_persisted_rows(self) -> list[dict[str, Any]]:
+        if not self._store_path or not os.path.exists(self._store_path):
+            return []
+        try:
             with open(self._store_path, "r", encoding="utf-8") as handle:
                 raw = json.load(handle)
-            rows = raw.get("jobs", []) if isinstance(raw, dict) else []
-            allowed = set(Job.__dataclass_fields__)
-            for row in rows:
-                if not isinstance(row, dict) or not row.get("job_id"):
-                    continue
-                payload = {k: v for k, v in row.items() if k in allowed}
-                job = Job(**payload)
-                if job.status in {"queued", "running"}:
-                    job.status = "interrupted"
-                    job.error = "Server/process restart ke wajah se running research resume nahi ho saki."
-                    job.finished_at = time.time()
-                    job.durable = True
-                elif job.status == "completed" and job.result is not None and not job.result_file:
-                    try:
-                        self._persist_result_locked(job)
-                    except Exception as exc:  # noqa: BLE001
-                        job.durable = False
-                        job.storage_warning = f"Legacy result migration failed: {type(exc).__name__}"
-                self._jobs[job.job_id] = job
-            self._prune_locked()
-            self._persist_locked()
-        except Exception:
+        except json.JSONDecodeError as exc:
+            self._quarantine_corrupt_store()
+            raise RuntimeError("Research job history JSON corrupt hai; bad copy quarantine ki gayi.") from exc
+        except OSError as exc:
+            # A permission/disk read failure is not corruption. Never rename a
+            # valid store merely because the filesystem is temporarily unhappy.
+            raise RuntimeError("Research job history read nahi ho saki") from exc
+
+        if not isinstance(raw, dict) or not isinstance(raw.get("jobs", []), list):
+            self._quarantine_corrupt_store()
+            raise RuntimeError("Research job history schema invalid hai; bad copy quarantine ki gayi.")
+        return [row for row in raw.get("jobs", []) if isinstance(row, dict)]
+
+    def _load_persisted(self) -> None:
+        rows = self._read_persisted_rows()
+        allowed = set(Job.__dataclass_fields__)
+        for row in rows:
+            if not row.get("job_id"):
+                continue
+            payload = {k: v for k, v in row.items() if k in allowed}
             try:
-                broken = f"{self._store_path}.corrupt-{int(time.time())}"
-                os.replace(self._store_path, broken)
-            except Exception:
-                pass
-            self._jobs = {}
+                job = Job(**payload)
+            except (TypeError, ValueError):
+                # One malformed row should not destroy every valid historical job.
+                continue
+
+            if job.result_file and not self._safe_result_path_from_name(job.result_file):
+                job.result_file = ""
+                job.durable = False
+                job.storage_warning = "Persisted result path invalid tha; unsafe path ko ignore kiya gaya."
+
+            if job.status in {"queued", "running"}:
+                job.status = "interrupted"
+                job.error = "Server/process restart ke wajah se running research resume nahi ho saki."
+                job.finished_at = time.time()
+                job.durable = False
+            elif job.status == "completed" and job.result is not None and not job.result_file:
+                try:
+                    self._persist_result_locked(job)
+                except Exception as exc:  # noqa: BLE001
+                    job.durable = False
+                    job.storage_warning = f"Legacy result migration failed: {type(exc).__name__}"
+            self._jobs[job.job_id] = job
+
+        self._prune_locked()
+        # If this write fails, startup fails closed but the valid input store is
+        # not mislabeled as corrupt.
+        self._persist_locked()
 
     def _persist_locked(self) -> None:
         if not self._persist_enabled or not self._store_path:
@@ -547,8 +594,12 @@ class ResearchJobRunner:
                 return None
             data = job.public()
             if include_result and job.status == "completed":
-                data["result"] = self._load_result_locked(job)
-                data["result_durable"] = job.durable
+                loaded = self._load_result_locked(job)
+                data["result"] = loaded if loaded is not None else {
+                    "_result_unavailable": True,
+                    "message": "Persisted research result available nahi hai.",
+                }
+                data["result_durable"] = bool(job.durable and loaded is not None)
                 data["storage_warning"] = job.storage_warning
             return data
 
