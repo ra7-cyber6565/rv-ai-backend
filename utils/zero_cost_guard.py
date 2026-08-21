@@ -27,10 +27,24 @@ FORBIDDEN_IN_ZERO_COST_MODE = (
     "ANTHROPIC_API_KEY",
 )
 
-_GEMINI_UNCONFIRMED = "GEMINI_API_KEY (GEMINI_ZERO_COST_CONFIRMED missing/false)"
+_GEMINI_UNCONFIRMED = "Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)"
 _GROQ_UNCONFIRMED = "GROQ_API_KEY (GROQ_ZERO_COST_CONFIRMED missing/false)"
 _OPENROUTER_NONFREE = "OPENROUTER_API_KEY (OPENROUTER_MODEL is not free-only)"
 _REMOTE_OLLAMA = "OLLAMA_BASE_URL (ZERO_COST_ONLY permits localhost only)"
+
+# Keep this list aligned with research_engine.key_pool without importing the
+# research package at startup. Importing research_engine here would make the
+# safety guard depend on heavy runtime modules and can create import cycles.
+_GEMINI_SINGLE_VARS = (
+    "GEMINI_API_KEY",
+    "GEMINI_API_KEY_BACKUP",
+    "GEMINI_API_KEY_FALLBACK",
+)
+_GEMINI_LIST_VARS = (
+    "GEMINI_API_KEYS",
+    "GEMINI_API_KEY_LIST",
+    "GEMINI_BACKUP_KEYS",
+)
 
 
 @dataclass(frozen=True)
@@ -63,6 +77,20 @@ def _ollama_is_local(value: object) -> bool:
         return False
 
 
+def gemini_credentials_configured(env: Mapping[str, str] | None = None) -> bool:
+    """True when *any* primary/backup/list Gemini credential is configured.
+
+    This closes a subtle zero-cost bypass: a deployment with only
+    ``GEMINI_API_KEY_2`` or ``GEMINI_API_KEYS`` set must be held to the same
+    confirmation rule as the primary key.
+    """
+    source = env if env is not None else os.environ
+    names = list(_GEMINI_SINGLE_VARS) + list(_GEMINI_LIST_VARS)
+    names.extend(f"GEMINI_API_KEY_{i}" for i in range(2, 10))
+    names.extend(f"GEMINI_API_KEY{i}" for i in range(2, 10))
+    return any(str(source.get(name, "") or "").strip() for name in names)
+
+
 def zero_cost_enabled(env: Mapping[str, str] | None = None) -> bool:
     source = env if env is not None else os.environ
     raw = str(source.get("ZERO_COST_ONLY", "true")).strip().lower()
@@ -80,8 +108,9 @@ def inspect_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostSt
         if str(source.get(key, "")).strip()
     ]
 
-    gemini_key = str(source.get("GEMINI_API_KEY", "")).strip()
-    if gemini_key and not _truthy(source.get("GEMINI_ZERO_COST_CONFIRMED", "")):
+    if gemini_credentials_configured(source) and not _truthy(
+        source.get("GEMINI_ZERO_COST_CONFIRMED", "")
+    ):
         blocked.append(_GEMINI_UNCONFIRMED)
 
     groq_key = str(source.get("GROQ_API_KEY", "")).strip()
@@ -108,7 +137,7 @@ def enforce_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostSt
         hints = []
         if _GEMINI_UNCONFIRMED in status.blocked_keys:
             hints.append(
-                "Gemini confirmation tabhi true karein jab Google project par paid billing/spend path disabled verify ho."
+                "Gemini confirmation tabhi true karein jab har configured Google project/key par paid billing/spend path disabled verify ho."
             )
         if _GROQ_UNCONFIRMED in status.blocked_keys:
             hints.append(
@@ -128,3 +157,12 @@ def enforce_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostSt
             f"configuration was found: {joined}.{extra}"
         )
     return status
+
+
+__all__ = [
+    "ZeroCostStatus",
+    "enforce_zero_cost_config",
+    "gemini_credentials_configured",
+    "inspect_zero_cost_config",
+    "zero_cost_enabled",
+]
