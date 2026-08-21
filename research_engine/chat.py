@@ -17,8 +17,10 @@ from __future__ import annotations
 import os
 from typing import Dict, List, Optional
 
-from .gemini_model import candidates, friendly_error
+from .gemini_model import candidates, configure, friendly_error, reset_for_new_key
+from .key_pool import KeyPool
 from .local_language import normalize
+from .local_reasoning import quick_answer as offline_quick
 
 # Sirf reference ke liye — asli naam runtime par Google se poochh kar chunte hain
 # (dekho gemini_model.resolve). Hard-coded naam hi "InvalidArgument" ki wajah tha.
@@ -119,58 +121,104 @@ def _build_prompt(message: str, history: Optional[List[Dict]]) -> str:
             f"\n# RV ka jawab")
 
 
+def _one_key_try(genai, prompt: str) -> Dict:
+    """
+    EK key par jawab lene ki koshish. Lautata hai:
+        {"text": str, "tried": [...], "exc": Exception|None, "key_dead": bool}
+
+    `key_dead=True` ka matlab: is KEY ki hadd thi (quota/auth), model ki galti
+    nahi — yaani doosri free key try karna sach mein kaam ka hai.
+    """
+    tried: List[str] = []
+    last_exc: Optional[Exception] = None
+    key_dead = False
+    for name in candidates(genai):
+        tried.append(name)
+        try:
+            resp = genai.GenerativeModel(name).generate_content(prompt)
+            text = (getattr(resp, "text", "") or "").strip()
+            if text:
+                return {"text": text, "tried": tried, "exc": None,
+                        "key_dead": False, "model": name}
+            last_exc = RuntimeError("khaali jawab")
+        except Exception as exc:  # noqa: BLE001 — agla model try karo
+            last_exc = exc
+            low = str(exc).lower()
+            # key hi galat hai ya quota khatam — is key par aage try karna bekaar
+            if ("api key not valid" in low or "api_key_invalid" in low
+                    or "quota" in low or "429" in low
+                    or "resource_exhausted" in low or "permission" in low):
+                key_dead = True
+                break
+        if len(tried) >= 4:           # bahut der tak mat lagao
+            break
+    return {"text": "", "tried": tried, "exc": last_exc, "key_dead": key_dead,
+            "model": ""}
+
+
 def quick_chat(message: str, history: Optional[List[Dict]] = None) -> Dict:
     """
-    Ek Gemini call, seedha jawab. Kabhi crash nahi karta — error aane par bhi
-    ek imaandaar message lautata hai taaki UI par "Failed" na dikhe.
+    Ek Gemini call, seedha jawab. Kabhi crash nahi karta — aur ab kabhi DEAD-END
+    bhi nahi karta.
+
+    Teen parat (₹0, sab free):
+      1. pehli free key par Gemini (jaisa pehle tha)
+      2. quota/auth marne par BACKUP free key par shift (key_pool)
+      3. saari key mar jaayein to engine ka apna offline jawab — free sources
+         (Wikipedia/DuckDuckGo) padh kar. Yahan bhi "Failed" jaisa kuch nahi.
     """
     message = (message or "").strip()
     if not message:
         return {"answer": "Kuch likho to sahi 🙂", "mode": "QUICK", "ok": True}
 
-    api_key = os.getenv("GEMINI_API_KEY", "")
-    if not api_key:
-        return {
-            "answer": ("Abhi main jawab nahi de pa raha — server par meri "
-                       "GEMINI_API_KEY set nahi hai. (Railway → Variables mein "
-                       "GEMINI_API_KEY daalo.)"),
-            "mode": "QUICK", "ok": False,
-        }
+    keys = KeyPool()
+    if not keys.has_key():
+        # key hi nahi hai — phir bhi jawab dena hai, error page nahi dikhana
+        out = offline_quick(message, cause="no-key")
+        out["reason"] = ("Server par GEMINI_API_KEY set nahi hai "
+                         "(Railway → Variables).")
+        return out
     try:
         import google.generativeai as genai  # lazy: import sasta rahe
-        genai.configure(api_key=api_key)
         prompt = _build_prompt(message, history)
 
-        # Pehle wo model jo Google ki asli list se chuna gaya; agar wo bhi mana
-        # kar de to jo baaki available the. Isse "InvalidArgument" par baat
-        # khatam nahi hoti — jawab phir bhi aata hai.
         tried: List[str] = []
         last_exc: Optional[Exception] = None
-        for name in candidates(genai):
-            tried.append(name)
-            try:
-                resp = genai.GenerativeModel(name).generate_content(prompt)
-                text = (getattr(resp, "text", "") or "").strip()
-                if text:
-                    return {"answer": text, "mode": "QUICK", "ok": True,
-                            "model": name}
-                last_exc = RuntimeError("khaali jawab")
-            except Exception as exc:  # noqa: BLE001 — agla model try karo
-                last_exc = exc
-                low = str(exc).lower()
-                # key hi galat hai ya quota khatam — aage try karna bekaar
-                if ("api key not valid" in low or "api_key_invalid" in low
-                        or "quota" in low or "429" in low
-                        or "resource_exhausted" in low):
-                    break
-            if len(tried) >= 4:           # bahut der tak mat lagao
+        switches = 0
+        while True:
+            configure(genai, keys.active())
+            # Pehle wo model jo Google ki asli list se chuna gaya; agar wo bhi
+            # mana kar de to jo baaki available the. Isse "InvalidArgument" par
+            # baat khatam nahi hoti — jawab phir bhi aata hai.
+            res = _one_key_try(genai, prompt)
+            tried.extend(n for n in res["tried"] if n not in tried)
+            last_exc = res["exc"] or last_exc
+            if res["text"]:
+                answer = {"answer": res["text"], "mode": "QUICK", "ok": True,
+                          "model": res["model"]}
+                if switches:
+                    # sirf ginti aur label — key ki value kabhi nahi
+                    answer["key_switches"] = switches
+                    answer["key_used"] = keys.label()
+                return answer
+            if not res["key_dead"] or not keys.has_backup():
                 break
-
-        return {"answer": friendly_error(last_exc or RuntimeError("unknown")),
-                "mode": "QUICK", "ok": False,
-                "detail": f"{type(last_exc).__name__}: {last_exc}" if last_exc else "",
-                "models_tried": tried}
+            keys.advance("quota/auth")
+            switches += 1
+            reset_for_new_key()      # nayi key par model-memory saaf
+        # Gemini se kuch nahi mila — ab bhi user ko jawab milega (offline parat)
+        out = offline_quick(message)
+        out["models_tried"] = tried
+        out["key_switches"] = switches
+        out["keys_available"] = keys.count
+        if last_exc is not None:
+            # raw text sirf debug field mein — user ko dikhne wale answer mein nahi
+            out["detail"] = f"{type(last_exc).__name__}: {last_exc}"
+            out["reason"] = friendly_error(last_exc)
+        return out
     except Exception as exc:  # noqa: BLE001 — kabhi crash nahi karna
-        return {"answer": friendly_error(exc), "mode": "QUICK", "ok": False,
-                "detail": f"{type(exc).__name__}: {exc}"}
+        out = offline_quick(message)
+        out["detail"] = f"{type(exc).__name__}: {exc}"
+        out["reason"] = friendly_error(exc)
+        return out
 

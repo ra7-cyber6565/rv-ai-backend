@@ -83,6 +83,35 @@ def forget_dead() -> None:
     _dead.clear()
 
 
+# ── key badalne par memory saaf (§8 backup keys) ─────────────────────────────
+def reset_for_new_key() -> None:
+    """
+    Jab hum doosri free key par shift karte hain to purani key ki model-memory
+    bekaar ho jaati hai: "kaunse model available hain" har key/project ke liye
+    ALAG hota hai, aur 404 bhi key-specific hota hai.
+
+    Isliye naye key par: chuna hua model, dekhi hui list, aur mare hue naam —
+    teeno bhula do. Warna nayi key par bhi wahi purana 404 dohraaya jaayega.
+
+    (Yahan koi key value nahi aati — sirf memory clear hoti hai.)
+    """
+    global _cache, _seen
+    _cache = None
+    _seen = []
+    _dead.clear()
+
+
+def configure(genai, key: str) -> bool:
+    """
+    SDK ko di hui key par set karo. `key` sirf yahan use hoti hai — na log hoti
+    hai, na return hoti hai. Khaali key par False (caller ko pata chal jaaye).
+    """
+    if not key:
+        return False
+    genai.configure(api_key=key)
+    return True
+
+
 def _alive(names: List[str]) -> List[str]:
     return [n for n in names if not is_dead(n)]
 
@@ -213,7 +242,16 @@ def diagnose() -> Dict:
     """
     report: Dict = {"key_present": False, "key_length": 0, "sdk_version": "",
                     "models_found": [], "chosen_model": "", "test_call": "",
-                    "dead_models": dead_models(), "error": ""}
+                    "dead_models": dead_models(), "error": "",
+                    "keys_available": 0, "keys": []}
+    # §8 — kitni FREE key mili hain (sirf ginti aur label; value kabhi nahi)
+    try:
+        from .key_pool import KeyPool
+        pool = KeyPool()
+        report["keys_available"] = pool.count
+        report["keys"] = pool.labels()
+    except Exception:                    # noqa: BLE001
+        pass
     key = os.getenv("GEMINI_API_KEY", "")
     report["key_present"] = bool(key)
     report["key_length"] = len(key)

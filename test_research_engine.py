@@ -775,8 +775,15 @@ def test_end_to_end():
               "missing")
         check("Sources section aaya", "## Sources" in result["answer"], "missing")
         check("crash nahi hua", result["mode"] == "QUICK", result["mode"])
+        # NOTE (2026-08-21, §8): pehle yahan sirf "Gemini" shabd dhoondha jaata
+        # tha. Ab jab reasoning model nahi chalta to warning RV ki apni bhasha
+        # mein aati hai ("AI reasoning model is baar nahi chala ...") — kyunki
+        # user ko model/company ka naam dena persona ke against hai. Warning ka
+        # KAAM wahi hai: saaf batana ki reasoning nahi hui aur jawab engine ke
+        # apne offline reasoning se bana hai. Isliye check dono roop maanta hai.
         check("Gemini fail hone par bhi honest warning aayi",
-              any("Gemini" in w for w in result["warnings"]),
+              any(("Gemini" in w) or ("AI reasoning model" in w)
+                  for w in result["warnings"]),
               str(result["warnings"]))
         check("koi asli Gemini network call nahi hui",
               gemini_module.GeminiReasoning.generate is blocked_generate,

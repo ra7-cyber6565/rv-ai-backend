@@ -57,6 +57,58 @@ saka"), unit-conversion/comparison sanity, 3 poori hypotheses vs LLM-dead plan,
 report ka kram (insaan pehle, audit aakhir) aur determinism (do run ka jawab
 shabd-ba-shabd same).
 
+## Naya batch — §8 "Quota-proof backup: app kabhi na ruke" (Owner: Claude)
+
+intel ki shikayat (2026-08-21): *"gimini ko call krte h to quta khatam ho jaata h
+... app ruke nhi, app me koi eror na aaye ... iska quta khatam ho gya, ye kaam
+nhi kiya, iss wajah se jawab thoda week rah gya ... 100% pura app working."*
+
+Asli root cause do the:
+1. Free tier ki deewar `GenerateRequestsPerDayPerProject` hai — us halat mein us
+   KEY ke saare model ek saath band ho jaate the, aur model rotation (§7) kuch
+   nahi kar paati thi.
+2. Quota marne par orchestrator `extractive_summary()` chalata tha, jo SIRF
+   `## Seedha jawab` bharta tha — baaki teen insaani section ("Research se kya
+   pata chala?", "Ye kyun hota hai?", "Kya abhi unknown hai?") "kaunse hisse
+   nahi ban paaye" list mein chale jaate the. Yahi "jawab week rah gya" tha.
+
+| Task | Owner | Status | Files | Commit |
+|---|---|---|---|---|
+| backup FREE key rotation (per-project quota ka ₹0 ilaaj) | Claude | done | `research_engine/key_pool.py` (naya), `research_engine/gemini_model.py`, `research_engine/gemini_reasoning.py`, `.env.example` | (is batch mein) |
+| offline deterministic reasoning — quota marne par bhi saare section bharein | Claude | done | `research_engine/local_reasoning.py` (naya), `research_engine/orchestrator.py` | (is batch mein) |
+| QUICK chat ka dead-end khatam (key rotation + offline backup) | Claude | done | `research_engine/chat.py`, `research_engine/local_reasoning.py` | (is batch mein) |
+| §8 offline test suite (98 checks) | Claude | done | `tests/test_quota_backup.py` (naya), `test_research_engine.py` (1 expectation) | (is batch mein) |
+
+Kaise chalta hai (teen parat, sab ₹0):
+
+1. **Model rotation** (§7, pehle se) — ek model ka quota mare to agla model.
+2. **Key rotation** (naya) — is key ke SAB model mar jaayein (daily quota / auth)
+   to `GEMINI_API_KEY_2..9` / `GEMINI_API_KEYS` se agli FREE key par shift. Nayi
+   key par model-memory (`_cache`/`_seen`/`_dead`) aur run ke `blocked`/`stopped`
+   saaf ho jaate hain, kyunki wo faisle purani key ke the.
+3. **Offline reasoning** (naya) — saari key mar jaayein to `local_reasoning.compose()`
+   engine ke apne padhe hue sources se poora sectioned jawab banata hai:
+   deterministic (wahi pack → shabd-ba-shabd wahi jawab), har line par `[S#]`,
+   label kabhi `[ESTABLISHED]` nahi (sirf `[SOURCE-REPORTED]` / `[INFERENCE]`).
+
+Do niyam jaan-boojh kar pakke rakhe gaye:
+
+- **Key badalna "retry" NAHI hai.** §14 ka hisaab isse alag ginta hai. Nayi
+  identity: `actual_http_attempts == (1 + key_switches) + same_model_retries +
+  model_switches`. Ek hi key wale setup mein `key_switches = 0`, yaani purana
+  formula jaisa ka waisa (purane test bina badle pass hote hain).
+- **Key ki VALUE kabhi bahar nahi jaati.** `note`/`usage_note`/`api_accounting`/
+  `diagnose` — sab jagah sirf `"free key #2"` jaisa label.
+- **STATUS nahi badla.** Reasoning pass sach mein nahi chala, to report ab bhi
+  imaandaari se `RESEARCH INCOMPLETE` kehti hai (`reasoning_done`/`failures`/
+  `run_status` ka ek shabd nahi chhua). Farak sirf itna hai ki koi section khaali
+  nahi rehta.
+
+Verify (sab offline): `python3 tests/test_quota_backup.py` → 98/0.
+Dead-run probe: quota poori mari hui MAXIMUM run ab 20,164 char ka jawab deti hai,
+saari 11 heading maujood, "Kaunse hisse nahi ban paaye" block gaayab, aur status
+phir bhi `RESEARCH INCOMPLETE`.
+
 ## intel ke haath ka kaam
 | Task | Owner | Status | Files | Commit |
 |---|---|---|---|---|
@@ -112,6 +164,13 @@ scoring hai.
   karke exit 5 deta hai, aur workflow un test files ko bhi reference karta hai jo
   `main` par nahi hain. Fix aasan hai (`def test_all(): assert main() == 0`
   wrapper), par wo ChatGPT ki file hai — bina permission touch nahi kiya.
+- **§8 ke liye ChatGPT-owned `synthesizer.py` JAAN-BOOJH KAR NAHI chhua.**
+  `key_switches` / `active_key` ko audit block mein alag row banane ke liye
+  `_api_accounting_block()` badalna padta — wo file ChatGPT ki hai, isliye rok
+  diya. Info gaayab nahi hai: ye dono cheezein `gemini_reasoning.usage_note()`
+  mein jaati hain aur audit block wahi note pehle se chhapta hai
+  (`api_accounting()` dict mein `keys_available` / `key_switches` /
+  `active_key` / `keys_note` bhi maujood hain, jab ChatGPT chaahe use kar le).
 - **Patents connector nahi hai.** §3 "patents" ko priority connector maanta hai,
   par repo mein koi patent connector maujood nahi (papers/books/datasets/web hi
   hain). Naya connector add karna alag task hai — is batch ka hissa nahi.

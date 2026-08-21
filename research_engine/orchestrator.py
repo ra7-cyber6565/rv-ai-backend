@@ -762,9 +762,31 @@ class DeepResearchEngine:
 
         gemini_answer = passes["final"] or passes["analysis"]
         if not gemini_answer:
-            gemini_answer = self.synthesizer.extractive_summary(question, pack)
-            warnings.append("Gemini reasoning available nahi thi — jawab mein sirf "
-                            "retrieved evidence ka extract hai, synthesis nahi.")
+            # §8 (2026-08-21) — pehle yahan `extractive_summary()` chalta tha, jo
+            # SIRF "## Seedha jawab" bharta tha. Nateeja: quota marne par report
+            # ke teen insaani section ("Research se kya pata chala?", "Ye kyun
+            # hota hai?", "Kya abhi unknown hai?") "kaunse hisse nahi ban paaye"
+            # list mein chale jaate the aur jawab kamzor lagta tha — intel ki
+            # exact shikayat.
+            #
+            # Ab engine ka apna offline reasoning chalta hai: wahi PADHE hue
+            # sources, deterministic (wahi pack -> wahi jawab), ₹0, koi API nahi.
+            # Ye STATUS nahi badalta — reasoning pass sach mein nahi chala, isliye
+            # report ab bhi imaandaari se "RESEARCH INCOMPLETE" kehti hai. Farak
+            # sirf itna hai ki koi section khaali nahi rehta.
+            from .local_reasoning import compose as compose_offline
+
+            gemini_answer = compose_offline(question, pack, plan,
+                                            contradiction_dicts)
+            warnings.append(
+                "AI reasoning model is baar nahi chala (free limit khatam thi), "
+                "isliye ye jawab engine ke apne offline reasoning se bana hai — "
+                "sirf un sources se jo sach mein padhe gaye. Har section bhara "
+                "hua hai, par multi-angle AI reasoning ka dava nahi hai.")
+            if not gemini_answer.strip():
+                # aakhri suraksha jaal — purana raasta, taaki jawab kabhi khaali
+                # na jaaye
+                gemini_answer = self.synthesizer.extractive_summary(question, pack)
 
         # 6b. maangi hui extra sections ka recovery (math model / second-order
         # chain). Ye Gemini ki ek bhi nayi call nahi karta — sirf analysis pass
