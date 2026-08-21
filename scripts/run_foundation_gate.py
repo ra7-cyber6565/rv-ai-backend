@@ -73,6 +73,8 @@ FOCUSED_PYTEST = (
     "tests/test_admin_guard.py",
     "tests/test_security_config.py",
     "tests/test_request_guard.py",
+    "tests/test_job_access.py",
+    "tests/test_job_routes_access.py",
     "tests/test_research_jobs.py",
     "tests/test_domain_guardrails.py",
     "tests/test_domain_ambiguity.py",
