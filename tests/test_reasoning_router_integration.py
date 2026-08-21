@@ -205,6 +205,25 @@ def test_all_backups_exhausted_records_incomplete_pass_without_raw_user_or_audit
     assert "provider:openrouter: quota" in public_details
 
 
+def test_no_provider_fallback_still_redacts_raw_gemini_ledger_detail(monkeypatch):
+    brain = ResilientReasoning(budget=1, fallback_providers=[], model_name="fake-gemini")
+    raw = RuntimeError(
+        "429 ResourceExhausted protobuf SECRET-SDK-BODY "
+        "quota_id: GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+    )
+    fake = _force_fake_gemini(monkeypatch, brain, [raw])
+
+    assert brain.generate("prompt", "analysis") == ""
+    assert fake.calls == 1
+    user_errors = " ".join(brain.errors)
+    public_details = " ".join(brain.technical_details())
+    for leaked in ("ResourceExhausted", "protobuf", "SECRET-SDK-BODY", "quota_id", "HTTP 429"):
+        assert leaked not in user_errors
+        assert leaked not in public_details
+    assert "fake-gemini / analysis: daily_quota" in public_details
+    assert brain.failure_kind() == "daily_quota"
+
+
 def test_provider_fallback_is_never_counted_as_same_model_retry(monkeypatch):
     _force_no_gemini(monkeypatch)
     first = FakeProvider("groq", "free-a", [quota_failure("groq", "free-a")])
