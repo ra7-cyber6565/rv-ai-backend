@@ -18,6 +18,7 @@ from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
 from api.archive_routes import router as archive_router
+from api.session_routes import router as session_router
 from knowledge.routes import router as knowledge_router
 from storage.provider_factory import provider_status
 from utils.zero_cost_guard import enforce_zero_cost_config
@@ -30,6 +31,7 @@ from utils.request_guard import (
     limiter,
 )
 from utils.reasoning_status import reasoning_status
+from utils.project_access import project_access
 
 ZERO_COST_STATUS = enforce_zero_cost_config()
 CORS_ORIGINS = allowed_cors_origins()
@@ -42,7 +44,7 @@ app = FastAPI(
 )
 
 # Same-origin website needs no CORS grant. A separately-hosted approved frontend
-# may use the exact configured origins and the private per-job polling header.
+# may use exact configured origins and opaque project/job capability headers.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -51,6 +53,7 @@ app.add_middleware(
     allow_headers=[
         "Content-Type",
         "Authorization",
+        "X-Project-Token",
         "X-Research-Job-Token",
         "X-Infinity-Admin-Token",
     ],
@@ -84,6 +87,8 @@ async def protect_free_quota(request: Request, call_next):
                 )
     return await call_next(request)
 
+# Session is zero-model/zero-cloud and creates a random isolated project namespace.
+app.include_router(session_router, prefix="/api/v1", tags=["Session"])
 app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
 app.include_router(agent_router, prefix="/api/v1", tags=["Agents"])
 app.include_router(job_router, prefix="/api/v1", tags=["Research Jobs"])
@@ -100,13 +105,14 @@ def _runtime_safety_status() -> dict:
 
     Keep /health cheap: hosting platforms may call it frequently, so it must not
     recursively scan a large D: workspace. Detailed manifest/retry/storage
-    archive state lives at /api/v1/archive/status instead.
+    archive state lives at the admin-only /api/v1/archive/status endpoint.
     """
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "release_state": RELEASE_STATE,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
+        "project_isolation": project_access.status(),
         "reasoning_resilience": reasoning_status(),
         "cloud_archive": provider_status(),
         # Never expose STORAGE_STATUS/storage_status() directly: internal status
@@ -147,12 +153,15 @@ def api_info():
 
 @app.get("/health")
 def health_check():
-    """Health check including public-safe storage/archive/reasoning readiness."""
+    """Health check including public-safe storage/archive/security readiness."""
     safety = _runtime_safety_status()
     current_storage = safety["storage"]
     archive = safety["cloud_archive"]
+    project_isolation = safety["project_isolation"]
     degraded = not current_storage.get("available")
     if archive.get("enabled") and not archive.get("ready"):
+        degraded = True
+    if not project_isolation.get("project_capability_tokens_ready"):
         degraded = True
     # Hosted/free reasoning providers are not a health-failure condition because
     # deterministic local evidence fallback remains available.
