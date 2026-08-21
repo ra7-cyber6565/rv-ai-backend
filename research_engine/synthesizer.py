@@ -9,18 +9,61 @@ facade keeps those features and adds ChatGPT's stricter user-facing safeguards:
 3. the deterministic A-L presentation guard runs before the report is returned;
 4. incomplete runs get an explicit opening warning if the model omitted it;
 5. if every reasoning provider is unavailable, retrieved evidence is still
-   turned into a conservative cited answer by the local deterministic reasoner.
+   turned into a conservative cited answer by the local deterministic reasoner;
+6. source-controlled title/snippet/URL metadata cannot inject report headings,
+   bidi controls or non-http clickable schemes into the human-facing report.
 """
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 
 from .models import EvidencePack
 from .offline_reasoner import OfflineEvidenceReasoner
 from .presentation_guard import PresentationGuard
 from .synthesizer_claude import *  # noqa: F401,F403 - compatibility exports
 from .synthesizer_claude import FinalSynthesizer as _ClaudeFinalSynthesizer
+
+
+_BIDI = {
+    "\u061c", "\u200e", "\u200f", "\u202a", "\u202b", "\u202c", "\u202d",
+    "\u202e", "\u2066", "\u2067", "\u2068", "\u2069",
+}
+_MARKDOWN_INERT = str.maketrans({
+    "*": "∗", "_": "＿", "[": "［", "]": "］", "<": "‹", ">": "›", "`": "ˋ",
+})
+
+
+def _safe_source_display(value: object, limit: int = 500) -> str:
+    """Flatten hostile source metadata into inert, bounded display text."""
+    text = unicodedata.normalize("NFKC", str(value or ""))
+    chars: List[str] = []
+    for ch in text:
+        if ch in _BIDI or ch == "\x00":
+            continue
+        if unicodedata.category(ch) == "Cc" and ch not in {"\n", "\r", "\t"}:
+            continue
+        chars.append(ch)
+    text = re.sub(r"\s+", " ", "".join(chars)).strip().translate(_MARKDOWN_INERT)
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def _safe_source_url(value: object) -> str:
+    """Only render external source URLs as URLs when scheme is http(s)."""
+    raw = re.sub(r"[\x00-\x20]+", "", str(value or "").strip())
+    if not raw or len(raw) > 2048:
+        return ""
+    try:
+        parsed = urlparse(raw)
+    except Exception:
+        return ""
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.netloc:
+        return ""
+    return raw
 
 
 class FinalSynthesizer(_ClaudeFinalSynthesizer):
@@ -81,9 +124,10 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 "padha gaya; sawal se relevant pages page-by-page select karke process hue."
             )
             for source in partial[:4]:
+                scope = _safe_source_display(getattr(source, "read_note", ""), 500)
                 lines.append(
                     f"  - [{source.source_id}] {int(source.pages_read)}/{int(source.pages_total)} "
-                    f"pages process hue. {str(getattr(source, 'read_note', '') or '').strip()}"
+                    f"pages process hue. {scope}"
                 )
         if abstract:
             lines.append(
@@ -122,27 +166,27 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
         blocks: List[str] = []
 
         for s in pack.sources:
-            title = (s.title or s.url or "naam nahi mila").strip()
-            head = f"**[{s.source_id}] {title}**"
-            if s.url:
-                head += f"  \n{s.url}"
-            about: List[str] = [self._KIND_WORDS.get(
+            safe_url = _safe_source_url(s.url)
+            title = _safe_source_display(s.title or safe_url or "naam nahi mila", 500)
+            safe_id = re.sub(r"[^A-Za-z0-9._-]", "", str(s.source_id or ""))[:40] or "?"
+            head = f"**[{safe_id}] {title}**"
+            if safe_url:
+                head += f"  \n{safe_url}"
+            about: List[str] = [_safe_source_display(self._KIND_WORDS.get(
                 getattr(s.source_type, "value", str(s.source_type)),
                 getattr(s.source_type, "value", "source"),
-            )]
+            ), 120)]
             if s.year:
                 about.append(f"saal {s.year}")
             if s.publisher or s.venue:
-                about.append(str(s.publisher or s.venue))
+                about.append(_safe_source_display(s.publisher or s.venue, 300))
             if s.peer_reviewed is True:
                 about.append("peer-reviewed")
-            lines = [head, f"- Ye kya hai: {', '.join(about)}."]
+            lines = [head, f"- Ye kya hai: {', '.join(x for x in about if x)}."]
 
-            took = re.sub(r"\s+", " ", (s.snippet or "")).strip()
+            took = _safe_source_display(s.snippet, 220)
             if took:
-                lines.append(
-                    "- Isse kya liya gaya: " + took[:220] + ("…" if len(took) > 220 else "")
-                )
+                lines.append("- Isse kya liya gaya: " + took)
             else:
                 lines.append("- Isse kya liya gaya: kuch nahi — content mila hi nahi.")
 
@@ -162,7 +206,7 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 access = self._ACCESS_WORDS.get(level, level)
             lines.append(f"- Kitna padha gaya: {access}.")
             if getattr(s, "read_note", ""):
-                lines.append(f"- Reading scope: {s.read_note}")
+                lines.append(f"- Reading scope: {_safe_source_display(s.read_note, 500)}")
 
             rel = float(getattr(s, "relevance_score", 0.0) or 0.0)
             rel_word = (
