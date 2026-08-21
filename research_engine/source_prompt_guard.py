@@ -29,7 +29,7 @@ from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Iterable, List
+from typing import List
 
 from .models import EvidencePack, SourceRecord
 
@@ -90,6 +90,13 @@ def _clip(value: object, limit: int) -> str:
     return clipped + "…"
 
 
+def _safe_source_id(value: object) -> str:
+    """Citation IDs are engine metadata; keep only the expected inert grammar."""
+    raw = _clip(value, 40)
+    inert = re.sub(r"[^A-Za-z0-9._-]", "", raw)
+    return inert or "?"
+
+
 def looks_instruction_like(value: object) -> bool:
     text = _clean_controls(value)
     return any(rx.search(text) for rx in _INJECTION_PATTERNS)
@@ -123,9 +130,9 @@ def _meta_line(label: str, value: object, *, limit: int) -> str:
 
 def render_source(source: SourceRecord, *, max_chars_per_source: int = 1200) -> str:
     """Bounded, provenance-preserving, injection-aware source renderer."""
-    sid = _clip(source.source_id, 40) or "?"
-    label = _clip(source.citation_label(), 700)
-    head = f"[{sid}] ({label})"
+    sid = _safe_source_id(source.source_id)
+    descriptor = quote_untrusted(source.citation_label(), limit=700) or "DATA> source"
+    head = f"[{sid}] SOURCE DESCRIPTOR (quoted data):\n{descriptor}"
     meta: List[str] = []
 
     fields = (
