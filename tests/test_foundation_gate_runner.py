@@ -9,7 +9,11 @@ from scripts import run_foundation_gate as gate
 
 def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     monkeypatch.setenv("GEMINI_API_KEY", "should-not-survive")
+    monkeypatch.setenv("GROQ_API_KEY", "should-not-survive")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "should-not-survive")
+    monkeypatch.setenv("OLLAMA_ENABLED", "true")
     monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google_drive")
+    monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "private-remote")
     monkeypatch.setenv("TERABOX_CLIENT_SECRET", "secret")
     monkeypatch.setenv("INFINITY_DATA_ROOT", str(tmp_path))
 
@@ -18,7 +22,13 @@ def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     assert env["ZERO_COST_ONLY"] == "true"
     assert env["GEMINI_API_KEY"] == ""
     assert env["GEMINI_ZERO_COST_CONFIRMED"] == "false"
+    assert env["GROQ_API_KEY"] == ""
+    assert env["GROQ_ZERO_COST_CONFIRMED"] == "false"
+    assert env["OPENROUTER_API_KEY"] == ""
+    assert env["OPENROUTER_MODEL"] == "openrouter/free"
+    assert env["OLLAMA_ENABLED"] == "false"
     assert env["CLOUD_ARCHIVE_PROVIDER"] == "none"
+    assert env["GOOGLE_DRIVE_RCLONE_REMOTE"] == ""
     assert env["TERABOX_CLIENT_SECRET"] == ""
     assert env["INFINITY_OFFLINE_TEST"] == "true"
 
@@ -32,6 +42,11 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "core_regression" in names
     assert "benchmark_superconductivity_v2" in names
     assert any(name.startswith("standalone:tests/test_") for name in names)
+
+    focused_command = next(command for name, command in plan if name == "focused_pytest")
+    assert "tests/test_reasoning_router.py" in focused_command
+    assert "tests/test_reasoning_router_integration.py" in focused_command
+    assert "tests/test_reasoning_zero_cost.py" in focused_command
 
 
 def test_receipt_fails_closed_when_any_stage_fails(tmp_path):
