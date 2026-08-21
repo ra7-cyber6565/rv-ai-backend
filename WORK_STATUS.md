@@ -99,14 +99,14 @@ scoring hai.
   helper badle, koi feature hataya nahi gaya. Merge conflict ho to §14 ka logic
   `gemini_reasoning.api_accounting()` mein poora maujood hai; presentation dobara
   banana aasan hai.
-- **Claim-label strict rule adhoora hai (production change baaki).** Aaj main par
-  `claim_labels.line_verdict(..., check_entailment=True)` par "poora text mila par
-  support nahi mila" wali line `SOURCE-REPORTED` par giri hai; strict rule
-  `UNVERIFIED` maangta hai. Wo ek-line badlaav `research_engine/claim_labels.py`
-  mein hoga — us file ko chhune se mana tha, isliye NAHI badla. Regression
-  (`tests/test_claim_verification.py`) ab sirf ye pakadti hai ki strong label
-  bachta hi nahi, aur `UNVERIFIED`/`SOURCE-REPORTED` dono accept karti hai — yaani
-  strict rule aane par test khud-ba-khud sahi rahega.
+- **Claim-label strict rule ab lagu hai, par `claim_labels.py` chhua NAHI gaya.**
+  Final rule ("poora text mila par support nahi mila" → `[UNVERIFIED]`, na ki
+  `SOURCE-REPORTED`) `research_engine/claim_verification.py` ke naye
+  `enforce_strict_labels()` / `strict_label_line()` mein hai, aur orchestrator
+  usse depth-wale downgrade se PEHLE chalata hai. `claim_labels.py` ka default
+  behaviour (`check_entailment=False`, sirf reading depth) bilkul waisa hi hai —
+  us file mein ek line bhi nahi badli. Regression:
+  `tests/test_claim_verification.py::test_strict_label_contract`.
 - **`.github/workflows/foundation-tests.yml` (ChatGPT-owned) `pytest -q` chalata
   hai**, par in suites ke test `main()` ke andar hain — pytest 0 test collect
   karke exit 5 deta hai, aur workflow un test files ko bhi reference karta hai jo

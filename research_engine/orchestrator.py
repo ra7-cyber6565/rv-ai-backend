@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 
 from .citation import CitationEngine
 from .claim_labels import downgrade as downgrade_labels
+from .claim_verification import enforce_strict_labels
 from .claim_verification import verify_answer as verify_claims
 from .content_fetcher import ContentFetcher
 from .contradiction import ContradictionEngine
@@ -785,6 +786,15 @@ class DeepResearchEngine:
         # rehta. Ye jaan-boojh kar sirf saaf FAIL par girata hai — jahan support
         # check HO HI NA SAKE wahan chup rehta hai aur wo baat claim-check block
         # mein alag se likhi jaati hai.
+        #
+        # STRICT PASS pehle chalta hai (2026-08-21): "poora text mila par support
+        # nahi mila" wali line ka sahi label `[UNVERIFIED]` hai, `SOURCE-REPORTED`
+        # nahi — kyunki "source ye report karta hai" bhi ek dava hai jo us source
+        # ne kiya hi nahi. Depth-wala downgrade uske BAAD chalta hai, aur uska
+        # apna default behaviour bilkul waisa hi hai.
+        gemini_answer, strict_report = enforce_strict_labels(gemini_answer, pack)
+        if strict_report.get("note"):
+            warnings.append(strict_report["note"])
         gemini_answer, label_report = downgrade_labels(gemini_answer, pack,
                                                        check_entailment=True)
         if label_report.get("note"):
