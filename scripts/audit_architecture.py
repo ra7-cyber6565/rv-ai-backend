@@ -1,6 +1,6 @@
 """Static architecture audit for Infinity Research AI.
 
-This is not a substitute for runtime tests.  It is a deterministic, zero-cost
+This is not a substitute for runtime tests. It is a deterministic, zero-cost
 release gate that catches a different class of regression: a refactor can leave
 individual unit tests green while accidentally disconnecting a whole capability
 from the real application path.
@@ -12,7 +12,8 @@ The audit therefore checks that the production entrypoint is still wired as:
     -> human-first synthesizer/audit
 
 It also checks the project's hard safety invariants (₹0 provider guard, local
-fallback, strict CORS, bounded storage/jobs, no obvious committed secrets).
+fallback, strict CORS, bounded storage/jobs, honest release state, no obvious
+committed secrets).
 
 Exit code:
     0  all required checks pass
@@ -25,7 +26,6 @@ from __future__ import annotations
 import argparse
 import json
 import re
-import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, List, Sequence
@@ -118,6 +118,26 @@ def _no_wildcard_cors() -> AuditCheck:
     )
 
 
+def _release_honesty() -> AuditCheck:
+    text = _read("main.py")
+    bad = "RV AI Backend - Production Ready" in text
+    required = (
+        "foundation_verification_pending",
+        '"release_state": RELEASE_STATE',
+        '"status": "degraded" if degraded else "healthy"',
+    )
+    missing = [needle for needle in required if needle not in text]
+    return AuditCheck(
+        name="honesty:release-state-not-faked",
+        passed=bool(text) and not bad and not missing,
+        detail=(
+            "runtime health is separate from release readiness"
+            if text and not bad and not missing
+            else f"production_ready_claim={bad}; missing={missing}"
+        ),
+    )
+
+
 def _zero_cost_chain() -> AuditCheck:
     guard = _read("utils/zero_cost_guard.py")
     router = _read("research_engine/reasoning_router.py")
@@ -205,7 +225,7 @@ def _obvious_secret_scan() -> AuditCheck:
     """Catch obvious real credential literals in production files.
 
     This is intentionally conservative and excludes tests/docs/examples so fake
-    fixtures such as `gsk_test` do not make the release gate noisy.  It is not a
+    fixtures such as `gsk_test` do not make the release gate noisy. It is not a
     full secret scanner and never claims to be one.
     """
     production_roots = [ROOT / "research_engine", ROOT / "api", ROOT / "utils", ROOT / "storage"]
@@ -262,6 +282,7 @@ def run_audit() -> AuditReport:
         "tests/test_claim_verification.py",
         "tests/test_reasoning_router_integration.py",
         "tests/test_offline_reasoner.py",
+        "tests/test_release_state.py",
         "tests/benchmark_superconductivity.py",
     )
 
@@ -274,6 +295,7 @@ def run_audit() -> AuditReport:
             "include_router",
             "reasoning_status",
         ),
+        _release_honesty(),
         _contains(
             "research_engine/orchestrator.py",
             "self._discover(",
@@ -306,9 +328,11 @@ def run_audit() -> AuditReport:
         ),
         _contains(
             "scripts/run_foundation_gate.py",
+            "architecture_audit",
             "benchmark_superconductivity_v2",
             "test_reasoning_router_integration.py",
             "test_offline_reasoner.py",
+            "test_release_state.py",
         ),
     ]
     failed = [check.name for check in checks if not check.passed]
