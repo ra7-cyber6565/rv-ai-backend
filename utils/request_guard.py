@@ -8,6 +8,9 @@ It is intentionally conservative: process restart resets counters, which is fine
 for a single-instance free deployment. A future multi-instance deployment should
 replace this with a shared free/self-hosted limiter rather than pretending these
 counters are global.
+
+The bucket table is bounded so a flood of unique spoofed/source addresses cannot
+turn the limiter itself into an unbounded-memory denial of service.
 """
 from __future__ import annotations
 
@@ -61,15 +64,45 @@ DEFAULT_LIMITS: dict[str, Limit] = {
 
 
 class SlidingWindowLimiter:
-    def __init__(self):
+    def __init__(self, *, max_buckets: int | None = None, cleanup_interval_seconds: int = 60):
         self._events: Dict[Tuple[str, str], Deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
+        self._max_buckets = max(100, int(max_buckets or _int_env("RATE_LIMIT_MAX_BUCKETS", 10_000, 100, 100_000)))
+        self._cleanup_interval = max(1, int(cleanup_interval_seconds))
+        self._last_cleanup = 0.0
+        self._capacity_rejections = 0
+
+    def _cleanup_locked(self, current: float) -> None:
+        """Drop expired/empty buckets without retaining client identifiers forever."""
+        # Every route has a window <= 1 hour in the current policy. Per-bucket
+        # exact expiry is handled on normal access; this global sweep removes
+        # completely idle buckets after the longest configured window.
+        longest_window = max((limit.window_seconds for limit in DEFAULT_LIMITS.values()), default=3600)
+        cutoff = current - longest_window
+        for index, queue in list(self._events.items()):
+            while queue and queue[0] <= cutoff:
+                queue.popleft()
+            if not queue:
+                self._events.pop(index, None)
+        self._last_cleanup = current
 
     def check(self, key: str, bucket: str, limit: Limit, *, now: float | None = None) -> tuple[bool, int]:
         current = time.time() if now is None else float(now)
         cutoff = current - limit.window_seconds
         index = (key, bucket)
         with self._lock:
+            if (
+                current - self._last_cleanup >= self._cleanup_interval
+                or len(self._events) >= self._max_buckets
+            ):
+                self._cleanup_locked(current)
+
+            # Fail closed for a brand-new bucket if the bounded table is still
+            # full. Existing clients keep their normal sliding-window behavior.
+            if index not in self._events and len(self._events) >= self._max_buckets:
+                self._capacity_rejections += 1
+                return False, max(1, min(60, limit.window_seconds))
+
             queue = self._events[index]
             while queue and queue[0] <= cutoff:
                 queue.popleft()
@@ -82,6 +115,17 @@ class SlidingWindowLimiter:
     def reset(self) -> None:
         with self._lock:
             self._events.clear()
+            self._last_cleanup = 0.0
+            self._capacity_rejections = 0
+
+    def stats(self) -> dict[str, int]:
+        """Safe aggregate metrics only; never expose client identifiers."""
+        with self._lock:
+            return {
+                "active_buckets": len(self._events),
+                "max_buckets": self._max_buckets,
+                "capacity_rejections": self._capacity_rejections,
+            }
 
 
 limiter = SlidingWindowLimiter()
