@@ -17,6 +17,8 @@ def test_real_repository_audit_has_all_expected_check_names():
     assert "honesty:release-state-not-faked" in names
     assert "safety:zero-cost-provider-chain" in names
     assert "resilience:quota-does-not-blank-answer" in names
+    assert "resilience:cross-request-provider-cooldown" in names
+    assert "security:async-job-capability" in names
     assert "storage:bounded-and-verified" in names
     assert "security:no-wildcard-cors" in names
     assert "security:no-obvious-credential-literals" in names
@@ -67,6 +69,43 @@ def test_release_honesty_accepts_separate_health_and_release_state(monkeypatch, 
     monkeypatch.setattr(audit, "ROOT", tmp_path)
     result = audit._release_honesty()
     assert result.passed is True
+
+
+def test_provider_cooldown_audit_fails_when_facade_is_not_wired(monkeypatch, tmp_path):
+    (tmp_path / "utils").mkdir()
+    (tmp_path / "research_engine").mkdir()
+    (tmp_path / ".env.example").write_text("PROVIDER_HEALTH_RATE_LIMIT_SECONDS=180\n", encoding="utf-8")
+    (tmp_path / "utils" / "provider_health.py").write_text(
+        "class ProviderHealthRegistry: pass\ndef record_failure(): pass\ndef record_success(): pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "utils" / "reasoning_status.py").write_text("temporarily_skipped=True\n", encoding="utf-8")
+    (tmp_path / "research_engine" / "reasoning_router_integrated.py").write_text(
+        "# missing health wrapper on purpose\n", encoding="utf-8"
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+
+    result = audit._provider_cooldown_wired()
+    assert result.passed is False
+    assert "fallback-provider wrapper" in result.detail
+
+
+def test_async_job_privacy_audit_fails_without_capability_verification(monkeypatch, tmp_path):
+    (tmp_path / "api").mkdir()
+    (tmp_path / "utils").mkdir()
+    (tmp_path / "api" / "job_routes.py").write_text(
+        "X-Research-Job-Token\n_authorized_job\nDepends(require_admin)\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "utils" / "job_access.py").write_text(
+        "hmac.new\nsecrets.token_bytes\nresearch_job_capability.key\ncompare_digest\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+
+    result = audit._async_job_privacy()
+    assert result.passed is False
+    assert "capability verification" in result.detail
 
 
 def test_secret_scan_detects_obvious_literal_in_production(monkeypatch, tmp_path):
