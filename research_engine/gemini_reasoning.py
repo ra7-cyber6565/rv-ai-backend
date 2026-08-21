@@ -77,11 +77,17 @@ class GeminiReasoning:
         self.successes = 0                   # kitne pass sach mein jawab laaye
         self.notes: List[str] = []           # "critique: model X par safal (retry 2)"
         self.models_tried: List[str] = []
-        self.switched_models = 0
+        self.switched_models = 0             # doosre model par kitni baar gaye
+        self.same_model_retries = 0          # WAHI model, dobara (asli retry)
         # §7 — kaun kis wajah se gira, aur kaun is run mein band hai
         self.ledger = FailureLedger()
         self.blocked: Dict[str, str] = {}    # model -> kind (is run ke liye)
         self.stopped = False                 # auth failure: aage koshish bekaar
+        # §14 — har pass ka apna record: naam, output aaya ya nahi, kitni HTTP
+        # attempts lagi, kis model par chala. `calls_used` sirf "maanga gaya"
+        # batata hai; ye list "mila ya nahi" batati hai. Purane audit mein
+        # "3/3 reasoning pass" chhapta tha jabki teeno khaali laut sakte the.
+        self.pass_log: List[Dict] = []
 
     # ── model access (lazy) ──────────────────────────────────────────────────
     def model(self):
@@ -172,6 +178,34 @@ class GeminiReasoning:
         """
         Ek logical Gemini call — par andar retry + model fallback ke saath.
 
+        Ye sirf patli parat hai: asli kaam `_generate` karta hai, aur yahan us
+        pass ka imaandaar record (`pass_log`) banta hai — naam, output aaya ya
+        nahi, kitni asli HTTP attempts lagi, kis model par chala.
+
+        Kyun zaroori (§14): pehle audit sirf `calls_used` chhapta tha, yaani
+        "3/3 reasoning pass". Par ek pass ho kar bhi khaali laut sakta hai
+        (429, safety block, khaali text). Us halat mein "3/3" padh kar lagta tha
+        3 baar sochh-vichaar hua — jabki hua kuch nahi. Ab dono ginti alag
+        dikhti hain: kitne maange gaye, aur kitne se sach mein output aaya.
+        """
+        tag = label or "gemini"
+        attempts_before = self.attempts
+        text = self._generate(prompt, label)
+        # QuotaExhausted yahan tak pahunchta hi nahi (upar se raise hota hai) —
+        # aur wo theek hai: budget khatam wala pass maanga hi nahi gaya tha,
+        # isliye use "khaali laut aaya" ginna galat hota.
+        self.pass_log.append({
+            "label": tag,
+            "ok": bool(text),
+            "http_attempts": max(0, self.attempts - attempts_before),
+            "model": self.model_name if text else "",
+        })
+        return text
+
+    def _generate(self, prompt: str, label: str = "") -> str:
+        """
+        Asli call loop.
+
         Budget LOGICAL calls ka hai (pass ka), retry us budget ko nahi khaata:
         warna ek 429 phir se poora pass kha jaata. Budget khatam ho to
         QuotaExhausted raise hota hai (ye behaviour purana hi hai, orchestrator
@@ -215,6 +249,14 @@ class GeminiReasoning:
                     self.errors.append(f"{tag}: model '{name}' banaya nahi ja saka: "
                                        f"{type(exc).__name__}: {exc}")
                     continue
+            if model_index:
+                # §14 — switch YAHAN gina jaata hai: jab hum sach mein agle model
+                # par aa gaye aur uspar attempt karne wale hain. Pehle ye sirf
+                # SAFAL hone par ginta tha, isliye "dono model fail" wale run
+                # mein switch 0 dikhta tha — jabki switch hua tha. Aur ye ginti
+                # `same_model_retries` se bilkul alag hai: model badalna retry
+                # nahi hai.
+                self.switched_models += 1
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 self.attempts += 1
                 try:
@@ -226,7 +268,6 @@ class GeminiReasoning:
                         raise RuntimeError("model ne khaali response diya")
                     self.successes += 1
                     if name != first_model:
-                        self.switched_models += 1
                         self.notes.append(
                             f"{tag}: '{first_model}' par nahi chala, "
                             f"'{name}' par chala")
@@ -266,18 +307,43 @@ class GeminiReasoning:
                                 f"maanga — itna rukne se behtar agla model")
                             break
                         time.sleep(min(wait, _MAX_SLEEP_SECONDS))
+                        # §14 — ASLI retry yahi hai: wahi model, dobara. Isse
+                        # alag se ginna zaroori hai, warna model fallback bhi
+                        # "retry" ban kar hisaab jhootha kar deta hai.
+                        self.same_model_retries += 1
                         continue
                     break                       # is model par bas — agla model
         return ""
 
+    # ── §14: pass-level sach (maanga vs mila) ────────────────────────────────
+    def passes_with_output(self) -> int:
+        return len([p for p in self.pass_log if p.get("ok")])
+
+    def empty_passes(self) -> List[str]:
+        """Jo pass chale par khaali laute — naam ke saath, chhupaye bina."""
+        return [str(p.get("label") or "?") for p in self.pass_log if not p.get("ok")]
+
     def usage_note(self) -> str:
         """Audit ke liye ek line — jitna hua utna, bina saja-sanwaar ke."""
-        bits = [f"{self.calls_used}/{self.budget} reasoning pass"]
-        if self.successes:
-            bits.append(f"{self.successes} pass safal")
-        if self.attempts > self.calls_used:
-            bits.append(f"{self.attempts} actual API attempts (retry lage)")
+        got = self.passes_with_output()
+        asked = len(self.pass_log)
+        bits = [f"{self.calls_used}/{self.budget} reasoning pass maange gaye"]
+        if asked:
+            # Yahi wo line hai jo pehle jhooth bolti thi: sirf "3/3 pass" likh
+            # kar output ka koi zikr nahi hota tha.
+            bits.append(f"inmein se {got}/{asked} se sach mein output aaya")
+        empty = self.empty_passes()
+        if empty:
+            bits.append("khaali laute: " + ", ".join(empty[:4]))
+        if self.attempts:
+            bits.append(f"{self.attempts} actual API attempts")
+        else:
+            bits.append("0 actual API attempts (ek bhi network call nahi hui)")
+        if self.same_model_retries:
+            bits.append(f"{self.same_model_retries} same-model retry")
         if self.switched_models:
+            # Ye jaan-boojh kar "retry" nahi kehta: doosre model par jaana retry
+            # nahi hai, aur pehle audit dono ko ek hi number mein mila deta tha.
             bits.append(f"{self.switched_models} baar doosre model par shift karna pada")
         if self.errors:
             bits.append(f"{len(self.errors)} error aaye")
@@ -288,22 +354,55 @@ class GeminiReasoning:
 
     def api_accounting(self) -> Dict:
         """
-        §14 — honest API accounting. Logical pass, asli HTTP attempts, safal,
-        fail, retry, aur kaun kis wajah se gira.
+        §14 — honest API accounting. Har number ka ek hi matlab, aur do cheezein
+        kabhi mila kar nahi ginte: WAHI model par dobara koshish (retry) aur
+        DOOSRE model par jaana (fallback).
+
+        Purana formula `retries = attempts - calls_used` tha, aur wahi bug tha:
+        model A ek baar gira, model B par jawab mila to attempts=2, calls=1, aur
+        report likh deti thi "1 retry" — jabki retry ek bhi nahi hua, model badla
+        tha. Ab teen ginti alag hain:
+          * `same_model_retries` — wahi model, dobara (asli retry)
+          * `model_switches`     — agle model par kitni baar gaye
+          * `actual_http_attempts` = pehli koshishein + same_model_retries
+
+        Aur teen ginti "kaam kitna hua" ke liye alag hain, kyunki inka matlab
+        alag hai aur pehle ye sab "calls" ke naam par ek number ban jaati thi:
+          * `logical_reasoning_calls` — kitne pass MAANGE gaye
+          * `passes_with_output`      — kitne pass se sach mein text aaya
+          * `actual_http_attempts`    — network par kitni baar sach mein gaye
+        `counted_by` isliye hai ki user ko pata rahe ye ginti engine ki apni hai,
+        Google ke billing dashboard se nahi aayi.
         """
+        asked = len(self.pass_log)
+        got = self.passes_with_output()
+        failed_http = max(0, self.attempts - self.successes)
         return {
             "logical_reasoning_calls": self.calls_used,
             "budget": self.budget,
+            "passes_requested": asked,
+            "passes_with_output": got,
+            "passes_empty": max(0, asked - got),
+            "empty_output_passes": self.empty_passes(),
+            "pass_log": [dict(p) for p in self.pass_log],
             "actual_http_attempts": self.attempts,
             "successful_calls": self.successes,
-            "failed_attempts": max(0, self.attempts - self.successes),
-            "retries": max(0, self.attempts - self.calls_used),
+            "failed_http_attempts": failed_http,
+            # purana naam — bahar ke callers na toote (wahi number, naya naam
+            # `failed_http_attempts` hai)
+            "failed_attempts": failed_http,
+            "same_model_retries": self.same_model_retries,
+            # `retries` ab SIRF asli retry hai (pehle isme model switch bhi
+            # ghusa hua tha)
+            "retries": self.same_model_retries,
             "models_tried": list(self.models_tried),
             "model_switches": self.switched_models,
             "blocked_models": dict(self.blocked),
             "failure_kinds": self.ledger.kinds(),
             "failure_summary": self.ledger.summary(),
             "stopped_early": self.stopped,
+            "no_api_calls": self.attempts == 0,
+            "counted_by": "engine ki apni ginti (Google billing dashboard se nahi)",
         }
 
     # ── PASS 1/2/3 + evidence audit (Spec Section 9) ─────────────────────────

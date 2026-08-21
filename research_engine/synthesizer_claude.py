@@ -606,6 +606,14 @@ Ab jawab likho:"""
 
     @staticmethod
     def _access_block(coverage: Dict, pack: EvidencePack) -> str:
+        """
+        "Kitna gehra padha gaya" — har ginti apne denominator ke saath (§14).
+
+        Sirf "3 source ka poora text mila" padh kar user maan leta hai ki kaam
+        gehra hua. Par agar kul 18 source the, to wo 3/18 hai — matlab bilkul
+        badal jaata hai. Isliye har line mein "kul kitne mein se" likhna zaroori
+        hai.
+        """
         levels = (coverage or {}).get("read_levels") or {}
         full = int(levels.get("full_text", 0) or 0)
         abstract = int(levels.get("abstract", 0) or 0)
@@ -614,21 +622,23 @@ Ab jawab likho:"""
         if not (full or abstract or snippet or meta):
             return ("**Kitna gehra padha gaya:** iska data available nahi hai, "
                     "isliye is jawab ko kam bharosemand maanein.")
-        lines = ["**Kitna gehra padha gaya (isi se confidence tay hoti hai):**"]
+        total = full + abstract + snippet + meta
+        lines = [f"**Kitna gehra padha gaya (isi se confidence tay hoti hai) — "
+                 f"kul {total} sources par:**"]
         if full:
-            lines.append(f"- {full} source ka POORA text mila. Inpar sabse zyada "
-                         f"bharosa kiya ja sakta hai, kyunki claim seedha wahan se "
-                         f"check hui hai.")
+            lines.append(f"- {full}/{total} source ka POORA text mila. Inpar sabse "
+                         f"zyada bharosa kiya ja sakta hai, kyunki claim seedha "
+                         f"wahan se check hui hai.")
         if abstract:
-            lines.append(f"- {abstract} source ka sirf abstract mila — yaani paper ka "
-                         f"summary padha gaya, poora method nahi. Aisi baat "
+            lines.append(f"- {abstract}/{total} source ka sirf abstract mila — yaani "
+                         f"paper ka summary padha gaya, poora method nahi. Aisi baat "
                          f"\"source ye report karta hai\" level ki hoti hai.")
         if snippet:
-            lines.append(f"- {snippet} source se sirf ek chhota snippet mila. Ye "
-                         f"ishara deta hai, saboot nahi.")
+            lines.append(f"- {snippet}/{total} source se sirf ek chhota snippet mila. "
+                         f"Ye ishara deta hai, saboot nahi.")
         if meta:
-            lines.append(f"- {meta} source ka sirf title/metadata mila — inse content "
-                         f"ki koi guarantee nahi hai.")
+            lines.append(f"- {meta}/{total} source ka sirf title/metadata mila — inse "
+                         f"content ki koi guarantee nahi hai.")
         if not full:
             lines.append("- Kisi bhi source ka poora text nahi padha ja saka, isliye is "
                          "report mein koi baat \"humne khud confirm kiya\" level par "
@@ -850,10 +860,13 @@ Ab jawab likho:"""
         status = str(verification.get("status") or "").strip()
         if status:
             lines.append(self._STATUS_WORDS.get(status, f"Verification status: {status}."))
+        # §14 — har ginti ke saath denominator. "2 check theek nikle" se pata hi
+        # nahi chalta ki kul 3 the ya 30; "2/3" se poori tasveer dikhti hai.
+        total = len(checks)
         if failed:
             lines.append("")
             word = "cheez" if len(failed) == 1 else "cheezein"
-            lines.append(f"**{len(failed)} {word} mein problem mili hai:**")
+            lines.append(f"**{len(failed)}/{total} {word} mein problem mili hai:**")
             for c in failed[:6]:
                 name = str(c.get("check") or "")
                 head = self._CHECK_PROBLEM.get(
@@ -868,10 +881,10 @@ Ab jawab likho:"""
             names = ", ".join(self._CHECK_WORDS.get(str(c.get("check")), str(c.get("check")))
                               for c in passed[:4])
             lines.append("")
-            lines.append(f"**{len(passed)} check theek nikle**, jaise: {names}.")
+            lines.append(f"**{len(passed)}/{total} check theek nikle**, jaise: {names}.")
         if unknown:
             lines.append("")
-            lines.append(f"**{len(unknown)} cheez check hi nahi ho paayi** — "
+            lines.append(f"**{len(unknown)}/{total} cheez check hi nahi ho paayi** — "
                          "yaani uske baare mein hum na haan keh sakte hain na naa.")
         if not checks:
             lines.append("Is jawab mein aisa kuch nahi tha jise numbers ke level par "
@@ -946,19 +959,29 @@ Ab jawab likho:"""
 
     @staticmethod
     def _quality_line(coverage: Dict, pack: EvidencePack) -> str:
+        """
+        Source quality ki ginti — hamesha "kul kitne mein se" ke saath (§14).
+
+        "4 source peer-reviewed hai" apne aap mein achha lagta hai; "4/15" sach
+        batata hai. Denominator wahi hai jitne sources jawab mein use hue.
+        """
         bits: List[str] = []
         count = FinalSynthesizer._count
+        used = count((coverage or {}).get("sources_used", 0))
+        if not used:
+            used = len(getattr(pack, "sources", []) or []) if pack else 0
+        of = f"/{used}" if used else ""
         peer = count((coverage or {}).get("peer_reviewed", 0))
         if peer:
-            bits.append(f"- {peer} source peer-reviewed hai (yaani doosre "
+            bits.append(f"- {peer}{of} source peer-reviewed hai (yaani doosre "
                         f"researchers ne use check kiya tha).")
         strong = count((coverage or {}).get("strong_methodology_sources", 0))
         if strong:
-            bits.append(f"- {strong} source ka study design mazboot hai "
+            bits.append(f"- {strong}{of} source ka study design mazboot hai "
                         f"(review/trial jaisa).")
         retracted = count((coverage or {}).get("retracted_sources", 0))
         if retracted:
-            bits.append(f"- ⚠️ {retracted} source par retraction ka signal hai.")
+            bits.append(f"- ⚠️ {retracted}{of} source par retraction ka signal hai.")
         note = pack.quality_signal_note() if pack else ""
         if note:
             bits.append(f"- {note}")
@@ -1254,18 +1277,49 @@ Ab jawab likho:"""
     # ── §14: API ka hisaab (andaaza nahi, ginti) ─────────────────────────────
     @staticmethod
     def _api_accounting_block(accounting: Optional[Dict]) -> str:
+        """
+        API ka hisaab — teen ALAG ginti, aur har number ka denominator.
+
+        Pehle is block ki pehli line "Reasoning pass: 3/3" hoti thi. Wo padh kar
+        lagta tha ki teen baar AI ne sochha — jabki 429 wale run mein teeno pass
+        khaali laut aaye the. Ab saaf likha hai: kitne maange, kitne se sach mein
+        output aaya, aur network par kitni baar gaye. Zero-call run par bhi chup
+        nahi rehte — wahan ye ₹0 ka saboot hai, isliye alag se likha jaata hai.
+        """
         if not accounting:
             return ""
         acc = dict(accounting)
-        rows = [
-            ("Reasoning pass (logical calls)",
-             f"{acc.get('logical_reasoning_calls', 0)}/{acc.get('budget', 0)}"),
-            ("Asli HTTP attempts", acc.get("actual_http_attempts", 0)),
-            ("Safal calls", acc.get("successful_calls", 0)),
-            ("Fail attempts", acc.get("failed_attempts", 0)),
-            ("Retry", acc.get("retries", 0)),
+        asked = int(acc.get("passes_requested") or 0)
+        got = int(acc.get("passes_with_output") or 0)
+        attempts = int(acc.get("actual_http_attempts") or 0)
+        lines = [
+            f"- Reasoning pass maange gaye: **{acc.get('logical_reasoning_calls', 0)}"
+            f"/{acc.get('budget', 0)}** (budget ke against).",
         ]
-        lines = [f"- {label}: **{value}**" for label, value in rows]
+        if asked:
+            lines.append(
+                f"- Inmein se output sach mein aaya: **{got}/{asked}**"
+                + (f" — khaali laute: {', '.join(str(p) for p in (acc.get('empty_output_passes') or [])[:5])}."
+                   if got < asked else "."))
+        lines.append(f"- Asli HTTP attempts (network par gaye): **{attempts}**")
+        if attempts:
+            lines += [
+                f"- Inmein safal: **{acc.get('successful_calls', 0)}/{attempts}**",
+                f"- Inmein fail: "
+                f"**{acc.get('failed_http_attempts', acc.get('failed_attempts', 0))}"
+                f"/{attempts}**",
+                # Ye do line jaan-boojh kar ALAG hain: wahi model dobara maarna
+                # retry hai, doosre model par jaana fallback. Pehle dono ek hi
+                # "Retry" number mein mil kar jhootha hisaab dete the.
+                f"- Same model par dobara koshish (retry): "
+                f"**{acc.get('same_model_retries', 0)}**",
+                f"- Doosre model par shift (fallback, retry NAHI): "
+                f"**{acc.get('model_switches', 0)}**",
+            ]
+        else:
+            lines.append("- Yaani is run mein ek bhi API call nahi hui — jo bana wo "
+                         "system ke apne (offline, deterministic) logic se bana. "
+                         "Iska cost ₹0 hai.")
         tried = acc.get("models_tried") or []
         if tried:
             lines.append(f"- Model try kiye gaye: {', '.join(str(t) for t in tried)}")
@@ -1278,6 +1332,10 @@ Ab jawab likho:"""
             lines.append(f"- Failure ka hisaab: {summary}")
         if acc.get("stopped_early"):
             lines.append("- API key/permission fail hone ke baad aage koshish nahi ki gayi.")
+        counted_by = str(acc.get("counted_by") or "").strip()
+        if counted_by:
+            lines.append(f"- _Ye ginti {counted_by} — isliye ise provider ke bill se "
+                         f"milane par thoda antar ho sakta hai._")
         return "\n".join(lines)
 
     # ── model ke output ko sections mein baanto ──────────────────────────────

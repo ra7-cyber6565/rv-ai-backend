@@ -304,13 +304,22 @@ def test_api_accounting_is_honest():
     assert acc["logical_reasoning_calls"] == 1
     assert acc["actual_http_attempts"] == 4, acc
     assert acc["successful_calls"] == 1
-    assert acc["failed_attempts"] == 3, acc
-    assert acc["retries"] == 3, acc
+    assert acc["failed_http_attempts"] == 3, acc
+    assert acc["failed_attempts"] == 3, acc          # purana naam bhi chalta hai
+    # NOTE (2026-08-21, §14): pehle yahan `retries == 3` likha tha, jo galat tha.
+    # Asli hisaab: model-a par 1 pehli koshish + 2 retry, phir model-b par shift
+    # (1 attempt). Yaani retry 2, switch 1 — 3 retry nahi. Purana formula
+    # `attempts - calls_used` model fallback ko bhi "retry" gin leta tha.
+    assert acc["same_model_retries"] == 2, acc
+    assert acc["retries"] == 2, acc
     assert acc["model_switches"] == 1
     assert acc["models_tried"] == ["model-a", "model-b"], acc
     assert RATE_LIMIT in acc["failure_kinds"], acc
     assert acc["failure_summary"], acc
     assert acc["stopped_early"] is False
+    # attempts ka poora hisaab: 1 pehli koshish (pass) + retry + switch
+    assert acc["actual_http_attempts"] == (
+        1 + acc["same_model_retries"] + acc["model_switches"]), acc
 
 
 def _main() -> int:

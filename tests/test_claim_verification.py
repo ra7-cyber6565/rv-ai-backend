@@ -367,8 +367,11 @@ def test_opt_in_label_gate():
     eq("aur kuch downgrade nahi hota", rep_off["downgraded"], 0)
 
     gated, rep_on = CL.downgrade(line, PACK, check_entailment=True)
-    check("gate on karne par label neeche aata hai",
-          "[SOURCE-REPORTED]" in gated and "[ESTABLISHED FACT]" not in gated, gated)
+    # NOTE (2026-08-21): `claim_labels` ka kaam READING DEPTH hai, isliye wo is
+    # line ko `SOURCE-REPORTED` par le aata hai. Ye poora strict contract NAHI
+    # hai — strict rule neeche `test_strict_label_contract` mein hai.
+    check("gate on karne par strong label bachta hi nahi",
+          "[ESTABLISHED FACT]" not in gated and "[FACT]" not in gated, gated)
     eq("aur ye alag counter mein ginta hai", rep_on["entailment_blocked"], 1)
     check("note mein wajah insaani bhasha mein hai",
           "support nahi mila" in rep_on["note"], rep_on["note"])
@@ -378,6 +381,86 @@ def test_opt_in_label_gate():
     check("sahi claim ka ESTABLISHED gate ke baad bhi bacha rehta hai",
           "[ESTABLISHED FACT]" in kept, kept)
     eq("us par koi downgrade nahi", rep_good["downgraded"], 0)
+
+
+def test_strict_label_contract():
+    """
+    FINAL strict rule (integration contract): poora text mila, par us text mein
+    claim ka support NAHI mila → strong label bachta nahi, aur uski jagah
+    `[SOURCE-REPORTED]` bhi galat hai (wo bhi ek dava hai jo source ne kiya hi
+    nahi). Sahi label `[UNVERIFIED]` hai.
+
+    Ye rule `claim_verification.enforce_strict_labels()` mein hai — `claim_labels`
+    ka default behaviour (`check_entailment=False`, sirf reading depth) jaan-boojh
+    kar chhua nahi gaya.
+    """
+    print("\nstrict contract — support nahi mila to [UNVERIFIED], SOURCE-REPORTED nahi")
+    line = ("- [ESTABLISHED FACT] Superconducting cables se poore desh ki "
+            "transmission loss zero ho gayi hai [S1]")
+
+    strict, rep = CV.enforce_strict_labels(line, PACK)
+    check("strong label ki jagah [UNVERIFIED] aaya",
+          "[UNVERIFIED]" in strict, strict)
+    check("aur SOURCE-REPORTED nahi banaya gaya",
+          "[SOURCE-REPORTED]" not in strict, strict)
+    check("strong label bilkul nahi bacha",
+          "[ESTABLISHED FACT]" not in strict and "[FACT]" not in strict, strict)
+    eq("line gini gayi", rep["checked"], 1)
+    eq("aur ek label UNVERIFIED hua", rep["to_unverified"], 1)
+    check("note denominator ke saath insaani bhasha mein hai",
+          "1/1" in rep["note"] and "poora text padha gaya" in rep["note"],
+          rep["note"])
+    check("claim ka text kaata nahi gaya (content kabhi nahi khota)",
+          "transmission loss zero ho gayi hai [S1]" in strict, strict)
+
+    # [STRONG EVIDENCE] bhi strong family hai
+    strong_ev = line.replace("[ESTABLISHED FACT]", "[STRONG EVIDENCE]")
+    out, rep2 = CV.enforce_strict_labels(strong_ev, PACK)
+    check("[STRONG EVIDENCE] par bhi strict rule lagta hai",
+          "[UNVERIFIED]" in out, out)
+    eq("wo bhi gina gaya", rep2["to_unverified"], 1)
+
+    # asli support wali line par haath nahi lagta
+    good = f"- [ESTABLISHED FACT] {CLAIM_SC} [S1]"
+    kept, rep3 = CV.enforce_strict_labels(good, PACK)
+    eq("sahi claim ka label waisa hi rehta hai", kept, good)
+    eq("us par kuch nahi badla", rep3["to_unverified"], 0)
+    eq("par wo check to hui thi", rep3["checked"], 1)
+    check("note khaali rehta hai jab kuch galat na ho", rep3["note"] == "",
+          rep3["note"])
+
+    # support check HO HI NA SAKE (S5 ka text nahi hai) → chup raho
+    no_text = f"- [ESTABLISHED FACT] {CLAIM_SC} [S5]"
+    kept5, rep5 = CV.enforce_strict_labels(no_text, PACK)
+    eq("text hi na ho to jhootha downgrade nahi", kept5, no_text)
+    eq("aur ginti bhi nahi badhti", rep5["to_unverified"], 0)
+
+    # hypothesis/speculation strong family mein nahi — unhe chhoda jaata hai
+    hyp = f"- [HYPOTHESIS] {CLAIM_SC} [S1]"
+    kept_h, rep_h = CV.enforce_strict_labels(hyp, PACK)
+    eq("hypothesis line chhui hi nahi jaati", kept_h, hyp)
+    eq("wo checked mein bhi nahi aati", rep_h["checked"], 0)
+
+    # pack ke bina / khaali text par crash nahi
+    same, rep_none = CV.enforce_strict_labels(line, None)
+    eq("pack ke bina text waisa hi", same, line)
+    eq("aur report khaali", rep_none["to_unverified"], 0)
+    empty, rep_empty = CV.enforce_strict_labels("", PACK)
+    eq("khaali text par khaali jawab", empty, "")
+    eq("aur khaali report", rep_empty["checked"], 0)
+
+    # ek line wala helper bhi wahi faisla deta hai
+    one, changed = CV.strict_label_line(line, PACK)
+    check("strict_label_line bhi [UNVERIFIED] deta hai", "[UNVERIFIED]" in one, one)
+    check("aur badla gaya flag True hai", changed is True)
+    _, unchanged = CV.strict_label_line(good, PACK)
+    check("sahi line par flag False", unchanged is False)
+
+    # default depth-only behaviour par koi asar nahi (legacy safe)
+    plain, rep_off = CL.downgrade(line, PACK)
+    check("claim_labels ka default (check_entailment=False) waisa hi hai",
+          "[ESTABLISHED FACT]" in plain, plain)
+    eq("aur usmein kuch downgrade nahi hota", rep_off["downgraded"], 0)
 
 
 def test_report_block_in_answer():
@@ -428,6 +511,7 @@ def main() -> int:
     test_answer_report()
     test_note_and_block()
     test_opt_in_label_gate()
+    test_strict_label_contract()
     test_report_block_in_answer()
     test_zero_cost_and_offline()
     print("\n" + "=" * 68)

@@ -601,3 +601,69 @@ def entailment_blocked(line: str, pack: Optional[EvidencePack] = None) -> bool:
         return False
     check, _ = check_c(line, records, pack)
     return check.status == FAIL
+
+
+# ── final strict label contract (integration se aligned) ─────────────────────
+# Niyam (2026-08-21): poora text padh liya gaya ho, PAR us text mein claim ka
+# support saaf na mile, to strong label ([ESTABLISHED FACT] / [FACT] / [STRONG
+# EVIDENCE]) bach nahi sakta — aur uski jagah `[SOURCE-REPORTED]` bhi galat hai,
+# kyunki "source ye report karta hai" ek dava hai jo us source ne kiya hi nahi.
+# Sahi label `[UNVERIFIED]` hai.
+#
+# Ye pass jaan-boojh kar `claim_labels.downgrade()` se ALAG rakha gaya hai:
+# claim_labels ka kaam READING DEPTH hai (abstract-only → SOURCE-REPORTED), aur
+# uska default behaviour (`check_entailment=False`) waisa hi chhoda gaya hai.
+# Ye pass sirf support/entailment ke saaf FAIL par lagta hai; jahan support check
+# HO HI NA SAKE wahan chup rehta hai (`entailment_blocked` unknown par False).
+_STRICT_LABEL = "[UNVERIFIED]"
+
+
+def strict_label_line(line: str,
+                      pack: Optional[EvidencePack] = None) -> Tuple[str, bool]:
+    """
+    Ek line par strict rule lagao: `(nayi_line, badla_gaya)`.
+
+    Text kabhi nahi kaata jaata — sirf label badalta hai, taaki content na khoye.
+    """
+    raw = line or ""
+    if not _STRONG_LABEL_RE.search(raw):
+        return raw, False
+    if not entailment_blocked(raw, pack):
+        return raw, False
+    return _STRONG_LABEL_RE.sub(_STRICT_LABEL, raw), True
+
+
+def enforce_strict_labels(text: str, pack: Optional[EvidencePack] = None
+                          ) -> Tuple[str, Dict]:
+    """
+    Poore answer par strict rule. Returns `(naya_text, report)`.
+
+    report: `checked` (kitni lines par strong label tha), `to_unverified`
+    (kitni [UNVERIFIED] hui), `details` (max 8 chhoti lines) aur `note` (ek line
+    ka human-readable summary — "" agar sab theek).
+    """
+    report: Dict = {"checked": 0, "to_unverified": 0, "details": [], "note": ""}
+    body = text or ""
+    if not body.strip() or pack is None:
+        return body, report
+
+    out_lines: List[str] = []
+    for raw in body.splitlines():
+        if not _STRONG_LABEL_RE.search(raw):
+            out_lines.append(raw)
+            continue
+        report["checked"] += 1
+        new_line, changed = strict_label_line(raw, pack)
+        out_lines.append(new_line)
+        if not changed:
+            continue
+        report["to_unverified"] += 1
+        if len(report["details"]) < 8:
+            snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_line).strip()
+            report["details"].append(snippet[:150])
+    if report["to_unverified"]:
+        report["note"] = (
+            f"{report['to_unverified']}/{report['checked']} 'established' dave "
+            f"[UNVERIFIED] kar diye gaye — un sources ka poora text padha gaya "
+            f"tha, par us text mein ye baat nahi mili.")
+    return "\n".join(out_lines), report
