@@ -28,7 +28,7 @@ Owner column: `Claude` = is session ka agent, `ChatGPT` = doosra agent,
 | §11 consensus gate (6 preconditions) | Claude | done | `research_engine/consensus_gate.py`, `contradiction.py`, `synthesizer.py`, `orchestrator.py`, `models.py`, `evidence.py`, `relevance.py`, `planner.py`, `tests/test_consensus_gate.py` | (is batch mein) |
 | §12 chunked/streaming large-PDF reading | Claude | done | `research_engine/content_fetcher.py`, `research_engine/processing/pdf_chunker.py` (naya), `research_engine/processing/pdf_processor.py`, `research_engine/processing/document_processor.py`, `research_engine/models.py`, `tests/test_pdf_chunking.py` (naya) | (is batch mein) |
 | §13 verification checks A–E (citation/relevance/entailment/depth/quality) | Claude | done | `research_engine/claim_verification.py` (naya), `claim_labels.py`, `citation.py`, `synthesizer.py`, `orchestrator.py`, `tests/test_claim_verification.py` (naya) | (agle batch mein) |
-| §14 audit denominators + honest API accounting | Claude | partly done | `research_engine/synthesizer.py`, `research_engine/gemini_reasoning.py` | — |
+| §14 audit denominators + honest API accounting | Claude | done | `research_engine/gemini_reasoning.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_audit_accounting.py` (naya), `tests/test_gemini_retry.py`, `test_research_engine.py` | (is batch mein) |
 | §15 search rounds LLM ke bina bhi chalein | Claude | done | `research_engine/orchestrator.py`, `research_engine/planner.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
 | §16 automated tests A–I + full regression | Claude | A–I done (regression green) | `tests/test_gemini_retry.py`, `tests/test_pipeline_offline.py`, `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py`, `tests/test_pdf_chunking.py` | (is batch mein) |
 | §17 nine-part report back | Claude | pending | — | — |
@@ -42,11 +42,11 @@ Owner column: `Claude` = is session ka agent, `ChatGPT` = doosra agent,
 | point 10/11 hypothesis quality + evidence gate | Claude | done | `research_engine/hypothesis.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_hypothesis_quality.py` (naya) | (is batch mein) |
 | point 12 maths/physics sanity checks | Claude | done | `research_engine/physics_checks.py` (naya), `research_engine/verification.py`, `research_engine/orchestrator.py`, `research_engine/synthesizer.py`, `tests/test_physics_sanity.py` (naya) | (is batch mein) |
 | §15 / point 9 search round crash-safety (ek round gire to run zinda) | Claude | done | `research_engine/orchestrator.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
-| point 14 baaki regression tests (relevance, false consensus, raw-error leak, quota, incomplete) | Claude | in progress | `tests/` | — |
+| point 14 baaki regression tests (relevance, false consensus, raw-error leak, quota, incomplete) | Claude | done | `tests/test_relevance_domain.py`, `tests/test_evidence_honesty.py`, `tests/test_consensus_gate.py`, `tests/test_pipeline_offline.py`, `tests/test_search_rounds.py`, `tests/test_hypothesis_quality.py`, `tests/test_requested_deliverables.py`, `tests/test_audit_accounting.py` (naya) | (is batch mein) |
 | point 1 superconductivity Benchmark V2 (offline runner, 10-point scorecard, 146 checks) | Claude | done | `tests/benchmark_superconductivity.py` (naya) | (is batch mein) |
 | point 12 fix: "250-288 K" range ko negative temperature samajhna band | Claude | done | `research_engine/physics_checks.py` | (is batch mein) |
 | point 13 fix: ledger ki wajah do-teen baar repeat hona band | Claude | done | `research_engine/requested.py` | (is batch mein) |
-| point 14 §14 audit denominators + honest API accounting | Claude | partly done | `research_engine/synthesizer.py`, `research_engine/gemini_reasoning.py` | — |
+| point 14 §14 audit denominators + honest API accounting | Claude | done | `research_engine/gemini_reasoning.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_audit_accounting.py` (naya) | (is batch mein) |
 
 Benchmark V2 chalane ka tareeka: `python3 tests/benchmark_superconductivity.py`
 (poora offline — koi network, koi API key, koi paisa). Wahi superconductivity
@@ -91,6 +91,27 @@ scoring hai.
 
 ## Known gaps (jaan-boojh kar khule)
 
+- **⚠️ ChatGPT-owned file mein §14 ka edit hua (intel ko report kiya gaya).**
+  `research_engine/synthesizer.py` ke 4 helper (`_api_accounting_block`,
+  `_access_block`, `_quality_line`, `_numbers_check`) aur
+  `research_engine/orchestrator.py` ka `_confidence_note` badle gaye — kyunki naye
+  imaandaar counters aur denominators report mein chhapte wahin se hain. Sirf ye
+  helper badle, koi feature hataya nahi gaya. Merge conflict ho to §14 ka logic
+  `gemini_reasoning.api_accounting()` mein poora maujood hai; presentation dobara
+  banana aasan hai.
+- **Claim-label strict rule adhoora hai (production change baaki).** Aaj main par
+  `claim_labels.line_verdict(..., check_entailment=True)` par "poora text mila par
+  support nahi mila" wali line `SOURCE-REPORTED` par giri hai; strict rule
+  `UNVERIFIED` maangta hai. Wo ek-line badlaav `research_engine/claim_labels.py`
+  mein hoga — us file ko chhune se mana tha, isliye NAHI badla. Regression
+  (`tests/test_claim_verification.py`) ab sirf ye pakadti hai ki strong label
+  bachta hi nahi, aur `UNVERIFIED`/`SOURCE-REPORTED` dono accept karti hai — yaani
+  strict rule aane par test khud-ba-khud sahi rahega.
+- **`.github/workflows/foundation-tests.yml` (ChatGPT-owned) `pytest -q` chalata
+  hai**, par in suites ke test `main()` ke andar hain — pytest 0 test collect
+  karke exit 5 deta hai, aur workflow un test files ko bhi reference karta hai jo
+  `main` par nahi hain. Fix aasan hai (`def test_all(): assert main() == 0`
+  wrapper), par wo ChatGPT ki file hai — bina permission touch nahi kiya.
 - **Patents connector nahi hai.** §3 "patents" ko priority connector maanta hai,
   par repo mein koi patent connector maujood nahi (papers/books/datasets/web hi
   hain). Naya connector add karna alag task hai — is batch ka hissa nahi.

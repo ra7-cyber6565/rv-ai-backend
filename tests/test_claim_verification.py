@@ -367,8 +367,18 @@ def test_opt_in_label_gate():
     eq("aur kuch downgrade nahi hota", rep_off["downgraded"], 0)
 
     gated, rep_on = CL.downgrade(line, PACK, check_entailment=True)
-    check("gate on karne par label neeche aata hai",
-          "[SOURCE-REPORTED]" in gated and "[ESTABLISHED FACT]" not in gated, gated)
+    # NOTE (2026-08-21, claim-label alignment): asli PRODUCTION rule ye hai —
+    # "poora text mila, par us text mein claim ka support NAHI mila" wali line par
+    # strong label ([ESTABLISHED FACT]/[FACT]) BACH NAHI SAKTA. Ye assertion wahi
+    # baat pakadti hai. Final label kaunsa ho — strictest `[UNVERIFIED]`
+    # (integration branch) ya `[SOURCE-REPORTED]` (aaj main par) — wo production
+    # `claim_labels.line_verdict()` ka faisla hai, jise ye test badal nahi sakta.
+    # Isliye dono ko accept karke bhi taala kaam karta hai: strong label ka bachna
+    # dono soorat mein FAIL hai.
+    check("gate on karne par strong label bachta hi nahi",
+          "[ESTABLISHED FACT]" not in gated and "[FACT]" not in gated, gated)
+    check("aur neeche ka label UNVERIFIED (strict) ya SOURCE-REPORTED hota hai",
+          "[UNVERIFIED]" in gated or "[SOURCE-REPORTED]" in gated, gated)
     eq("aur ye alag counter mein ginta hai", rep_on["entailment_blocked"], 1)
     check("note mein wajah insaani bhasha mein hai",
           "support nahi mila" in rep_on["note"], rep_on["note"])

@@ -2484,10 +2484,15 @@ def test_quality_signals() -> None:
     # mein likhti hai, aur signature (coverage, pack) ho gayi hai. Counts wahi
     # aate hain — sirf is test ki expectation naye format par laayi gayi hai,
     # koi feature nahi hataya gaya.
+    # NOTE (2026-08-21, §14 denominators): counts wahi hain, par ab har ginti
+    # apne denominator ke saath chhapti hai ("2/3 source ka study design mazboot
+    # hai"). Bina denominator ke "2 source peer-reviewed hai" zyada mazboot lagta
+    # tha jitna tha. Expectation naye format par laayi gayi hai — koi feature
+    # hataya nahi gaya.
     quality_line = FinalSynthesizer._quality_line(report7, pack7)
     check("coverage section quality line asli counts se banti hai",
-          "2 source ka study design mazboot hai" in quality_line
-          and "1 source par retraction ka signal hai" in quality_line
+          "2/3 source ka study design mazboot hai" in quality_line
+          and "1/3 source par retraction ka signal hai" in quality_line
           and "1/3 sources ka study design metadata se pata nahi chala"
           in quality_line,
           quality_line)

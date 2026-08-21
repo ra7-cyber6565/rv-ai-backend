@@ -1043,7 +1043,12 @@ class DeepResearchEngine:
         ]
         peer = sum(1 for s in pack.sources if s.peer_reviewed is True)
         if peer:
-            parts.append(f"{peer} peer-reviewed hain.")
+            # §14 — denominator ke bina "4 peer-reviewed hain" zyada mazboot
+            # lagta hai jitna hai. Kul ginti saath likhna hi imaandaar hai.
+            parts.append(f"{peer}/{len(pack.sources)} peer-reviewed hain.")
+        if pack.full_text_read_count:
+            parts.append(f"{pack.full_text_read_count}/{len(pack.sources)} ka poora "
+                         f"text padha gaya.")
         if not sufficiency.get("sufficient", True):
             parts.append("Evidence threshold poora nahi hua — confidence kam rakhein.")
         # Retrieval ka sach — "kitne sources mile" se zyada zaroori hai "wo
