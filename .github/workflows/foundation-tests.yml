@@ -3,8 +3,7 @@ name: Foundation tests
 on:
   pull_request:
     branches: [main]
-  push:
-    branches: [chatgpt-upload-safety]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,7 +14,7 @@ concurrency:
 
 jobs:
   offline-regression:
-    # Standard GitHub-hosted runners are free for public repositories.
+    # Public-repository standard GitHub-hosted runner; no larger/paid runner.
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
@@ -25,7 +24,7 @@ jobs:
       GEMINI_API_KEY: ""
       CLOUD_ARCHIVE_PROVIDER: "none"
     steps:
-      - name: Checkout
+      - name: Checkout PR code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -41,10 +40,9 @@ jobs:
           pip install pytest
 
       - name: Compile Python sources
-        run: |
-          python -m compileall -q .
+        run: python -m compileall -q .
 
-      - name: Run ChatGPT infrastructure tests
+      - name: Run infrastructure regression
         run: |
           pytest -q \
             tests/test_upload_safety.py \
@@ -64,8 +62,7 @@ jobs:
             tests/test_research_jobs.py
 
       - name: Run core offline regression
-        run: |
-          python test_research_engine.py
+        run: python test_research_engine.py
 
       - name: Run standalone offline test files
         shell: bash
