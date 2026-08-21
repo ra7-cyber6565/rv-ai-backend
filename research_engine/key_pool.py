@@ -26,6 +26,7 @@ Env (jitni ho utni — ek bhi zaroori nahi ki teen ho):
 """
 from __future__ import annotations
 
+import hashlib
 import os
 from typing import Dict, List, Optional
 
@@ -67,6 +68,81 @@ def load_keys(env: Optional[Dict[str, str]] = None) -> List[str]:
         if key and key not in out:
             out.append(key)
     return out
+
+
+def fingerprint(key: str) -> str:
+    """
+    Key ka chhota, ULTA-na-ho-sakne-wala nishaan (sha256 ke pehle 8 hex).
+
+    Kyun: "dono variable mein wahi ek key hai ya alag-alag?" — ye sawal warna
+    sirf key dekh kar hi hal hota, jo kabhi bahar nahi jaani chahiye. Hash se
+    key wapas nahi banayi ja sakti, par do key same hain ya alag, ye saaf pata
+    chal jaata hai.
+    """
+    if not key:
+        return ""
+    return hashlib.sha256(key.encode("utf-8")).hexdigest()[:8]
+
+
+def describe(env: Optional[Dict[str, str]] = None) -> Dict:
+    """
+    Setup ki imaandaar report — BINA kisi key value ke.
+
+    Lautata hai:
+        names_present      -> kaunse env NAAM mein value mili (app inhe padhta hai)
+        unique_keys        -> duplicate hatane ke baad kitni ASLI alag key bachi
+        duplicates_dropped -> kitni entry duplicate thi (yahi "backup lag nahi
+                              raha" ki sabse aam wajah hai)
+        fingerprints       -> har unique key ka 8-hex nishaan (value nahi)
+        note               -> ek line insaani samajh ke liye
+    """
+    src = env if env is not None else os.environ
+    names: List[str] = []
+    raw: List[str] = []
+
+    def _take(name: str, value: str) -> None:
+        value = (value or "").strip()
+        if value:
+            names.append(name)
+            raw.append(value)
+
+    _take(_PRIMARY, src.get(_PRIMARY) or "")
+    for i in range(2, 10):
+        _take(f"{_PRIMARY}_{i}", src.get(f"{_PRIMARY}_{i}") or "")
+        _take(f"{_PRIMARY}{i}", src.get(f"{_PRIMARY}{i}") or "")
+    _take(f"{_PRIMARY}_BACKUP", src.get(f"{_PRIMARY}_BACKUP") or "")
+    _take(f"{_PRIMARY}_FALLBACK", src.get(f"{_PRIMARY}_FALLBACK") or "")
+    for name in _LIST_VARS:
+        for part in _split_list(src.get(name) or ""):
+            _take(name, part)
+
+    unique: List[str] = []
+    for key in raw:
+        if key not in unique:
+            unique.append(key)
+
+    dropped = len(raw) - len(unique)
+    if not raw:
+        note = ("Koi free key set nahi hai — GEMINI_API_KEY (aur chaaho to "
+                "GEMINI_API_KEY_2) Railway → Variables mein daalo.")
+    elif dropped and len(unique) == 1:
+        note = ("Ek se zyada variable mein WAHI EK key hai, isliye backup nahi "
+                "bana. Alag AI Studio project (ya alag Google account) ki alag "
+                "key daalo — quota project par lagta hai, naam par nahi.")
+    elif dropped:
+        note = (f"{len(unique)} alag free key mili, {dropped} entry duplicate thi "
+                f"(duplicate ginti mein nahi li gayi).")
+    elif len(unique) == 1:
+        note = ("Sirf ek free key hai. Backup ke liye GEMINI_API_KEY_2 mein alag "
+                "project ki key daal sakte ho (₹0). Iske bina bhi app rukega "
+                "nahi — offline reasoning jawab bana deta hai.")
+    else:
+        note = f"{len(unique)} alag free key kataar mein hain — backup taiyar hai."
+
+    return {"names_present": names, "unique_keys": len(unique),
+            "duplicates_dropped": dropped,
+            "fingerprints": [fingerprint(k) for k in unique],
+            "note": note}
 
 
 class KeyPool:

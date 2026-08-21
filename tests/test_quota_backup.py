@@ -28,7 +28,8 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import gemini_model, gemini_reasoning  # noqa: E402
 from research_engine.gemini_reasoning import GeminiReasoning  # noqa: E402
-from research_engine.key_pool import KeyPool, load_keys  # noqa: E402
+from research_engine.key_pool import (KeyPool, describe,  # noqa: E402
+                                      fingerprint, load_keys)
 from research_engine.local_reasoning import compose, quick_answer  # noqa: E402
 from research_engine.models import (EvidencePack, SourceRecord,  # noqa: E402
                                     SourceType)
@@ -213,6 +214,64 @@ def test_load_keys_from_env():
     eq("khaali pool: has_key False", KeyPool([]).has_key(), False)
     check("khaali pool ka label imaandaar",
           "nahi" in KeyPool([]).label(), KeyPool([]).label())
+
+
+# ── A2: "variable daal diya par backup chal nahi raha" ka seedha jawab ──────
+def test_describe_explains_why_backup_missing():
+    print("\nA2. describe(): backup kyun nahi laga, wo bina key dikhaye batao")
+
+    # (i) dono variable mein WAHI EK key — asli zindagi ki sabse aam galti
+    same = describe({"GEMINI_API_KEY": _K1, "GEMINI_API_KEY_2": _K1})
+    eq("dono naam dikhe", len(same["names_present"]), 2)
+    check("naam mein GEMINI_API_KEY_2 hai",
+          "GEMINI_API_KEY_2" in same["names_present"], str(same["names_present"]))
+    eq("asli alag key sirf ek", same["unique_keys"], 1)
+    eq("ek duplicate hataayi gayi", same["duplicates_dropped"], 1)
+    check("note wajah batata hai (wahi ek key)",
+          "WAHI EK key" in same["note"], same["note"])
+    check("note ilaaj bhi batata hai (alag project)",
+          "alag" in same["note"] and "project" in same["note"], same["note"])
+    check("report mein key ki value nahi", _K1 not in str(same), str(same))
+
+    # (ii) do sach mein ALAG key — backup taiyar
+    two = describe({"GEMINI_API_KEY": _K1, "GEMINI_API_KEY_2": _K2})
+    eq("do alag key gini gayi", two["unique_keys"], 2)
+    eq("koi duplicate nahi", two["duplicates_dropped"], 0)
+    check("note kehta hai backup taiyar hai", "backup taiyar" in two["note"],
+          two["note"])
+    check("dono ka nishaan alag hai",
+          two["fingerprints"][0] != two["fingerprints"][1], str(two))
+    check("nishaan se key wapas nahi banti (value gayab)",
+          all(k not in str(two) for k in (_K1, _K2)), str(two))
+
+    # (iii) ek hi key — imaandaar, par darane wala nahi
+    one = describe({"GEMINI_API_KEY": _K1})
+    eq("ek key", one["unique_keys"], 1)
+    check("note batata hai app phir bhi rukega nahi",
+          "rukega nahi" in one["note"], one["note"])
+
+    # (iv) kuch bhi set nahi
+    none = describe({})
+    eq("koi key nahi", none["unique_keys"], 0)
+    eq("koi naam nahi", none["names_present"], [])
+    check("note Railway ka raasta batata hai",
+          "GEMINI_API_KEY" in none["note"], none["note"])
+
+    # (v) galat naam (space/chhote letter) app ko dikhte hi nahi
+    wrong = describe({"Gemini API Key 2": _K2, "gemini_api_key": _K3})
+    eq("galat naam ignore hue", wrong["unique_keys"], 0)
+
+    # (vi) list-var aur trailing space wali value bhi chalti hai
+    listed = describe({"GEMINI_API_KEY": _K1, "GEMINI_API_KEYS": f"  {_K2} , {_K3}"})
+    eq("list se bhi key uthi", listed["unique_keys"], 3)
+
+    # (vii) fingerprint ka apna contract
+    eq("nishaan 8 hex ka", len(fingerprint(_K1)), 8)
+    eq("wahi key -> wahi nishaan", fingerprint(_K1), fingerprint(_K1))
+    check("alag key -> alag nishaan", fingerprint(_K1) != fingerprint(_K2))
+    eq("khaali key ka nishaan khaali", fingerprint(""), "")
+    check("nishaan mein key ka koi hissa nahi",
+          _K1[:8].lower() not in fingerprint(_K1).lower(), fingerprint(_K1))
 
 
 # ── B: key #1 ka DIN ka quota khatam -> key #2 par jawab ─────────────────────
@@ -427,6 +486,7 @@ def main() -> int:
     print("§8 — QUOTA BACKUP (free key rotation + offline reasoning)")
     print("=" * 70)
     test_load_keys_from_env()
+    test_describe_explains_why_backup_missing()
     test_daily_quota_switches_to_backup_key()
     test_auth_failure_tries_backup_key()
     test_single_key_behaviour_unchanged()

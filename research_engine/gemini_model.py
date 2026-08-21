@@ -243,13 +243,18 @@ def diagnose() -> Dict:
     report: Dict = {"key_present": False, "key_length": 0, "sdk_version": "",
                     "models_found": [], "chosen_model": "", "test_call": "",
                     "dead_models": dead_models(), "error": "",
-                    "keys_available": 0, "keys": []}
+                    "keys_available": 0, "keys": [], "key_setup": {}}
     # §8 — kitni FREE key mili hain (sirf ginti aur label; value kabhi nahi)
     try:
-        from .key_pool import KeyPool
+        from .key_pool import KeyPool, describe
         pool = KeyPool()
         report["keys_available"] = pool.count
         report["keys"] = pool.labels()
+        # "variable daal diya par backup chal nahi raha" ka seedha jawab:
+        # kaunse NAAM dikhe, kitni duplicate thi, aur key alag hai ya wahi ek.
+        # `key_setup` mein bhi kabhi key ki value nahi jaati — sirf naam, ginti
+        # aur ek ulta-na-ho-sakne-wala 8-hex nishaan.
+        report["key_setup"] = describe()
     except Exception:                    # noqa: BLE001
         pass
     key = os.getenv("GEMINI_API_KEY", "")

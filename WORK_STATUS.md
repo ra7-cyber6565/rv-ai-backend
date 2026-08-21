@@ -78,6 +78,7 @@ Asli root cause do the:
 | offline deterministic reasoning — quota marne par bhi saare section bharein | Claude | done | `research_engine/local_reasoning.py` (naya), `research_engine/orchestrator.py` | (is batch mein) |
 | QUICK chat ka dead-end khatam (key rotation + offline backup) | Claude | done | `research_engine/chat.py`, `research_engine/local_reasoning.py` | (is batch mein) |
 | §8 offline test suite (98 checks) | Claude | done | `tests/test_quota_backup.py` (naya), `test_research_engine.py` (1 expectation) | (is batch mein) |
+| §8b `/chat/diag` mein `key_setup` — "key daali par backup nahi laga" ka seedha jawab | Claude | done | `research_engine/key_pool.py` (`describe`, `fingerprint`), `research_engine/gemini_model.py`, `tests/test_quota_backup.py` (122 checks) | (is batch mein) |
 
 Kaise chalta hai (teen parat, sab ₹0):
 
@@ -104,10 +105,19 @@ Do niyam jaan-boojh kar pakke rakhe gaye:
   `run_status` ka ek shabd nahi chhua). Farak sirf itna hai ki koi section khaali
   nahi rehta.
 
-Verify (sab offline): `python3 tests/test_quota_backup.py` → 98/0.
+Verify (sab offline): `python3 tests/test_quota_backup.py` → 122/0.
 Dead-run probe: quota poori mari hui MAXIMUM run ab 20,164 char ka jawab deti hai,
 saari 11 heading maujood, "Kaunse hisse nahi ban paaye" block gaayab, aur status
 phir bhi `RESEARCH INCOMPLETE`.
+
+§8b (intel ne live check kiya, 2026-08-21): `GEMINI_API_KEY_2` Railway mein daalne
+par bhi `/api/v1/chat/diag` `keys_available: 1` dikha raha tha. Wajah andaaze se
+nahi, ab endpoint khud batata hai — `diagnose()["key_setup"]` mein
+`names_present` (kaunse env NAAM sach mein dikhe), `unique_keys`,
+`duplicates_dropped` aur har unique key ka 8-hex `fingerprint` (sha256 ka prefix,
+ulta nahi ho sakta) aata hai. Sabse aam wajah: dono variable mein WAHI EK key —
+`load_keys()` duplicate hata deta hai, kyunki quota project par lagta hai, naam
+par nahi. Key ki value yahan bhi kahin nahi jaati.
 
 ## intel ke haath ka kaam
 | Task | Owner | Status | Files | Commit |
