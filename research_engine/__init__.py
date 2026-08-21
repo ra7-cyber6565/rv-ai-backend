@@ -18,6 +18,7 @@ Package layout:
     reasoning_router.py       quota-resilient ₹0 provider fallback base
     reasoning_router_integrated.py
                               provider fallback + latest pass accounting facade
+    source_prompt_guard.py    untrusted source-data / prompt-injection boundary
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -37,6 +38,11 @@ fallback configured it can finish the same logical pass through Groq,
 OpenRouter-free or local Ollama instead of returning a quota error. The
 integrated facade preserves Claude's latest pass-level/API accounting even when
 a fallback provider completes a pass after Gemini fails.
+
+Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
+EvidencePack rendering in a strict evidence-only boundary, quotes every source
+line, neutralizes instruction-like source text without deleting research
+content, strips hidden bidi/control characters, and bounds hostile metadata.
 """
 from __future__ import annotations
 
@@ -62,6 +68,11 @@ from .models import (
     SourceType,
     label_to_claim_type,
 )
+# Every normal package import receives the same source-data trust boundary.
+# Installation is deterministic and performs no network/model call.
+from .source_prompt_guard import install as _install_source_prompt_guard
+_install_source_prompt_guard()
+
 from .depth import DepthConfig, get_depth_config, quota_note
 
 __all__ = [
