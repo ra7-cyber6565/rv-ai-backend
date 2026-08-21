@@ -1,17 +1,10 @@
-"""
-Claim-label honesty gate.
+"""Claim-label honesty gate.
 
-Core rule:
-    abstract/snippet/metadata only -> SOURCE-REPORTED at best
-    full-text access + claim-level A-E verification -> ESTABLISHED
-
-The old safety net checked only reading depth. That still left a loophole: a
-line could cite one unrelated full-text source and keep ``[ESTABLISHED]`` even if
-another weaker source was the one that actually supported the words. The final
-A-E verifier would notice later, but the user-facing label was already too
-strong. ``downgrade`` now also asks the deterministic A-E verifier before a
-strong label survives whenever a real research question/evidence pack is
-available.
+Compatibility + production rule:
+- default helper behaviour remains depth/citation-only for old tests/callers;
+- the production orchestrator passes ``check_entailment=True``;
+- in that strict path, full-text access alone is NOT enough: the same cited
+  source must pass citation + relevance + support + depth + quality (A-E).
 
 No label is ever upgraded here.
 """
@@ -44,14 +37,36 @@ def _cited_ids(line: str) -> List[str]:
     return out
 
 
-def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
-    """Depth/citation pre-gate used by ``downgrade`` and legacy callers."""
+def _ae_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[Optional[bool], str]:
+    """Cumulative same-source A-E result; None means context unavailable."""
+    if pack is None or not str(getattr(pack, "question", "") or "").strip():
+        return None, "claim-level A-E context available nahi tha"
+    try:
+        from .evidence_verification import EvidenceVerifier
+        report = EvidenceVerifier().verify(line, pack)
+    except Exception as exc:  # strong labels fail closed
+        return False, f"claim-level A-E verification run nahi ho saki ({type(exc).__name__})"
+    if not report.items:
+        return False, "labelled factual claim A-E verifier ne parse nahi ki"
+    item = report.items[0]
+    if item.verdict == "verified_against_available_evidence":
+        return True, (
+            "same cited source ne citation+relevance+support+depth+quality A-E gate pass kiya"
+        )
+    return False, item.note or "claim-level A-E gate pass nahi hua"
+
+
+def line_verdict(
+    line: str,
+    pack: Optional[EvidencePack],
+    check_entailment: bool = False,
+) -> Tuple[str, str]:
+    """Return strongest label allowed by the requested checking depth."""
     ids = _cited_ids(line)
+    records = []
     if pack is not None:
         records = [pack.by_id(sid) for sid in ids]
         records = [record for record in records if record is not None]
-    else:
-        records = []
 
     if not records:
         if _NO_SOURCE_RE.search(line or ""):
@@ -66,40 +81,33 @@ def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
     for record in records:
         try:
             level = record.reading_level()
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover
             level = "metadata"
         levels[record.source_id] = level
 
     full = [sid for sid, level in levels.items() if level == _FULL]
-    if full:
+    if not full:
+        detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
+        return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
+
+    if not check_entailment:
         return ESTABLISHED, f"full text padha gaya: {', '.join(full)}"
-    detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
-    return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
+
+    verified, why = _ae_verdict(line, pack)
+    if verified is True:
+        return ESTABLISHED, why
+    if verified is None:
+        # Strict check requested but context missing: strong label ko pass mat
+        # karo. Unknown verification is not PASS.
+        return UNVERIFIED, why
+    return UNVERIFIED, f"full text access tha, lekin {why}"
 
 
-def _claim_verification_verdict(
-    line: str,
-    pack: Optional[EvidencePack],
-) -> Tuple[Optional[bool], str]:
-    """Return A-E result for a strong labelled line when enough context exists."""
-    if pack is None or not str(getattr(pack, "question", "") or "").strip():
-        return None, "claim-level A-E context available nahi tha"
-    try:
-        from .evidence_verification import EvidenceVerifier
-
-        report = EvidenceVerifier().verify(line, pack)
-    except Exception as exc:  # fail closed for strong labels
-        return False, f"claim-level A-E verification run nahi ho saki ({type(exc).__name__})"
-
-    if not report.items:
-        return False, "labelled factual claim A-E verifier ne parse nahi ki"
-    item = report.items[0]
-    if item.verdict == "verified_against_available_evidence":
-        return True, "same cited source ne citation+relevance+support+depth+quality A-E gate pass kiya"
-    return False, item.note or "claim-level A-E gate pass nahi hua"
-
-
-def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict]:
+def downgrade(
+    text: str,
+    pack: Optional[EvidencePack] = None,
+    check_entailment: bool = False,
+) -> Tuple[str, Dict]:
     """Strong user-facing labels ko deterministic evidence state se match karao."""
     body = text or ""
     report: Dict = {
@@ -109,6 +117,9 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
         "to_unverified": 0,
         "a_e_checked": 0,
         "a_e_failed": 0,
+        # Claude compatibility name; in production this means the stricter A-E
+        # gate blocked a strong label, not merely a lexical entailment proxy.
+        "entailment_blocked": 0,
         "details": [],
         "note": "",
     }
@@ -122,23 +133,16 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
             continue
 
         report["checked"] += 1
-        verdict, why = line_verdict(raw, pack)
+        verdict, why = line_verdict(raw, pack, check_entailment=check_entailment)
+        if check_entailment:
+            report["a_e_checked"] += 1
+            if verdict != ESTABLISHED:
+                report["a_e_failed"] += 1
+                report["entailment_blocked"] += 1
 
         if verdict == ESTABLISHED:
-            verified, verify_why = _claim_verification_verdict(raw, pack)
-            if verified is True:
-                report["a_e_checked"] += 1
-                out_lines.append(raw)
-                continue
-            if verified is None:
-                # Legacy/lightweight fixtures without a question keep the old
-                # depth-only helper contract. Production packs have a question.
-                out_lines.append(raw)
-                continue
-            report["a_e_checked"] += 1
-            report["a_e_failed"] += 1
-            verdict = UNVERIFIED
-            why = f"full text access tha, lekin {verify_why}"
+            out_lines.append(raw)
+            continue
 
         new_line = _STRONG_LABEL_RE.sub(f"[{verdict}]", raw)
         out_lines.append(new_line)
@@ -157,10 +161,15 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
             bits.append(f"{report['to_source_reported']} claim SOURCE-REPORTED")
         if report["to_unverified"]:
             bits.append(f"{report['to_unverified']} claim UNVERIFIED")
+        strict_reason = (
+            "full text hone ke baad bhi same cited source par claim-level A-E support "
+            "nahi mila"
+            if check_entailment and report["a_e_failed"]
+            else "source access depth strong label ke liye enough nahi thi"
+        )
         report["note"] = (
             f"{report['downgraded']}/{report['checked']} strong dave neeche kiye gaye "
-            f"(" + ", ".join(bits) + ") — source access depth ya claim-level A-E "
-            "verification strong label ke liye enough nahi thi."
+            f"(" + ", ".join(bits) + f") — {strict_reason}."
         )
     return "\n".join(out_lines), report
 
@@ -183,14 +192,14 @@ def human_note(report: Optional[Dict]) -> str:
                 "gate bhi pass hua, isliye ESTABLISHED label reh saka."
             )
         return (
-            f"{checked} strong dave depth-level check mein theek the. Is lightweight "
-            "context mein claim-level A-E context available nahi tha."
+            f"{checked} strong dave depth-level check mein theek the. Claim-level A-E "
+            "strict mode is helper call mein apply nahi hua tha."
         )
     return (
-        f"{down} jagah ESTABLISHED strong label neeche karna pada. Jahan source sirf "
-        "report-level support deta hai wahan SOURCE-REPORTED hota hai; aur jahan "
-        "claim-level A-E support bhi prove nahi hua wahan UNVERIFIED rakha jaata hai. "
-        "Sirf full text khulna strong verification ke liye enough nahi hai."
+        f"{down} jagah ESTABLISHED strong label neeche karna pada. Jahan sirf "
+        "abstract/snippet support hai wahan SOURCE-REPORTED hota hai; aur jahan "
+        "strong claim ko same cited source par A-E support prove nahi hua wahan "
+        "UNVERIFIED rakha jaata hai. Sirf full text khulna enough nahi hai."
     )
 
 
