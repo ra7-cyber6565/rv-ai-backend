@@ -101,3 +101,9 @@ def test_active_discovery_raw_provider_error_is_sanitized(monkeypatch):
     for raw in ("ResourceExhausted", "protobuf", "SECRET-SDK-DETAIL", "429"):
         assert raw not in text
     assert report["generation_calls"] == 0
+
+
+if __name__ == "__main__":
+    import pytest
+
+    raise SystemExit(pytest.main([__file__, "-q"]))
