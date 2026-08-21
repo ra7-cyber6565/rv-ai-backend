@@ -12,8 +12,9 @@ The default mode is deliberately strict:
 - forces every cloud reasoning provider and cloud archive off for the offline gate;
 - runs compile checks;
 - runs targeted infrastructure/integration pytest gates;
+- runs the complete ``tests/`` pytest suite (so pytest-only files really execute);
 - runs the legacy/core regression;
-- executes every standalone ``tests/test_*.py`` file;
+- directly executes only test files that contain an explicit ``__main__`` harness;
 - runs a direct-provider-bypass audit;
 - runs a production-wiring/static architecture audit;
 - executes the offline superconductivity Benchmark V2;
@@ -40,8 +41,8 @@ from typing import Iterable, Sequence
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TIMEOUT_SECONDS = 15 * 60
 
-# These files are the focused integration gates maintained by ChatGPT. Claude's
-# own standalone tests are still executed later through the all-test-files pass.
+# These files are the focused integration gates maintained by ChatGPT. The full
+# tests/ pytest pass below is the authoritative catch-all for pytest-style tests.
 FOCUSED_PYTEST = (
     "tests/test_upload_safety.py",
     "tests/test_work_root.py",
@@ -62,9 +63,12 @@ FOCUSED_PYTEST = (
     "tests/test_offline_reasoner.py",
     "tests/test_reasoning_status.py",
     "tests/test_quick_chat_resilience.py",
+    "tests/test_gemini_diag_zero_call.py",
     "tests/test_provider_bypass_audit.py",
     "tests/test_architecture_audit.py",
     "tests/test_release_state.py",
+    "tests/test_repo_hygiene.py",
+    "tests/test_admin_guard.py",
     "tests/test_security_config.py",
     "tests/test_request_guard.py",
     "tests/test_research_jobs.py",
@@ -78,6 +82,7 @@ FOCUSED_PYTEST = (
     "tests/test_presentation_guard.py",
     "tests/test_integrated_facades.py",
     "tests/test_claim_label_accounting.py",
+    "tests/test_foundation_gate_runner.py",
 )
 
 
@@ -129,6 +134,7 @@ def _safe_env() -> dict[str, str]:
             "TERABOX_CLIENT_ID": "",
             "TERABOX_CLIENT_SECRET": "",
             "TERABOX_PRIVATE_SECRET": "",
+            "INFINITY_ADMIN_TOKEN": "",
             "INFINITY_OFFLINE_TEST": "true",
         }
     )
@@ -205,6 +211,18 @@ def _existing(paths: Iterable[str]) -> list[str]:
     return [path for path in paths if (REPO_ROOT / path).is_file()]
 
 
+def _has_main_harness(path: Path) -> bool:
+    """True only for tests intended to be meaningful when run as ``python file``."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception:
+        return False
+    return (
+        'if __name__ == "__main__"' in text
+        or "if __name__ == '__main__'" in text
+    )
+
+
 def _receipt_path(value: str | None, env: dict[str, str]) -> Path:
     if value:
         return Path(value).expanduser().resolve()
@@ -241,12 +259,23 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
     if focused:
         plan.append(("focused_pytest", [python, "-m", "pytest", "-q", *focused]))
 
+    tests_dir = REPO_ROOT / "tests"
+    if tests_dir.is_dir():
+        # This is the real catch-all. Running a pytest-only file with `python`
+        # merely imports/defines tests and exits 0 without executing assertions.
+        plan.append(("all_pytest", [python, "-m", "pytest", "-q", "tests"]))
+
     if (REPO_ROOT / "test_research_engine.py").is_file():
         plan.append(("core_regression", [python, "test_research_engine.py"]))
 
-    for path in sorted((REPO_ROOT / "tests").glob("test_*.py")):
-        rel = path.relative_to(REPO_ROOT).as_posix()
-        plan.append((f"standalone:{rel}", [python, rel]))
+    # Some legacy project tests use their own main()/exit-code harness instead of
+    # pytest collection. Execute only those explicitly designed for script mode.
+    if tests_dir.is_dir():
+        for path in sorted(tests_dir.glob("test_*.py")):
+            if not _has_main_harness(path):
+                continue
+            rel = path.relative_to(REPO_ROOT).as_posix()
+            plan.append((f"script_harness:{rel}", [python, rel]))
 
     provider_audit = REPO_ROOT / "scripts" / "audit_provider_bypass.py"
     if provider_audit.is_file():
@@ -283,7 +312,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Run compile + focused pytest + core regression + provider/architecture audits + benchmark only.",
+        help="Run compile + focused/full pytest + core regression + provider/architecture audits + benchmark only.",
     )
     args = parser.parse_args(argv)
 
@@ -296,6 +325,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             if item[0] in {
                 "compileall",
                 "focused_pytest",
+                "all_pytest",
                 "core_regression",
                 "provider_bypass_audit",
                 "architecture_audit",
@@ -319,9 +349,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name in receipt.failed_stages:
             print(f"  - {name}")
     print(f"Receipt: {receipt_path}")
-    print("NOTE: Offline PASS includes provider-bypass and static architecture wiring")
-    print("checks, but it still is not a 100/100 production sign-off; live zero-cost")
-    print("benchmark/use remains a separate required gate.")
+    print("NOTE: Offline PASS includes full pytest coverage, provider-bypass and")
+    print("static architecture wiring checks, but it still is not a 100/100")
+    print("production sign-off; live zero-cost benchmark/use remains separate.")
     print("=" * 72)
     return 0 if receipt.passed else 1
 
