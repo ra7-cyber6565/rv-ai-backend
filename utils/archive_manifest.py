@@ -1,17 +1,17 @@
-"""Durable archive manifest for cloud-first storage.
+"""Durable archive manifest for verified cloud storage copies.
 
-This module tracks whether a local working file is safe to delete. A file must
-be marked uploaded *and* verified before cleanup is allowed.
+A local working file may have more than one cloud destination over its lifetime
+(for example temporary Google Drive now and TeraBox later). Therefore the ledger
+must not key records by content hash alone. Version 2 uses a stable ``archive_id``
+derived from provider + remote path + SHA-256 while preserving ``sha256`` as the
+content identity.
 
-The provider upload implementation is intentionally separate: cloud tokens and
-account-specific API details must never be hard-coded in this repository.
-
-Concurrency note:
-Multiple research jobs may archive at the same time. Atomic ``os.replace`` keeps
-individual writes safe, while a process-wide lock keyed by manifest path prevents
-same-process read/modify/write races from silently dropping another job's update.
-A future multi-process deployment should move this ledger to a proper shared
-transactional store rather than pretending this JSON lock is cross-process.
+Safety:
+- uploaded != verified;
+- local deletion is allowed only for a specific VERIFIED archive record;
+- legacy SHA-only references still work only when they identify exactly one
+  record, so ambiguous multi-provider state fails closed;
+- same-process read/modify/write is protected by a path-scoped RLock.
 """
 from __future__ import annotations
 
@@ -52,6 +52,11 @@ def sha256_file(path: str, chunk_bytes: int = 1024 * 1024) -> str:
     return digest.hexdigest()
 
 
+def _archive_id(provider: str, remote_path: str, sha256: str) -> str:
+    raw = f"{str(provider).strip().lower()}\0{str(remote_path).strip()}\0{str(sha256).lower()}"
+    return "a_" + hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
 def default_manifest_path() -> str:
     folder = Path(ensure_layout()["archive"])
     folder.mkdir(parents=True, exist_ok=True)
@@ -66,21 +71,46 @@ class ArchiveManifest:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = _lock_for(self.path)
 
+    def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
+        """Migrate legacy SHA-keyed manifests to provider/path-aware v2 in memory."""
+        items = data.get("items")
+        if not isinstance(items, dict):
+            raise ValueError("invalid archive manifest")
+        normalized: dict[str, dict[str, Any]] = {}
+        for old_key, raw_item in items.items():
+            if not isinstance(raw_item, dict):
+                continue
+            item = dict(raw_item)
+            digest = str(item.get("sha256") or old_key or "").strip().lower()
+            provider = str(item.get("provider") or "unknown").strip() or "unknown"
+            remote_path = str(item.get("remote_path") or "").strip()
+            if not digest or not remote_path:
+                continue
+            archive_id = str(item.get("archive_id") or _archive_id(provider, remote_path, digest))
+            item["archive_id"] = archive_id
+            item["sha256"] = digest
+            normalized[archive_id] = item
+        return {"version": 2, "items": normalized}
+
     def _load(self) -> dict[str, Any]:
         with self._lock:
             if not os.path.exists(self.path):
-                return {"version": 1, "items": {}}
+                return {"version": 2, "items": {}}
             try:
                 with open(self.path, "r", encoding="utf-8") as handle:
                     data = json.load(handle)
-                if not isinstance(data, dict) or not isinstance(data.get("items"), dict):
-                    raise ValueError("invalid archive manifest")
-                return data
             except json.JSONDecodeError as exc:
                 raise RuntimeError(f"Archive manifest is corrupted: {self.path}") from exc
+            if not isinstance(data, dict):
+                raise RuntimeError(f"Archive manifest is invalid: {self.path}")
+            try:
+                return self._normalize(data)
+            except ValueError as exc:
+                raise RuntimeError(f"Archive manifest is invalid: {self.path}") from exc
 
     def _save(self, data: dict[str, Any]) -> None:
         with self._lock:
+            data = self._normalize(data)
             parent = os.path.dirname(self.path)
             fd, tmp = tempfile.mkstemp(prefix="manifest_", suffix=".json", dir=parent)
             try:
@@ -93,59 +123,95 @@ class ArchiveManifest:
                 if os.path.exists(tmp):
                     os.remove(tmp)
 
+    @staticmethod
+    def _resolve_key(data: dict[str, Any], reference: str) -> str:
+        ref = str(reference or "").strip()
+        if not ref:
+            raise KeyError(reference)
+        if ref in data["items"]:
+            return ref
+        matches = [
+            key for key, item in data["items"].items()
+            if str(item.get("sha256") or "").lower() == ref.lower()
+        ]
+        if len(matches) == 1:
+            return matches[0]
+        if len(matches) > 1:
+            raise KeyError(f"Ambiguous archive reference: {ref}; use archive_id")
+        raise KeyError(ref)
+
     def register(self, local_path: str, *, remote_path: str, provider: str) -> dict[str, Any]:
         local = os.path.abspath(local_path)
         if not os.path.isfile(local):
             raise FileNotFoundError(local)
-        item = {
+        remote = str(remote_path or "").strip()
+        provider_name = str(provider or "").strip()
+        if not remote:
+            raise ValueError("remote_path khaali nahi ho sakta")
+        if not provider_name:
+            raise ValueError("provider khaali nahi ho sakta")
+
+        digest = sha256_file(local)
+        archive_id = _archive_id(provider_name, remote, digest)
+        now = int(time.time())
+        fresh = {
+            "archive_id": archive_id,
             "local_path": local,
-            "remote_path": remote_path,
-            "provider": provider,
+            "remote_path": remote,
+            "provider": provider_name,
             "size": os.path.getsize(local),
-            "sha256": sha256_file(local),
+            "sha256": digest,
             "status": "pending",
             "verified": False,
             "attempts": 0,
             "last_error": "",
-            "updated_at": int(time.time()),
+            "updated_at": now,
         }
         with self._lock:
             data = self._load()
-            data["items"][item["sha256"]] = item
+            existing = data["items"].get(archive_id)
+            if existing:
+                # Idempotent re-registration of the same content/destination must
+                # not destroy a previously VERIFIED state.
+                existing["local_path"] = local
+                existing["size"] = os.path.getsize(local)
+                existing["updated_at"] = now
+                item = existing
+            else:
+                data["items"][archive_id] = fresh
+                item = fresh
             self._save(data)
         return dict(item)
 
-    def mark_upload_attempt(self, sha256: str, *, error: str = "") -> None:
+    def mark_upload_attempt(self, reference: str, *, error: str = "") -> None:
         with self._lock:
             data = self._load()
-            item = data["items"].get(sha256)
-            if not item:
-                raise KeyError(sha256)
+            key = self._resolve_key(data, reference)
+            item = data["items"][key]
             item["attempts"] = int(item.get("attempts", 0)) + 1
             item["status"] = "failed" if error else "uploaded_unverified"
+            item["verified"] = False if error else bool(item.get("verified", False))
             item["last_error"] = str(error)[:1000]
             item["updated_at"] = int(time.time())
             self._save(data)
 
-    def mark_verification_failed(self, sha256: str, error: str) -> None:
+    def mark_verification_failed(self, reference: str, error: str) -> None:
         """Persist verification failure without counting a second upload attempt."""
         with self._lock:
             data = self._load()
-            item = data["items"].get(sha256)
-            if not item:
-                raise KeyError(sha256)
+            key = self._resolve_key(data, reference)
+            item = data["items"][key]
             item["status"] = "uploaded_unverified"
             item["verified"] = False
             item["last_error"] = str(error)[:1000]
             item["updated_at"] = int(time.time())
             self._save(data)
 
-    def mark_verified(self, sha256: str, *, remote_size: int, remote_sha256: str | None = None) -> None:
+    def mark_verified(self, reference: str, *, remote_size: int, remote_sha256: str | None = None) -> None:
         with self._lock:
             data = self._load()
-            item = data["items"].get(sha256)
-            if not item:
-                raise KeyError(sha256)
+            key = self._resolve_key(data, reference)
+            item = data["items"][key]
             if int(remote_size) != int(item["size"]):
                 raise RuntimeError("Remote size does not match local file; refusing verification")
             if remote_sha256 and remote_sha256.lower() != str(item["sha256"]).lower():
@@ -156,13 +222,12 @@ class ArchiveManifest:
             item["updated_at"] = int(time.time())
             self._save(data)
 
-    def mark_local_deleted(self, sha256: str) -> None:
+    def mark_local_deleted(self, reference: str) -> None:
         """Record that the verified local working copy was safely removed."""
         with self._lock:
             data = self._load()
-            item = data["items"].get(sha256)
-            if not item:
-                raise KeyError(sha256)
+            key = self._resolve_key(data, reference)
+            item = data["items"][key]
             if item.get("status") != "verified" or item.get("verified") is not True:
                 raise RuntimeError("Unverified archive item cannot be marked locally deleted")
             item["local_deleted"] = True
@@ -170,14 +235,24 @@ class ArchiveManifest:
             item["updated_at"] = int(time.time())
             self._save(data)
 
-    def safe_to_delete_local(self, sha256: str) -> bool:
+    def safe_to_delete_local(self, reference: str) -> bool:
         with self._lock:
-            item = self._load()["items"].get(sha256) or {}
+            data = self._load()
+            try:
+                key = self._resolve_key(data, reference)
+            except KeyError:
+                return False
+            item = data["items"].get(key) or {}
             return item.get("status") == "verified" and item.get("verified") is True
 
-    def get(self, sha256: str) -> dict[str, Any] | None:
+    def get(self, reference: str) -> dict[str, Any] | None:
         with self._lock:
-            item = self._load()["items"].get(sha256)
+            data = self._load()
+            try:
+                key = self._resolve_key(data, reference)
+            except KeyError:
+                return None
+            item = data["items"].get(key)
             return dict(item) if item else None
 
     def items(self) -> list[dict[str, Any]]:
