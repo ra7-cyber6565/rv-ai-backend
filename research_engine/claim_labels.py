@@ -1,27 +1,19 @@
 """
-Claim label honesty — "[ESTABLISHED]" sirf tab jab full text padha gaya ho.
+Claim-label honesty gate.
 
-Kyun ye file bani (2026-08-20, live MAXIMUM run ke baad):
-Us report mein ek CACC claim par `[ESTABLISHED]` label tha, aur usi report ke
-neeche likha tha "0/14 full-text fetch successful". Yaani label ne kaha "ye
-established fact hai", par system ne us paper ka ek shabd bhi poora nahi padha
-tha — sirf abstract/snippet dekha tha. Ye chhupa hua jhooth hai, aur intel ka
-rule saaf hai:
+Core rule:
+    abstract/snippet/metadata only -> SOURCE-REPORTED at best
+    full-text access + claim-level A-E verification -> ESTABLISHED
 
-    Snippet/abstract-only evidence  →  SOURCE-REPORTED   (source ye keh raha hai)
-    Full text + claim verification →  ESTABLISHED        (humne khud dekha)
+The old safety net checked only reading depth.  That still left a loophole: a
+line could cite one unrelated full-text source and keep ``[ESTABLISHED]`` even if
+another weaker source was the one that actually supported the words.  The final
+A-E verifier would notice later, but the user-facing label was already too
+strong.  ``downgrade`` now also asks the deterministic A-E verifier before a
+strong label survives whenever a real research question/evidence pack is
+available.
 
-Ye module do cheezein deta hai:
-  1. `LABEL_RULE_PROMPT` — Gemini ko yahi rule pehle se bata dena (behtar hai ki
-     wo galti hi na kare).
-  2. `downgrade(text, pack)` — DETERMINISTIC safety net. Model bhool jaaye, to
-     yahan har `[ESTABLISHED]` line ke [S#] ka asli `reading_level()` dekha
-     jaata hai aur label khud-ba-khud neeche kar diya jaata hai. Ye Gemini par
-     bharosa nahi karta — regex + pack ke asli numbers par chalta hai, isliye
-     quota khatam hone par bhi kaam karta hai.
-
-Kuch upgrade NAHI hota: agar model ne khud `[SOURCE-REPORTED]` likha hai to use
-`[ESTABLISHED]` banane ka koi raasta nahi hai. Honesty ek taraf hi jhukti hai.
+No label is ever upgraded here.
 """
 from __future__ import annotations
 
@@ -34,20 +26,16 @@ ESTABLISHED = "ESTABLISHED"
 SOURCE_REPORTED = "SOURCE-REPORTED"
 UNVERIFIED = "UNVERIFIED"
 
-# "[ESTABLISHED]" / "[ESTABLISHED FACT]" / "[FACT]" / "[STRONG EVIDENCE]" —
-# ye chaar hi labels "humne verify kiya" ka dava karte hain, isliye inhi par
-# gate lagta hai. [EVIDENCE]/[INFERENCE]/[HYPOTHESIS] pehle se hi honest hain.
 _STRONG_LABEL_RE = re.compile(
     r"\[\s*(ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE)\s*\]",
-    re.IGNORECASE)
+    re.IGNORECASE,
+)
 _SID_RE = re.compile(r"\[\s*S\s*(\d{1,3})[^\]]*\]", re.IGNORECASE)
 _NO_SOURCE_RE = re.compile(r"\[\s*NO[\s\-]?SOURCE\s*\]", re.IGNORECASE)
-
 _FULL = "full_text"
 
 
 def _cited_ids(line: str) -> List[str]:
-    """Line ke andar ke [S#] ids — "[S1][S4]" aur "[S1, S4]" dono chalte hain."""
     out: List[str] = []
     for num in _SID_RE.findall(line or ""):
         sid = f"S{int(num)}"
@@ -57,17 +45,11 @@ def _cited_ids(line: str) -> List[str]:
 
 
 def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
-    """
-    Ek line ke liye faisla: (naya_label, wajah).
-
-    - koi valid [S#] nahi → UNVERIFIED (source ke bina "established" impossible)
-    - kam se kam ek cited source ka reading_level() == "full_text" → ESTABLISHED
-    - warna → SOURCE-REPORTED
-    """
+    """Depth/citation pre-gate used by ``downgrade`` and legacy callers."""
     ids = _cited_ids(line)
     if pack is not None:
         records = [pack.by_id(sid) for sid in ids]
-        records = [r for r in records if r is not None]
+        records = [record for record in records if record is not None]
     else:
         records = []
 
@@ -75,15 +57,16 @@ def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
         if _NO_SOURCE_RE.search(line or ""):
             return UNVERIFIED, "is line par koi source nahi hai ([NO-SOURCE])"
         if ids:
-            return UNVERIFIED, ("cite kiye gaye " + ", ".join(ids)
-                                + " evidence pack mein nahi mile")
+            return UNVERIFIED, (
+                "cite kiye gaye " + ", ".join(ids) + " evidence pack mein nahi mile"
+            )
         return UNVERIFIED, "is line par koi [S#] citation nahi hai"
 
     levels = {}
     for record in records:
         try:
             level = record.reading_level()
-        except Exception:                      # noqa: BLE001 — kabhi crash na kare
+        except Exception:  # pragma: no cover - defensive
             level = "metadata"
         levels[record.source_id] = level
 
@@ -94,21 +77,49 @@ def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
     return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
 
 
-def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict]:
-    """
-    Answer text mein har "verified" dave ka label asli read-level se match karao.
+def _claim_verification_verdict(
+    line: str,
+    pack: Optional[EvidencePack],
+) -> Tuple[Optional[bool], str]:
+    """Return A-E result for a strong labelled line when enough context exists.
 
-    Returns `(naya_text, report)`. Report mein:
-        checked          — kitni lines par strong label tha
-        downgraded       — kitni neeche ki gayi
-        to_source_reported / to_unverified — ginti
-        details          — max 8 chhoti lines (user ko dikhane ke liye)
-        note             — ek line ka human-readable summary ("" agar sab theek)
-    Text kabhi nahi kaata jaata — sirf label badalta hai, taaki content na khoye.
+    ``None`` means the pack is only a lightweight/legacy fixture and does not
+    carry a research question, so callers keep the old depth-only behaviour.
+    Production ``EvidencePack`` objects created by the orchestrator always carry
+    the question and therefore use the stricter path.
     """
+    if pack is None or not str(getattr(pack, "question", "") or "").strip():
+        return None, "claim-level A-E context available nahi tha"
+    try:
+        # Lazy import avoids making the label module part of the verifier's
+        # import graph during module initialization.
+        from .evidence_verification import EvidenceVerifier
+
+        report = EvidenceVerifier().verify(line, pack)
+    except Exception as exc:  # fail closed for strong labels
+        return False, f"claim-level A-E verification run nahi ho saki ({type(exc).__name__})"
+
+    if not report.items:
+        return False, "labelled factual claim A-E verifier ne parse nahi ki"
+    item = report.items[0]
+    if item.verdict == "verified_against_available_evidence":
+        return True, "same cited source ne citation+relevance+support+depth+quality A-E gate pass kiya"
+    return False, item.note or "claim-level A-E gate pass nahi hua"
+
+
+def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict]:
+    """Strong user-facing labels ko deterministic evidence state se match karao."""
     body = text or ""
-    report: Dict = {"checked": 0, "downgraded": 0, "to_source_reported": 0,
-                    "to_unverified": 0, "details": [], "note": ""}
+    report: Dict = {
+        "checked": 0,
+        "downgraded": 0,
+        "to_source_reported": 0,
+        "to_unverified": 0,
+        "a_e_checked": 0,
+        "a_e_failed": 0,
+        "details": [],
+        "note": "",
+    }
     if not body.strip():
         return body, report
 
@@ -117,11 +128,29 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
         if not _STRONG_LABEL_RE.search(raw):
             out_lines.append(raw)
             continue
+
         report["checked"] += 1
         verdict, why = line_verdict(raw, pack)
+
+        # Full-text access is necessary but no longer sufficient.  In a real
+        # research pack, keep ESTABLISHED only after the cumulative same-source
+        # A-E gate also passes.
         if verdict == ESTABLISHED:
-            out_lines.append(raw)
-            continue
+            verified, verify_why = _claim_verification_verdict(raw, pack)
+            if verified is True:
+                report["a_e_checked"] += 1
+                out_lines.append(raw)
+                continue
+            if verified is None:
+                # Legacy/lightweight fixture without a question: preserve the
+                # depth-only helper contract. Production never uses this path.
+                out_lines.append(raw)
+                continue
+            report["a_e_checked"] += 1
+            report["a_e_failed"] += 1
+            verdict = UNVERIFIED
+            why = f"full text access tha, lekin {verify_why}"
+
         new_line = _STRONG_LABEL_RE.sub(f"[{verdict}]", raw)
         out_lines.append(new_line)
         report["downgraded"] += 1
@@ -139,45 +168,53 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
             bits.append(f"{report['to_source_reported']} claim SOURCE-REPORTED")
         if report["to_unverified"]:
             bits.append(f"{report['to_unverified']} claim UNVERIFIED")
+        reason = (
+            "source access depth ya claim-level A-E verification strong label ke "
+            "liye enough nahi thi"
+        )
         report["note"] = (
-            f"{report['downgraded']}/{report['checked']} 'established' dave "
-            f"neeche kiye gaye (" + ", ".join(bits) + ") — kyunki un sources ka "
-            f"poora text nahi padha gaya, sirf abstract/snippet mila.")
+            f"{report['downgraded']}/{report['checked']} strong dave neeche kiye gaye "
+            f"(" + ", ".join(bits) + f") — {reason}."
+        )
     return "\n".join(out_lines), report
 
 
 def human_note(report: Optional[Dict]) -> str:
-    """
-    Audit section ke liye normal bhasha wali line (raw log nahi).
-
-    intel ka rule: user ko "[FAIL] label gate" nahi dikhna chahiye — use ye
-    dikhna chahiye ki iska matlab kya hai.
-    """
+    """Audit section ke liye normal bhasha, raw PASS/FAIL log nahi."""
     r = report or {}
     checked = int(r.get("checked") or 0)
     if not checked:
-        return ("Answer mein 'established fact' type ka koi strong dava nahi tha, "
-                "isliye yahan kuch downgrade karne ki zaroorat nahi padi.")
+        return (
+            "Answer mein 'established fact' type ka koi strong dava nahi tha, "
+            "isliye yahan kuch downgrade karne ki zaroorat nahi padi."
+        )
     down = int(r.get("downgraded") or 0)
     if not down:
-        return (f"{checked} strong dave check kiye gaye aur sabke peeche kam se kam "
-                f"ek aisa source tha jiska poora text padha gaya — isliye inhe "
-                f"'established' rehne diya gaya.")
-    return (f"{down} jagah label neeche karna pada. Matlab simple hai: wahan par "
-            f"baat 'source ye keh raha hai' (SOURCE-REPORTED) ke level par hai, "
-            f"'humne khud poora paper padh kar confirm kiya' (ESTABLISHED) ke "
-            f"level par nahi. Jahan poora text mila, wahan label waisa hi raha.")
+        if int(r.get("a_e_checked") or 0):
+            return (
+                f"{checked} strong dave check kiye gaye; required full-text access ke "
+                "saath claim-level citation, relevance, support, depth aur source-quality "
+                "gate bhi pass hua."
+            )
+        return (
+            f"{checked} strong dave depth-level check mein theek the. Is lightweight "
+            "context mein claim-level A-E context available nahi tha."
+        )
+    return (
+        f"{down} jagah strong label neeche karna pada. Simple matlab: sirf source "
+        "milna ya full text khulna enough nahi tha; claim ko usi cited source se "
+        "relevance, support, depth aur quality checks bhi pass karne the."
+    )
 
 
-# ── prompt block ─────────────────────────────────────────────────────────────
-LABEL_RULE_PROMPT = """# LABEL RULE (intel ka rule — todne par label khud neeche kar diya jayega)
-- `[ESTABLISHED]` sirf us baat par jiska POORA TEXT padha gaya hai (source list
-  mein us source par "read: full_text" likha hoga) aur claim wahan se seedha
-  verify hota hai.
-- Agar sirf abstract/snippet/metadata mila hai, to label `[SOURCE-REPORTED]`
-  likho — matlab "source ye report karta hai", "ye confirmed fact hai" nahi.
-- Kisi bhi source se support na ho to `[NO-SOURCE]` + `[INFERENCE]` ya
-  `[HYPOTHESIS]`.
-- Ye guess ka kaam nahi hai: source block mein har source ka read level diya
-  gaya hai, wahi dekho.
+LABEL_RULE_PROMPT = """# LABEL RULE (strict evidence honesty)
+- `[ESTABLISHED]` / `[FACT]` / `[STRONG EVIDENCE]` sirf tab likho jab source
+  block mein required `full_text` access ho AUR claim usi cited evidence se
+  citation + relevance + support + depth + quality checks pass kar sake.
+- Full text khul jaana apne aap claim ko verify nahi karta.
+- Agar sirf abstract/snippet/metadata mila hai, `[SOURCE-REPORTED]` likho —
+  matlab source ye report karta hai, confirmed fact nahi.
+- Kisi source se support na ho to `[NO-SOURCE]` + `[INFERENCE]`, `[HYPOTHESIS]`
+  ya `[UNVERIFIED]` use karo.
+- Labels kabhi confidence decoration nahi hain; evidence state ka sach hain.
 """
