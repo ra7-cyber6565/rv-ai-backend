@@ -17,6 +17,7 @@ The default mode is deliberately strict:
 - directly executes only test files that contain an explicit ``__main__`` harness;
 - runs a direct-provider-bypass audit;
 - runs a production-wiring/static architecture audit;
+- executes Claude's offline 8-domain adversarial reliability benchmark;
 - executes the offline superconductivity Benchmark V2;
 - continues after failures so the final receipt shows *all* broken stages;
 - exits non-zero if any stage failed/timed out/could not start.
@@ -88,6 +89,9 @@ FOCUSED_PYTEST = (
     "tests/test_private_response_headers.py",
     "tests/test_cors_private_headers.py",
     "tests/test_web_job_capability.py",
+    "tests/test_web_source_link_safety.py",
+    "tests/test_source_prompt_guard.py",
+    "tests/test_source_output_safety.py",
     "tests/test_research_jobs.py",
     "tests/test_domain_guardrails.py",
     "tests/test_domain_ambiguity.py",
@@ -316,9 +320,19 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
             [python, architecture.relative_to(REPO_ROOT).as_posix()],
         ))
 
+    cross_domain = REPO_ROOT / "tests" / "benchmark_cross_domain.py"
+    if cross_domain.is_file():
+        plan.append((
+            "benchmark_cross_domain",
+            [python, cross_domain.relative_to(REPO_ROOT).as_posix()],
+        ))
+
     benchmark = REPO_ROOT / "tests" / "benchmark_superconductivity.py"
     if benchmark.is_file():
-        plan.append(("benchmark_superconductivity_v2", [python, benchmark.relative_to(REPO_ROOT).as_posix()]))
+        plan.append((
+            "benchmark_superconductivity_v2",
+            [python, benchmark.relative_to(REPO_ROOT).as_posix()],
+        ))
     return plan
 
 
@@ -337,7 +351,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Run compile + focused/full pytest + core regression + provider/architecture audits + benchmark only.",
+        help="Run compile + focused/full pytest + core regression + provider/architecture audits + both benchmarks only.",
     )
     args = parser.parse_args(argv)
 
@@ -354,6 +368,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "core_regression",
                 "provider_bypass_audit",
                 "architecture_audit",
+                "benchmark_cross_domain",
                 "benchmark_superconductivity_v2",
             }
         ]
@@ -375,8 +390,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"  - {name}")
     print(f"Receipt: {receipt_path}")
     print("NOTE: Offline PASS includes full pytest coverage, provider-bypass and")
-    print("static architecture wiring checks, but it still is not a 100/100")
-    print("production sign-off; live zero-cost benchmark/use remains separate.")
+    print("static architecture wiring checks plus both adversarial benchmarks, but")
+    print("it still is not a 100/100 production sign-off; live zero-cost use remains")
+    print("a separate required gate.")
     print("=" * 72)
     return 0 if receipt.passed else 1
 
