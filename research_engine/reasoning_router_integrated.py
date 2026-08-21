@@ -9,7 +9,7 @@ This facade keeps those two layers consistent and enforces public-safe accountin
 - HTTP attempts include primary + provider fallbacks;
 - same-model retries stay separate from model/provider/key switches;
 - backup-only Gemini configuration is recognized under the same ₹0 confirmation;
-- raw SDK/HTTP/protobuf bodies are never returned by ``technical_details()``.
+- raw SDK/HTTP/protobuf bodies are never returned by errors/technical_details.
 """
 from __future__ import annotations
 
@@ -42,29 +42,38 @@ class ResilientReasoning(_Router):
 
     @staticmethod
     def _gemini_allowed() -> bool:
-        """Primary OR backup Gemini credentials obey one zero-cost policy.
-
-        The base router historically checked only ``GEMINI_API_KEY``. After
-        backup-key rotation landed, that made a backup-only setup look disabled
-        here even though GeminiReasoning could use it. Keep the router, key pool,
-        reasoning status and startup guard on the same definition.
-        """
+        """Primary OR backup Gemini credentials obey one zero-cost policy."""
         if not gemini_credentials_configured():
             return False
         if zero_cost_enabled() and not _truthy(os.getenv("GEMINI_ZERO_COST_CONFIRMED", "")):
             return False
         return True
 
+    def _redact_new_primary_errors(self, start: int, tag: str) -> None:
+        """Replace raw provider exception strings with normalized failure kinds."""
+        errors = getattr(self, "errors", None)
+        if not isinstance(errors, list) or len(errors) <= start:
+            return
+        del errors[start:]
+        kind = self.failure_kind() or "provider_unavailable"
+        errors.append(f"{tag}: reasoning provider unavailable ({kind})")
+
     def generate(self, prompt: str, label: str = "") -> str:
+        tag = label or "reasoning"
         before_log = len(getattr(self, "pass_log", []))
         attempts_before = int(getattr(self, "attempts", 0) or 0)
+        errors_before = len(getattr(self, "errors", []) or [])
         text = super().generate(prompt, label)
+        # Even when no provider-level fallback is configured, the integrated
+        # facade is the production class. Raw Gemini SDK exception strings must
+        # therefore not survive in `errors`, because orchestrator can inspect it.
+        if not text:
+            self._redact_new_primary_errors(errors_before, tag)
         attempts_delta = max(0, int(getattr(self, "attempts", 0) or 0) - attempts_before)
         log = getattr(self, "pass_log", None)
         if log is None:
             return text
 
-        tag = label or "reasoning"
         if len(log) == before_log:
             model = ""
             if text and getattr(self, "models_tried", None):
@@ -87,13 +96,7 @@ class ResilientReasoning(_Router):
         return text
 
     def technical_details(self, limit: int = 8) -> List[str]:
-        """Return coarse failure metadata only, never raw provider bodies.
-
-        Older layers retained raw SDK/protobuf/HTTP text for an audit footer.
-        That footer is still user-visible, so it is not an acceptable secret/error
-        sink. Model/provider + normalized failure kind is enough to debug routing;
-        actual provider response bodies stay internal to the running process.
-        """
+        """Return coarse failure metadata only, never raw provider bodies."""
         rows: List[str] = []
         for event in list(getattr(getattr(self, "ledger", None), "events", []) or []):
             if not isinstance(event, dict):
