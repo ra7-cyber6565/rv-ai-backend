@@ -1,16 +1,13 @@
 """Small in-memory abuse/rate guard for the ₹0 backend.
 
-Public endpoints that trigger model calls, long research or large uploads can
-otherwise burn the entire free quota. This module uses only stdlib, stores no
-persistent IP history and does not depend on Redis/paid infrastructure.
-
-It is intentionally conservative: process restart resets counters, which is fine
-for a single-instance free deployment. A future multi-instance deployment should
-replace this with a shared free/self-hosted limiter rather than pretending these
-counters are global.
+Public endpoints that trigger model calls, long research, large uploads or rapid
+job polling can otherwise burn free quota/CPU. This module uses only stdlib,
+stores no persistent IP history and does not depend on Redis/paid infrastructure.
 
 The bucket table is bounded so a flood of unique spoofed/source addresses cannot
-turn the limiter itself into an unbounded-memory denial of service.
+turn the limiter itself into an unbounded-memory denial of service. Dynamic job
+URLs are normalized to one polling bucket per client, so thousands of job ids do
+not create thousands of limiter buckets.
 """
 from __future__ import annotations
 
@@ -46,15 +43,14 @@ class Limit:
 _QUICK_PER_MINUTE = _int_env("RATE_QUICK_AI_PER_MINUTE", 12, 1, 120)
 _UPLOADS_PER_HOUR = _int_env("RATE_UPLOADS_PER_HOUR", 20, 1, 200)
 _AUDIO_PER_HOUR = _int_env("RATE_AUDIO_UPLOADS_PER_HOUR", 8, 1, 100)
+_JOB_POLL_PER_MINUTE = _int_env("RATE_JOB_POLL_PER_MINUTE", 180, 30, 600)
+_JOB_POLL_BUCKET = "/api/v1/research-jobs/{job}/poll"
 
 DEFAULT_LIMITS: dict[str, Limit] = {
-    # endpoints that can consume model/search quota
     "/api/v1/chat": Limit(_int_env("RATE_CHAT_PER_MINUTE", 30, 1, 300), 60),
     "/api/v1/ask": Limit(_QUICK_PER_MINUTE, 60),
     "/api/v1/deep-research": Limit(_int_env("RATE_SYNC_RESEARCH_PER_HOUR", 4, 1, 60), 3600),
     "/api/v1/research-jobs": Limit(_int_env("RATE_RESEARCH_JOBS_PER_HOUR", 6, 1, 60), 3600),
-
-    # ingestion/processing endpoints that can use CPU, disk or local model time
     "/api/v1/upload-document": Limit(_UPLOADS_PER_HOUR, 3600),
     "/api/v1/upload-pdf": Limit(_UPLOADS_PER_HOUR, 3600),
     "/api/v1/ingest-youtube": Limit(_UPLOADS_PER_HOUR, 3600),
@@ -73,11 +69,10 @@ class SlidingWindowLimiter:
         self._capacity_rejections = 0
 
     def _cleanup_locked(self, current: float) -> None:
-        """Drop expired/empty buckets without retaining client identifiers forever."""
-        # Every route has a window <= 1 hour in the current policy. Per-bucket
-        # exact expiry is handled on normal access; this global sweep removes
-        # completely idle buckets after the longest configured window.
-        longest_window = max((limit.window_seconds for limit in DEFAULT_LIMITS.values()), default=3600)
+        longest_window = max(
+            [limit.window_seconds for limit in DEFAULT_LIMITS.values()] + [60],
+            default=3600,
+        )
         cutoff = current - longest_window
         for index, queue in list(self._events.items()):
             while queue and queue[0] <= cutoff:
@@ -97,8 +92,6 @@ class SlidingWindowLimiter:
             ):
                 self._cleanup_locked(current)
 
-            # Fail closed for a brand-new bucket if the bounded table is still
-            # full. Existing clients keep their normal sliding-window behavior.
             if index not in self._events and len(self._events) >= self._max_buckets:
                 self._capacity_rejections += 1
                 return False, max(1, min(60, limit.window_seconds))
@@ -119,7 +112,6 @@ class SlidingWindowLimiter:
             self._capacity_rejections = 0
 
     def stats(self) -> dict[str, int]:
-        """Safe aggregate metrics only; never expose client identifiers."""
         with self._lock:
             return {
                 "active_buckets": len(self._events),
@@ -132,11 +124,7 @@ limiter = SlidingWindowLimiter()
 
 
 def client_key(request) -> str:
-    """Return client identifier without persisting it anywhere.
-
-    X-Forwarded-For is trusted only when explicitly enabled, because otherwise a
-    caller can spoof that header and bypass the limiter.
-    """
+    """Return client identifier without persisting it anywhere."""
     if _bool_env("TRUST_PROXY_HEADERS", False):
         forwarded = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
         if forwarded:
@@ -146,11 +134,36 @@ def client_key(request) -> str:
     return str(host or "unknown")[:128]
 
 
+def _is_job_poll_path(path: str) -> bool:
+    prefix = "/api/v1/research-jobs/"
+    if not str(path or "").startswith(prefix):
+        return False
+    # Bare collection endpoint is handled separately. Anything below a concrete
+    # job id (status/progress/result) shares one client bucket.
+    suffix = str(path)[len(prefix):].strip("/")
+    return bool(suffix)
+
+
+def bucket_for(method: str, path: str) -> str:
+    if method.upper() == "GET" and _is_job_poll_path(path):
+        return _JOB_POLL_BUCKET
+    return path
+
+
 def limit_for(method: str, path: str) -> Limit | None:
-    if method.upper() != "POST":
-        return None
-    return DEFAULT_LIMITS.get(path)
+    method = method.upper()
+    if method == "POST":
+        return DEFAULT_LIMITS.get(path)
+    if method == "GET" and _is_job_poll_path(path):
+        return Limit(_JOB_POLL_PER_MINUTE, 60)
+    return None
 
 
 def enabled() -> bool:
     return _bool_env("RATE_LIMIT_ENABLED", True)
+
+
+__all__ = [
+    "Limit", "SlidingWindowLimiter", "client_key", "bucket_for", "limit_for",
+    "limiter", "enabled", "DEFAULT_LIMITS",
+]
