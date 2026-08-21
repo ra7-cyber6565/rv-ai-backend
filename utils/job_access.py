@@ -55,9 +55,18 @@ def default_secret_path() -> str:
 
 class JobCapabilitySigner:
     def __init__(self, secret_path: Optional[str] = None):
-        self.secret_path = os.path.abspath(secret_path or default_secret_path())
+        # Keep import side-effect free. The default data-root path is resolved
+        # only when a job actually needs a capability token/status check.
+        self.secret_path = os.path.abspath(secret_path) if secret_path else ""
         self._lock = threading.RLock()
         self._secret: bytes | None = None
+
+    def _path(self) -> str:
+        if self.secret_path:
+            return self.secret_path
+        path = os.path.abspath(default_secret_path())
+        self.secret_path = path
+        return path
 
     @staticmethod
     def _read_secret(path: str) -> bytes:
@@ -104,18 +113,19 @@ class JobCapabilitySigner:
         with self._lock:
             if self._secret is not None:
                 return self._secret
-            existing = self._read_secret(self.secret_path)
+            path = self._path()
+            existing = self._read_secret(path)
             if existing:
                 self._secret = existing
                 return existing
             raw = secrets.token_bytes(_SECRET_BYTES)
             try:
-                self._write_new_secret(self.secret_path, raw)
+                self._write_new_secret(path, raw)
             except OSError as exc:
                 raise RuntimeError("Research job access secret safely persist nahi ho saka") from exc
             # Read back from disk instead of trusting only memory. If a storage
             # layer mangled the write, fail closed before issuing bearer tokens.
-            persisted = self._read_secret(self.secret_path)
+            persisted = self._read_secret(path)
             if not hmac.compare_digest(raw, persisted):
                 raise RuntimeError("Research job access secret verification fail hua")
             self._secret = persisted
@@ -143,7 +153,7 @@ class JobCapabilitySigner:
         return hmac.compare_digest(expected, candidate)
 
     def status(self) -> dict:
-        """Non-secret readiness only; never creates/reads a token for a job."""
+        """Non-secret readiness only; creates/loads the server secret if needed."""
         try:
             secret = self._load_or_create()
             ready = len(secret) == _SECRET_BYTES
