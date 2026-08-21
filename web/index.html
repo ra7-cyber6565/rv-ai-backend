@@ -67,19 +67,21 @@ async function runChat(message,el){thinking(el);try{const {r,data}=await jsonFet
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
 
-async function runResearch(question,el){const ui=progressPanel(el);let jobId="";try{
+async function runResearch(question,el){const ui=progressPanel(el);let jobId="",jobToken="";try{
   const start=await jsonFetch(API+"/api/v1/research-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question,project_id:PROJECT_ID,depth_mode:mode})});
-  if(!start.r.ok||!start.data.job_id)throw new Error("job start failed");jobId=start.data.job_id;
+  if(!start.r.ok||!start.data.job_id||!start.data.job_access_token)throw new Error("job start failed");
+  jobId=start.data.job_id;jobToken=start.data.job_access_token;
+  const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
   while(true){
-    const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId));
+    const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok)throw new Error("job status lost");
-    const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress");
+    const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
     if(prog.r.ok)paintProgress(ui,prog.data.progress);
     if(status.data.status==="completed")break;
     if(status.data.status==="failed")throw new Error(status.data.error||"research failed");
     await sleep(1200);
   }
-  const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result");
+  const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
   if(!res.r.ok)throw new Error("result unavailable");renderResearch(el,res.data);
 }catch(e){friendly(el,"Research complete nahi ho paayi. Jo kaam hua tha uska progress server par ho sakta hai; dubara try kar sakte ho.");}}
 
