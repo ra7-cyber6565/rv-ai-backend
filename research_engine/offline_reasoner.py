@@ -9,8 +9,8 @@ answer instead of an exception or blank template.
 
 This is deliberately conservative. It does NOT invent mechanisms, general
 knowledge, hypotheses or consensus. It ranks source text against the question,
-quotes only short fragments, labels them honestly, and says what could not be
-established. A local LLM remains the stronger no-quota reasoning fallback.
+uses only short source fragments, labels them honestly, and says what could not
+be established. A local LLM remains the stronger no-quota reasoning fallback.
 """
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def _sentences(text: str) -> Iterable[str]:
 
 
 def _safe_fragment(text: str, max_words: int = 22, max_chars: int = 220) -> str:
-    """Short source fragment: enough context, not a long copied passage."""
+    """Short source fragment: enough context, never a long copied passage."""
     words = str(text or "").split()
     clipped = " ".join(words[:max_words])
     if len(clipped) > max_chars:
@@ -86,6 +86,17 @@ def _safe_fragment(text: str, max_words: int = 22, max_chars: int = 220) -> str:
 def _unsafe_source_text(text: str) -> bool:
     low = str(text or "").lower()
     return any(marker in low for marker in _INJECTION_MARKERS)
+
+
+def _source_allowed(source) -> bool:
+    """Fail closed on sources already rejected or carrying a retraction signal."""
+    if source is None:
+        return False
+    if getattr(source, "retracted", None) is True:
+        return False
+    if str(getattr(source, "rejected_reason", "") or "").strip():
+        return False
+    return True
 
 
 def _reading_level(source) -> str:
@@ -105,10 +116,6 @@ def _score(sentence: str, source, question_terms: Sequence[str]) -> float:
     depth = {"full_text": 0.24, "abstract": 0.16, "snippet": 0.08}.get(level, 0.0)
     peer = 0.08 if getattr(source, "peer_reviewed", None) is True else 0.0
     penalty = 0.0
-    if getattr(source, "retracted", None) is True:
-        penalty += 1.2
-    if str(getattr(source, "rejected_reason", "") or "").strip():
-        penalty += 1.0
     if question_terms and overlap == 0 and rel < 0.45:
         penalty += 0.45
     return round(coverage * 1.7 + rel * 0.65 + quality * 0.35 + depth + peer - penalty, 6)
@@ -140,12 +147,13 @@ class OfflineEvidenceReasoner:
         for passage in list(getattr(pack, "passages", []) or []):
             sid = str(getattr(passage, "source_id", "") or "")
             text = str(getattr(passage, "text", "") or "")
-            if sid in source_map and text:
+            source = source_map.get(sid)
+            if _source_allowed(source) and text:
                 texts.append((sid, text))
         passage_sources = {sid for sid, _ in texts}
         for source in pack.sources or []:
             sid = str(getattr(source, "source_id", "") or "")
-            if not sid or sid in passage_sources:
+            if not sid or sid in passage_sources or not _source_allowed(source):
                 continue
             text = str(getattr(source, "snippet", "") or "")
             if text:
@@ -154,7 +162,7 @@ class OfflineEvidenceReasoner:
         rows: List[EvidenceSentence] = []
         for sid, text in texts:
             source = source_map.get(sid)
-            if source is None or _unsafe_source_text(text):
+            if not _source_allowed(source) or _unsafe_source_text(text):
                 continue
             level = _reading_level(source)
             if level == "metadata":
@@ -199,30 +207,34 @@ class OfflineEvidenceReasoner:
 
     @staticmethod
     def _strength(pack: EvidencePack) -> str:
-        total = len(pack.sources or [])
-        independent = int(getattr(pack, "independent_source_count", 0) or 0)
-        full = sum(1 for s in pack.sources or [] if _reading_level(s) == "full_text")
-        abstract = sum(1 for s in pack.sources or [] if _reading_level(s) == "abstract")
-        peer = sum(1 for s in pack.sources or [] if getattr(s, "peer_reviewed", None) is True)
+        allowed = [s for s in (pack.sources or []) if _source_allowed(s)]
+        total = len(allowed)
+        independent = len({getattr(s, "independence_key", "") for s in allowed})
+        full = sum(1 for s in allowed if _reading_level(s) == "full_text")
+        abstract = sum(1 for s in allowed if _reading_level(s) == "abstract")
+        peer = sum(1 for s in allowed if getattr(s, "peer_reviewed", None) is True)
         return (
-            f"Is fallback ke paas {total} retrieved source the; {independent} independent origin, "
-            f"{full}/{total} full-text level, {abstract}/{total} abstract level aur "
-            f"{peer}/{total} peer-reviewed signal wale the. Ye ginti evidence ki depth "
+            f"Is fallback ke paas {total} usable retrieved source the; {independent} independent origin, "
+            f"{full}/{max(1, total)} full-text level, {abstract}/{max(1, total)} abstract level aur "
+            f"{peer}/{max(1, total)} peer-reviewed signal wale the. Ye ginti evidence ki depth "
             "batati hai; apne aap kisi claim ko proven nahi banati."
         )
 
     @staticmethod
     def _unknowns(pack: EvidencePack) -> List[str]:
-        total = len(pack.sources or [])
-        full = sum(1 for s in pack.sources or [] if _reading_level(s) == "full_text")
-        independent = int(getattr(pack, "independent_source_count", 0) or 0)
+        allowed = [s for s in (pack.sources or []) if _source_allowed(s)]
+        total = len(allowed)
+        full = sum(1 for s in allowed if _reading_level(s) == "full_text")
+        independent = len({getattr(s, "independence_key", "") for s in allowed})
         rows: List[str] = []
+        if total == 0:
+            return ["Retrieved sources usable evidence gate pass nahi kar sake."]
         if full == 0:
-            rows.append("Kisi source ka full text available nahi tha, isliye method/result context kaafi had tak unknown hai.")
+            rows.append("Kisi usable source ka full text available nahi tha, isliye method/result context kaafi had tak unknown hai.")
         elif full < max(1, total // 3):
-            rows.append(f"Sirf {full}/{total} sources full-text level tak padhe gaye; baaki claims ki depth limited hai.")
+            rows.append(f"Sirf {full}/{total} usable sources full-text level tak padhe gaye; baaki claims ki depth limited hai.")
         if independent < 2:
-            rows.append("Independent sources bahut kam hain, isliye ek source ki galti ko cross-check karna mushkil hai.")
+            rows.append("Independent usable sources bahut kam hain, isliye ek source ki galti ko cross-check karna mushkil hai.")
         if not rows:
             rows.append("Model ke bina naya causal inference ya hypothesis invent nahi ki gayi; sirf retrieved evidence ka safe synthesis diya gaya hai.")
         return rows
@@ -245,8 +257,8 @@ class OfflineEvidenceReasoner:
         if not findings:
             return (
                 "## Seedha jawab\n"
-                "Sources retrieve hue, lekin unke available text se sawal ka direct, safe "
-                "answer extract nahi ho saka. Isliye guess nahi diya gaya.\n\n"
+                "Sources retrieve hue, lekin unke usable available text se sawal ka direct, "
+                "safe answer extract nahi ho saka. Isliye guess nahi diya gaya.\n\n"
                 "## Evidence kitna majboot hai\n"
                 + self._strength(pack)
                 + "\n\n## Final conclusion\n[UNKNOWN] Available source text direct conclusion ke liye enough nahi tha."
