@@ -186,17 +186,29 @@ class ArchiveManifest:
         return dict(item)
 
     def mark_upload_attempt(self, reference: str, *, error: str = "") -> None:
+        """Start/fail one upload attempt while keeping attempt accounting honest.
+
+        ``archive()`` marks the attempt *before* the network call so an older
+        VERIFIED flag cannot authorize cleanup while the remote object is being
+        replaced. If that same network call then fails, the second call with
+        ``error=...`` changes state to failed without counting a second attempt.
+        """
         with self._lock:
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
-            item["attempts"] = int(item.get("attempts", 0)) + 1
+            already_started = (
+                bool(error)
+                and item.get("status") == "uploaded_unverified"
+                and not str(item.get("last_error") or "")
+            )
+            if not already_started:
+                item["attempts"] = int(item.get("attempts", 0)) + 1
             item["status"] = "failed" if error else "uploaded_unverified"
             # A new upload can replace/alter the remote object. Even an archive
-            # record that was verified previously must become unverified until
-            # the post-upload stat/hash check succeeds again. Keeping
-            # status=uploaded_unverified with verified=True is internally
-            # contradictory and could mislead UI/cleanup code added later.
+            # record that was verified previously must become unverified before
+            # bytes are sent and stay unverified until post-upload stat/hash
+            # validation succeeds.
             item["verified"] = False
             item["last_error"] = str(error)[:1000]
             item["updated_at"] = int(time.time())
