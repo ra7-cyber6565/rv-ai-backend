@@ -59,23 +59,33 @@ def test_default_stage_plan_contains_real_release_gates():
     assert all_pytest == ["python", "-m", "pytest", "-q", "tests"]
 
     focused_command = next(command for name, command in plan if name == "focused_pytest")
-    assert "tests/test_reasoning_router.py" in focused_command
-    assert "tests/test_reasoning_router_integration.py" in focused_command
-    assert "tests/test_reasoning_zero_cost.py" in focused_command
-    assert "tests/test_provider_health.py" in focused_command
-    assert "tests/test_offline_reasoner.py" in focused_command
-    assert "tests/test_reasoning_status.py" in focused_command
-    assert "tests/test_quick_chat_resilience.py" in focused_command
-    assert "tests/test_gemini_diag_zero_call.py" in focused_command
-    assert "tests/test_quota_backup.py" in focused_command
-    assert "tests/test_provider_bypass_audit.py" in focused_command
-    assert "tests/test_architecture_audit.py" in focused_command
-    assert "tests/test_release_state.py" in focused_command
-    assert "tests/test_repo_hygiene.py" in focused_command
-    assert "tests/test_admin_guard.py" in focused_command
-    assert "tests/test_job_access.py" in focused_command
-    assert "tests/test_job_routes_access.py" in focused_command
-    assert "tests/test_foundation_gate_runner.py" in focused_command
+    for required in (
+        "tests/test_archive_runtime.py",
+        "tests/test_archive_integration.py",
+        "tests/test_archive_routes.py",
+        "tests/test_research_job_archive_retention.py",
+        "tests/test_api_input_bounds.py",
+        "tests/test_cors_private_headers.py",
+        "tests/test_web_job_capability.py",
+        "tests/test_reasoning_router.py",
+        "tests/test_reasoning_router_integration.py",
+        "tests/test_reasoning_zero_cost.py",
+        "tests/test_provider_health.py",
+        "tests/test_offline_reasoner.py",
+        "tests/test_reasoning_status.py",
+        "tests/test_quick_chat_resilience.py",
+        "tests/test_gemini_diag_zero_call.py",
+        "tests/test_quota_backup.py",
+        "tests/test_provider_bypass_audit.py",
+        "tests/test_architecture_audit.py",
+        "tests/test_release_state.py",
+        "tests/test_repo_hygiene.py",
+        "tests/test_admin_guard.py",
+        "tests/test_job_access.py",
+        "tests/test_job_routes_access.py",
+        "tests/test_foundation_gate_runner.py",
+    ):
+        assert required in focused_command
 
 
 def test_pytest_only_file_is_not_mistaken_for_script_harness(tmp_path):
