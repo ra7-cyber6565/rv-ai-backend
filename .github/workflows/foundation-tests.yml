@@ -66,6 +66,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_relevance_domain.py \
+            tests/test_domain_guardrails.py \
+            tests/test_domain_ambiguity.py \
             tests/test_pdf_chunking.py \
             tests/test_pdf_sparse_sampling.py \
             tests/test_consensus_gate.py \
@@ -74,8 +76,7 @@ jobs:
             tests/test_answer_structure.py \
             tests/test_claim_labels.py \
             tests/test_evidence_honesty.py \
-            tests/test_explain_style.py \
-            tests/test_domain_guardrails.py
+            tests/test_explain_style.py
 
       - name: Run claim evidence verification A-E
         run: |
