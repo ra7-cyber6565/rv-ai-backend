@@ -123,6 +123,12 @@ def configure_process_storage() -> dict[str, object]:
 
 
 def storage_status() -> dict[str, object]:
+    """Internal detailed storage status.
+
+    This deliberately includes the absolute root and diagnostic error text for
+    local logs/debugging. Do not expose this mapping directly from a public API;
+    use :func:`public_storage_status` instead.
+    """
     root, explicit = configured_root()
     status: dict[str, object] = {"root": root, "explicit": explicit, "available": False}
     try:
@@ -136,3 +142,33 @@ def storage_status() -> dict[str, object]:
     except Exception as exc:  # noqa: BLE001
         status["error"] = f"{type(exc).__name__}: {exc}"
     return status
+
+
+def public_storage_status(status: Mapping[str, object] | None = None) -> dict[str, object]:
+    """Return public-safe storage health without filesystem-path disclosure.
+
+    ``storage_status()`` is intentionally useful for local diagnostics and can
+    contain an absolute Windows/Linux path plus raw exception text. Public
+    ``/health``/``/api`` responses must not leak those details. This helper keeps
+    only aggregate capacity/readiness fields and replaces raw errors with a stable
+    coarse code.
+
+    ``status`` may be supplied by tests/callers to sanitize an already-collected
+    internal mapping without probing the disk again.
+    """
+    raw = dict(status) if status is not None else storage_status()
+    out: dict[str, object] = {
+        "available": bool(raw.get("available")),
+        "explicit_root_configured": bool(raw.get("explicit")),
+    }
+    total = raw.get("disk_total_bytes")
+    free = raw.get("disk_free_bytes")
+    if isinstance(total, int) and total >= 0:
+        out["disk_total_bytes"] = total
+    if isinstance(free, int) and free >= 0:
+        out["disk_free_bytes"] = free
+    if isinstance(total, int) and total > 0 and isinstance(free, int) and free >= 0:
+        out["disk_free_percent"] = round((free / total) * 100, 1)
+    if not out["available"]:
+        out["error"] = "storage_unavailable"
+    return out
