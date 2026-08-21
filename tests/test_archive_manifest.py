@@ -38,6 +38,27 @@ def test_matching_remote_size_allows_verified_state():
         assert manifest.safe_to_delete_local(item["archive_id"]) is True
 
 
+def test_new_upload_attempt_clears_previous_verified_state_until_rechecked(tmp_path):
+    local = tmp_path / "result.bin"
+    local.write_bytes(b"stable-result")
+    manifest = ArchiveManifest(str(tmp_path / "manifest.json"))
+    item = manifest.register(
+        str(local), remote_path="/results/result.bin", provider="google-drive-rclone"
+    )
+    manifest.mark_upload_attempt(item["archive_id"])
+    manifest.mark_verified(item["archive_id"], remote_size=local.stat().st_size)
+    assert manifest.safe_to_delete_local(item["archive_id"]) is True
+
+    # A fresh upload can replace the remote object. The old verification must
+    # not stay true while status says uploaded_unverified.
+    manifest.mark_upload_attempt(item["archive_id"])
+    refreshed = manifest.get(item["archive_id"])
+    assert refreshed is not None
+    assert refreshed["status"] == "uploaded_unverified"
+    assert refreshed["verified"] is False
+    assert manifest.safe_to_delete_local(item["archive_id"]) is False
+
+
 def test_wrong_remote_size_never_verifies():
     with tempfile.TemporaryDirectory() as root:
         local = os.path.join(root, "data.bin")
