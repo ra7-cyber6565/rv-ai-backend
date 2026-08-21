@@ -15,6 +15,7 @@ Package layout:
     citation.py               CitationEngine (Spec 7,14)
     contradiction.py          ContradictionEngine (Spec 8)
     gemini_reasoning.py       GeminiReasoning (Spec 9)
+    reasoning_router.py       quota-resilient ₹0 provider fallback facade
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -25,12 +26,26 @@ Package layout:
 Heavy modules lazily import so ``import research_engine`` remains cheap. A tiny
 pure-Python domain ambiguity guard is installed immediately because every later
 planner/relevance/connector caller must share the same domain decision.
+
+The reasoning router is also installed at package-import time, but performs NO
+network call then. It simply replaces the exported ``GeminiReasoning`` class
+with a backwards-compatible subclass. With no configured fallback provider it
+behaves exactly like Claude's Gemini implementation; with a confirmed/free
+fallback configured it can finish the same logical pass through Groq,
+OpenRouter-free or local Ollama instead of returning a quota error.
 """
 from __future__ import annotations
 
 # Install before planner/relevance/connectors bind domain.detect. This module is
 # pure Python and has no heavy dependency/network side effect.
 from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
+
+# Preserve Claude's Gemini implementation as the primary, but let every normal
+# import (including orchestrator's direct module import) see the resilient
+# subclass. reasoning_router captures the original class before this assignment.
+from . import gemini_reasoning as _gemini_reasoning
+from .reasoning_router import ResilientReasoning as _ResilientReasoning
+_gemini_reasoning.GeminiReasoning = _ResilientReasoning
 
 from .models import (
     Claim,
