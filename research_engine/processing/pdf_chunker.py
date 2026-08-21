@@ -1,22 +1,21 @@
 """
-§12 — badi PDF ko "unusable" nahi hone dena.
+§12 — badi PDF ko unusable na hone dena.
 
-Large documents are processed page-by-page with bounded memory.  A second
-important guard is *coverage*: when a PDF has more pages than the scan budget,
-we must not inspect only the first N pages.  That front-bias can silently miss a
-late methods/results chapter.  ``sample_page_indices`` therefore keeps the
-opening pages, the ending pages, and an evenly-spread sample across the whole
-PDF.  Selection still happens by relevance, and the report says honestly when
-only a sparse sample was inspected.
+Large documents are processed page-by-page with bounded memory. When the PDF is
+larger than the scan budget, candidate pages come from ``pdf_sampling`` so the
+budget spans beginning + middle + end instead of only the first N pages. This
+module then scores those inspected pages by relevance and keeps only bounded,
+citation-ready evidence chunks.
 
-This module stays pure-Python so the selection/sampling policy is deterministic,
-offline-testable and costs no model/API quota.
+Everything here remains deterministic/offline and consumes no model/API quota.
 """
 from __future__ import annotations
 
 import heapq
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List
+
+from .pdf_sampling import spread_page_indices
 
 DEFAULT_HEAD_PAGES = 3
 DEFAULT_TAIL_PAGES = 3
@@ -53,44 +52,13 @@ def sample_page_indices(
     head_pages: int = DEFAULT_HEAD_PAGES,
     tail_pages: int = DEFAULT_TAIL_PAGES,
 ) -> List[int]:
-    """Return sorted 0-based page indices spread across the whole document."""
-    total = max(0, int(page_count or 0))
-    limit = int(max_pages or 0)
-    if total <= 0:
-        return []
-    if limit <= 0 or limit >= total:
-        return list(range(total))
-
-    limit = max(1, min(limit, total))
-    picked = set()
-
-    head = min(max(0, int(head_pages or 0)), limit, total)
-    picked.update(range(head))
-
-    remaining = limit - len(picked)
-    tail = min(max(0, int(tail_pages or 0)), remaining, total - len(picked))
-    if tail:
-        picked.update(range(total - tail, total))
-
-    remaining = limit - len(picked)
-    interior_start = head
-    interior_end = max(interior_start, total - tail)
-    span = max(0, interior_end - interior_start)
-
-    if remaining > 0 and span > 0:
-        for i in range(remaining):
-            fraction = (i + 1) / (remaining + 1)
-            candidate = interior_start + int(round(fraction * max(0, span - 1)))
-            candidate = min(interior_end - 1, max(interior_start, candidate))
-            picked.add(candidate)
-
-    if len(picked) < limit:
-        for candidate in range(total):
-            picked.add(candidate)
-            if len(picked) >= limit:
-                break
-
-    return sorted(picked)[:limit]
+    """Compatibility wrapper around the canonical whole-document sampler."""
+    return spread_page_indices(
+        page_count,
+        max_pages,
+        head_pages=head_pages,
+        tail_pages=tail_pages,
+    )
 
 
 @dataclass
