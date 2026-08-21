@@ -135,7 +135,7 @@ QUESTION = "kya AI training data ka bias real-world discrimination badha sakta h
 
 
 # ── 1. planner ───────────────────────────────────────────────────────────────
-def test_planner():
+def _check_planner():
     section("1. ResearchPlanner (Spec 1)")
     planner = ResearchPlanner()
     cls = planner.classify(QUESTION)
@@ -178,7 +178,7 @@ def test_planner():
 
 
 # ── 2. dedup + relevance ─────────────────────────────────────────────────────
-def test_dedup_and_relevance():
+def _check_dedup_and_relevance():
     section("2. Dedup + Relevance (Spec 6, 7)")
     dedup = DeduplicationEngine()
     unique = dedup.deduplicate(sample_sources())
@@ -203,7 +203,7 @@ def test_dedup_and_relevance():
 
 
 # ── 3. evidence pack + citations ─────────────────────────────────────────────
-def test_evidence_and_citations():
+def _check_evidence_and_citations():
     section("3. EvidencePack + CitationEngine (Spec 7, 14)")
     evidence = EvidenceEngine()
     pack = evidence.build_pack(
@@ -288,7 +288,7 @@ def test_evidence_and_citations():
 
 
 # ── 4. contradictions ────────────────────────────────────────────────────────
-def test_contradictions(pack):
+def _check_contradictions(pack):
     section("4. ContradictionEngine (Spec 8)")
     engine = ContradictionEngine()
     found = engine.detect(pack)
@@ -322,7 +322,7 @@ def test_contradictions(pack):
 
 
 # ── 5. verification ──────────────────────────────────────────────────────────
-def test_verification(pack):
+def _check_verification(pack):
     section("5. VerificationEngine (Spec 11)")
     verifier = VerificationEngine()
 
@@ -350,7 +350,7 @@ def test_verification(pack):
 
 
 # ── 6. critic + hypothesis parsing ───────────────────────────────────────────
-def test_critic_and_hypothesis():
+def _check_critic_and_hypothesis():
     section("6. Critic + HypothesisEngine (Spec 9, 10)")
     critic_output = """## Weaknesses
 - Sample size chhota tha, sirf 12 deployments.
@@ -419,7 +419,7 @@ def test_critic_and_hypothesis():
 
 
 # ── 7. processing ────────────────────────────────────────────────────────────
-def test_processing():
+def _check_processing():
     section("7. Processing pipeline (Spec 4, 5)")
     temp_dir = tempfile.mkdtemp(prefix="ire_test_")
     try:
@@ -509,7 +509,7 @@ Iska matlab dataset composition important hai.
 
 
 # ── 8. research memory ───────────────────────────────────────────────────────
-def test_memory():
+def _check_memory():
     section("8. ResearchMemory (Spec 16)")
     temp_dir = tempfile.mkdtemp(prefix="ire_mem_")
     try:
@@ -574,7 +574,7 @@ def test_memory():
 
 
 # ── 9. synthesizer (Gemini ke bina) ──────────────────────────────────────────
-def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
+def _check_synthesizer(pack, contradictions, consensus, verification, hypotheses,
                      critique):
     section("9. FinalSynthesizer — Gemini fail hone par bhi (Spec 12, 13)")
     synthesizer = FinalSynthesizer()
@@ -710,7 +710,7 @@ def test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
 
 
 # ── 10. end-to-end (poori tarah hermetic — na network, na Gemini) ────────────
-def test_end_to_end():
+def _check_end_to_end():
     section("10. DeepResearchEngine end-to-end (hermetic degradation test)")
     temp_dir = tempfile.mkdtemp(prefix="ire_e2e_")
     os.environ["RESEARCH_MEMORY_DIR"] = temp_dir
@@ -806,7 +806,7 @@ def test_end_to_end():
 
 
 # ── 11. content fetcher (paywall rule + read levels) ─────────────────────────
-def test_content_fetcher():
+def _check_content_fetcher():
     """
     ContentFetcher ka sabse zaroori kaam SIRF text laana nahi hai — ye decide
     karna hai ki KAUNSA link kholna legal hai. Wo faisla `resolve()` mein hota
@@ -1045,7 +1045,7 @@ def test_content_fetcher():
 
 
 # ── 12. progress tracker ─────────────────────────────────────────────────────
-def test_progress_tracker():
+def _check_progress_tracker():
     section("12. Progress tracker (asli counts, banaya hua percentage NAHI)")
     from utils import progress_tracker as pt
 
@@ -1106,7 +1106,7 @@ def test_progress_tracker():
 
 
 # ── 13. source discovery — web tier ek CHAIN hai, parallel nahi ──────────────
-def test_discovery_chain():
+def _check_discovery_chain():
     section("13. SourceDiscovery web chain (Spec 2, 18 — free quota bachao)")
     from research_engine.source_discovery import SourceDiscovery
 
@@ -1210,7 +1210,7 @@ def test_discovery_chain():
 
 
 # ── 14. package surface — `from research_engine import *` toot na jaaye ──────
-def test_package_surface():
+def _check_package_surface():
     section("14. research_engine package surface (lazy import contract)")
     import ast
     from importlib import util as import_util
@@ -1342,7 +1342,7 @@ def _raises_attribute_error(module, name: str) -> bool:
 
 
 # ── 15. knowledge graph — hint layer, evidence layer NAHI ────────────────────
-def test_knowledge_graph():
+def _check_knowledge_graph():
     section("15. Knowledge graph (Spec 16 — hint hai, evidence nahi)")
     from knowledge import graph as kg
     from research_engine.knowledge_graph import KnowledgeGraphAdapter
@@ -1419,7 +1419,7 @@ def test_knowledge_graph():
 
 
 # ── 16. depth modes (Spec 13 — quota rails) ──────────────────────────────────
-def test_depth_modes():
+def _check_depth_modes():
     section("16. Depth modes (Spec 13 — 'Maximum' ka matlab unlimited NAHI)")
     from research_engine.depth import DEEP, MAXIMUM, QUICK, get_depth_config, quota_note
 
@@ -1531,7 +1531,7 @@ def test_depth_modes():
 
 
 # ── 17. connector query building + failure honesty (live bugs, offline pin) ───
-def test_connector_contracts():
+def _check_connector_contracts():
     section("17. Connector contracts (live bugs — ab bina network pin hue)")
     from research_engine import orchestrator as orch_module
     from research_engine import content_fetcher as cf_module
@@ -2241,7 +2241,7 @@ def test_connector_contracts():
 
 
 # ── 18. source quality signals (Spec 7 — methodology/retraction/COI) ─────────
-def test_quality_signals() -> None:
+def _check_quality_signals() -> None:
     section("18. Quality signals (Spec 7 — methodology, retraction, COI)")
 
     from research_engine import quality_signals as qs
@@ -2509,7 +2509,7 @@ def test_quality_signals() -> None:
           "retraction warning wiring nahi mili")
 
 
-def test_dataset_connectors():
+def _check_dataset_connectors():
     section("19. Dataset connectors (Spec §2 + §11) — offline, bina network")
     from research_engine.connectors.dataset_connector import (
         DataGovConnector, DataGovInConnector, DatasetConnector,
@@ -2782,7 +2782,7 @@ def test_dataset_connectors():
                               "datasets": ["nope"]}, 3, 5) == [], "")
 
 
-def test_speech_to_text():
+def _check_speech_to_text():
     section("20. Local speech-to-text (Spec §5) — offline, bina Whisper/network")
     from research_engine.processing import (SpeechToTextProcessor,
                                             TranscriptProcessor)
@@ -2896,7 +2896,7 @@ def test_speech_to_text():
           ".mp3" in routes_src and "AUDIO_SUPPORTED" in routes_src, "audio formats missing")
 
 
-def test_verification_dataset_stats():
+def _check_verification_dataset_stats():
     section("21. VerificationEngine dataset + statistics awareness (Spec 11)")
     verifier = VerificationEngine()
 
@@ -3047,7 +3047,7 @@ def test_verification_dataset_stats():
           in audit, audit[-600:])
 
 
-def test_live_round2_fixes():
+def _check_live_round2_fixes():
     """
     Doosre LIVE run (2026-08-17) ne 5 asli bug nikale. Ye section unhe bina
     network ke pin karti hai, taaki dobara na aa sakein:
@@ -3477,29 +3477,29 @@ def test_live_round2_fixes():
 def main() -> int:
     print("INFINITY RESEARCH AI — offline engine test (0 Gemini calls)")
     try:
-        test_planner()
-        test_dedup_and_relevance()
-        pack, answer_text = test_evidence_and_citations()
-        contradictions, consensus = test_contradictions(pack)
-        verification = test_verification(pack)
-        hypotheses, critique = test_critic_and_hypothesis()
-        test_processing()
-        test_memory()
-        test_synthesizer(pack, contradictions, consensus, verification, hypotheses,
-                         critique)
-        test_end_to_end()
-        test_content_fetcher()
-        test_progress_tracker()
-        test_discovery_chain()
-        test_package_surface()
-        test_knowledge_graph()
-        test_depth_modes()
-        test_connector_contracts()
-        test_quality_signals()
-        test_dataset_connectors()
-        test_speech_to_text()
-        test_verification_dataset_stats()
-        test_live_round2_fixes()
+        _check_planner()
+        _check_dedup_and_relevance()
+        pack, answer_text = _check_evidence_and_citations()
+        contradictions, consensus = _check_contradictions(pack)
+        verification = _check_verification(pack)
+        hypotheses, critique = _check_critic_and_hypothesis()
+        _check_processing()
+        _check_memory()
+        _check_synthesizer(pack, contradictions, consensus, verification,
+                           hypotheses, critique)
+        _check_end_to_end()
+        _check_content_fetcher()
+        _check_progress_tracker()
+        _check_discovery_chain()
+        _check_package_surface()
+        _check_knowledge_graph()
+        _check_depth_modes()
+        _check_connector_contracts()
+        _check_quality_signals()
+        _check_dataset_connectors()
+        _check_speech_to_text()
+        _check_verification_dataset_stats()
+        _check_live_round2_fixes()
     except Exception:
         print("\n!!! SUITE CRASH:")
         traceback.print_exc()
@@ -3510,6 +3510,31 @@ def main() -> int:
     for name, detail in FAILED:
         print(f"  FAILED → {name}: {detail}")
     return 1 if FAILED else 0
+
+
+def test_research_engine_all_checks_pass():
+    """
+    pytest ke liye ek hi entry point (2026-08-21).
+
+    Pehle is file ke saare stage function `test_` se shuru hote the, isliye
+    pytest unhe alag-alag test samajh kar khud chalata tha. Uska nateeja:
+
+      * `test_contradictions(pack)`, `test_verification(pack)`,
+        `test_synthesizer(pack, ...)` — inhe agle stage ka data chahiye tha,
+        par pytest ne unhe FIXTURE naam samajh liya → "fixture 'pack' not
+        found", 3 ERROR (intel ke Windows run mein aaj yahi dikha).
+      * `test_evidence_and_citations` / `test_critic_and_hypothesis` value
+        return karte the → PytestReturnNotNoneWarning, jo future pytest mein
+        error ban jaata hai.
+      * Baaki stage bina kram ke, main() ke bahar chal rahe the — yaani jo
+        cheez CI (`python test_research_engine.py`) chalati hai aur jo pytest
+        chalata tha, wo ek jaisi nahi thi.
+
+    Isliye saare stage ka naam `_check_*` kar diya gaya (sirf naam badla,
+    andar ka ek bhi check nahi) aur pytest ab wahi `main()` chalata hai jo CI
+    chalati hai — same kram, same 593 check, ek hi nateeja.
+    """
+    assert main() == 0
 
 
 if __name__ == "__main__":

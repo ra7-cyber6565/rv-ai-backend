@@ -172,7 +172,7 @@ evidence, na-kaafi evidence, retracted metadata, model-dead) aur har domain par
 | galat conversion par khadi comparison pakdo | Claude | done | `research_engine/physics_checks.py` | (is batch mein) |
 | hypothesis cap evidence gate ki izzat kare | Claude | done | `research_engine/hypothesis.py` | (is batch mein) |
 | lone-keyword trap rejection (`Bearing witness` type) | Claude | done | `research_engine/relevance.py` | (is batch mein) |
-| pytest bhi wahi test chalaye jo script chalati hai | Claude | done | `tests/test_pdf_chunking.py`, `tests/test_answer_structure.py`, `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py` | (is batch mein) |
+| pytest bhi wahi test chalaye jo script chalati hai | Claude | done | `tests/test_pdf_chunking.py`, `tests/test_answer_structure.py`, `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py`, `test_research_engine.py` | (is batch mein) |
 
 Chalane ka tareeka: `python3 tests/benchmark_cross_domain.py` (poora offline —
 network nahi, API key nahi, paisa nahi). Aakhir mein per-domain scorecard
@@ -227,7 +227,18 @@ Benchmark ne 5 asli bug pakde (test aasan karke nahi, code theek karke gaye):
   (ye pytest mein **collection error** de rahi thi, kyunki module level par
   `sys.exit()` tha), `tests/test_answer_structure.py`,
   `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py`. Script wala
-  purana tareeka bilkul waisa hi chalta hai. **Baaki gap ChatGPT ka hai:** wo
+  purana tareeka bilkul waisa hi chalta hai. Aur 2026-08-21 ko hi
+  `test_research_engine.py` ke 22 stage function ka naam `test_*` se `_check_*`
+  kar diya gaya (sirf naam — andar ka ek bhi check nahi badla) + ek hi
+  module-level entry `test_research_engine_all_checks_pass()` jo `main()`
+  chalata hai. Wajah intel ke asli pytest run se aayi: `pytest -q tests/
+  test_research_engine.py` → **212 passed, 3 errors** — teen stage
+  (`_check_contradictions`, `_check_verification`, `_check_synthesizer`) agle
+  stage ka `pack` argument lete hain, aur pytest ne usko fixture samajh liya
+  ("fixture 'pack' not found"); do stage value return karte the → future
+  pytest mein error banne wali `PytestReturnNotNoneWarning`. Ab pytest wahi
+  ek run karta hai jo CI (`python test_research_engine.py`) karti hai —
+  same kram, same 593 check. **Baaki gap ChatGPT ka hai:** wo
   workflow 20+ aisi test files reference karta hai jo `main` par maujood hi nahi
   (`tests/test_upload_safety.py`, `tests/test_evidence_verification.py`,
   `tests/test_domain_guardrails.py`, `tests/test_presentation_guard.py`,
@@ -241,10 +252,13 @@ Benchmark ne 5 asli bug pakde (test aasan karke nahi, code theek karke gaye):
   Iski jagah ek pytest-jaisa collector chalaya gaya jo har test file se
   module-level `test_*` functions collect karke chalata hai: **collected=219,
   pass=216, fail=0, error=0, skip=3** (3 skip = `test_research_engine.py` ke wo
-  helper jo argument lete hain — asli pytest unhe "fixture not found" kahegi, par
-  CI us file ko script ki tarah chalati hai, `pytest` se nahi). Asli `pytest -q`
-  intel ke Windows par chalna baaki hai — usse pehle "pytest green hai" nahi
-  kaha ja sakta.
+  helper jo argument lete hain). Asli `pytest 8.3.4` intel ke Windows par chala
+  (2026-08-21): pehle 4 nayi wrapper suites → **4 passed**; poori `pytest -q
+  tests/ test_research_engine.py` → **212 passed, 3 errors** (wahi 3 fixture
+  wale, upar likhe gaye). Un 3 ko theek karne ke baad `test_research_engine.py`
+  se pytest 19 ke bajaye 1 test collect karega, isliye agla run
+  **~194 passed, 0 errors** hona chahiye — ye ginti intel ke run se confirm
+  hona baaki hai.
 - **§8 ke liye ChatGPT-owned `synthesizer.py` JAAN-BOOJH KAR NAHI chhua.**
   `key_switches` / `active_key` ko audit block mein alag row banane ke liye
   `_api_accounting_block()` badalna padta — wo file ChatGPT ki hai, isliye rok
