@@ -14,6 +14,7 @@ The default mode is deliberately strict:
 - runs targeted infrastructure/integration pytest gates;
 - runs the legacy/core regression;
 - executes every standalone ``tests/test_*.py`` file;
+- runs a production-wiring/static architecture audit;
 - executes the offline superconductivity Benchmark V2;
 - continues after failures so the final receipt shows *all* broken stages;
 - exits non-zero if any stage failed/timed out/could not start.
@@ -57,6 +58,9 @@ FOCUSED_PYTEST = (
     "tests/test_reasoning_zero_cost.py",
     "tests/test_reasoning_router.py",
     "tests/test_reasoning_router_integration.py",
+    "tests/test_offline_reasoner.py",
+    "tests/test_reasoning_status.py",
+    "tests/test_architecture_audit.py",
     "tests/test_security_config.py",
     "tests/test_request_guard.py",
     "tests/test_research_jobs.py",
@@ -247,6 +251,13 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
         rel = path.relative_to(REPO_ROOT).as_posix()
         plan.append((f"standalone:{rel}", [python, rel]))
 
+    architecture = REPO_ROOT / "scripts" / "audit_architecture.py"
+    if architecture.is_file():
+        plan.append((
+            "architecture_audit",
+            [python, architecture.relative_to(REPO_ROOT).as_posix()],
+        ))
+
     benchmark = REPO_ROOT / "tests" / "benchmark_superconductivity.py"
     if benchmark.is_file():
         plan.append(("benchmark_superconductivity_v2", [python, benchmark.relative_to(REPO_ROOT).as_posix()]))
@@ -268,7 +279,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--quick",
         action="store_true",
-        help="Run compile + focused pytest + core regression + benchmark only.",
+        help="Run compile + focused pytest + core regression + architecture audit + benchmark only.",
     )
     args = parser.parse_args(argv)
 
@@ -278,7 +289,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.quick:
         plan = [
             item for item in plan
-            if item[0] in {"compileall", "focused_pytest", "core_regression", "benchmark_superconductivity_v2"}
+            if item[0] in {
+                "compileall",
+                "focused_pytest",
+                "core_regression",
+                "architecture_audit",
+                "benchmark_superconductivity_v2",
+            }
         ]
 
     stages: list[StageResult] = []
@@ -297,8 +314,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         for name in receipt.failed_stages:
             print(f"  - {name}")
     print(f"Receipt: {receipt_path}")
-    print("NOTE: Offline PASS alone is not a 100/100 production sign-off; the live")
-    print("zero-cost benchmark and final architecture audit are separate required gates.")
+    print("NOTE: Offline PASS includes static architecture wiring, but it still is")
+    print("not a 100/100 production sign-off; live zero-cost benchmark/use remains a")
+    print("separate required gate.")
     print("=" * 72)
     return 0 if receipt.passed else 1
 
