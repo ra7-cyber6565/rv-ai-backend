@@ -11,15 +11,16 @@ load_dotenv()
 from utils.storage_paths import configure_process_storage, storage_status
 STORAGE_STATUS = configure_process_storage()
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
 from knowledge.routes import router as knowledge_router
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
+from utils.request_guard import client_key, enabled as rate_limit_enabled, limit_for, limiter
 
 # Project policy: zero-cost mode is ON by default. If a known paid-provider
 # credential is accidentally configured, fail at startup instead of risking a bill.
@@ -42,6 +43,32 @@ app.add_middleware(
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
 )
+
+
+@app.middleware("http")
+async def protect_free_quota(request: Request, call_next):
+    """Bound expensive POST endpoints so a public deployment cannot burn free quota.
+
+    This limiter is process-local and intentionally modest. It adds no paid
+    infrastructure and can be disabled with RATE_LIMIT_ENABLED=false for local
+    development. Proxy headers are trusted only when TRUST_PROXY_HEADERS=true.
+    """
+    if rate_limit_enabled():
+        limit = limit_for(request.method, request.url.path)
+        if limit is not None:
+            allowed, retry_after = limiter.check(
+                client_key(request), request.url.path, limit
+            )
+            if not allowed:
+                return JSONResponse(
+                    status_code=429,
+                    content={
+                        "detail": "Free quota protection: bahut requests aa gayi hain. Thodi der baad dobara try karein.",
+                        "retry_after_seconds": retry_after,
+                    },
+                    headers={"Retry-After": str(retry_after)},
+                )
+    return await call_next(request)
 
 # RAG routes — upload & basic Q&A
 app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
@@ -84,6 +111,7 @@ def api_info():
         "docs": "/docs",
         "website": "/",
         "zero_cost_only": ZERO_COST_STATUS.enabled,
+        "rate_limit_enabled": rate_limit_enabled(),
         "cors_origins": CORS_ORIGINS,
         "storage": storage_status(),
         "endpoint_count": len(endpoints),
@@ -100,5 +128,6 @@ def health_check():
         "service": "RV AI Backend",
         "version": app.version,
         "zero_cost_only": ZERO_COST_STATUS.enabled,
+        "rate_limit_enabled": rate_limit_enabled(),
         "storage": current_storage,
     }
