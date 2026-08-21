@@ -63,7 +63,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY/RECOVERY DESIGN | No homemade/insecure crypto and no unrecoverable-key design |
 | Secondary compact metadata backup | ChatGPT | PLANNED | Only after a genuinely free private destination is selected |
 | Patents connector | ChatGPT | PENDING OFFICIAL-AUTH DESIGN | No unofficial scraping. Add only through an official zero-cost route |
-| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 strict default gate passed all 31 stages: 397 focused pytest, 581 full pytest, 593 core checks, every explicit script harness, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
+| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 strict default gate passed all 31 stages: 399 focused pytest, 583 full pytest, 593 core checks, every explicit script harness, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
 | Final architecture/integration audit | ChatGPT | OFFLINE PASS / LIVE GATE PENDING | Static architecture and provider/source-boundary audits pass; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
 | Advanced Scientific Discovery Engine | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED | Structured discovery field includes all 16 planned layers; arbitrary code, automatic real experiments, global-novelty claims and success-probability claims are fail-closed |
 | Live ₹0 release runner | ChatGPT | CODE COMPLETE / CREDENTIALS PENDING | No-call preflight is default; real run requires `--execute`, explicit D-root and a currently usable confirmed/free model layer; receipt contains no answer/source text/credentials |
@@ -71,8 +71,8 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 ## Latest independent offline validation — 2026-08-21
 
 - Strict default `scripts/run_foundation_gate.py` execution: **PASS, 31/31 stages**.
-- Focused release pytest: **397 passed**.
-- Full `pytest -q tests`: **581 passed**; root wrapper-inclusive collection separately passed **582/582**.
+- Focused release pytest: **399 passed**.
+- Full `pytest -q tests`: **583 passed**; the strict gate also executed the separate 593-check core regression harness.
 - Ordered core regression: **593 passed, 0 failed**.
 - Cross-domain adversarial benchmark: **633 passed, 0 failed** across eight domains.
 - Superconductivity Benchmark V2: **146 passed, 0 failed**.
@@ -100,6 +100,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 17. Direct script-harness stages lost repository imports when the caller supplied a dependency-only `PYTHONPATH`. The strict runner now prepends the repository root and the default 31-stage gate executes every intended harness successfully.
 18. The advanced-discovery roadmap existed only as an aspirational checklist. Added one deterministic, network-free production layer covering all 16 planned stages and wired its bounded result into every research response without extra model calls.
 19. Final live verification had no safe one-command boundary. Added a no-call-by-default runner that refuses unconfirmed/non-free model configuration, requires an explicit runtime root and writes only a non-secret summary receipt after an explicitly requested live run.
+20. QUICK chat ran its evidence fallback synchronously for up to the 45-second discovery budget, so a proxy/browser timeout could repeatedly replace ongoing work with one generic server-error sentence. Model failure now promotes to the capability-protected durable QUICK job path, while transport/session failures show bounded actionable reasons and preserve the question for retry.
 
 ## Required gates before foundation can be called reliable
 

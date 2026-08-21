@@ -71,47 +71,44 @@ def deep_research(
     )
 
 
-def _safe_research_chat_fallback(request: ChatRequest) -> Dict:
-    """Last route-level fallback after every configured chat model fails.
+def _async_research_chat_fallback(reason: object = "") -> Dict:
+    """Tell capable clients to recover through the durable QUICK job route.
 
-    QUICK research can still search/read public evidence and ultimately use the
-    deterministic evidence reasoner, so a hosted-model quota outage does not turn
-    the chat endpoint into an HTTP/provider error. Unexpected research-engine
-    exceptions are converted to one safe degraded response; raw exception text is
-    never returned to the client.
+    Running evidence research synchronously inside ``/chat`` used the QUICK
+    discovery budget (up to 45 seconds) and could cross a hosting/proxy request
+    timeout.  The browser then replaced the still-running work with the same
+    generic "server se baat nahi" line on every attempt.  Research jobs already
+    provide bounded concurrency, progress, capability protection and durable
+    results, so the client should use that path instead of duplicating it here.
+
+    The response is also useful to older clients: it contains a human-readable
+    action and no provider exception.  ``reason`` is reduced to a small enum so
+    raw SDK/server text can never cross this boundary.
     """
-    try:
-        result = manager.research(
-            question=request.message,
-            project_id=request.project_id,
-            depth_mode="QUICK",
-            job_id=request.project_id,
-        )
-        if not isinstance(result, dict):
-            raise RuntimeError("research result was not a mapping")
-        answer = str(result.get("answer") or "").strip()
-        if not answer:
-            raise RuntimeError("research result had no answer")
-        result["ok"] = True
-        result["degraded"] = True
-        result["mode"] = result.get("mode") or "QUICK"
-        result["chat_fallback"] = "quick_evidence_research"
-        return result
-    except Exception:
-        return {
-            "answer": (
-                "Is sawal ka reliable jawab is run mein establish nahi ho saka. "
-                "Koi raw provider/server error dikhane ya guess karne ke bajay app ne "
-                "safe fallback use kiya. Deep/Maximum mode ya uploaded source ke saath "
-                "dobara chalane par zyada evidence mil sakta hai."
-            ),
-            "mode": "QUICK",
-            "ok": True,
-            "degraded": True,
-            "chat_fallback": "safe_local_failure_message",
-            "evidence_level": "UNKNOWN",
-            "sources": [],
-        }
+    allowed = {
+        "no_model_layer_configured",
+        "all_configured_model_layers_unavailable",
+    }
+    safe_reason = str(reason or "").strip()
+    if safe_reason not in allowed:
+        safe_reason = "model_layer_unavailable"
+    return {
+        "answer": (
+            "Chat model se jawab nahi mila, isliye source-based QUICK research "
+            "background job mein chalani hogi. Official web app ise automatically "
+            "start karegi aur yahin progress dikhayegi."
+        ),
+        "mode": "QUICK",
+        "ok": True,
+        "degraded": True,
+        "fallback_required": True,
+        "start_research_job": True,
+        "research_depth_mode": "QUICK",
+        "chat_fallback": "async_quick_evidence_research",
+        "reason": safe_reason,
+        "evidence_level": "PENDING",
+        "sources": [],
+    }
 
 
 @router.post("/chat")
@@ -126,7 +123,7 @@ def chat(
     result = quick_chat(request.message, request.history)
     if not result.get("fallback_required"):
         return result
-    return _safe_research_chat_fallback(request)
+    return _async_research_chat_fallback(result.get("reason"))
 
 
 @router.get("/chat/diag")

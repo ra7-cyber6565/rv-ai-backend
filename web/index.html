@@ -59,7 +59,17 @@ function row(role){const w=$("#welcome");if(w)w.remove();const el=document.creat
 function thinking(el){el.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';}
 function answer(el,text){el.innerHTML=htmlText(text);down();}
 function note(el,text){const n=document.createElement("div");n.className="note";n.textContent=text;el.appendChild(n);}
-function friendly(el,text="Abhi server se baat nahi ho paayi. Thodi der baad phir try karo."){answer(el,IS_FILE?"Ye page file se khula hai. Backend server ke URL se page kholo, tab research chalegi.":text);}
+function friendly(el,text){answer(el,IS_FILE?"Ye page file se khula hai. Backend server ke URL se page kholo, tab research chalegi.":(text||"Request safely complete nahi hui."));}
+function clientFailure(status,data,area="Request"){
+  const code=Number(status||0),rawWait=Number(data?.retry_after_seconds||0),wait=rawWait>0?Math.max(1,Math.min(3600,rawWait)):0;
+  if(code===429)return wait?area+" limit abhi busy hai. "+wait+" second baad retry karo.":area+" limit abhi busy hai; thoda ruk kar retry karo.";
+  if(code===503)return "Backend ka private session/research layer ready nahi hai. Backend configuration aur writable data root check karna hoga.";
+  if(code===401||code===403||code===404)return "Private session valid nahi rahi. Page refresh karke question dobara bhejo.";
+  if(code>=500)return "Backend ne "+area.toLowerCase()+" complete nahi ki. Question input mein wapas rakh diya hai; backend health check ke baad retry karo.";
+  if(!code)return "Backend tak network connection nahi ban paaya. Question input mein wapas rakh diya hai; backend chal raha ho to retry karo.";
+  return area+" complete nahi hui (HTTP "+code+"). Question input mein wapas rakh diya hai.";
+}
+function restoreQuestion(message){if(!input.value.trim()){input.value=message;resize();}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 async function jsonFetch(url,opts){const r=await fetch(url,opts);let data={};try{data=await r.json();}catch(_){data={};}return {r,data};}
 
@@ -90,32 +100,32 @@ async function projectPost(url,makePayload){
   throw new Error("project session recovery failed");
 }
 
-async function runChat(message,el){thinking(el);try{const {r,data}=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}));if(!r.ok)throw new Error("chat failed");const text=data.answer||"Is baar jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});}catch(e){friendly(el);}}
+async function runChat(message,el){thinking(el);try{const {r,data}=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}));if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat"));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
 
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
 
-async function runResearch(question,el){const ui=progressPanel(el);let jobId="",jobToken="";try{
-  const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:mode}));
-  if(!start.r.ok||!start.data.job_id||!start.data.job_access_token)throw new Error("job start failed");
+async function runResearch(question,el,requestedMode=mode){const ui=progressPanel(el);let jobId="",jobToken="";try{
+  const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
+  if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
-    if(!status.r.ok)throw new Error("job status lost");
+    if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
     const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
     if(prog.r.ok)paintProgress(ui,prog.data.progress);
     if(status.data.status==="completed")break;
-    if(status.data.status==="failed")throw new Error("research failed");
+    if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
     await sleep(1200);
   }
   const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
-  if(!res.r.ok)throw new Error("result unavailable");renderResearch(el,res.data);
-}catch(e){friendly(el,"Research complete nahi ho paayi. Jo kaam hua tha uska progress server par ho sakta hai; dubara try kar sakte ho.");}}
+  if(!res.r.ok){friendly(el,clientFailure(res.r.status,res.data,"Research result"));restoreQuestion(question);return false;}renderResearch(el,res.data);return true;
+}catch(e){friendly(el,clientFailure(0,{},"Research"));restoreQuestion(question);return false;}}
 
 function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),href=safeHttpUrl(s.url),url=href?esc(href):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
 
-async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");if(mode==="QUICK")await runChat(message,r);else await runResearch(message,r);busy=false;send.disabled=false;input.focus();}
+async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");const completed=mode==="QUICK"?await runChat(message,r):await runResearch(message,r);if(!completed&&history.length&&history[history.length-1]?.role==="user")history.pop();busy=false;send.disabled=false;input.focus();}
 function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);
 document.querySelectorAll(".modes button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.mode;$("#hint").textContent=HINT[mode];}));document.addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){input.value=c.dataset.q;resize();submit();}});
 if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");}

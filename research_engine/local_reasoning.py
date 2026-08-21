@@ -462,22 +462,25 @@ _QUICK_LEAD = (
      "My AI model had hit its free limit, so I read this straight from free "
      "sources instead:"),
     ("Abhi mera AI model thoda saans le raha hai (free limit khatam ho gayi thi) "
-     "aur is waqt mujhe koi bharosemand source bhi nahi mila. Thodi der baad "
-     "yahi sawal phir poochho — main yahin hoon 🙂 Aur agar jaldi chahiye to "
-     "Deep/Max mode try karo, wahan main sources padh kar jawab banata hoon.",
+     "aur is QUICK run mein koi bharosemand source bhi nahi mila. Main guess karke "
+     "jawab nahi de raha. Isi sawal ko Deep/Max mode mein bhejo; background research "
+     "source dhoondhte waqt normal page-request timeout par depend nahi karegi.",
      "अभी मेरा AI model थोड़ा साँस ले रहा है (free limit ख़त्म हो गई थी) और इस वक़्त "
-     "कोई भरोसेमंद source भी नहीं मिला। थोड़ी देर बाद यही सवाल फिर पूछो — मैं यहीं हूँ 🙂",
+     "कोई भरोसेमंद source भी नहीं मिला। मैं अनुमान से उत्तर नहीं दूँगा। इसी सवाल को "
+     "Deep/Max mode में भेजें, जहाँ background research चलेगी।",
      "My AI model is catching its breath (free limit reached) and I could not "
-     "find a reliable source right now. Ask me again in a little while — I am "
-     "right here. Deep/Max mode also reads sources directly."),
+     "find a reliable source in this QUICK run. I will not guess. Send the same "
+     "question through Deep/Max so background research can gather evidence."),
     # teesra roop — jab key hi set nahi hai (quota ki baat karna jhooth hota)
     ("Abhi mera AI model connect nahi hai (server par uski key set nahi hai), "
-     "aur is waqt koi bharosemand source bhi nahi mila. Thodi der baad phir "
-     "poochho — main yahin hoon 🙂",
+     "aur is QUICK run mein koi bharosemand source bhi nahi mila. Main guess nahi "
+     "karunga; isi sawal ko Deep/Max background research mein bhejo.",
      "अभी मेरा AI model connect नहीं है (server पर उसकी key सेट नहीं है), और इस वक़्त "
-     "कोई भरोसेमंद source भी नहीं मिला। थोड़ी देर बाद फिर पूछो — मैं यहीं हूँ 🙂",
+     "कोई भरोसेमंद source भी नहीं मिला। अनुमान लगाने के बजाय इसी सवाल को Deep/Max "
+     "background research में भेजें।",
      "My AI model is not connected right now (its key is not set on the server) "
-     "and I could not find a reliable source either. Please ask again shortly."),
+     "and I could not find a reliable source in this QUICK run. Rather than guess, "
+     "send the same question through Deep/Max background research."),
 )
 
 

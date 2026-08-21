@@ -118,3 +118,28 @@ def test_poll_token_is_function_local_not_global():
 
     assert 'let jobId="",jobToken=""' in run_body
     assert "jobToken=" not in before
+
+
+def test_failed_quick_chat_recovers_through_async_quick_job():
+    text = _text()
+    chat_start = text.index("async function runChat")
+    chat_end = text.index("function progressPanel", chat_start)
+    chat = text[chat_start:chat_end]
+    research_start = text.index("async function runResearch")
+    research_end = text.index("function renderResearch", research_start)
+    research = text[research_start:research_end]
+
+    assert "data.start_research_job===true" in chat
+    assert 'runResearch(message,el,"QUICK")' in chat
+    assert "requestedMode=mode" in research
+    assert "depth_mode:requestedMode" in research
+    assert "Abhi server se baat nahi ho paayi" not in text
+
+
+def test_web_failure_message_is_actionable_and_preserves_question():
+    text = _text()
+    assert "function clientFailure(" in text
+    assert "code===429" in text
+    assert "code===503" in text
+    assert "restoreQuestion(message)" in text
+    assert "restoreQuestion(question)" in text

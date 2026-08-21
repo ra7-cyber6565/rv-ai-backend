@@ -125,7 +125,7 @@ def test_chat_diag_is_read_only_status(monkeypatch):
     assert "key_length" not in result
 
 
-def test_route_uses_quick_research_when_chat_models_all_fail(monkeypatch):
+def test_route_moves_failed_chat_to_async_quick_research(monkeypatch):
     from api import agent_routes
     import research_engine.chat as quick_module
 
@@ -138,27 +138,28 @@ def test_route_uses_quick_research_when_chat_models_all_fail(monkeypatch):
             "reason": "all_configured_model_layers_unavailable",
         },
     )
-    monkeypatch.setattr(
-        agent_routes.manager,
-        "research",
-        lambda **kwargs: {
-            "question": kwargs["question"],
-            "answer": "retrieved evidence answer [S1]",
-            "sources": [{"source_id": "S1"}],
-            "evidence_level": "MODERATE",
-            "mode": "QUICK",
-        },
-    )
+    sync_calls = {"n": 0}
+
+    def forbidden_sync_research(**kwargs):  # noqa: ARG001
+        sync_calls["n"] += 1
+        raise AssertionError("chat route must not run long research synchronously")
+
+    monkeypatch.setattr(agent_routes.manager, "research", forbidden_sync_research)
     project = "p_" + "a" * 24
     request = agent_routes.ChatRequest(message="hard factual question", project_id=project)
     result = agent_routes.chat(request, "project-token")
     assert result["ok"] is True
     assert result["degraded"] is True
-    assert result["chat_fallback"] == "quick_evidence_research"
-    assert result["answer"] == "retrieved evidence answer [S1]"
+    assert result["fallback_required"] is True
+    assert result["start_research_job"] is True
+    assert result["research_depth_mode"] == "QUICK"
+    assert result["chat_fallback"] == "async_quick_evidence_research"
+    assert result["reason"] == "all_configured_model_layers_unavailable"
+    assert sync_calls["n"] == 0
+    assert "background job" in result["answer"]
 
 
-def test_route_never_leaks_research_exception(monkeypatch):
+def test_route_never_leaks_unknown_fallback_reason(monkeypatch):
     from api import agent_routes
     import research_engine.chat as quick_module
 
@@ -166,18 +167,19 @@ def test_route_never_leaks_research_exception(monkeypatch):
     monkeypatch.setattr(
         quick_module,
         "quick_chat",
-        lambda message, history=None: {"fallback_required": True, "ok": False},
+        lambda message, history=None: {
+            "fallback_required": True,
+            "ok": False,
+            "reason": "SECRET SDK traceback protobuf 429",
+        },
     )
-
-    def explode(**kwargs):  # noqa: ARG001
-        raise RuntimeError("SECRET SDK traceback protobuf 429")
-
-    monkeypatch.setattr(agent_routes.manager, "research", explode)
     project = "p_" + "b" * 24
     request = agent_routes.ChatRequest(message="question", project_id=project)
     result = agent_routes.chat(request, "project-token")
     assert result["ok"] is True
     assert result["degraded"] is True
+    assert result["start_research_job"] is True
+    assert result["reason"] == "model_layer_unavailable"
     text = str(result)
     for raw in ("SECRET", "traceback", "protobuf", "429"):
         assert raw.lower() not in text.lower()
