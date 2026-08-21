@@ -1,14 +1,16 @@
 """Read-only, non-secret reasoning resilience status.
 
 No provider is contacted here. This only reports whether each configured layer is
-eligible under the ₹0 policy. It is safe for /health and /api responses because
-API keys/tokens are never returned.
+eligible under the ₹0 policy plus coarse process-local cooldown state learned
+from real requests. API keys/tokens, prompts and provider response bodies are
+never returned.
 """
 from __future__ import annotations
 
 import os
 from urllib.parse import urlparse
 
+from utils.provider_health import provider_health
 from utils.zero_cost_guard import gemini_credentials_configured
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -60,23 +62,41 @@ def reasoning_status(env=None) -> dict:
         source.get("REASONING_FALLBACK_CHAIN", "groq,openrouter,ollama")
     ).split(",") if item.strip()]
 
+    cooldowns = provider_health.snapshot()
+
+    def _layer(configured: bool, kind: str, provider: str, **extra) -> dict:
+        health = cooldowns.get(provider, {})
+        return {
+            "configured": configured,
+            "kind": kind,
+            "temporarily_skipped": bool(health.get("cooldown_active")),
+            "cooldown_reason": str(health.get("reason") or ""),
+            "cooldown_seconds_remaining": int(health.get("cooldown_seconds_remaining") or 0),
+            **extra,
+        }
+
     layers = {
-        "gemini_primary": {"configured": gemini_ready, "kind": "cloud"},
-        "groq_backup": {"configured": groq_ready, "kind": "cloud"},
-        "openrouter_free_backup": {
-            "configured": openrouter_ready,
-            "kind": "cloud",
-            "model": openrouter_model if _openrouter_free(openrouter_model) else "blocked_nonfree",
-        },
-        "ollama_local_backup": {
-            "configured": ollama_ready,
-            "kind": "local",
-            "model": str(source.get("OLLAMA_MODEL", "qwen3:4b")).strip() or "qwen3:4b",
-            "localhost_only": zero_cost,
-        },
+        "gemini_primary": _layer(gemini_ready, "cloud", "gemini"),
+        "groq_backup": _layer(groq_ready, "cloud", "groq"),
+        "openrouter_free_backup": _layer(
+            openrouter_ready,
+            "cloud",
+            "openrouter",
+            model=openrouter_model if _openrouter_free(openrouter_model) else "blocked_nonfree",
+        ),
+        "ollama_local_backup": _layer(
+            ollama_ready,
+            "local",
+            "ollama",
+            model=str(source.get("OLLAMA_MODEL", "qwen3:4b")).strip() or "qwen3:4b",
+            localhost_only=zero_cost,
+        ),
         "deterministic_evidence_fallback": {
             "configured": True,
             "kind": "local_builtin",
+            "temporarily_skipped": False,
+            "cooldown_reason": "",
+            "cooldown_seconds_remaining": 0,
             "note": "No API/model required; conservative retrieved-evidence answer only.",
         },
     }
@@ -85,16 +105,23 @@ def reasoning_status(env=None) -> dict:
         name for name, row in layers.items()
         if name != "deterministic_evidence_fallback" and row.get("configured")
     ]
+    usable_now = [
+        name for name in configured_model_layers
+        if not layers[name].get("temporarily_skipped")
+    ]
     return {
         "zero_cost_only": zero_cost,
         "fallback_chain": chain,
         "model_layers_configured": len(configured_model_layers),
+        "model_layers_usable_now": len(usable_now),
         "has_model_backup": any(name != "gemini_primary" for name in configured_model_layers),
+        "has_model_layer_usable_now": bool(usable_now),
         "deterministic_last_resort": True,
         "layers": layers,
         "note": (
-            "Configured ka matlab policy/config ready hai; live quota/reachability request ke waqt hi pata chalegi. "
-            "Saare model providers fail hon tab bhi deterministic evidence fallback available hai."
+            "Configured ka matlab ₹0 policy/config ready hai. Temporarily_skipped recent quota/auth/network failure ki "
+            "short process-local cooldown memory hai; cooldown ke baad provider automatically probe ho sakta hai. "
+            "Saare model providers unavailable hon tab bhi deterministic evidence fallback available hai."
         ),
     }
 
