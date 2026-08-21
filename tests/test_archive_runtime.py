@@ -16,7 +16,8 @@ class _FakeProvider:
         self.objects: dict[str, bytes] = {}
 
     def upload_file(self, local_path: str, remote_path: str) -> RemoteObject:
-        data = open(local_path, "rb").read()
+        with open(local_path, "rb") as handle:
+            data = handle.read()
         self.objects[remote_path] = data
         return RemoteObject(path=remote_path, size=len(data))
 
@@ -96,6 +97,50 @@ def test_not_ready_provider_keeps_local_and_retry_intent(tmp_path, monkeypatch):
     assert manifest.items() == []
     assert retry.summary()["pending"] == 1
     assert runtime.local_delete_allowed(str(local), "research-results/job.json.gz") is False
+    assert runtime.public_status()["background"]["retry_timer_scheduled"] is True
+    runtime.close()
+
+
+def test_retry_timer_recovers_when_provider_becomes_ready_without_new_research(tmp_path, monkeypatch):
+    # Make retry rows immediately due and the timer fast only in this test.
+    monkeypatch.setattr("utils.archive_retry.BASE_BACKOFF_SECONDS", 0)
+    monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
+    monkeypatch.setenv("INFINITY_DATA_ROOT", str(tmp_path / "data"))
+    state = {"ready": False}
+    provider = _FakeProvider()
+    manifest = ArchiveManifest(str(tmp_path / "manifest.json"))
+    retry = ArchiveRetryQueue(str(tmp_path / "retry.json"))
+    runtime = ArchiveRuntime(
+        manifest=manifest,
+        retry_queue=retry,
+        provider_builder=lambda: provider,
+        provider_status_func=lambda: {
+            "provider": "fake-drive",
+            "enabled": True,
+            "ready": state["ready"],
+        },
+        max_pending=2,
+        retry_poll_seconds=0.05,
+    )
+    local = tmp_path / "recover.json.gz"
+    local.write_bytes(b"recover later")
+    remote = "research-results/recover.json.gz"
+
+    first = runtime.submit_file(str(local), remote)
+    assert first["reason"] == "provider_not_ready"
+    assert retry.summary()["pending"] == 1
+    state["ready"] = True
+
+    end = time.time() + 2.0
+    while time.time() < end:
+        rows = manifest.items()
+        if rows and rows[0].get("verified") is True and retry.summary()["pending"] == 0:
+            break
+        time.sleep(0.02)
+    else:
+        raise AssertionError("automatic archive retry did not recover")
+
+    assert local.exists()
     runtime.close()
 
 
