@@ -5,8 +5,8 @@ It defines the contract that Google Drive, TeraBox, or another future genuinely
 free provider must implement.
 
 Safety invariant:
-    local file -> upload -> remote stat/verification -> manifest VERIFIED
-    -> only then may local cleanup happen.
+    local file -> mark upload in-progress/unverified -> upload -> remote
+    stat/verification -> manifest VERIFIED -> only then may local cleanup happen.
 
 Cloud failures are recorded in a durable retry queue; they do not silently drop
 archive intent or delete the local copy. Manifest operations use provider/path-
@@ -81,10 +81,16 @@ class ArchiveCoordinator:
         digest = str(item["sha256"])
         archive_id = str(item.get("archive_id") or digest)
 
+        # Critical ordering: invalidate any previous VERIFIED state *before* the
+        # provider is allowed to replace remote bytes. Otherwise a crash or
+        # concurrent cleanup between upload and manifest update could trust stale
+        # verification for an object that is currently changing.
+        self.manifest.mark_upload_attempt(archive_id)
         try:
             uploaded = self.provider.upload_file(local_path, remote_path)
-            self.manifest.mark_upload_attempt(archive_id)
         except Exception as exc:
+            # mark_upload_attempt(error=...) recognizes this as the same already-
+            # started attempt, so attempt accounting is not doubled.
             self.manifest.mark_upload_attempt(archive_id, error=f"{type(exc).__name__}: {exc}")
             self._queue_failure(local_path, remote_path, exc)
             raise
