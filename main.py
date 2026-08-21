@@ -29,6 +29,12 @@ from utils.reasoning_status import reasoning_status
 ZERO_COST_STATUS = enforce_zero_cost_config()
 CORS_ORIGINS = allowed_cors_origins()
 
+# This value is deliberately honest. It must not be changed to "production_ready"
+# until the integrated offline gate, live zero-cost benchmark and final review have
+# actually passed. Runtime health and release readiness are different concepts.
+RELEASE_STATE = os.getenv("INFINITY_RELEASE_STATE", "foundation_verification_pending").strip() \
+    or "foundation_verification_pending"
+
 app = FastAPI(
     title="RV AI",
     description="Deep Research Engine — sawaalon ke jawab, source ke saath",
@@ -94,6 +100,7 @@ def _runtime_safety_status() -> dict:
     """Aggregate only non-secret operational state for API/health responses."""
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
+        "release_state": RELEASE_STATE,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
         "reasoning_resilience": reasoning_status(),
@@ -121,7 +128,7 @@ def api_info():
             endpoints.append(f"{','.join(methods)} {path}")
     safety = _runtime_safety_status()
     return {
-        "message": "RV AI Backend - Production Ready",
+        "message": "RV AI Backend - foundation integration build",
         "version": app.version,
         "docs": "/docs",
         "website": "/",
