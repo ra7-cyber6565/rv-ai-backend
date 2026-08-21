@@ -77,6 +77,7 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_provider_health.py",
         "tests/test_offline_reasoner.py",
         "tests/test_reasoning_status.py",
+        "tests/test_gemini_key_status.py",
         "tests/test_quick_chat_resilience.py",
         "tests/test_gemini_diag_zero_call.py",
         "tests/test_quota_backup.py",
