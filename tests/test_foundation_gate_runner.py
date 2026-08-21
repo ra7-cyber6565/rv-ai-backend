@@ -60,6 +60,7 @@ def test_default_stage_plan_contains_real_release_gates():
 
     focused_command = next(command for name, command in plan if name == "focused_pytest")
     for required in (
+        "tests/test_body_limit.py",
         "tests/test_archive_runtime.py",
         "tests/test_archive_integration.py",
         "tests/test_archive_routes.py",
