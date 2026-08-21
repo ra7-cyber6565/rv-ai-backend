@@ -15,6 +15,7 @@ def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google_drive")
     monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "private-remote")
     monkeypatch.setenv("TERABOX_CLIENT_SECRET", "secret")
+    monkeypatch.setenv("INFINITY_ADMIN_TOKEN", "admin-secret-that-must-not-survive")
     monkeypatch.setenv("INFINITY_DATA_ROOT", str(tmp_path))
 
     env = gate._safe_env()
@@ -30,6 +31,7 @@ def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     assert env["CLOUD_ARCHIVE_PROVIDER"] == "none"
     assert env["GOOGLE_DRIVE_RCLONE_REMOTE"] == ""
     assert env["TERABOX_CLIENT_SECRET"] == ""
+    assert env["INFINITY_ADMIN_TOKEN"] == ""
     assert env["INFINITY_OFFLINE_TEST"] == "true"
 
 
@@ -39,11 +41,14 @@ def test_default_stage_plan_contains_real_release_gates():
 
     assert names[0] == "compileall"
     assert "focused_pytest" in names
+    assert "all_pytest" in names
     assert "core_regression" in names
     assert "provider_bypass_audit" in names
     assert "architecture_audit" in names
     assert "benchmark_superconductivity_v2" in names
-    assert any(name.startswith("standalone:tests/test_") for name in names)
+
+    all_pytest = next(command for name, command in plan if name == "all_pytest")
+    assert all_pytest == ["python", "-m", "pytest", "-q", "tests"]
 
     focused_command = next(command for name, command in plan if name == "focused_pytest")
     assert "tests/test_reasoning_router.py" in focused_command
@@ -52,9 +57,26 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "tests/test_offline_reasoner.py" in focused_command
     assert "tests/test_reasoning_status.py" in focused_command
     assert "tests/test_quick_chat_resilience.py" in focused_command
+    assert "tests/test_gemini_diag_zero_call.py" in focused_command
     assert "tests/test_provider_bypass_audit.py" in focused_command
     assert "tests/test_architecture_audit.py" in focused_command
     assert "tests/test_release_state.py" in focused_command
+    assert "tests/test_repo_hygiene.py" in focused_command
+    assert "tests/test_admin_guard.py" in focused_command
+    assert "tests/test_foundation_gate_runner.py" in focused_command
+
+
+def test_pytest_only_file_is_not_mistaken_for_script_harness(tmp_path):
+    pytest_only = tmp_path / "test_only.py"
+    pytest_only.write_text("def test_x():\n    assert True\n", encoding="utf-8")
+    assert gate._has_main_harness(pytest_only) is False
+
+    script = tmp_path / "test_script.py"
+    script.write_text(
+        "def main():\n    return 0\n\nif __name__ == '__main__':\n    raise SystemExit(main())\n",
+        encoding="utf-8",
+    )
+    assert gate._has_main_harness(script) is True
 
 
 def test_provider_and_architecture_audits_run_before_benchmark():
