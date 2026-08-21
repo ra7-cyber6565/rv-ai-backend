@@ -53,6 +53,7 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "core_regression" in names
     assert "provider_bypass_audit" in names
     assert "architecture_audit" in names
+    assert "benchmark_cross_domain" in names
     assert "benchmark_superconductivity_v2" in names
 
     all_pytest = next(command for name, command in plan if name == "all_pytest")
@@ -68,6 +69,9 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_api_input_bounds.py",
         "tests/test_cors_private_headers.py",
         "tests/test_web_job_capability.py",
+        "tests/test_web_source_link_safety.py",
+        "tests/test_source_prompt_guard.py",
+        "tests/test_source_output_safety.py",
         "tests/test_project_access.py",
         "tests/test_project_route_guards.py",
         "tests/test_project_wiring.py",
@@ -107,10 +111,11 @@ def test_pytest_only_file_is_not_mistaken_for_script_harness(tmp_path):
     assert gate._has_main_harness(script) is True
 
 
-def test_provider_and_architecture_audits_run_before_benchmark():
+def test_audits_and_cross_domain_run_before_superconductivity_benchmark():
     names = [name for name, _ in gate.build_stage_plan("python")]
     assert names.index("provider_bypass_audit") < names.index("architecture_audit")
-    assert names.index("architecture_audit") < names.index("benchmark_superconductivity_v2")
+    assert names.index("architecture_audit") < names.index("benchmark_cross_domain")
+    assert names.index("benchmark_cross_domain") < names.index("benchmark_superconductivity_v2")
 
 
 def test_receipt_fails_closed_when_any_stage_fails(tmp_path):
