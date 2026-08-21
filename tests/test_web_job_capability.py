@@ -1,8 +1,8 @@
-"""Static regression for browser async-research capability handling.
+"""Static regression for browser project/job capability handling.
 
 No browser/network needed. This intentionally checks the shipped HTML/JS because
 backend capability enforcement is useless if the official web client forgets to
-send the header or leaks the token into a URL/persistent browser storage.
+send headers or leaks tokens into URLs/persistent browser storage.
 """
 from __future__ import annotations
 
@@ -18,6 +18,22 @@ def _text() -> str:
     return WEB.read_text(encoding="utf-8")
 
 
+def test_web_creates_server_issued_project_session_before_project_work():
+    text = _text()
+    assert 'API+"/api/v1/session"' in text
+    assert 'method:"POST"' in text
+    assert "data.project_id" in text
+    assert "data.project_access_token" in text
+    assert "await ensureSession()" in text
+
+
+def test_chat_and_job_start_send_private_project_header():
+    text = _text()
+    assert 'function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}' in text
+    assert 'headers:projectHeaders()' in text
+    assert 'project_id:PROJECT.id' in text
+
+
 def test_deep_max_client_requires_job_access_token_from_start_response():
     text = _text()
     assert "start.data.job_access_token" in text
@@ -25,7 +41,7 @@ def test_deep_max_client_requires_job_access_token_from_start_response():
     assert 'jobToken=start.data.job_access_token' in text
 
 
-def test_all_async_polling_uses_private_header():
+def test_all_async_polling_uses_private_job_header():
     text = _text()
     assert 'const pollOpts={headers:{"X-Research-Job-Token":jobToken}}' in text
 
@@ -37,19 +53,32 @@ def test_all_async_polling_uses_private_header():
     assert result_call in text
 
 
-def test_job_token_is_not_put_in_url_or_persistent_browser_storage():
+def test_tokens_are_not_put_in_url_or_persistent_browser_storage():
     text = _text()
     low = text.lower()
     assert "localstorage" not in low
     assert "sessionstorage" not in low
-    assert "?job_access_token=" not in low
-    assert "&job_access_token=" not in low
-    assert "?token=" not in low
-    assert "&token=" not in low
+    for marker in (
+        "?job_access_token=", "&job_access_token=", "?project_access_token=",
+        "&project_access_token=", "?project_token=", "&project_token=",
+        "?token=", "&token=",
+    ):
+        assert marker not in low
 
-    # Function-local token should exist, but URL concatenation with jobToken must
-    # not. This catches a future shortcut such as `... + '?token=' + jobToken`.
+    # Function-local job token and in-memory project token must never be appended
+    # to request URLs.
     assert not re.search(r"(?:api|research-jobs)[^\n]{0,180}\+\s*jobToken", text)
+    assert not re.search(r"(?:api|session|chat)[^\n]{0,180}\+\s*PROJECT\.token", text)
+
+
+def test_project_token_is_memory_only_not_generated_client_side():
+    text = _text()
+    assert 'const PROJECT={id:"",token:""}' in text
+    assert "PROJECT.id=data.project_id" in text
+    assert "PROJECT.token=data.project_access_token" in text
+    # Project IDs must be server-issued, not predictable/browser-generated.
+    assert 'PROJECT_ID="web-"' not in text
+    assert "Math.random().toString(36)" not in text
 
 
 def test_poll_token_is_function_local_not_global():
