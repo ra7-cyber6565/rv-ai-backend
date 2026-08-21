@@ -1,20 +1,20 @@
 """Claim-level evidence verification A-E for Infinity Research AI.
 
-A valid citation ID is not enough to call a claim verified.  This module checks
+A valid citation ID is not enough to call a claim verified. This module checks
 five separate things without spending any model/API quota:
 
-A. citation integrity   — cited IDs exist for the claim;
-B. relevance            — at least one cited source is relevant to the question;
-C. available-text support — the claim is actually supported by the title/
-   abstract/snippet/full-text excerpt that the engine has in hand;
-D. access depth         — strong fact language needs full-text-level reading;
-   abstract/snippet evidence is kept at a weaker level;
-E. source quality       — at least one supporting source is usable quality and
-   is not retracted/withdrawn.
+A. citation integrity — cited IDs exist for the claim;
+B. relevance — at least one cited source is relevant to the question;
+C. available-text support — the claim is supported by the title/abstract/
+   snippet/full-text excerpt the engine actually has in hand;
+D. access depth — strong fact language needs full-text-level reading;
+E. source quality — at least one supporting source is usable quality and is not
+   retracted/withdrawn.
 
-This is deliberately conservative.  It is NOT an NLI model and never pretends
-that lexical/semantic similarity is a proof of entailment.  Borderline cases are
-reported as ``unknown`` instead of being silently promoted to verified.
+Important limitation: this is a conservative deterministic gate, not a neural
+NLI model. Similar wording can establish that a source is plausibly supportive,
+but borderline cases stay ``unknown`` instead of being silently promoted to
+verified. Numeric and obvious direction/negation mismatches fail explicitly.
 """
 from __future__ import annotations
 
@@ -31,16 +31,22 @@ _LABEL_RE = re.compile(
     r"SPECULATION|UNVERIFIED|UNKNOWN)\s*\]",
     re.IGNORECASE,
 )
-_SID_RE = re.compile(r"\[([^\[\]]{1,80})\]")
+_BRACKET_RE = re.compile(r"\[([^\[\]]{1,80})\]")
 _SID_TOKEN_RE = re.compile(r"\bS\s?(\d{1,3})\b", re.IGNORECASE)
 _NO_SOURCE_RE = re.compile(r"\[\s*NO[\s\-_]?SOURCE\s*\]", re.IGNORECASE)
 _STRONG_LABELS = {"ESTABLISHED", "ESTABLISHED FACT", "FACT", "STRONG EVIDENCE"}
-_NUMBER_RE = re.compile(r"(?<![A-Za-z])(-?\d+(?:\.\d+)?)\s*(%|gpa|k|kelvin|°c|c)?", re.IGNORECASE)
+_NUMBER_RE = re.compile(
+    r"(?<![A-Za-z])(-?\d+(?:\.\d+)?)\s*(%|percent|percentage|gpa|k|kelvin|°c|c)?",
+    re.IGNORECASE,
+)
+_NEGATION_RE = re.compile(r"\b(no|not|never|without|doesn['’]?t|didn['’]?t|nahi|nahin|mat)\b", re.I)
+_UP_RE = re.compile(r"\b(increase[sd]?|increasing|higher|rise[sn]?|rising|grow(?:s|th)?|badh(?:ta|ti|te|na|a)?|zyada)\b", re.I)
+_DOWN_RE = re.compile(r"\b(decrease[sd]?|decreasing|lower|reduce[sd]?|reduction|fall(?:s|ing)?|decline[sd]?|kam|ghat(?:ta|ti|te|na|a)?)\b", re.I)
 
 
 def _ids(text: str) -> List[str]:
     found: List[str] = []
-    for bracket in _SID_RE.findall(text or ""):
+    for bracket in _BRACKET_RE.findall(text or ""):
         for number in _SID_TOKEN_RE.findall(bracket):
             sid = f"S{int(number)}"
             if sid not in found:
@@ -50,20 +56,30 @@ def _ids(text: str) -> List[str]:
 
 def _clean_claim(line: str) -> str:
     text = _LABEL_RE.sub("", line or "")
-    text = _SID_RE.sub("", text)
+    text = _BRACKET_RE.sub("", text)
     text = re.sub(r"^[#\s\-\*\d\.]+", "", text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _unit(unit: str) -> str:
+    low = (unit or "").lower()
+    if low in {"%", "percent", "percentage"}:
+        return "%"
+    if low in {"k", "kelvin"}:
+        return "k"
+    if low in {"c", "°c"}:
+        return "c"
+    return low
 
 
 def _numbers(text: str) -> List[str]:
     out: List[str] = []
     for value, unit in _NUMBER_RE.findall(text or ""):
-        # Ignore tiny section/list numbers that are not measurements.
         try:
             num = float(value)
         except ValueError:
             continue
-        normalized = f"{num:g}{(unit or '').lower()}"
+        normalized = f"{num:g}{_unit(unit)}"
         if normalized not in out:
             out.append(normalized)
     return out
@@ -74,17 +90,51 @@ def _numbers_supported(claim: str, source_text: str) -> Optional[bool]:
     if not claim_nums:
         return None
     source_nums = set(_numbers(source_text))
-    # A numeric claim must not be called supported if its actual number is absent
-    # from every cited excerpt.  This catches the common "30%" -> "100%" drift.
-    return all(n in source_nums for n in claim_nums)
+    # Numeric drift is one of the highest-risk hallucinations. If an answer says
+    # 100% while its cited excerpt says 30%, semantic similarity cannot rescue it.
+    return all(number in source_nums for number in claim_nums)
+
+
+def _direction(text: str) -> str:
+    up = bool(_UP_RE.search(text or ""))
+    down = bool(_DOWN_RE.search(text or ""))
+    if up and not down:
+        return "up"
+    if down and not up:
+        return "down"
+    return ""
+
+
+def _obvious_semantic_conflict(claim: str, source_text: str) -> bool:
+    claim_direction = _direction(claim)
+    source_direction = _direction(source_text)
+    if claim_direction and source_direction and claim_direction != source_direction:
+        return True
+    # Only use negation as a hard conflict when the texts otherwise overlap well;
+    # long academic excerpts often contain unrelated negated sentences.
+    if bool(_NEGATION_RE.search(claim)) != bool(_NEGATION_RE.search(source_text)):
+        if similarity(claim, source_text) >= 0.30:
+            return True
+    return False
 
 
 def _source_text(pack: EvidencePack, source: SourceRecord) -> str:
-    pieces = [source.title or "", source.snippet or ""]
+    # Include structured metadata too. This avoids falsely failing a correctly
+    # cited publication year merely because the year was stored in metadata and
+    # not repeated inside the excerpt.
+    pieces = [
+        source.title or "",
+        source.snippet or "",
+        str(source.year or ""),
+        source.publisher or "",
+        source.venue or "",
+        source.locator or "",
+        source.read_note or "",
+    ]
     for passage in pack.passages:
         if passage.source_id == source.source_id and passage.text:
             pieces.append(passage.text)
-    return "\n".join(p for p in pieces if p)
+    return "\n".join(piece for piece in pieces if piece)
 
 
 def _quality_state(source: SourceRecord) -> Optional[bool]:
@@ -102,6 +152,9 @@ def _depth_state(label: str, source: SourceRecord) -> Optional[bool]:
     level = source.reading_level()
     strong = label.upper().strip() in _STRONG_LABELS
     if strong:
+        # A selected-page large PDF can still support a specific claim if the
+        # cited relevant page/excerpt was actually processed. The separate
+        # read_note/pages fields disclose that the entire document was not read.
         return level == "full_text"
     if level in {"full_text", "abstract"}:
         return True
@@ -111,8 +164,6 @@ def _depth_state(label: str, source: SourceRecord) -> Optional[bool]:
 
 
 def _relevance_state(pack: EvidencePack, source: SourceRecord, source_text: str) -> Optional[bool]:
-    # User documents are deliberately not thrown away by retrieval filtering,
-    # but their claim still has to pass the support check below.
     if source.source_type == SourceType.DOCUMENT:
         return True
     score = float(source.relevance_score or 0.0)
@@ -132,10 +183,8 @@ def _relevance_state(pack: EvidencePack, source: SourceRecord, source_text: str)
 def _support_state(claim: str, source_text: str) -> tuple[Optional[bool], float, Optional[bool]]:
     score = similarity(claim, source_text)
     numeric = _numbers_supported(claim, source_text)
-    if numeric is False:
+    if numeric is False or _obvious_semantic_conflict(claim, source_text):
         return False, score, numeric
-    # Conservative three-way gate: weak overlap is UNKNOWN, not automatically
-    # false, because source text and answer may use different wording/language.
     if score >= 0.24:
         return True, score, numeric
     if score >= 0.12:
@@ -218,7 +267,11 @@ class EvidenceVerifier:
 
             cited = _ids(raw)
             valid_ids = [sid for sid in cited if sid in valid]
-            citation_ok = bool(valid_ids) and len(valid_ids) == len(cited) and not _NO_SOURCE_RE.search(raw)
+            citation_ok = (
+                bool(valid_ids)
+                and len(valid_ids) == len(cited)
+                and not _NO_SOURCE_RE.search(raw)
+            )
             item = ClaimEvidenceResult(
                 claim=claim[:500], label=label, source_ids=cited, citation=citation_ok,
             )
@@ -250,9 +303,9 @@ class EvidenceVerifier:
 
             def any_true(key: str) -> Optional[bool]:
                 values = [row.get(key) for row in source_rows]
-                if any(v is True for v in values):
+                if any(value is True for value in values):
                     return True
-                if any(v is None for v in values):
+                if any(value is None for value in values):
                     return None
                 return False
 
@@ -262,24 +315,25 @@ class EvidenceVerifier:
             item.quality = any_true("quality") if citation_ok else False
 
             states = [item.citation, item.relevance, item.support, item.depth, item.quality]
-            if all(v is True for v in states):
+            if all(value is True for value in states):
                 item.verdict = "verified_against_available_evidence"
                 result.passed_claims += 1
-            elif any(v is False for v in states):
+            elif any(value is False for value in states):
                 item.verdict = "failed_evidence_gate"
                 result.failed_claims += 1
             else:
                 item.verdict = "uncertain_needs_deeper_check"
                 result.uncertain_claims += 1
 
-            failed_names = [name for name, value in (
-                ("citation", item.citation), ("relevance", item.relevance),
-                ("support", item.support), ("depth", item.depth), ("quality", item.quality),
-            ) if value is False]
-            unknown_names = [name for name, value in (
-                ("citation", item.citation), ("relevance", item.relevance),
-                ("support", item.support), ("depth", item.depth), ("quality", item.quality),
-            ) if value is None]
+            named = (
+                ("citation", item.citation),
+                ("relevance", item.relevance),
+                ("support", item.support),
+                ("depth", item.depth),
+                ("quality", item.quality),
+            )
+            failed_names = [name for name, value in named if value is False]
+            unknown_names = [name for name, value in named if value is None]
             if failed_names:
                 item.note = "Fail: " + ", ".join(failed_names)
             elif unknown_names:
@@ -294,9 +348,9 @@ class EvidenceVerifier:
             if not result.items:
                 return None
             values = [getattr(item, attr) for item in result.items]
-            if any(v is False for v in values):
+            if any(value is False for value in values):
                 return False
-            if any(v is None for v in values):
+            if any(value is None for value in values):
                 return None
             return True
 
@@ -307,7 +361,9 @@ class EvidenceVerifier:
             "D_depth": aggregate("depth"),
             "E_quality": aggregate("quality"),
         }
-        result.gate_passed = bool(result.items) and all(v is True for v in result.checks.values())
+        result.gate_passed = bool(result.items) and all(
+            value is True for value in result.checks.values()
+        )
 
         if not result.items:
             result.note = (
