@@ -4,14 +4,20 @@ RAG routes — upload aur ask.
 Uploads use bounded streaming + cleanup and all public error responses are kept
 human-readable. Raw local paths/library exception text stay inside the backend;
 capability endpoints explain optional dependencies separately.
+
+Every endpoint that reads/writes a project namespace requires the server-issued
+``X-Project-Token`` capability. A caller can still create its own anonymous
+session for ₹0, but cannot poison or query another session merely by guessing a
+project id.
 """
 import os
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header
 from pydantic import BaseModel, Field
 
 from research_engine.vector_search import VectorSearch
 from research_engine.agent_manager import manager
+from utils.project_guard import require_project_access
 from utils.upload_safety import cleanup_upload_path, save_upload_stream
 
 router = APIRouter()
@@ -69,10 +75,14 @@ def _ingest(file_path: str, filename: str, project_id: str, use_ocr: bool) -> di
 
 
 @router.post("/upload-audio")
-async def upload_audio(file: UploadFile = File(...),
-                      project_id: str = Form("default"),
-                      language: str = Form(None)):
+async def upload_audio(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    language: str | None = Form(None, max_length=32),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
     """Audio/video upload -> local speech-to-text -> timestamped vector chunks."""
+    require_project_access(project_id, x_project_token)
     filename = file.filename or "audio"
     extension = os.path.splitext(filename)[1].lower()
 
@@ -118,10 +128,14 @@ async def upload_audio(file: UploadFile = File(...),
 
 
 @router.post("/upload-document")
-async def upload_document(file: UploadFile = File(...),
-                          project_id: str = Form("default"),
-                          use_ocr: bool = Form(True)):
-    """pdf/docx/txt/md/html/vtt/srt ko bounded stream se ingest karo."""
+async def upload_document(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    use_ocr: bool = Form(True),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """pdf/docx/txt/md/html/vtt/srt ko isolated project mein ingest karo."""
+    require_project_access(project_id, x_project_token)
     filename = file.filename or "upload"
     extension = os.path.splitext(filename)[1].lower()
     if extension not in SUPPORTED:
@@ -146,9 +160,13 @@ async def upload_document(file: UploadFile = File(...),
 
 
 @router.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...),
-                     project_id: str = Form("default")):
-    """Backward-compatible PDF endpoint, now with processing/OCR path."""
+async def upload_pdf(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Backward-compatible PDF endpoint, protected by project capability."""
+    require_project_access(project_id, x_project_token)
     filename = file.filename or "upload.pdf"
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400,
@@ -168,12 +186,12 @@ async def upload_pdf(file: UploadFile = File(...),
 
 
 @router.post("/ingest-youtube")
-async def ingest_youtube(request: YouTubeRequest):
-    """Public YouTube captions ko timestamped chunks bana kar store karo.
-
-    This does not download/bypass video media. Transcript support is default-off
-    and requires the optional youtube-transcript-api package + explicit flag.
-    """
+async def ingest_youtube(
+    request: YouTubeRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Public YouTube captions ko private project ke timestamped chunks banao."""
+    require_project_access(request.project_id, x_project_token)
     from research_engine.processing import TranscriptProcessor
 
     raw = (request.video or "").strip()
@@ -214,11 +232,15 @@ async def ingest_youtube(request: YouTubeRequest):
 
 
 @router.post("/transcribe-audio")
-async def transcribe_audio(file: UploadFile = File(...),
-                           project_id: str = Form("default"),
-                           title: str = Form(""),
-                           lang: str = Form("")):
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    title: str = Form("", max_length=_MAX_TITLE_CHARS),
+    lang: str = Form("", max_length=32),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
     """User-provided local audio/video ko locally transcribe + ingest karo."""
+    require_project_access(project_id, x_project_token)
     from research_engine.processing import SpeechToTextProcessor
 
     filename = file.filename or "audio"
@@ -318,8 +340,12 @@ def processing_capabilities():
 
 
 @router.post("/ask")
-async def ask(request: QuestionRequest):
-    """QUICK source-based research route with bounded input."""
+async def ask(
+    request: QuestionRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """QUICK source-based research inside the caller's private project."""
+    require_project_access(request.project_id, x_project_token)
     return manager.research(
         question=request.question,
         project_id=request.project_id,
