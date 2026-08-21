@@ -1,8 +1,9 @@
 """Small in-memory abuse/rate guard for the ₹0 backend.
 
-Public endpoints that trigger model calls, long research, large uploads or rapid
-job polling can otherwise burn free quota/CPU. This module uses only stdlib,
-stores no persistent IP history and does not depend on Redis/paid infrastructure.
+Public endpoints that trigger model calls, long research, large uploads, session
+creation or rapid job polling can otherwise burn free quota/CPU. This module uses
+only stdlib, stores no persistent IP history and does not depend on Redis/paid
+infrastructure.
 
 The bucket table is bounded so a flood of unique spoofed/source addresses cannot
 turn the limiter itself into an unbounded-memory denial of service. Dynamic job
@@ -47,6 +48,9 @@ _JOB_POLL_PER_MINUTE = _int_env("RATE_JOB_POLL_PER_MINUTE", 180, 30, 600)
 _JOB_POLL_BUCKET = "/api/v1/research-jobs/{job}/poll"
 
 DEFAULT_LIMITS: dict[str, Limit] = {
+    # Session creation is cheap/no-model but bounded so an attacker cannot mint
+    # unbounded anonymous namespaces/tokens from one client address.
+    "/api/v1/session": Limit(_int_env("RATE_SESSION_PER_HOUR", 20, 1, 200), 3600),
     "/api/v1/chat": Limit(_int_env("RATE_CHAT_PER_MINUTE", 30, 1, 300), 60),
     "/api/v1/ask": Limit(_QUICK_PER_MINUTE, 60),
     "/api/v1/deep-research": Limit(_int_env("RATE_SYNC_RESEARCH_PER_HOUR", 4, 1, 60), 3600),
@@ -138,8 +142,6 @@ def _is_job_poll_path(path: str) -> bool:
     prefix = "/api/v1/research-jobs/"
     if not str(path or "").startswith(prefix):
         return False
-    # Bare collection endpoint is handled separately. Anything below a concrete
-    # job id (status/progress/result) shares one client bucket.
     suffix = str(path)[len(prefix):].strip("/")
     return bool(suffix)
 
