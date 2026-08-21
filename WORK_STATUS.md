@@ -30,14 +30,21 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
 | Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |
 | Full-text + large PDF handling | Claude + ChatGPT audit | DONE / VERIFY | Claude removed 4MB blind skip; ChatGPT added honest access wording and whole-document sparse sampling so huge PDFs are not first-N biased |
-| Evidence Verification A-E | ChatGPT independent implementation | DONE / VERIFY | Claim-level citation, relevance, available-text support, depth and quality/retraction gate added and connected to verification; regression tests added |
+| Evidence Verification A-E | Claude + ChatGPT integration audit | DONE / VERIFY | Latest Claude strict claim-verification code is merged into integration branch; ChatGPT system-boundary A-E/fail-closed tests remain in release gate |
 | Consensus/contradiction correctness | Claude | DONE / VERIFY | Consensus gate present; integrated regression/live benchmark still required |
-| Model quota/fallback honesty | Claude + ChatGPT ₹0 guard | DONE / VERIFY | Error taxonomy/dynamic model discovery present; Gemini key blocked in zero-cost mode unless owner explicitly confirms no paid spend path |
+| Model quota/fallback honesty | Claude + ChatGPT | DONE / VERIFY | Same-model retry vs model switch accounting is separated; strict provider failure/error taxonomy is integrated |
+| Multi-provider ₹0 reasoning fallback | ChatGPT | DONE / VERIFY | confirmed Gemini -> confirmed Groq free -> OpenRouter free-only -> localhost Ollama; hard failures are skipped for remainder of run |
+| Deterministic no-model evidence fallback | ChatGPT | DONE / VERIFY | If every model provider is unavailable, retrieved evidence still produces a conservative cited answer instead of a blank/provider error |
+| QUICK chat quota resilience | ChatGPT | DONE / VERIFY | Removed direct Gemini-only chat path; trivial small-talk uses 0 API calls; model failure automatically falls back to QUICK evidence research |
+| Legacy RAG provider bypass | ChatGPT | FIXED / VERIFY | `rag/pipeline.py` no longer imports/calls Gemini directly; it uses resilient router + conservative document extract fallback |
+| Provider-bypass release audit | ChatGPT | DONE / VERIFY | AST audit fails release if production code outside approved adapters directly calls Gemini/Groq/OpenRouter/Ollama generation surfaces |
 | Human-first presentation contract | ChatGPT audit | DONE / VERIFY | Deterministic presentation guard + A-L tests; sources/audit last; raw technical junk kept out of main explanation |
-| Superconductivity benchmark V2 | Claude + ChatGPT | PENDING LIVE RETEST | Must rerun after integrated offline suite with confirmed zero-cost Gemini setup |
+| Release-state honesty | ChatGPT | DONE / VERIFY | API no longer says `Production Ready` before proof; runtime health and release readiness are separate fields |
+| Static architecture wiring audit | ChatGPT | DONE / VERIFY | Release gate now checks end-to-end production wiring, ₹0 chain, storage/security invariants and premature release claims |
+| Superconductivity benchmark V2 | Claude + ChatGPT | PENDING LIVE RETEST | Offline benchmark is in strict gate; live zero-cost rerun still required |
 | Central D-drive runtime routing | ChatGPT | DONE / VERIFY | Heavy runtime/cache/vector/temp/research data routes under configured root; explicit root failure is fail-closed |
 | Streaming upload safety | ChatGPT | DONE / VERIFY | Bounded streaming, early stop, partial cleanup, storage reservation |
-| ₹0 startup guard | ChatGPT | DONE / VERIFY | Known paid API keys blocked; Gemini requires explicit zero-cost confirmation |
+| ₹0 startup guard | ChatGPT | DONE / VERIFY | Paid-key paths blocked; Gemini/Groq need explicit zero-cost confirmation; OpenRouter restricted to free-only; remote Ollama blocked |
 | Request abuse/rate guard | ChatGPT | DONE / VERIFY | Expensive POST endpoints protected without trusting spoofable proxy headers by default |
 | Strict browser CORS | ChatGPT | DONE / VERIFY | Wildcard rejected; exact origins only |
 | Cloud archive manifest + retry | ChatGPT | DONE / VERIFY | pending -> uploaded_unverified -> verified, durable retry/backoff, local retention |
@@ -47,15 +54,22 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Job result compaction / size cap | ChatGPT | DONE / VERIFY | Separate gzip result files, configurable per-result cap, deterministic compaction |
 | Multi-process job safety | ChatGPT | DONE / VERIFY | Single-writer OS process lock fails closed instead of risking JSON corruption |
 | Storage quota / cleanup safety | ChatGPT | DONE / VERIFY | Bounded local workspace; only cloud-verified copies eligible for cleanup |
+| Runtime data Git hygiene | ChatGPT | DONE / VERIFY | Tracked `knowledge_graph.json`, `knowledge_store.json`, `error_log.txt` and generated `research_memory/*.json` removed from integration branch; ignored for future runs |
 | TeraBox official adapter | ChatGPT | OPTIONAL / BLOCKED | Wait only for official credentials + confirmed zero-cost terms; app development does not wait |
 | Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY/RECOVERY DESIGN | No homemade/insecure crypto and no unrecoverable-key design |
 | Secondary compact metadata backup | ChatGPT | PLANNED | Only after a genuinely free private destination is selected |
-| Integrated regression | ChatGPT | REQUIRED / BLOCKED ON ACTUAL RUN | CI workflow contains foundation gates, but connected GitHub API currently reports no workflow run/status for PR head; do not claim green |
-| Final architecture/integration audit | ChatGPT | REQUIRED | Cross-module blueprint audit after offline tests; fix all failures before foundation sign-off |
+| Patents connector | ChatGPT | PENDING OFFICIAL-AUTH DESIGN | No unofficial scraping. Current official USPTO access requires account/auth; add only through official zero-cost route |
+| Integrated regression | ChatGPT | REQUIRED / NEEDS ACTUAL EXECUTION | Strict runner now covers compile, focused integration tests, all standalone tests, provider-bypass audit, architecture audit and Superconductivity Benchmark V2. GitHub connector still exposes no workflow run, so no fake green claim |
+| Final architecture/integration audit | ChatGPT | ACTIVE | Manual audit already found and fixed direct QUICK-chat + legacy-RAG Gemini bypasses; continue cross-module review and fix all findings before sign-off |
 
-## Current independent audit finding being fixed
+## Current independent audit findings fixed
 
-Claude's huge-PDF solution was bounded-memory, but for documents larger than the page scan budget it could inspect only the first N pages. That systematically risks missing late methods/results chapters. ChatGPT added deterministic whole-document sparse sampling: opening pages + ending pages + evenly spread interior pages, then relevance selection. Audit metadata explicitly reports sparse coverage and never claims the whole document was read.
+1. Claude's huge-PDF solution was bounded-memory but could bias scanning toward the first N pages. ChatGPT added deterministic opening + interior + ending sparse sampling and honest partial-reading metadata.
+2. QUICK chat directly called Gemini, so Gemini quota could kill normal chat even when the research engine had fallback logic. It now uses the shared zero-cost resilient router, then QUICK evidence research if every model layer fails.
+3. Legacy `rag/pipeline.py` also directly called Gemini and bypassed the zero-cost router. That path is now routed through the resilient facade and has a document-only last resort.
+4. `/chat/diag` used to spend a real Gemini generation just to test Gemini. It is now a zero-call, non-secret readiness report.
+5. API claimed `Production Ready` before the release gates were actually proven. That wording was removed and a separate `foundation_verification_pending` release state was added.
+6. Generated runtime/test state was still tracked despite `.gitignore`. It has been removed from the integration branch and a hygiene regression prevents it returning.
 
 ## Required gates before foundation can be called reliable
 
@@ -64,18 +78,22 @@ Claude's huge-PDF solution was bounded-memory, but for documents larger than the
 3. No false `ESTABLISHED` and no citation-ID-only verification.
 4. Claim-level A-E gate enforced: citation + relevance + support + depth + quality.
 5. No false consensus; opposition search and reasoning completeness requirements respected.
-6. Quota/model failure returns a useful incomplete result, never fake completeness or blank boilerplate.
-7. Raw provider/protobuf/HTTP traces never leak into the main explanation.
-8. Huge PDF processing is bounded-memory AND whole-document sampled when not every page can be inspected.
-9. Upload cap stops reading early and cleans partial files.
-10. Explicit D-root unavailable/unwritable => fail closed; no silent C: spill.
-11. Cloud upload failure/mismatch => local copy preserved; deletion only after verified remote state.
-12. Durable job status/result lifecycle, compaction and interrupted restart state all pass.
-13. Process lock prevents multiple backend workers from corrupting durable job JSON.
-14. Request guard blocks abuse; proxy headers are trusted only when explicitly configured.
-15. Full offline regression suite actually executes green on the integrated branch.
-16. Live superconductivity benchmark V2 reruns after integration and passes relevance/full-text/hypothesis/error-honesty expectations.
-17. Final end-to-end path matches the blueprint: discover -> fetch -> process -> evidence -> reason -> criticize -> hypothesize -> verify -> synthesize -> cite/audit.
+6. Gemini/free-provider quota failure automatically tries permitted backups; a failed provider does not kill the whole app.
+7. If every model provider is unavailable, deterministic retrieved-evidence fallback returns a conservative non-blank result where evidence exists.
+8. Raw provider/protobuf/HTTP traces never leak into the main explanation/chat response.
+9. No production API/RAG/chat route may bypass the resilient provider router; AST provider-bypass audit must pass.
+10. Huge PDF processing is bounded-memory AND whole-document sampled when not every page can be inspected.
+11. Upload cap stops reading early and cleans partial files.
+12. Explicit D-root unavailable/unwritable => fail closed; no silent C: spill.
+13. Cloud upload failure/mismatch => local copy preserved; deletion only after verified remote state.
+14. Durable job status/result lifecycle, compaction and interrupted restart state all pass.
+15. Process lock prevents multiple backend workers from corrupting durable job JSON.
+16. Request guard blocks abuse; proxy headers are trusted only when explicitly configured.
+17. Generated runtime/error/research-memory state stays out of Git source tree.
+18. Full offline regression suite actually executes green on the integrated branch.
+19. Offline architecture audit and Superconductivity Benchmark V2 execute green after integration.
+20. Live zero-cost benchmark reruns after integration and passes relevance/full-text/hypothesis/error-honesty expectations.
+21. Final end-to-end path matches the blueprint: discover -> fetch -> process -> evidence -> reason -> criticize -> hypothesize -> verify -> synthesize -> cite/audit.
 
 ## Advanced Scientific Discovery Engine — after foundation passes
 
