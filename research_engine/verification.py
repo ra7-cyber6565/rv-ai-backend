@@ -1,8 +1,14 @@
 """Enhanced verification facade with claim-level evidence verification A-E.
 
 The original verification implementation is kept in ``verification_legacy.py``
-unchanged for compatibility. This facade adds the missing claim-level evidence
-gate so a valid citation ID alone can never promote an answer to SOURCE GROUNDED.
+for compatibility. This facade adds the missing claim-level evidence gate so a
+valid citation ID alone can never promote an answer to SOURCE GROUNDED.
+
+A second honesty rule matters just as much: if the answer contains no labelled
+factual/evidence claim that the A-E verifier can inspect, SOURCE GROUNDED is also
+not allowed. "No check ran" is UNKNOWN, not PASS. Computational verification is
+kept separate: a real arithmetic/algebra check may still be computationally
+verified even when source-level A-E verification did not apply.
 """
 from __future__ import annotations
 
@@ -45,15 +51,22 @@ class VerificationEngine(_LegacyVerificationEngine):
                 f"{uncertain} uncertain, {failed} fail."
             )
         return (
-            f"Is check ko pakka pass/fail bolne layak depth nahi mili "
+            f"Is check ko pakka pass/fail bolne layak claim-level data nahi mila "
             f"({checked} claim(s) check hui)."
         )
 
-    def verify(self, answer: str, pack, citation_ok: bool = True,
-               ungrounded_count: int = 0, hypotheses: Optional[List[Dict]] = None,
-               cited_ids: Optional[List[str]] = None) -> VerificationReport:
+    def verify(
+        self,
+        answer: str,
+        pack,
+        citation_ok: bool = True,
+        ungrounded_count: int = 0,
+        hypotheses: Optional[List[Dict]] = None,
+        cited_ids: Optional[List[str]] = None,
+    ) -> VerificationReport:
         base = super().verify(
-            answer, pack,
+            answer,
+            pack,
             citation_ok=citation_ok,
             ungrounded_count=ungrounded_count,
             hypotheses=hypotheses,
@@ -81,15 +94,26 @@ class VerificationEngine(_LegacyVerificationEngine):
         states = ev.get("checks") or {}
         for key, human_name in mapping:
             state = states.get(key)
-            report.checks.append(Check(
-                human_name,
-                state,
-                self._check_detail(key, state, ev),
-            ))
+            report.checks.append(
+                Check(human_name, state, self._check_detail(key, state, ev))
+            )
 
         claims_checked = int(ev.get("claims_checked") or 0)
         gate_passed = bool(ev.get("gate_passed"))
-        if claims_checked and not gate_passed:
+
+        if claims_checked == 0:
+            # Critical fail-closed rule: structural citation checks from the
+            # legacy verifier cannot stand in for claim-level support. If A-E
+            # did not parse any factual/evidence claim, source grounding is
+            # simply unknown. Do NOT affect independent computation statuses.
+            if report.status == "SOURCE GROUNDED":
+                report.status = "UNVERIFIABLE HERE"
+            report.warnings.append(
+                "Claim-level evidence verification A-E apply nahi ho saki kyunki "
+                "koi labelled factual/evidence claim detect nahi hui. Valid citation "
+                "ID ko akela source verification nahi maana gaya."
+            )
+        elif not gate_passed:
             report.warnings.append(
                 "Valid citation IDs mile, lekin claim-level evidence verification A-E "
                 "poori pass nahi hui. Isliye answer ko fully source-verified nahi maana gaya."
@@ -99,11 +123,12 @@ class VerificationEngine(_LegacyVerificationEngine):
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
             elif report.status == "COMPUTATIONALLY VERIFIED":
+                # A calculation may be correct while its factual premises are
+                # not fully source-verified; say partial instead of fully verified.
                 report.status = "COMPUTATIONALLY VERIFIED (partial)"
-        elif claims_checked and gate_passed and report.status in {
-            "UNVERIFIABLE HERE", "LOGICALLY CONSISTENT"
-        }:
-            # Only promote after all five claim-level gates have passed.
+        elif report.status in {"UNVERIFIABLE HERE", "LOGICALLY CONSISTENT"}:
+            # Only promote after every labelled factual/evidence claim passed
+            # the cumulative same-source A-E gate.
             report.status = "SOURCE GROUNDED"
 
         return report
