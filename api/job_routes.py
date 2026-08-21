@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from research_engine.depth import BOOL_FIELDS, depth_limits
 from utils.admin_guard import require_admin
 from utils.job_access import job_access
-from utils.progress_tracker import get_progress
+from utils.progress_tracker import STAGES, get_progress
 from utils.project_guard import require_project_access
 from utils.research_jobs import runner
 
@@ -37,12 +37,71 @@ class ResearchJobRequest(BaseModel):
 
 
 _CUSTOM_FIELDS = tuple(depth_limits()) + BOOL_FIELDS
+_PROGRESS_LOG_LIMIT = 24
+_PROGRESS_NOTE_CHARS = 240
+_UNSAFE_PROGRESS_MARKERS = (
+    "traceback", "resourceexhausted", "protobuf", "grpc_status",
+    "api_key", "authorization", "bearer ", "access_token", "refresh_token",
+    "client_secret", "secret=", "<html", "<!doctype",
+)
 
 
 def _custom(request: ResearchJobRequest) -> Optional[Dict]:
     values = {name: getattr(request, name, None) for name in _CUSTOM_FIELDS}
     values = {key: value for key, value in values.items() if value is not None}
     return values or None
+
+
+def _progress_result_snapshot(job_id: str) -> Dict:
+    """Return a bounded, non-secret progress trail for the completed result.
+
+    The live progress endpoint is intentionally separate while work is running,
+    but the browser replaces that panel with the final answer at completion.
+    Without a copy on the result boundary, useful lines such as contradiction,
+    independence, reasoning and hypothesis stages disappear even though the run
+    succeeded.  This compact snapshot lets any client keep a collapsible
+    "research process" section after rendering the answer.
+
+    Project/job ids, the question, timestamps and unbounded/raw notes are not
+    copied.  The full live endpoint remains protected by the job capability.
+    """
+    progress = get_progress(job_id)
+    if not isinstance(progress, dict) or progress.get("error"):
+        return {"available": False}
+
+    rows = []
+    for item in list(progress.get("log") or [])[-_PROGRESS_LOG_LIMIT:]:
+        if not isinstance(item, dict):
+            continue
+        stage = str(item.get("stage") or "").strip().upper()
+        if stage not in STAGES:
+            continue
+        note = " ".join(str(item.get("note") or "").split())[:_PROGRESS_NOTE_CHARS]
+        if any(marker in note.lower() for marker in _UNSAFE_PROGRESS_MARKERS):
+            note = "Technical provider detail hidden; stage status retained."
+        rows.append({"stage": stage, "note": note})
+
+    def count(name: str) -> int:
+        try:
+            return max(0, int(progress.get(name) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    current = str(progress.get("current_stage") or "").strip().upper()
+    if current not in STAGES:
+        current = ""
+    return {
+        "available": True,
+        "current_stage": current,
+        "stages_done": min(len(STAGES), count("stages_done")),
+        "stages_total": len(STAGES),
+        "sources_discovered": count("sources_discovered"),
+        "documents_processed": count("documents_processed"),
+        "evidence_conflicts_found": count("evidence_conflicts_found"),
+        "full_text_sources_read": count("full_text_sources_read"),
+        "reasoning_calls_used": count("gemini_calls_used"),
+        "log": rows,
+    }
 
 
 def _authorized_job(
@@ -154,7 +213,12 @@ def research_job_result(
             "message": "Research job complete nahi ho saka. Safe retry ya naya job start karein.",
             "status": "failed",
         })
-    return item["result"]
+    result = item["result"]
+    if not isinstance(result, dict):
+        return result
+    response = dict(result)
+    response["research_progress"] = _progress_result_snapshot(job_id)
+    return response
 
 
 @router.get("/research-jobs")

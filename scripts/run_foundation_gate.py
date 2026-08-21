@@ -83,6 +83,7 @@ FOCUSED_PYTEST = (
     "tests/test_api_input_bounds.py",
     "tests/test_job_access.py",
     "tests/test_job_routes_access.py",
+    "tests/test_job_result_progress_snapshot.py",
     "tests/test_project_access.py",
     "tests/test_project_route_guards.py",
     "tests/test_project_wiring.py",
