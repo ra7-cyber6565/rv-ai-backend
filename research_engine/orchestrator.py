@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 
 from .citation import CitationEngine
 from .claim_labels import downgrade as downgrade_labels
+from .claim_verification import verify_answer as verify_claims
 from .content_fetcher import ContentFetcher
 from .contradiction import ContradictionEngine
 from .critic import Critic
@@ -138,28 +139,56 @@ class DeepResearchEngine:
         # dekhta hai ki opposition-side search hui thi ya nahi.
         queries_run: List[str] = []
 
+        # §15 — kis round mein search khud crash hua. Ye insaani warning banti
+        # hai; raw exception text sirf `round_error_details` mein jaata hai aur
+        # wahan se report ke sabse neeche "Technical details" block mein
+        # (point 9: user ke padhne wale hisse mein protobuf/traceback kabhi nahi).
+        round_errors: List[str] = []
+        round_error_details: List[str] = []
+
         for round_no in range(1, config.max_rounds + 1):
             rounds_run = round_no
             # `plan` classify() ke dict ka SUPERSET hai (planner.plan() mein
             # **cls spread hota hai), isliye ise seedha cls ki jagah dena safe
             # hai — planner ke andar saari fields .get() se padhi jaati hain.
             queries = self.planner.search_queries(question, plan, round_no=round_no)
+            if not queries:
+                # Planner ne kuch na diya to bhi search rukni nahi chahiye —
+                # seedha sawal hi query ban jaata hai.
+                queries = [question]
             for q in queries:
                 if q and q not in queries_run:
                     queries_run.append(q)
             self._track(job_id, "DISCOVERING",
                         f"round {round_no}: {', '.join(queries)[:120]}")
 
-            found = self.discovery.discover(
-                queries=queries,
-                plan=plan["connectors"],
-                max_per_connector=config.max_per_connector,
-                max_web=config.max_sources,
-                round_no=round_no,
-                exclude_urls=seen_this_run,
-                # Spec §13 — network par bhi rail. Har round ka apna budget.
-                budget_seconds=getattr(config, "discovery_seconds", None),
-            )
+            try:
+                found = self.discovery.discover(
+                    queries=queries,
+                    plan=plan["connectors"],
+                    max_per_connector=config.max_per_connector,
+                    max_web=config.max_sources,
+                    round_no=round_no,
+                    exclude_urls=seen_this_run,
+                    # Spec §13 — network par bhi rail. Har round ka apna budget.
+                    budget_seconds=getattr(config, "discovery_seconds", None),
+                )
+            except Exception as exc:
+                # §15 — ek round ka crash poori research ko nahi maar sakta.
+                # Loop agla round chalata rehta hai, aur is round ke records
+                # khaali maane jaate hain — "0 mila" nahi, "dekha hi nahi ja
+                # saka". Audit mein insaani line jaati hai, raw exception sirf
+                # sabse neeche ke technical block mein.
+                round_errors.append(f"round {round_no}")
+                round_error_details.append(
+                    f"discovery round {round_no} crashed: "
+                    f"{type(exc).__name__}: {exc}")
+                logs.append({"connector": f"discovery round {round_no}",
+                             "count": 0, "reason": "error",
+                             "error": "ye round beech mein ruk gaya — raw "
+                                      "wajah technical details mein hai"})
+                found = {"records": [], "log": [], "connectors_searched": [],
+                         "seen_urls": set()}
             external.extend(found["records"])
             logs.extend(found["log"])
             connectors = sorted(set(connectors) | set(found["connectors_searched"]))
@@ -195,6 +224,8 @@ class DeepResearchEngine:
             "connectors": connectors, "sufficiency": sufficiency,
             "urls": sorted(seen_this_run - seen),
             "queries": queries_run,
+            "round_errors": round_errors,
+            "round_error_details": round_error_details,
         }
 
     # ── 3. gemini passes (budget-aware) ──────────────────────────────────────
@@ -354,6 +385,9 @@ class DeepResearchEngine:
                "requests": {}, "hypothesis_requested": False,
                "hypothesis_count": 0, "attempts": 0, "models_tried": [],
                "usage_note": "", "notes": [],
+               # point 11/10 — evidence gate ki ginti aur (LLM na chale to)
+               # system ka khud banaya deterministic research plan
+               "hypothesis_gate": {}, "hypothesis_plan": {},
                # §9/§14 — wajah insaani bhasha mein + raw detail alag
                "failure_kind": "", "failure_reason": "",
                "technical_details": [], "api_accounting": {}}
@@ -382,8 +416,28 @@ class DeepResearchEngine:
                                              "MIXED", "WEAK") if word in graded), "")
         want_hypothesis = explicit_hypotheses or self.hypotheses.should_generate(
             plan, pack, contradiction_dicts, level_hint)
-        # Kitni maangi thi: explicit number ho to wahi, warna purana default 2.
-        hypothesis_count = asked_count if asked_count else 2
+        # ── evidence gate (point 11) ─────────────────────────────────────────
+        # Ab tak `hypothesis_count` sirf request ya flat default 2 tha. Uska
+        # nateeja: 1 patle source par bhi 2-3 hypotheses maangi jaati thi, aur
+        # model unhe bhar deta tha — yaani "hypothesis" naam par andaaza.
+        # `gate` asli ginti karta hai (relevant source, kitne gehrai tak padhe,
+        # takraav) aur uski wajah insaani bhasha mein deta hai.
+        #
+        # Jaan-boojh kar: EXPLICIT request gate se OOPAR hai (repo ka purana
+        # rule). User ne 3 maangi to 3 hi maangi jayengi — par gate ki wajah
+        # prompt ke andar aur report mein jaati hai, taaki kami ka ilzaam galat
+        # jagah (quota) par na jaaye.
+        gate = self.hypotheses.gate(pack, requested=asked_count,
+                                    contradictions=contradiction_dicts)
+        out["hypothesis_gate"] = gate.to_dict()
+        # Kitni maangi thi: explicit number ho to wahi, warna gate jitni imaandaari
+        # se utha sakta hai (purana flat default 2 iski jagah tha).
+        hypothesis_count = asked_count if asked_count else max(1, gate.allowed or 1)
+        if not explicit_hypotheses and gate.allowed <= 0:
+            # 0 relevant source par hypothesis maangna hi galat hai — na maango,
+            # aur wajah likh do (khaali template se behtar).
+            want_hypothesis = False
+            out["notes"].append(f"Nayi hypothesis nahi maangi gayi: {gate.reason}")
         out["hypothesis_requested"] = want_hypothesis
         out["hypothesis_count"] = asked_count
 
@@ -469,7 +523,7 @@ class DeepResearchEngine:
                 out["hypothesis_raw"] = brain.generate(
                     self.hypotheses.prompt(question, out["analysis"], pack, plan,
                                            contradiction_dicts,
-                                           count=hypothesis_count),
+                                           count=hypothesis_count, gate=gate),
                     "hypothesis")
             except QuotaExhausted as exc:
                 out["errors"].append(str(exc))
@@ -514,11 +568,25 @@ class DeepResearchEngine:
                                            max_count=hypothesis_count)
             out["hypotheses"] = [h.to_dict() for h in parsed]
             out["errors"].extend(self.hypotheses.honesty_check(parsed))
-        # Maangi thi 3, mili 1 — ye chup-chaap nahi jaana chahiye.
+        # Maangi thi 3, mili 1 — ye chup-chaap nahi jaana chahiye. Aur wajah bhi
+        # sahi honi chahiye: agar evidence hi patla tha to ilzaam quota par mat
+        # daalo (gate ki asli ginti saath jaati hai).
         if asked_count and len(out["hypotheses"]) < asked_count:
-            out["errors"].append(
-                f"{len(out['hypotheses'])}/{asked_count} hypotheses hi ban paayi "
-                f"jo aapne maangi thi.")
+            msg = (f"{len(out['hypotheses'])}/{asked_count} hypotheses hi ban paayi "
+                   f"jo aapne maangi thi.")
+            if not gate.sufficient and gate.reason:
+                msg += f" Evidence ki haalat: {gate.reason}"
+            out["errors"].append(msg)
+
+        # ── point 10: LLM ke bina bhi kaam ka output ─────────────────────────
+        # Pehle hypothesis pass fail hone par section mein khaali dhaancha ya
+        # sirf "nahi ban paayi" jaata tha. Ab system khud (bina kisi API, ₹0)
+        # ek research plan banata hai — open questions + agla kadam, sirf usi
+        # cheez se jo retrieve hui. Ye plan hypothesis ka DAAWA nahi karta.
+        short = len(out["hypotheses"]) < max(1, asked_count)
+        if short and (want_hypothesis or gate.allowed <= 0):
+            out["hypothesis_plan"] = self.hypotheses.fallback_plan(
+                question, pack, contradiction_dicts, gate, plan)
 
         out["calls"] = brain.calls_used
         out["errors"].extend(brain.errors)
@@ -533,7 +601,9 @@ class DeepResearchEngine:
         out["api_accounting"] = brain.api_accounting()
         # notes = "retry ke baad chal gaya" type imaandaar jaankari. Ye ERROR
         # nahi hai, isliye warnings mein nahi daalte — audit section mein jaati hai.
-        out["notes"] = list(brain.notes)
+        # `extend` (assignment nahi): gate ka note isse pehle add ho chuka hota
+        # hai, aur `=` use karne se wo chup-chaap gum ho jaata tha.
+        out["notes"].extend(brain.notes)
 
         # ── kya-kya SACH MEIN hua ────────────────────────────────────────────
         # Output se naapte hain, intention se nahi: call ho kar bhi khaali text
@@ -584,6 +654,18 @@ class DeepResearchEngine:
                             "sirf model ki general knowledge par hai, verified nahi.")
         if doc_note:
             discovery_note = f"{doc_note} | {discovery_note}"
+
+        # §15 — koi search round beech mein gir gaya. User ko sirf itna pata
+        # chalna chahiye ki us round ka data MISSING hai (na ki "0 mila"), aur
+        # raw exception ka ek shabd bhi yahan nahi aata (point 9).
+        round_errors = discovered.get("round_errors") or []
+        round_error_details = list(discovered.get("round_error_details") or [])
+        if round_errors:
+            warnings.append(
+                f"{len(round_errors)} search round technical wajah se poora nahi "
+                f"ho paaya ({', '.join(round_errors)}) — baaki rounds chalte rahe, "
+                f"par utna data is jawab mein missing hai. Details audit section "
+                f"mein hain.")
 
         sufficiency = discovered.get("sufficiency", {})
         if sufficiency and not sufficiency.get("sufficient"):
@@ -696,9 +778,30 @@ class DeepResearchEngine:
         # hue source par. Ye citation verify se PEHLE chalta hai, kyunki annotate
         # baad mein isi text par lagta hai — warna downgrade annotate ke markers
         # ko kaat sakta tha. Text kabhi nahi kaata jaata, sirf label badalta hai.
-        gemini_answer, label_report = downgrade_labels(gemini_answer, pack)
+        #
+        # §13 (2026-08-21): ab gate mein entailment bhi shaamil hai
+        # (`check_entailment=True`). Matlab: poora text padh liya ho, par us text
+        # mein claim ka support hi na dikhe, to bhi label ESTABLISHED nahi
+        # rehta. Ye jaan-boojh kar sirf saaf FAIL par girata hai — jahan support
+        # check HO HI NA SAKE wahan chup rehta hai aur wo baat claim-check block
+        # mein alag se likhi jaati hai.
+        gemini_answer, label_report = downgrade_labels(gemini_answer, pack,
+                                                       check_entailment=True)
         if label_report.get("note"):
             warnings.append(label_report["note"])
+
+        # 6d. §13 / point 7 — paanch alag check (A–E) har labelled claim par.
+        # Purana "citation verified" number sirf ye batata tha ki [S3] naam ka
+        # source pack mein hai. Ye report usse ALAG hai: citation exists (A),
+        # source relevant (B), claim entailed (C), reading depth (D), source
+        # quality (E) — sab alag ginte hain, aur "verified" ka dava sirf C par
+        # tikta hai. Poora module deterministic hai (₹0, koi API call nahi).
+        claim_checks = verify_claims(gemini_answer, pack).to_dict()
+        if claim_checks.get("overclaims"):
+            warnings.append(
+                f"{len(claim_checks['overclaims'])} claim par label evidence se "
+                f"zyada strong tha — unhe report mein wajah ke saath mark kiya "
+                f"gaya hai.")
 
         # 7. citation verification (structural, Gemini par bharosa nahi)
         report = self.citations.verify(gemini_answer, pack)
@@ -720,7 +823,20 @@ class DeepResearchEngine:
             ungrounded_count=len(report.ungrounded_claims),
             hypotheses=passes["hypotheses"],
             cited_ids=[c.get("source_id") for c in report.cited if c.get("source_id")],
+            # point 12 — sanity checks sirf quantitative sawal par chalein,
+            # isliye sawal bhi bhejna zaroori hai.
+            question=question,
         ).to_dict()
+        # §13 — A–E ka poora record API/Android tak bhi jaana chahiye, sirf
+        # report ke text mein nahi. `verification` dict pehle se result mein
+        # jaata hai, isliye naya top-level field banane ki zaroorat nahi.
+        verification["claim_checks"] = claim_checks
+        # point 11 — kitni hypotheses evidence ke hisaab se banayi ja sakti thi,
+        # ye ginti bhi API/Android tak jaani chahiye (report ke text ke alawa).
+        if passes.get("hypothesis_gate"):
+            verification["hypothesis_gate"] = passes["hypothesis_gate"]
+        if passes.get("hypothesis_plan"):
+            verification["hypothesis_plan"] = passes["hypothesis_plan"]
 
         # 9. grading + coverage
         evidence_level = self.evidence.grade_evidence(pack, claims)
@@ -817,6 +933,13 @@ class DeepResearchEngine:
         )
         status_dict = run_status.to_dict()
 
+        # §15 — crashed search round ka RAW text bhi report se gayab nahi hota,
+        # par uska ghar sirf sabse neeche wala "Technical details" block hai.
+        # Ye jaan-boojh kar `evaluate_status()` ko NAHI diya jaata: wo LLM ke
+        # failure_kind ka faisla karta hai, aur network/connector ka crash LLM
+        # ka dosh nahi hai — warna banner galat wajah bata deta.
+        technical_lines = list(run_status.technical) + round_error_details
+
         # §1 — adhoore run par top label "VERIFIED" nahi ho sakta, chahe
         # citations theek hon. Grading already reasoning-gate lagata hai, ye
         # doosra taala hai taaki koi bhi raasta bacha na rah jaaye. Grader ki
@@ -848,8 +971,10 @@ class DeepResearchEngine:
             usage_note=passes.get("usage_note", ""),
             requests=requests,
             status=status_dict,
-            technical_details=run_status.technical,
+            technical_details=technical_lines,
             api_accounting=passes.get("api_accounting") or {},
+            claim_checks=claim_checks,
+            hypothesis_plan=passes.get("hypothesis_plan") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -903,7 +1028,7 @@ class DeepResearchEngine:
             failure_kind=run_status.failure_kind,
             missing_passes=list(run_status.missing_passes),
             missing_sections=list(run_status.missing_sections),
-            technical_details=list(run_status.technical),
+            technical_details=list(technical_lines),
             api_accounting=passes.get("api_accounting") or {},
         ).to_dict()
 

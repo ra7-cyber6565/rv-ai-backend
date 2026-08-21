@@ -231,7 +231,13 @@ class ResearchPlanner:
 
         if plan.is_known:
             if round_no <= 1:
-                qs = plan.expanded_queries(base, limit=4)
+                # Round 1 = SAWAAL + uske alag-alag search intents (transport,
+                # grid, computing, mechanism...). Pehle sirf `expanded_queries`
+                # jaati thi, jo branch queries hi thi par intent ke roop mein
+                # na plan hoti thi na report hoti thi. Ab intent-wise chalti
+                # hai: focus intents pehle, aur base query kabhi nahi girti.
+                intents = plan.search_intents(base, limit=3)
+                qs = [base] + [i["query"] for i in intents]
             else:
                 qs = ([base]
                       + plan.fallback_queries(base, round_no=round_no, limit=2)
@@ -313,6 +319,7 @@ class ResearchPlanner:
                 datasets += ["world_bank", "huggingface", "data_gov_in"]
 
         dplan = domain_detect(question or cls.get("question") or "")
+        intents = dplan.search_intents(self.clean_query(question or ""), limit=8)
         papers, drop_p = dplan.route(sorted(set(papers)), "papers")
         books, drop_b = dplan.route(sorted(set(books)), "books")
         datasets, drop_d = dplan.route(sorted(set(datasets)), "datasets")
@@ -333,6 +340,13 @@ class ResearchPlanner:
             "domain": dplan.key,
             "domain_label": dplan.profile.label,
             "sub_domains": [b.key for b in dplan.focus_branches()],
+            # §3 (2026-08-21) — ek sawaal, kai alag literatures. Har intent ki
+            # apni query hoti hai, aur report mein saaf likha jaata hai kis
+            # intent par search hui. Ye list deterministic hai.
+            "search_intents": [{"key": i["key"], "label": i["label"],
+                                "query": i["query"], "focus": i["focus"]}
+                               for i in intents],
+            "intent_note": dplan.intent_note(intents),
             "useful_source_types": list(dplan.profile.source_types),
             "skipped_connectors": sorted(set(dropped)),
             "routing_note": dplan.routing_note(dropped),
