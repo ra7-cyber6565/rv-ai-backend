@@ -21,6 +21,7 @@ from api.archive_routes import router as archive_router
 from api.session_routes import router as session_router
 from knowledge.routes import router as knowledge_router
 from storage.provider_factory import provider_status
+from utils.body_limit import RequestBodyLimitMiddleware
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
 from utils.request_guard import (
@@ -58,6 +59,11 @@ app.add_middleware(
         "X-Infinity-Admin-Token",
     ],
 )
+# This pure-ASGI guard is intentionally added after CORS so it is outermost in
+# Starlette's user middleware stack. It counts raw bytes before JSON/multipart
+# parsing, closing the gap where a huge chunked upload could spool before the
+# route-level UploadFile size check ever runs.
+app.add_middleware(RequestBodyLimitMiddleware)
 
 
 def _harden_response(response, path: str):
