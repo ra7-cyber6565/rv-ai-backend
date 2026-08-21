@@ -25,13 +25,7 @@ def test_job_returns_result_after_background_execution():
     def fake_run(**kwargs):
         return {"answer": "ok", "job_id": kwargs["job_id"]}
 
-    job = runner.submit(
-        project_id="p1",
-        question="test question",
-        mode="DEEP",
-        custom=None,
-        run=fake_run,
-    )
+    job = runner.submit(project_id="p1", question="test question", mode="DEEP", custom=None, run=fake_run)
     done = _wait(runner, job.job_id)
     assert done["status"] == "completed"
     assert done["result"]["answer"] == "ok"
@@ -45,13 +39,7 @@ def test_job_failure_is_captured_instead_of_crashing_request():
     def broken(**kwargs):
         raise RuntimeError("provider unavailable")
 
-    job = runner.submit(
-        project_id="p1",
-        question="test failure",
-        mode="MAXIMUM",
-        custom=None,
-        run=broken,
-    )
+    job = runner.submit(project_id="p1", question="test failure", mode="MAXIMUM", custom=None, run=broken)
     done = _wait(runner, job.job_id)
     assert done["status"] == "failed"
     assert "provider unavailable" in done["error"]
@@ -67,13 +55,7 @@ def test_raw_provider_trace_and_secret_are_not_exposed():
             "https://provider.example/v1/raw"
         )
 
-    job = runner.submit(
-        project_id="p1",
-        question="safe failure",
-        mode="DEEP",
-        custom=None,
-        run=broken,
-    )
+    job = runner.submit(project_id="p1", question="safe failure", mode="DEEP", custom=None, run=broken)
     done = _wait(runner, job.job_id)
     assert done["status"] == "failed"
     lowered = done["error"].lower()
@@ -98,12 +80,8 @@ def test_empty_question_is_rejected_before_worker_submission():
 def test_completed_result_survives_runner_restart_in_separate_gzip_file(tmp_path):
     store = tmp_path / "jobs.json"
     runner1 = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
-
     job = runner1.submit(
-        project_id="p",
-        question="durable test",
-        mode="DEEP",
-        custom=None,
+        project_id="p", question="durable test", mode="DEEP", custom=None,
         run=lambda **_: {"answer": "saved", "sources": [{"title": "paper"}]},
     )
     first = _wait(runner1, job.job_id)
@@ -136,26 +114,16 @@ def test_second_process_owner_is_blocked_for_same_store(tmp_path):
     finally:
         runner1.close()
 
-    # Lock release must allow a clean restart afterwards.
     runner2 = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
     runner2.close()
 
 
 def test_oversized_result_is_compacted_and_disclosed(tmp_path):
     store = tmp_path / "jobs.json"
-    runner = ResearchJobRunner(
-        max_workers=1,
-        max_jobs=5,
-        store_path=str(store),
-        persist=True,
-        max_result_bytes=1024,
-    )
+    runner = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True, max_result_bytes=1024)
     huge = "x" * 50_000
     job = runner.submit(
-        project_id="p",
-        question="large result",
-        mode="MAXIMUM",
-        custom=None,
+        project_id="p", question="large result", mode="MAXIMUM", custom=None,
         run=lambda **_: {
             "answer": "important final answer",
             "debug_blob": huge,
@@ -176,11 +144,7 @@ def test_pruning_old_job_removes_external_result_file(tmp_path):
     store = tmp_path / "jobs.json"
     runner = ResearchJobRunner(max_workers=1, max_jobs=1, store_path=str(store), persist=True)
     first = runner.submit(
-        project_id="p",
-        question="first",
-        mode="DEEP",
-        custom=None,
-        run=lambda **_: {"answer": "one"},
+        project_id="p", question="first", mode="DEEP", custom=None, run=lambda **_: {"answer": "one"}
     )
     assert _wait(runner, first.job_id)["status"] == "completed"
     ledger = json.loads(store.read_text(encoding="utf-8"))
@@ -189,11 +153,7 @@ def test_pruning_old_job_removes_external_result_file(tmp_path):
     assert first_path.exists()
 
     second = runner.submit(
-        project_id="p",
-        question="second",
-        mode="DEEP",
-        custom=None,
-        run=lambda **_: {"answer": "two"},
+        project_id="p", question="second", mode="DEEP", custom=None, run=lambda **_: {"answer": "two"}
     )
     assert _wait(runner, second.job_id)["status"] == "completed"
     assert runner.get(first.job_id) is None
@@ -206,16 +166,9 @@ def test_previously_running_job_is_marked_interrupted(tmp_path):
     store.write_text(json.dumps({
         "version": 1,
         "jobs": [{
-            "job_id": "old-job",
-            "project_id": "p",
-            "question": "was running",
-            "mode": "MAXIMUM",
-            "status": "running",
-            "created_at": 1.0,
-            "started_at": 2.0,
-            "finished_at": None,
-            "result": None,
-            "error": "",
+            "job_id": "old-job", "project_id": "p", "question": "was running", "mode": "MAXIMUM",
+            "status": "running", "created_at": 1.0, "started_at": 2.0, "finished_at": None,
+            "result": None, "error": "",
         }],
     }), encoding="utf-8")
 
@@ -223,6 +176,7 @@ def test_previously_running_job_is_marked_interrupted(tmp_path):
     restored = runner.get("old-job")
     assert restored is not None
     assert restored["status"] == "interrupted"
+    assert restored["result_durable"] is False
     assert "restart" in restored["error"].lower()
     runner.close()
 
@@ -232,16 +186,9 @@ def test_old_inline_completed_result_is_migrated(tmp_path):
     store.write_text(json.dumps({
         "version": 1,
         "jobs": [{
-            "job_id": "old-complete",
-            "project_id": "p",
-            "question": "old result",
-            "mode": "DEEP",
-            "status": "completed",
-            "created_at": 1.0,
-            "started_at": 2.0,
-            "finished_at": 3.0,
-            "result": {"answer": "legacy saved"},
-            "error": "",
+            "job_id": "old-complete", "project_id": "p", "question": "old result", "mode": "DEEP",
+            "status": "completed", "created_at": 1.0, "started_at": 2.0, "finished_at": 3.0,
+            "result": {"answer": "legacy saved"}, "error": "",
         }],
     }), encoding="utf-8")
 
@@ -255,3 +202,49 @@ def test_old_inline_completed_result_is_migrated(tmp_path):
     assert row["result"] is None
     assert row["result_file"].endswith(".json.gz")
     runner.close()
+
+
+def test_tampered_absolute_result_path_is_never_read_or_deleted(tmp_path):
+    store = tmp_path / "jobs.json"
+    victim = tmp_path / "do-not-delete.txt"
+    victim.write_text("private data", encoding="utf-8")
+    store.write_text(json.dumps({
+        "version": 2,
+        "jobs": [{
+            "job_id": "tampered", "project_id": "p", "question": "tampered", "mode": "DEEP",
+            "status": "completed", "created_at": 1.0, "started_at": 2.0, "finished_at": 3.0,
+            "result": None, "error": "", "result_file": str(victim.resolve()), "result_bytes": 10,
+            "result_compacted": False, "durable": True, "storage_warning": "",
+        }],
+    }), encoding="utf-8")
+
+    runner = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
+    restored = runner.get("tampered", include_result=True)
+    assert restored is not None
+    assert restored["result_durable"] is False
+    assert restored["result"].get("_result_unavailable") is True
+    assert "unsafe path" in restored["storage_warning"].lower()
+    assert victim.read_text(encoding="utf-8") == "private data"
+    runner.close()
+    assert victim.exists()
+
+
+def test_corrupt_json_is_quarantined_but_valid_write_failure_is_not(tmp_path, monkeypatch):
+    corrupt = tmp_path / "corrupt-jobs.json"
+    corrupt.write_text("{not-json", encoding="utf-8")
+    with pytest.raises(RuntimeError, match="corrupt"):
+        ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(corrupt), persist=True)
+    assert not corrupt.exists()
+    assert list(tmp_path.glob("corrupt-jobs.json.corrupt-*"))
+
+    valid = tmp_path / "valid-jobs.json"
+    valid.write_text(json.dumps({"version": 2, "jobs": []}), encoding="utf-8")
+
+    def fail_write(self):
+        raise OSError("simulated disk write failure")
+
+    monkeypatch.setattr(ResearchJobRunner, "_persist_locked", fail_write)
+    with pytest.raises(OSError, match="disk write failure"):
+        ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(valid), persist=True)
+    assert valid.exists()
+    assert not list(tmp_path.glob("valid-jobs.json.corrupt-*"))
