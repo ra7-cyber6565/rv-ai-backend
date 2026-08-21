@@ -23,26 +23,30 @@ Storage: GitHub = code/version history; laptop D: = bounded fast working/runtime
 
 | Task | Owner | Status | Files / area | Notes |
 |---|---|---|---|---|
-| Research relevance hardening | Claude | ACTIVE/VERIFY | `research_engine/relevance.py`, planner/query/discovery files | Reject off-domain results aggressively |
-| Source routing + query expansion | Claude | ACTIVE/VERIFY | planner/query/connectors | Domain-aware, deterministic fallback |
-| Full-text + large PDF handling | Claude | ACTIVE/VERIFY | content fetch/processing | Chunk/range, do not skip only because large |
-| Evidence verification A-E | Claude | ACTIVE/VERIFY | verification/evidence/claim labels | Citation, relevance, entailment, depth, quality |
-| Consensus/contradiction correctness | Claude | ACTIVE/VERIFY | contradiction/synthesizer | No consensus without opposition analysis |
-| Model quota/fallback honesty | Claude | ACTIVE/VERIFY | Gemini/model reasoning path | No raw 429/protobuf in user answer |
-| Superconductivity benchmark V2 | Claude | TODO/VERIFY | regression benchmark | Must reject irrelevant biology/WHO/etc. |
-| Central D-drive runtime routing | ChatGPT | DONE on `chatgpt-upload-safety` | `utils/storage_paths.py`, `main.py`, RAG/memory/project paths | Heavy caches/models/vector DB/temp routed under configured root |
-| Streaming upload safety | ChatGPT | DONE on branch | `utils/upload_safety.py`, `api/routes.py` | No whole-file RAM buffering, bounded caps, cleanup |
-| ₹0 startup guard | ChatGPT | DONE on branch | `utils/zero_cost_guard.py`, config | Fail closed on known paid-provider credentials |
-| Strict browser CORS | ChatGPT | DONE on branch | `utils/security_config.py`, `main.py` | No wildcard CORS |
-| Cloud archive manifest | ChatGPT | DONE/EXTENDING | `utils/archive_manifest.py` | pending -> uploaded_unverified -> verified; deletion only after verification |
-| Provider-neutral cloud storage interface | ChatGPT | IN PROGRESS | `utils/cloud_storage.py` | TeraBox adapter waits for official credentials/API approval |
-| Async Deep/Maximum research jobs | ChatGPT | DONE/VERIFY | `utils/research_jobs.py`, `api/job_routes.py`, web UI | Avoid giant HTTP timeout; one worker by default to protect free quota |
-| Storage quota / local cleanup safety | ChatGPT | NEXT | `utils/storage_quota.py` + tests | Never delete unverified archive data |
-| Runtime/generated files out of Git | ChatGPT | DONE on branch | `.gitignore` | Research memory/db/cache/generated data should not be committed |
-| Deployment docs ₹0 cleanup | ChatGPT | DONE on branch | `DEPLOYMENT_GUIDE.md` | Removed stale paid-key guidance; verify provider terms before claiming free |
+| Research relevance hardening | Claude | DONE / merged into ChatGPT branch | `research_engine/relevance.py`, planner/query/discovery files | Claude commit `312dcd6`; off-domain hard rejection |
+| Source routing + query expansion | Claude | DONE / merged into ChatGPT branch | planner/query/connectors | Domain-aware, deterministic fallback |
+| Full-text + large PDF handling | Claude | DONE / merged into ChatGPT branch | content fetch/processing | Chunk/range based; no 4MB blind skip |
+| Evidence verification A-E | Claude | STILL PENDING | verification/evidence/claim labels | Citation, relevance, entailment, depth, quality must be completed before foundation pass |
+| Consensus/contradiction correctness | Claude | DONE / VERIFY | contradiction/synthesizer | Consensus gate added; needs integrated regression |
+| Model quota/fallback honesty | Claude | DONE / VERIFY | Gemini/model reasoning path | Error taxonomy + dynamic discovery; needs integrated regression |
+| Superconductivity benchmark V2 | Claude + ChatGPT review | PENDING LIVE RETEST | regression benchmark | Offline fixes landed; live benchmark still required |
+| Central D-drive runtime routing | ChatGPT | DONE | `utils/storage_paths.py`, `main.py`, RAG/memory/project paths | Heavy caches/models/vector DB/temp routed under configured root |
+| Streaming upload safety | ChatGPT | DONE | `utils/upload_safety.py`, `api/routes.py` | No whole-file RAM buffering, bounded caps, cleanup |
+| Upload storage reservation | ChatGPT | DONE / VERIFY | `utils/upload_safety.py`, `utils/storage_quota.py` | HTTP 507 before large write when bounded workspace is unsafe |
+| ₹0 startup guard | ChatGPT | DONE | `utils/zero_cost_guard.py`, config | Fail closed on known paid-provider credentials |
+| ₹0 request abuse guard | ChatGPT | DONE / VERIFY | `utils/request_guard.py`, `main.py` | Process-local rate limits on expensive POST endpoints |
+| Strict browser CORS | ChatGPT | DONE | `utils/security_config.py`, `main.py` | No wildcard CORS |
+| Cloud archive manifest | ChatGPT | DONE | `utils/archive_manifest.py` | pending -> uploaded_unverified -> verified; deletion only after verification |
+| Provider-neutral cloud storage interface | ChatGPT | DONE foundation | `utils/cloud_storage.py` | Official provider can plug in without core rewrite |
+| Async Deep/Maximum research jobs | ChatGPT | DONE / VERIFY | `utils/research_jobs.py`, `api/job_routes.py`, web UI | Avoid giant HTTP timeout; one worker default |
+| Durable job result storage | ChatGPT | DONE / VERIFY | `utils/research_jobs.py`, `api/job_routes.py` | Completed results survive restart; in-flight jobs become honest `interrupted` |
+| Storage quota / local cleanup safety | ChatGPT | DONE / VERIFY | `utils/storage_quota.py` + tests | Only cloud-VERIFIED local copies eligible for cleanup |
+| Runtime/generated files out of Git | ChatGPT | DONE | `.gitignore` | Research memory/db/cache/generated data should not be committed |
+| Deployment docs ₹0 cleanup | ChatGPT | DONE | `DEPLOYMENT_GUIDE.md`, `.env.example` | Current safety/config knobs documented |
 | TeraBox official adapter | ChatGPT | BLOCKED | future provider module | Waiting for official TeraBox API credentials/approval; no unofficial reverse-engineered client |
-| Encryption for cloud archive | ChatGPT | PLANNED | storage/security | Authenticated encryption; key never in public repo/APK; implement only with safe key recovery design |
-| Secondary compact metadata backup | ChatGPT | PLANNED | storage/provider layer | Small critical metadata only; must remain genuinely free |
+| Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY DESIGN / PROVIDER | storage/security | Do not deploy encryption that risks unrecoverable data; key must stay out of repo/APK |
+| Secondary compact metadata backup | ChatGPT | PLANNED AFTER PROVIDER APPROVAL | storage/provider layer | Small critical metadata only; genuinely free destination required |
+| Integrated regression after branch merge | ChatGPT | REQUIRED | full branch | Local clone unavailable in current tool environment; do not falsely claim tests passed |
 
 ## Required test gates before foundation is considered reliable
 
@@ -56,8 +60,10 @@ Storage: GitHub = code/version history; laptop D: = bounded fast working/runtime
 8. Upload cap stops reading early and cleans partial file.
 9. D-drive/root unavailable => fail closed, no silent C: fallback when explicitly configured.
 10. Cloud upload failure/mismatch => local copy preserved.
-11. Async job status/result lifecycle works.
-12. Full regression suite + superconductivity benchmark rerun after integration.
+11. Async + durable job status/result lifecycle works, including `interrupted` restart state.
+12. Request rate guard blocks abuse without trusting spoofed proxy headers by default.
+13. Full regression suite + superconductivity benchmark rerun after integration.
+14. Evidence verification A-E completed and enforced.
 
 ## Advanced Scientific Discovery Engine — intentionally postponed until foundation passes
 
