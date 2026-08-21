@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Dict, Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from research_engine.depth import BOOL_FIELDS, depth_limits
 from utils.admin_guard import require_admin
@@ -14,12 +14,14 @@ from utils.research_jobs import runner
 
 
 router = APIRouter()
+_MAX_QUESTION_CHARS = 20_000
+_MAX_PROJECT_ID_CHARS = 80
 
 
 class ResearchJobRequest(BaseModel):
-    question: str
-    project_id: str = "default"
-    depth_mode: str = "DEEP"
+    question: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
+    depth_mode: str = Field(default="DEEP", min_length=1, max_length=16)
     max_sources: Optional[int] = None
     max_rounds: Optional[int] = None
     gemini_calls: Optional[int] = None
@@ -90,7 +92,12 @@ def start_research_job(request: ResearchJobRequest):
             run=manager.research,
         )
     except RuntimeError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
+        # Queue/process/storage internals may include local paths or operational
+        # details. Keep them server-side instead of reflecting raw exception text.
+        raise HTTPException(
+            status_code=429,
+            detail="Research queue abhi busy/unavailable hai. Thodi der baad dobara try karein.",
+        ) from exc
 
     access_token = job_access.issue(job.job_id)
     return {
