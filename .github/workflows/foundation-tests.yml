@@ -51,6 +51,7 @@ jobs:
             tests/test_storage_paths.py \
             tests/test_storage_quota.py \
             tests/test_archive_manifest.py \
+            tests/test_archive_retry.py \
             tests/test_cloud_storage.py \
             tests/test_cloud_archive.py \
             tests/test_zero_cost_guard.py \
