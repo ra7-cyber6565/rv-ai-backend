@@ -73,6 +73,8 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "tests/test_release_state.py" in focused_command
     assert "tests/test_repo_hygiene.py" in focused_command
     assert "tests/test_admin_guard.py" in focused_command
+    assert "tests/test_job_access.py" in focused_command
+    assert "tests/test_job_routes_access.py" in focused_command
     assert "tests/test_foundation_gate_runner.py" in focused_command
 
 
