@@ -258,4 +258,21 @@ check("score deterministic hai",
       pdf_chunker.page_score(RELEVANT_BODY, QUESTION) == relevant_score)
 
 print(f"\n{PASS} passed, {FAIL} failed")
-sys.exit(1 if FAIL else 0)
+
+
+def test_pdf_chunking_checks_all_pass():
+    """
+    pytest ke liye entry point (2026-08-21).
+
+    Ye file flat script hai — saare check import ke waqt hi chal jaate hain.
+    Pehle file ke aakhir mein seedha `sys.exit(...)` tha, aur CI `pytest -q
+    tests/test_pdf_chunking.py` chalati hai: pytest ke andar module-level
+    SystemExit = COLLECTION ERROR. Yaani ye CI step aaj toota hua tha, aur
+    `python3 tests/test_pdf_chunking.py` se ye kabhi pata nahi chalta.
+    Ab exit sirf script mode mein hota hai, aur pytest yahi ginti check karta hai.
+    """
+    assert FAIL == 0, f"{FAIL} check fail hue"
+
+
+if __name__ == "__main__":
+    sys.exit(1 if FAIL else 0)

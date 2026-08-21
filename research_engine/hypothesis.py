@@ -638,13 +638,22 @@ Format exactly aise:
         Model ke text se hypotheses nikaalo.
 
         `max_count` pehle hard-coded 3 tha. User "kam se kam 3" maange aur model
-        4 de de, to chauthi chup-chaap phenki jaati thi — isliye ab cap request
-        ke hisaab se badhta hai (kam kabhi nahi hota).
+        4 de de, to chauthi chup-chaap phenki jaati thi — isliye cap request ke
+        hisaab se BADH sakta hai.
+
+        2026-08-21 (cross-domain benchmark): cap mein `max(3, ...)` ka floor tha,
+        yaani neeche kabhi nahi ja sakta tha. Nateeja: 2 patle snippet-only
+        sources par evidence gate `allowed=1` kehta tha, orchestrator 1 hi
+        maangta tha, par model ke bheje 3 blocks poore parse ho jaate the aur
+        report mein teen hypotheses chhap jaati thi — gate ka faisla kaagaz par
+        reh jaata tha. Ab explicit cap ki izzat hoti hai (1 bhi), aur cap na
+        bheja jaaye to purana default 3 hi rehta hai.
         """
         if not text or not text.strip():
             return []
 
-        cap = max(3, int(max_count or 0))
+        asked = int(max_count or 0)
+        cap = max(1, asked) if asked > 0 else 3
         blocks = _H_SPLIT_RE.split(text)
         chunks = [b for b in blocks[1:] if b and b.strip()] if len(blocks) > 1 else [text]
 

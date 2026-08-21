@@ -29,6 +29,7 @@ from typing import Dict, List, Optional
 
 from .citation import CitationEngine
 from .claim_labels import downgrade as downgrade_labels
+from .claim_labels import merge_reports as merge_label_reports
 from .claim_verification import enforce_strict_labels
 from .claim_verification import verify_answer as verify_claims
 from .content_fetcher import ContentFetcher
@@ -424,16 +425,31 @@ class DeepResearchEngine:
         # `gate` asli ginti karta hai (relevant source, kitne gehrai tak padhe,
         # takraav) aur uski wajah insaani bhasha mein deta hai.
         #
-        # Jaan-boojh kar: EXPLICIT request gate se OOPAR hai (repo ka purana
-        # rule). User ne 3 maangi to 3 hi maangi jayengi — par gate ki wajah
-        # prompt ke andar aur report mein jaati hai, taaki kami ka ilzaam galat
+        # Jaan-boojh kar: explicit request ko gate ke SAATH mila kar dekha jaata
+        # hai. User ne 3 maangi to 3 hi maangi jayengi — par sirf tab tak jab tak
+        # evidence 3 ki ijaazat deta hai; warna ginti kategi aur gate ki wajah
+        # prompt ke andar aur report mein jaayegi, taaki kami ka ilzaam galat
         # jagah (quota) par na jaaye.
         gate = self.hypotheses.gate(pack, requested=asked_count,
                                     contradictions=contradiction_dicts)
         out["hypothesis_gate"] = gate.to_dict()
         # Kitni maangi thi: explicit number ho to wahi, warna gate jitni imaandaari
         # se utha sakta hai (purana flat default 2 iski jagah tha).
+        #
+        # 2026-08-21 (cross-domain benchmark): purana rule "EXPLICIT request gate
+        # se OOPAR hai" jhooth paida kar raha tha. 2 patle sources par bhi
+        # "kam se kam 3 hypotheses banao" par model teen bhar deta tha — gate
+        # allowed=1 kehta tha aur report mein teen chhapti thi. Maangi hui ginti
+        # ab bhi poori izzat paati hai JAB evidence ijaazat de (aam haalat), par
+        # evidence patla ho to ginti gate par kategi aur kami ka asli kaaran
+        # (evidence, quota nahi) saaf likha jaayega.
         hypothesis_count = asked_count if asked_count else max(1, gate.allowed or 1)
+        if asked_count and 0 < gate.allowed < asked_count:
+            hypothesis_count = gate.allowed
+            out["notes"].append(
+                f"Aapne {asked_count} hypotheses maangi thi, par evidence ke hisaab "
+                f"se sirf {gate.allowed} imaandaari se ban sakti hai: {gate.reason}")
+        out["hypothesis_allowed"] = hypothesis_count
         if not explicit_hypotheses and gate.allowed <= 0:
             # 0 relevant source par hypothesis maangna hi galat hai — na maango,
             # aur wajah likh do (khaali template se behtar).
@@ -821,6 +837,11 @@ class DeepResearchEngine:
                                                        check_entailment=True)
         if label_report.get("note"):
             warnings.append(label_report["note"])
+        # Dono pass ka hisaab ek jagah. Warna strict pass jo lines pehle hi
+        # [UNVERIFIED] kar chuka hai wo depth pass ko dikhti hi nahi, aur
+        # `label_report` "checked: 0, downgraded: 0" bolta hai — jabki downgrade
+        # hua tha. Audit ka aankda kaam se kam nahi hona chahiye.
+        label_report = merge_label_reports(strict_report, label_report)
 
         # 6d. §13 / point 7 — paanch alag check (A–E) har labelled claim par.
         # Purana "citation verified" number sirf ye batata tha ki [S3] naam ka

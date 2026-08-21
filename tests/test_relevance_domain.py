@@ -209,5 +209,14 @@ def main() -> int:
     return 1 if FAIL else 0
 
 
+def test_relevance_domain_checks_all_pass():
+    """
+    pytest ke liye entry point (2026-08-21) — saare check `main()` ke andar hain,
+    isliye pytest is file se 0 test collect kar raha tha aur CI ka step bina kuch
+    chalaye green ho jaata tha.
+    """
+    assert main() == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
