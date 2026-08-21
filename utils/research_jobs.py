@@ -18,7 +18,10 @@ Important honesty rules:
 - the JSON job ledger is single-writer. A cross-process OS lock fails closed if
   a second Python worker tries to own the same durable store;
 - persisted result filenames are treated as untrusted metadata and are never
-  allowed to escape the managed ``results`` directory.
+  allowed to escape the managed ``results`` directory;
+- when cloud archive is explicitly enabled, durable retry intent is recorded
+  before history pruning can forget a result. Job-history pruning never deletes
+  those local bytes; only the separate VERIFIED-archive cleanup path may do so.
 """
 from __future__ import annotations
 
@@ -66,6 +69,7 @@ _SECRET_VALUE_RE = re.compile(
 _GOOGLE_KEY_RE = re.compile(r"AIza[0-9A-Za-z_-]{20,}")
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 _SAFE_RESULT_FILE_RE = re.compile(r"^[A-Za-z0-9._-]{1,160}\.json\.gz$")
+_ARCHIVE_DISABLED = {"", "none", "off", "disabled"}
 
 
 def _safe_error(exc: Exception, *, limit: int = 240) -> str:
@@ -278,6 +282,7 @@ class ResearchJobRunner:
         persist: bool = True,
         max_result_bytes: int = MAX_RESULT_BYTES,
         enforce_process_lock: bool | None = None,
+        archive_runtime_override: Any = None,
     ):
         self.max_jobs = max(1, max_jobs)
         self.max_result_bytes = max(1024, int(max_result_bytes))
@@ -292,6 +297,7 @@ class ResearchJobRunner:
         self._store_path = os.path.abspath(store_path or default_job_store_path()) if persist else ""
         self._result_dir = os.path.join(os.path.dirname(self._store_path), "results") if persist else ""
         self._process_lock: ExclusiveProcessFileLock | None = None
+        self._archive_runtime_override = archive_runtime_override
         should_lock = _bool_env("RESEARCH_JOB_PROCESS_LOCK", True) if enforce_process_lock is None else bool(enforce_process_lock)
         if self._persist_enabled:
             Path(self._store_path).parent.mkdir(parents=True, exist_ok=True)
@@ -348,6 +354,41 @@ class ResearchJobRunner:
     def _result_path(self, job: Job) -> str:
         return self._safe_result_path_from_name(job.result_file)
 
+    @staticmethod
+    def _archive_remote_path(job: Job) -> str:
+        return f"research-results/{job.job_id}.json.gz"
+
+    def _archive_runtime(self):
+        if self._archive_runtime_override is not None:
+            return self._archive_runtime_override
+        from storage.archive_runtime import archive_runtime
+        return archive_runtime
+
+    @staticmethod
+    def _archive_explicitly_disabled() -> bool:
+        raw = str(os.getenv("CLOUD_ARCHIVE_PROVIDER", "none") or "none").strip().lower()
+        return raw in _ARCHIVE_DISABLED
+
+    def _record_archive_intent_locked(self, job: Job, path: str) -> bool:
+        """Queue cloud intent without letting provider failure fail research."""
+        if not path or not os.path.isfile(path):
+            return False
+        try:
+            runtime = self._archive_runtime()
+            if not runtime.archive_required():
+                return True
+            result = runtime.submit_file(path, self._archive_remote_path(job))
+            if result.get("intent_recorded"):
+                return True
+            note = "Cloud archive intent save nahi ho saka; local result delete nahi kiya jayega."
+            if note not in job.storage_warning:
+                job.storage_warning = (job.storage_warning + " " + note).strip()
+            return False
+        except Exception:
+            # If cloud is not explicitly enabled, archive plumbing is optional.
+            # If it *is* enabled, fail closed for deletion and retain local bytes.
+            return self._archive_explicitly_disabled()
+
     def _persist_result_locked(self, job: Job) -> None:
         if not self._persist_enabled or job.status != "completed" or job.result is None:
             return
@@ -380,6 +421,10 @@ class ResearchJobRunner:
             if compacted else ""
         )
         job.result = None
+        # Persisted local result is already safe. Cloud archival is additive and
+        # non-blocking; a provider outage only leaves durable retry intent/local
+        # bytes, never converts completed research into a failure.
+        self._record_archive_intent_locked(job, final_path)
 
     def _load_result_locked(self, job: Job) -> Optional[Dict[str, Any]]:
         if job.result is not None:
@@ -405,15 +450,41 @@ class ResearchJobRunner:
                 "error_type": type(exc).__name__,
             }
 
-    def _delete_result_file_locked(self, job: Job) -> None:
+    def _delete_result_file_locked(self, job: Job) -> bool:
+        """Apply retention without violating an enabled cloud-archive contract.
+
+        With archive disabled, old result files follow the normal bounded-history
+        lifecycle and may be deleted.  With archive enabled, history metadata may
+        be pruned after durable archive intent is recorded, but the local bytes are
+        intentionally retained.  Verified-file cleanup is centralized in
+        ``cleanup_verified_archives`` so manifest ``local_deleted`` state stays
+        correct and no second deletion implementation drifts from the safety rule.
+        """
         path = self._result_path(job)
-        if not path:
-            return
+        if not path or not os.path.exists(path):
+            return True
+        if os.path.islink(path):
+            return True
+
         try:
-            if os.path.isfile(path) and not os.path.islink(path):
+            runtime = self._archive_runtime()
+            if runtime.archive_required():
+                # If already verified this returns True; we still leave deletion
+                # to the centralized verified cleanup path. Otherwise ensure a
+                # crash-safe retry record exists before forgetting job metadata.
+                if runtime.local_delete_allowed(path, self._archive_remote_path(job)):
+                    return True
+                return self._record_archive_intent_locked(job, path)
+        except Exception:
+            if not self._archive_explicitly_disabled():
+                return False
+
+        try:
+            if os.path.isfile(path):
                 os.remove(path)
+            return True
         except OSError:
-            pass
+            return False
 
     def _quarantine_corrupt_store(self) -> None:
         if not self._store_path or not os.path.exists(self._store_path):
@@ -472,6 +543,12 @@ class ResearchJobRunner:
                 except Exception as exc:  # noqa: BLE001
                     job.durable = False
                     job.storage_warning = f"Legacy result migration failed: {type(exc).__name__}"
+            elif job.status == "completed" and job.result_file:
+                # Enabling Drive later should pick up already-durable completed
+                # results too; provider-disabled mode remains a no-op.
+                path = self._result_path(job)
+                if path and os.path.isfile(path):
+                    self._record_archive_intent_locked(job, path)
             self._jobs[job.job_id] = job
 
         self._prune_locked()
@@ -619,11 +696,16 @@ class ResearchJobRunner:
         )
         while len(self._jobs) >= self.max_jobs and finished:
             old = finished.pop(0)
-            self._delete_result_file_locked(old)
+            if not self._delete_result_file_locked(old):
+                # Cloud archive was explicitly enabled but we could not even
+                # persist safe archive intent. Keep metadata + bytes and try the
+                # next finished job; if none are safe, reject a new submission
+                # rather than destroy the only local copy.
+                continue
             self._jobs.pop(old.job_id, None)
             self._futures.pop(old.job_id, None)
         if len(self._jobs) >= self.max_jobs:
-            raise RuntimeError("Research job queue full hai; pehle current job complete hone do")
+            raise RuntimeError("Research job queue full hai; pehle current job complete/archive hone do")
 
 
 runner = ResearchJobRunner()
