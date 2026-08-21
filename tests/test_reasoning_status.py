@@ -38,6 +38,30 @@ def test_confirmed_free_layers_are_reported_without_keys():
         assert secret not in blob
 
 
+def test_confirmed_backup_only_gemini_key_counts_as_ready_without_leak():
+    env = {
+        "ZERO_COST_ONLY": "true",
+        "GEMINI_API_KEY_2": "SECRET-BACKUP-GEMINI",
+        "GEMINI_ZERO_COST_CONFIRMED": "true",
+    }
+    status = reasoning_status(env)
+    assert status["layers"]["gemini_primary"]["configured"] is True
+    assert status["model_layers_configured"] == 1
+    assert "SECRET-BACKUP-GEMINI" not in repr(status)
+
+
+def test_unconfirmed_backup_only_gemini_key_is_not_ready():
+    status = reasoning_status({
+        "ZERO_COST_ONLY": "true",
+        "GEMINI_API_KEYS": "SECRET-ONE,SECRET-TWO",
+        "GEMINI_ZERO_COST_CONFIRMED": "false",
+    })
+    assert status["layers"]["gemini_primary"]["configured"] is False
+    assert status["model_layers_configured"] == 0
+    assert "SECRET-ONE" not in repr(status)
+    assert "SECRET-TWO" not in repr(status)
+
+
 def test_unconfirmed_or_paid_paths_are_not_reported_ready():
     status = reasoning_status({
         "ZERO_COST_ONLY": "true",
