@@ -45,6 +45,7 @@ DEFAULT_TIMEOUT_SECONDS = 15 * 60
 # tests/ pytest pass below is the authoritative catch-all for pytest-style tests.
 FOCUSED_PYTEST = (
     "tests/test_upload_safety.py",
+    "tests/test_body_limit.py",
     "tests/test_work_root.py",
     "tests/test_storage_paths.py",
     "tests/test_storage_quota.py",
