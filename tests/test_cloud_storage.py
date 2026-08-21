@@ -7,6 +7,7 @@ import tempfile
 import pytest
 
 from utils.archive_manifest import ArchiveManifest, sha256_file
+from utils.archive_retry import ArchiveRetryQueue
 from utils.cloud_storage import ArchiveCoordinator, RemoteObject
 
 
@@ -41,41 +42,86 @@ def _file(root: str, name: str = "paper.pdf") -> str:
     return path
 
 
+def _coordinator(root: str, provider: FakeProvider) -> tuple[ArchiveCoordinator, ArchiveManifest, ArchiveRetryQueue]:
+    manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+    retry = ArchiveRetryQueue(os.path.join(root, "retry.json"))
+    return ArchiveCoordinator(provider, manifest, retry), manifest, retry
+
+
 def test_verified_upload_can_delete_local():
     with tempfile.TemporaryDirectory() as root:
         local = _file(root)
-        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
-        out = ArchiveCoordinator(FakeProvider(), manifest).archive(
-            local, "/archive/paper.pdf", delete_local=True
-        )
+        coordinator, _, retry = _coordinator(root, FakeProvider())
+        out = coordinator.archive(local, "/archive/paper.pdf", delete_local=True)
         assert out["verified"] is True
         assert out["local_deleted"] is True
         assert not os.path.exists(local)
+        assert retry.items() == []
 
 
-def test_upload_failure_keeps_local_file():
+def test_upload_failure_keeps_local_file_and_queues_retry():
     with tempfile.TemporaryDirectory() as root:
         local = _file(root)
-        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        coordinator, manifest, retry = _coordinator(root, FakeProvider(fail_upload=True))
         with pytest.raises(RuntimeError, match="upload failure"):
-            ArchiveCoordinator(FakeProvider(fail_upload=True), manifest).archive(
-                local, "/archive/paper.pdf", delete_local=True
-            )
+            coordinator.archive(local, "/archive/paper.pdf", delete_local=True)
         assert os.path.isfile(local)
         record = manifest.items()[0]
         assert record["status"] == "failed"
         assert record["verified"] is False
+        queued = retry.items()
+        assert len(queued) == 1
+        assert queued[0]["local_path"] == os.path.abspath(local)
+        assert queued[0]["provider"] == "fake-free-cloud"
 
 
-def test_remote_verification_failure_keeps_local_file():
+def test_remote_verification_failure_keeps_local_file_and_queues_retry():
     with tempfile.TemporaryDirectory() as root:
         local = _file(root)
-        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        coordinator, manifest, retry = _coordinator(root, FakeProvider(wrong_size=True))
         with pytest.raises(RuntimeError, match="Remote size"):
-            ArchiveCoordinator(FakeProvider(wrong_size=True), manifest).archive(
-                local, "/archive/paper.pdf", delete_local=True
-            )
+            coordinator.archive(local, "/archive/paper.pdf", delete_local=True)
         assert os.path.isfile(local)
         record = manifest.items()[0]
         assert record["status"] == "uploaded_unverified"
         assert record["verified"] is False
+        assert len(retry.items()) == 1
+
+
+def test_successful_archive_clears_old_retry_record():
+    with tempfile.TemporaryDirectory() as root:
+        local = _file(root)
+        provider = FakeProvider()
+        coordinator, _, retry = _coordinator(root, provider)
+        retry.enqueue(
+            local_path=local,
+            remote_path="/archive/paper.pdf",
+            provider=provider.name,
+            error="old outage",
+            now=0,
+        )
+        assert len(retry.items()) == 1
+        out = coordinator.archive(local, "/archive/paper.pdf")
+        assert out["verified"] is True
+        assert retry.items() == []
+
+
+def test_retry_due_marks_missing_local_copy_without_crash():
+    with tempfile.TemporaryDirectory() as root:
+        local = _file(root)
+        provider = FakeProvider()
+        coordinator, _, retry = _coordinator(root, provider)
+        item = retry.enqueue(
+            local_path=local,
+            remote_path="/archive/paper.pdf",
+            provider=provider.name,
+            error="offline",
+            now=0,
+        )
+        os.remove(local)
+        out = coordinator.retry_due(limit=5)
+        assert out["attempted"] == 1
+        assert out["failed"] == 1
+        assert out["results"][0]["error"] == "local_copy_missing"
+        current = {row["key"]: row for row in retry.items()}[item["key"]]
+        assert current["attempts"] == 1
