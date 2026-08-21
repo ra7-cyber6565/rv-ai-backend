@@ -64,6 +64,7 @@ FOCUSED_PYTEST = (
     "tests/test_reasoning_status.py",
     "tests/test_quick_chat_resilience.py",
     "tests/test_gemini_diag_zero_call.py",
+    "tests/test_quota_backup.py",
     "tests/test_provider_bypass_audit.py",
     "tests/test_architecture_audit.py",
     "tests/test_release_state.py",
@@ -121,6 +122,11 @@ def _safe_env() -> dict[str, str]:
             "ZERO_COST_ONLY": "true",
             "RATE_LIMIT_ENABLED": "true",
             "GEMINI_API_KEY": "",
+            "GEMINI_API_KEY_BACKUP": "",
+            "GEMINI_API_KEY_FALLBACK": "",
+            "GEMINI_API_KEYS": "",
+            "GEMINI_API_KEY_LIST": "",
+            "GEMINI_BACKUP_KEYS": "",
             "GEMINI_ZERO_COST_CONFIRMED": "false",
             "GROQ_API_KEY": "",
             "GROQ_ZERO_COST_CONFIRMED": "false",
@@ -138,6 +144,9 @@ def _safe_env() -> dict[str, str]:
             "INFINITY_OFFLINE_TEST": "true",
         }
     )
+    for i in range(2, 10):
+        env[f"GEMINI_API_KEY_{i}"] = ""
+        env[f"GEMINI_API_KEY{i}"] = ""
     if not env.get("INFINITY_DATA_ROOT"):
         env["INFINITY_DATA_ROOT"] = str(REPO_ROOT / "runtime_data" / "gate")
     return env
