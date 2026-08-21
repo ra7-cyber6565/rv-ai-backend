@@ -1,11 +1,12 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 
 from research_engine.agent_manager import manager
 from research_engine.depth import (BOOL_FIELDS, depth_limits,
                                     get_depth_config, quota_note)
+from utils.admin_guard import require_admin
 from utils.progress_tracker import get_progress
 from utils.reasoning_status import reasoning_status
 
@@ -167,11 +168,13 @@ def get_research_progress(project_id: str):
 
 
 @router.get("/history/{project_id}")
-def get_history(project_id: str):
+def get_history(project_id: str, _admin: None = Depends(require_admin)):
+    """Server-side research history (admin-only; never public by project id)."""
     return {"history": manager.history(project_id)}
 
 
 @router.delete("/history/{project_id}")
-def clear_history(project_id: str):
+def clear_history(project_id: str, _admin: None = Depends(require_admin)):
+    """Server-side history clear karo (admin-only)."""
     removed = manager.clear_history(project_id)
     return {"message": "History clear ho gayi", "removed": removed}
