@@ -16,6 +16,10 @@ That gives three useful properties:
 This is intentionally not a user/account auth system. It is a zero-cost
 capability layer for single-user/public-backend deployments until a real account
 system is deliberately added.
+
+Secret first-creation is race-safe across signer instances and processes. This
+prevents two simultaneous starters from publishing different HMAC secrets and
+invalidating a token immediately after it was issued.
 """
 from __future__ import annotations
 
@@ -27,15 +31,32 @@ import re
 import secrets
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
+from utils.process_lock import ExclusiveProcessFileLock, ProcessLockError
 from utils.storage_paths import ensure_layout
 
 
 _JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{16,128}$")
 _SECRET_BYTES = 32
 _SECRET_FILENAME = "research_job_capability.key"
+_CREATE_LOCK_WAIT_SECONDS = 2.0
+_CREATE_LOCK_POLL_SECONDS = 0.01
+
+_LOCKS_GUARD = threading.Lock()
+_PATH_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _lock_for(path: str) -> threading.RLock:
+    key = os.path.normcase(os.path.abspath(path))
+    with _LOCKS_GUARD:
+        lock = _PATH_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _PATH_LOCKS[key] = lock
+        return lock
 
 
 def _b64url(raw: bytes) -> str:
@@ -84,9 +105,6 @@ class JobCapabilitySigner:
     def _write_new_secret(path: str, raw: bytes) -> None:
         parent = os.path.dirname(path)
         Path(parent).mkdir(parents=True, exist_ok=True)
-        # tempfile + fsync + replace avoids a half-written secret on crash. Two
-        # same-process callers are serialized by _lock; the backend's durable job
-        # process lock already prevents normal multi-process ownership.
         fd, temp_path = tempfile.mkstemp(prefix="job_capability_", suffix=".tmp", dir=parent)
         try:
             try:
@@ -114,22 +132,57 @@ class JobCapabilitySigner:
             if self._secret is not None:
                 return self._secret
             path = self._path()
-            existing = self._read_secret(path)
-            if existing:
-                self._secret = existing
-                return existing
-            raw = secrets.token_bytes(_SECRET_BYTES)
-            try:
-                self._write_new_secret(path, raw)
-            except OSError as exc:
-                raise RuntimeError("Research job access secret safely persist nahi ho saka") from exc
-            # Read back from disk instead of trusting only memory. If a storage
-            # layer mangled the write, fail closed before issuing bearer tokens.
-            persisted = self._read_secret(path)
-            if not hmac.compare_digest(raw, persisted):
-                raise RuntimeError("Research job access secret verification fail hua")
-            self._secret = persisted
-            return persisted
+
+            # Different signer instances targeting the same file must serialize
+            # the read/create/publish sequence even within one Python process.
+            with _lock_for(path):
+                existing = self._read_secret(path)
+                if existing:
+                    self._secret = existing
+                    return existing
+
+                deadline = time.monotonic() + _CREATE_LOCK_WAIT_SECONDS
+                create_lock_path = path + ".create.lock"
+                while True:
+                    guard = ExclusiveProcessFileLock(create_lock_path)
+                    try:
+                        guard.acquire()
+                    except ProcessLockError:
+                        existing = self._read_secret(path)
+                        if existing:
+                            self._secret = existing
+                            return existing
+                        if time.monotonic() >= deadline:
+                            raise RuntimeError(
+                                "Research job access secret creation lock busy raha; safe startup fail-closed hua"
+                            )
+                        time.sleep(_CREATE_LOCK_POLL_SECONDS)
+                        continue
+
+                    try:
+                        # Another process may have published the secret while we
+                        # waited for the OS lock, so always re-read first.
+                        existing = self._read_secret(path)
+                        if existing:
+                            self._secret = existing
+                            return existing
+
+                        raw = secrets.token_bytes(_SECRET_BYTES)
+                        try:
+                            self._write_new_secret(path, raw)
+                        except OSError as exc:
+                            raise RuntimeError(
+                                "Research job access secret safely persist nahi ho saka"
+                            ) from exc
+                        persisted = self._read_secret(path)
+                        if not hmac.compare_digest(raw, persisted):
+                            raise RuntimeError(
+                                "Research job access secret verification fail hua"
+                            )
+                        self._secret = persisted
+                        return persisted
+                    finally:
+                        guard.release()
 
     def issue(self, job_id: object) -> str:
         safe = _safe_job_id(job_id)
