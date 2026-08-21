@@ -1,8 +1,9 @@
 """Operational cloud-archive endpoints.
 
-Public status is aggregate-only and intentionally safe for health/UI use.  It
-contains no local filenames/paths, Drive remote name, OAuth data or raw provider
-errors.  A retry nudge mutates background work, so it remains admin-only.
+Detailed archive status can walk manifest/retry/storage state and is therefore
+operator-only even though its returned fields are sanitized. This prevents an
+unauthenticated caller from turning repeated status requests into disk-scan load.
+Cheap provider readiness remains available through /health and /api.
 """
 from __future__ import annotations
 
@@ -16,8 +17,8 @@ router = APIRouter()
 
 
 @router.get("/archive/status")
-def archive_status():
-    """Read-only, non-secret archive/retention readiness."""
+def archive_status(_admin: None = Depends(require_admin)):
+    """Read-only, non-secret detailed archive/retention readiness (admin-only)."""
     return archive_runtime.public_status()
 
 
