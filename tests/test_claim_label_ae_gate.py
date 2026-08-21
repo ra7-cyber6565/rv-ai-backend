@@ -37,12 +37,17 @@ def _pack(*sources: SourceRecord) -> EvidencePack:
     )
 
 
+def _strict(text: str, pack: EvidencePack):
+    """Production orchestrator uses this strict mode explicitly."""
+    return downgrade(text, pack, check_entailment=True)
+
+
 def test_established_survives_only_when_same_fulltext_source_passes_A_to_E():
     source = _source(
         "S1",
         snippet="Higher urban density reduces per-capita car travel in the studied cities.",
     )
-    text, report = downgrade(
+    text, report = _strict(
         "[ESTABLISHED] Higher urban density reduces per-capita car travel [S1].",
         _pack(source),
     )
@@ -58,7 +63,7 @@ def test_unrelated_fulltext_citation_cannot_keep_established_label():
         snippet="Maternal mortality fell after expansion of obstetric services in rural hospitals.",
         relevance=0.0,
     )
-    text, report = downgrade(
+    text, report = _strict(
         "[ESTABLISHED] Higher urban density reduces per-capita car travel [S1].",
         _pack(source),
     )
@@ -81,7 +86,7 @@ def test_fulltext_unrelated_plus_abstract_support_cannot_mix_dimensions_to_fake_
         relevance=0.9,
         quality=0.9,
     )
-    text, report = downgrade(
+    text, report = _strict(
         "[FACT] Higher urban density reduces per-capita car travel [S1][S2].",
         _pack(unrelated_full, supporting_abstract),
     )
@@ -96,7 +101,7 @@ def test_low_quality_fulltext_support_does_not_keep_strong_label():
         snippet="Higher urban density reduces per-capita car travel.",
         quality=0.1,
     )
-    text, report = downgrade(
+    text, report = _strict(
         "[STRONG EVIDENCE] Higher urban density reduces per-capita car travel [S1].",
         _pack(weak),
     )
