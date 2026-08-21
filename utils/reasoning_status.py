@@ -9,6 +9,8 @@ from __future__ import annotations
 import os
 from urllib.parse import urlparse
 
+from utils.zero_cost_guard import gemini_credentials_configured
+
 _TRUTHY = {"1", "true", "yes", "on"}
 
 
@@ -35,7 +37,10 @@ def reasoning_status(env=None) -> dict:
     source = env if env is not None else os.environ
     zero_cost = _truthy(source.get("ZERO_COST_ONLY", "true"))
 
-    gemini_key = bool(str(source.get("GEMINI_API_KEY", "")).strip())
+    # Primary or any backup/list Gemini credential counts as configured. This
+    # must match the key-pool/zero-cost guard; otherwise backup-only deployments
+    # would be silently reported unusable even though the engine can rotate to it.
+    gemini_key = gemini_credentials_configured(source)
     gemini_confirmed = _truthy(source.get("GEMINI_ZERO_COST_CONFIRMED", ""))
     gemini_ready = gemini_key and (not zero_cost or gemini_confirmed)
 
@@ -67,8 +72,6 @@ def reasoning_status(env=None) -> dict:
             "configured": ollama_ready,
             "kind": "local",
             "model": str(source.get("OLLAMA_MODEL", "qwen3:4b")).strip() or "qwen3:4b",
-            # Do not expose a non-local remote URL in zero-cost mode. Hostname
-            # itself can be operationally sensitive and is not needed in health.
             "localhost_only": zero_cost,
         },
         "deterministic_evidence_fallback": {
