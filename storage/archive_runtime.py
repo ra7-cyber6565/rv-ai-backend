@@ -2,14 +2,19 @@
 
 The archive provider is optional, but once the owner explicitly enables one the
 backend must never delete a local finished artifact merely because an upload was
-scheduled.  Every submission therefore records durable retry intent *before* a
-background worker touches the network.  A successful upload is re-statted and
+scheduled. Every submission therefore records durable retry intent *before* a
+background worker touches the network. A successful upload is re-statted and
 verified by :class:`utils.cloud_storage.ArchiveCoordinator`; only an exact
 verified manifest record may later authorize local cleanup.
 
-This module intentionally does not auto-delete local files.  It also exposes
-only aggregate/public-safe operational status: no OAuth tokens, rclone remote
-names, absolute local paths, filenames, or raw provider errors are returned.
+A lightweight daemon timer wakes only while durable retry rows exist, so a
+temporary Drive/provider outage can recover even when no new research request
+arrives. The timer never performs network work itself; it only schedules a
+bounded batch on the same single archive worker.
+
+This module intentionally does not auto-delete local files. It also exposes only
+aggregate/public-safe operational status: no OAuth tokens, rclone remote names,
+absolute local paths, filenames, or raw provider errors are returned.
 """
 from __future__ import annotations
 
@@ -41,14 +46,7 @@ def _configured_raw_name() -> str:
 
 
 class ArchiveRuntime:
-    """Single-process background archive dispatcher with durable intent.
-
-    The durable retry queue is the crash boundary.  ``submit_file`` writes an
-    entry there synchronously, then (when the provider is ready) schedules the
-    slower upload/verification on one bounded worker.  If the process exits
-    between those steps, the next process still has the retry record and local
-    path.
-    """
+    """Single-process background archive dispatcher with durable intent."""
 
     def __init__(
         self,
@@ -58,6 +56,7 @@ class ArchiveRuntime:
         provider_builder: Callable[[], Any] = build_provider,
         provider_status_func: Callable[[], dict[str, Any]] = provider_status,
         max_pending: int | None = None,
+        retry_poll_seconds: float | None = None,
     ):
         self.manifest = manifest or ArchiveManifest()
         self.retry_queue = retry_queue or ArchiveRetryQueue()
@@ -66,9 +65,16 @@ class ArchiveRuntime:
         self._max_pending = max_pending or _positive_int(
             "ARCHIVE_BACKGROUND_QUEUE_MAX", 32, 1, 200
         )
+        self._retry_poll_seconds = (
+            max(0.05, float(retry_poll_seconds))
+            if retry_poll_seconds is not None
+            else float(_positive_int("ARCHIVE_RETRY_POLL_SECONDS", 60, 5, 3600))
+        )
         self._lock = threading.RLock()
         self._executor: ThreadPoolExecutor | None = None
         self._futures: set[Future] = set()
+        self._retry_timer: threading.Timer | None = None
+        self._closed = False
         self._submitted = 0
         self._completed = 0
         self._failed = 0
@@ -78,7 +84,7 @@ class ArchiveRuntime:
         """Whether config says local cleanup must wait for cloud verification.
 
         Unknown provider names are deliberately treated as *required* rather
-        than disabled.  A typo must fail closed for deletion instead of silently
+        than disabled. A typo must fail closed for deletion instead of silently
         discarding the only local copy.
         """
         return _configured_raw_name() not in _DISABLED_NAMES
@@ -93,8 +99,6 @@ class ArchiveRuntime:
                 "ready": False,
                 "reason": "archive provider status unavailable",
             }
-        # Treat an invalid-but-explicit provider as enabled for local-retention
-        # safety even if the factory status itself reports enabled=False.
         if self.archive_required() and row.get("provider") == "invalid":
             row["enabled"] = True
             row["ready"] = False
@@ -102,6 +106,8 @@ class ArchiveRuntime:
 
     def _ensure_executor(self) -> ThreadPoolExecutor:
         with self._lock:
+            if self._closed:
+                raise RuntimeError("archive runtime closed")
             if self._executor is None:
                 self._executor = ThreadPoolExecutor(
                     max_workers=1,
@@ -119,6 +125,43 @@ class ArchiveRuntime:
             retry_queue=self.retry_queue,
         )
 
+    def _has_retry_rows(self) -> bool:
+        try:
+            return int(self.retry_queue.summary().get("pending", 0) or 0) > 0
+        except Exception:
+            # A corrupt/unreadable retry store is an operational error, but a
+            # busy timer loop cannot repair it. Public status surfaces the coarse
+            # read failure and local cleanup remains fail-closed elsewhere.
+            return False
+
+    def _ensure_retry_timer(self) -> None:
+        """Start one daemon wake-up only when durable retry work exists."""
+        if not self.archive_required() or not self._has_retry_rows():
+            return
+        with self._lock:
+            if self._closed:
+                return
+            if self._retry_timer is not None and self._retry_timer.is_alive():
+                return
+            timer = threading.Timer(self._retry_poll_seconds, self._retry_timer_fire)
+            timer.daemon = True
+            self._retry_timer = timer
+            timer.start()
+
+    def _retry_timer_fire(self) -> None:
+        with self._lock:
+            self._retry_timer = None
+            if self._closed:
+                return
+        try:
+            self.kick_retries(
+                limit=_positive_int("ARCHIVE_RETRY_PER_KICK", 2, 1, 10)
+            )
+        finally:
+            # If the provider is still down, kick_retries leaves the durable rows
+            # untouched and this schedules the next bounded recovery probe.
+            self._ensure_retry_timer()
+
     def _done(self, future: Future) -> None:
         with self._lock:
             self._futures.discard(future)
@@ -130,13 +173,11 @@ class ArchiveRuntime:
                 self._completed += 1
             else:
                 self._failed += 1
+        self._ensure_retry_timer()
 
     def _run_archive(self, local_path: str, remote_path: str) -> bool:
         try:
             coordinator = self._coordinator()
-            # Old due work gets a tiny bounded chance before the newest file.
-            # This prevents a steady stream of new research from starving old
-            # failed uploads, without turning one request into an unbounded loop.
             try:
                 coordinator.retry_due(
                     limit=_positive_int("ARCHIVE_RETRY_PER_KICK", 2, 1, 10)
@@ -147,16 +188,12 @@ class ArchiveRuntime:
             return bool(result.get("ok") and result.get("verified"))
         except Exception:
             # ArchiveCoordinator has already persisted/re-written retry intent on
-            # upload/verification failures.  Never let a cloud error escape into
+            # upload/verification failures. Never let a cloud error escape into
             # the research completion path.
             return False
 
     def submit_file(self, local_path: str, remote_path: str) -> dict[str, Any]:
-        """Persist archive intent and schedule upload when possible.
-
-        The returned shape is deliberately coarse and safe to attach to internal
-        logs/tests.  It contains no local path, remote name, token, or raw error.
-        """
+        """Persist archive intent and schedule upload when possible."""
         if not os.path.isfile(local_path):
             return {
                 "enabled": self.archive_required(),
@@ -183,8 +220,6 @@ class ArchiveRuntime:
 
         provider_name = str(status.get("provider") or "").strip()
         if not provider_name or provider_name in {"none", "invalid"}:
-            # We cannot write a meaningful retry record without a valid provider
-            # identity.  Local cleanup will therefore remain blocked.
             return {
                 "enabled": True,
                 "accepted": False,
@@ -193,7 +228,7 @@ class ArchiveRuntime:
             }
 
         try:
-            # Durable intent FIRST.  archive() removes this exact record only
+            # Durable intent FIRST. archive() removes this exact record only
             # after verified success.
             self.retry_queue.enqueue(
                 local_path=local_path,
@@ -209,6 +244,9 @@ class ArchiveRuntime:
                 "reason": "retry_intent_persist_failed",
             }
 
+        # From this point a process crash cannot forget the archive request.
+        self._ensure_retry_timer()
+
         if not status.get("ready"):
             return {
                 "enabled": True,
@@ -218,6 +256,13 @@ class ArchiveRuntime:
             }
 
         with self._lock:
+            if self._closed:
+                return {
+                    "enabled": True,
+                    "accepted": False,
+                    "intent_recorded": True,
+                    "reason": "runtime_closed",
+                }
             if len(self._futures) >= self._max_pending:
                 self._capacity_deferred += 1
                 return {
@@ -242,7 +287,7 @@ class ArchiveRuntime:
         }
 
     def kick_retries(self, *, limit: int = 5) -> dict[str, Any]:
-        """Schedule one bounded retry batch; useful for an admin/operator nudge."""
+        """Schedule one bounded retry batch; useful for timer/admin recovery."""
         status = self._status()
         if not self.archive_required():
             return {"accepted": False, "reason": "disabled"}
@@ -250,6 +295,8 @@ class ArchiveRuntime:
             return {"accepted": False, "reason": "provider_not_ready"}
 
         with self._lock:
+            if self._closed:
+                return {"accepted": False, "reason": "runtime_closed"}
             if len(self._futures) >= self._max_pending:
                 self._capacity_deferred += 1
                 return {"accepted": False, "reason": "background_queue_full"}
@@ -351,11 +398,11 @@ class ArchiveRuntime:
                 "completed": self._completed,
                 "failed": self._failed,
                 "capacity_deferred": self._capacity_deferred,
+                "retry_timer_scheduled": bool(
+                    self._retry_timer is not None and self._retry_timer.is_alive()
+                ),
             }
 
-        # provider_status deliberately contains readiness booleans only.  Remove
-        # its human `reason` field so future adapters cannot accidentally put a
-        # command/path/account detail into this public endpoint.
         provider_public = {
             key: value for key, value in provider.items()
             if key in {
@@ -386,8 +433,13 @@ class ArchiveRuntime:
 
     def close(self, *, wait: bool = False) -> None:
         with self._lock:
+            self._closed = True
+            timer = self._retry_timer
+            self._retry_timer = None
             executor = self._executor
             self._executor = None
+        if timer is not None:
+            timer.cancel()
         if executor is not None:
             executor.shutdown(wait=wait, cancel_futures=not wait)
 
