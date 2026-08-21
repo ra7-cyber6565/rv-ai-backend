@@ -1091,6 +1091,62 @@
       "project_id": "default",
       "mention_count": 1,
       "first_seen_question": "If 2x + 5 = 15, what is x?"
+    },
+    {
+      "name": "Pabuji Rajasthan",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Kolu",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Jodhpur",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Dhandalji",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Pabuji",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Kesar Kalami",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Jindrao Khichi",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
+    },
+    {
+      "name": "Rajasthan",
+      "type": "ENTITY",
+      "project_id": "kgtest2",
+      "mention_count": 3,
+      "first_seen_question": "Pabuji ke baare mein bataiye"
     }
   ],
   "relationships": [
@@ -2224,6 +2280,195 @@
       "verified": false,
       "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
       "project_id": "default"
+    },
+    {
+      "from": "Pabuji Rajasthan",
+      "relation": "co_occurs_with",
+      "to": "Pabuji",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji Rajasthan",
+      "relation": "co_occurs_with",
+      "to": "Rajasthan",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Rajasthan",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Kolu",
+      "relation": "co_occurs_with",
+      "to": "Jodhpur",
+      "context": "Unka janam Kolu gaon mein hua tha, jo Jodhpur ke paas hai",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Kesar Kalami",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Jindrao Khichi",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Kesar Kalami",
+      "relation": "co_occurs_with",
+      "to": "Jindrao Khichi",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji Rajasthan",
+      "relation": "co_occurs_with",
+      "to": "Pabuji",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji Rajasthan",
+      "relation": "co_occurs_with",
+      "to": "Rajasthan",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Rajasthan",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Kolu",
+      "relation": "co_occurs_with",
+      "to": "Jodhpur",
+      "context": "Unka janam Kolu gaon mein hua tha, jo Jodhpur ke paas hai",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Kesar Kalami",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Jindrao Khichi",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Kesar Kalami",
+      "relation": "co_occurs_with",
+      "to": "Jindrao Khichi",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji Rajasthan",
+      "relation": "co_occurs_with",
+      "to": "Pabuji",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji Rajasthan",
+      "relation": "co_occurs_with",
+      "to": "Rajasthan",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Rajasthan",
+      "context": "Pabuji Rajasthan ke lok devta hain",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Kolu",
+      "relation": "co_occurs_with",
+      "to": "Jodhpur",
+      "context": "Unka janam Kolu gaon mein hua tha, jo Jodhpur ke paas hai",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Kesar Kalami",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Pabuji",
+      "relation": "co_occurs_with",
+      "to": "Jindrao Khichi",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
+    },
+    {
+      "from": "Kesar Kalami",
+      "relation": "co_occurs_with",
+      "to": "Jindrao Khichi",
+      "context": "Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya",
+      "verified": false,
+      "evidence": "same sentence mein saath aaye — ye sirf co-occurrence hint hai, proven rishta nahi",
+      "project_id": "kgtest2"
     }
   ],
   "research_log": [
@@ -2286,6 +2531,21 @@
       "question": "If 2x + 5 = 15, what is x?",
       "answer_summary": "## 1. Seedha Jawab (Direct Conclusion)\nGemini synthesis available nahi thi, isliye neeche sirf retrieved sources ka seedha extract hai (system ka apna interpretation nahi):\n\n- **S1** राजस्थान_सामान्य_ज्ञान.pdf: esa jkoy rstflag ds le; vkgM+ esa ^Jkod izfrØe.k lw= pwf.kZ* uked xzaFk  fpf=r fd;k x;kA  - 1423 A.D.\n- **S2** Solve for x 2x+5=15: Step 1 Move all terms not containing x x to the right side of the equation. Subtract 5 5 from both sides of the equation. 2x=15−5 2 x = 15 … 2 Divide each te",
       "project_id": "default"
+    },
+    {
+      "question": "Pabuji ke baare mein bataiye",
+      "answer_summary": "Pabuji Rajasthan ke lok devta hain. Unka janam Kolu gaon mein hua tha, jo Jodhpur ke paas hai.\nUnke pita ka naam Dhandalji tha. Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya.\nYe ghatna Rajasthan ke itihas mein bahut mashoor hai.",
+      "project_id": "kgtest2"
+    },
+    {
+      "question": "Pabuji ke baare mein bataiye",
+      "answer_summary": "Pabuji Rajasthan ke lok devta hain. Unka janam Kolu gaon mein hua tha, jo Jodhpur ke paas hai.\nUnke pita ka naam Dhandalji tha. Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya.\nYe ghatna Rajasthan ke itihas mein bahut mashoor hai.",
+      "project_id": "kgtest2"
+    },
+    {
+      "question": "Pabuji ke baare mein bataiye",
+      "answer_summary": "Pabuji Rajasthan ke lok devta hain. Unka janam Kolu gaon mein hua tha, jo Jodhpur ke paas hai.\nUnke pita ka naam Dhandalji tha. Pabuji ne apni ghodi Kesar Kalami par sawar hokar Jindrao Khichi se yudh kiya.\nYe ghatna Rajasthan ke itihas mein bahut mashoor hai.",
+      "project_id": "kgtest2"
     }
   ]
 }

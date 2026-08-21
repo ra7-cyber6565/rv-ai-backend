@@ -256,9 +256,10 @@ Benchmark ne 5 asli bug pakde (test aasan karke nahi, code theek karke gaye):
   (2026-08-21): pehle 4 nayi wrapper suites → **4 passed**; poori `pytest -q
   tests/ test_research_engine.py` → **212 passed, 3 errors** (wahi 3 fixture
   wale, upar likhe gaye). Un 3 ko theek karne ke baad `test_research_engine.py`
-  se pytest 19 ke bajaye 1 test collect karega, isliye agla run
-  **~194 passed, 0 errors** hona chahiye — ye ginti intel ke run se confirm
-  hona baaki hai.
+  se pytest 19 ke bajaye 1 test collect karta hai, aur intel ka agla run isi ko
+  confirm karta hai: **194 passed, 0 errors, 2 warnings in 7.70s** (dono warning
+  `google._upb` protobuf ki DeprecationWarning hain, humare code ki nahi).
+  Commit `51a07f7` push ho chuka hai.
 - **§8 ke liye ChatGPT-owned `synthesizer.py` JAAN-BOOJH KAR NAHI chhua.**
   `key_switches` / `active_key` ko audit block mein alag row banane ke liye
   `_api_accounting_block()` badalna padta — wo file ChatGPT ki hai, isliye rok

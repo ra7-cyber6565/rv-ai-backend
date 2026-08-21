@@ -2,7 +2,7 @@
   "project_id": "offline_test",
   "runs": [
     {
-      "at": "2026-08-17 16:23:43",
+      "at": "2026-08-20 16:44:17",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -11,7 +11,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 16:24:30",
+      "at": "2026-08-20 16:44:32",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -20,7 +20,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 16:33:53",
+      "at": "2026-08-20 16:44:55",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -29,7 +29,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 17:02:41",
+      "at": "2026-08-20 16:45:51",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -38,7 +38,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 17:05:14",
+      "at": "2026-08-20 16:46:03",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -47,7 +47,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 17:08:39",
+      "at": "2026-08-20 16:47:59",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -56,7 +56,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 18:13:45",
+      "at": "2026-08-20 16:50:12",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -65,7 +65,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 18:28:48",
+      "at": "2026-08-20 16:50:43",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -74,7 +74,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 18:41:39",
+      "at": "2026-08-20 16:54:53",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -83,7 +83,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 18:51:45",
+      "at": "2026-08-20 18:28:46",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -92,7 +92,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 18:57:17",
+      "at": "2026-08-20 18:39:25",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -101,7 +101,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 19:12:17",
+      "at": "2026-08-20 18:41:32",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -110,7 +110,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 19:29:39",
+      "at": "2026-08-20 19:09:21",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -119,7 +119,7 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 19:32:06",
+      "at": "2026-08-20 19:10:53",
       "question": "kya AI bias real-world discrimination badhata hai?",
       "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
@@ -128,324 +128,324 @@
       "summary": ""
     },
     {
-      "at": "2026-08-17 19:37:23",
+      "at": "2026-08-20 20:25:36",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 19:47:17",
+      "at": "2026-08-20 20:26:00",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:01:27",
+      "at": "2026-08-20 20:43:03",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:27",
+      "at": "2026-08-20 20:44:47",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:31",
+      "at": "2026-08-20 20:57:47",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:36",
+      "at": "2026-08-20 21:16:45",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:41",
+      "at": "2026-08-21 06:58:16",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:46",
+      "at": "2026-08-21 07:11:38",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:50",
+      "at": "2026-08-21 07:17:11",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:22:55",
+      "at": "2026-08-21 07:41:41",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:00",
+      "at": "2026-08-21 07:49:24",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:04",
+      "at": "2026-08-21 08:28:27",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:09",
+      "at": "2026-08-21 08:31:17",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:14",
+      "at": "2026-08-21 08:46:36",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:18",
+      "at": "2026-08-21 09:27:58",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:23",
+      "at": "2026-08-21 09:29:49",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:27",
+      "at": "2026-08-21 09:36:33",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:32",
+      "at": "2026-08-21 10:15:54",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:37",
+      "at": "2026-08-21 10:16:26",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:41",
+      "at": "2026-08-21 10:30:14",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:46",
+      "at": "2026-08-21 10:37:32",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:23:51",
+      "at": "2026-08-21 11:26:15",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:24:57",
+      "at": "2026-08-21 11:27:10",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:25:33",
+      "at": "2026-08-21 11:31:45",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:25:38",
+      "at": "2026-08-21 11:36:32",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:25:43",
+      "at": "2026-08-21 12:12:49",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:26:33",
+      "at": "2026-08-21 15:27:41",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:26:38",
+      "at": "2026-08-21 15:27:56",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:27:00",
+      "at": "2026-08-21 15:33:19",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:47:23",
+      "at": "2026-08-21 15:35:38",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:51:00",
+      "at": "2026-08-21 15:37:31",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 20:51:38",
+      "at": "2026-08-21 15:37:57",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 21:11:35",
+      "at": "2026-08-21 15:50:06",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 21:23:27",
+      "at": "2026-08-21 15:55:48",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 21:23:43",
+      "at": "2026-08-21 15:56:06",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
       "summary": ""
     },
     {
-      "at": "2026-08-17 21:23:47",
+      "at": "2026-08-21 16:02:57",
       "question": "kya AI bias real-world discrimination badhata hai?",
-      "evidence_level": "⚠️ UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
+      "evidence_level": "⚠️ RESEARCH INCOMPLETE — UNVERIFIED — koi source retrieve nahi hua (sirf general knowledge)",
       "source_count": 0,
       "mode": "QUICK",
       "connectors": [],
