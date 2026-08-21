@@ -9,29 +9,28 @@ Package layout:
     source_discovery.py       SourceDiscovery (Spec 2)
     dedup.py                  DeduplicationEngine (Spec 6,7)
     relevance.py              RelevanceEngine (Spec 6)
-    processing/               DocumentProcessor / PDFProcessor / OCRProcessor /
-                              TranscriptProcessor (Spec 4,5)
-    content_fetcher.py        ContentFetcher — legally-free full text laata hai
-                              aur processing/ ko pipeline se jodta hai (Spec 3,4,5)
-    vector_search.py          VectorSearch (Spec 4,6)
+    processing/               Document/PDF/OCR/Transcript processing
+    content_fetcher.py        legally-free full-text retrieval + processing
     evidence.py               EvidenceEngine (Spec 7)
     citation.py               CitationEngine (Spec 7,14)
     contradiction.py          ContradictionEngine (Spec 8)
     gemini_reasoning.py       GeminiReasoning (Spec 9)
-    critic.py                 Critic (Spec 9 Pass 4/6)
+    critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
-    knowledge_graph.py        KnowledgeGraph adapter (Spec 16)
-    research_memory.py        ResearchMemory (Spec 16)
-    synthesizer.py            FinalSynthesizer (Spec 14)
-    orchestrator.py           DeepResearchEngine — poora pipeline
-    agent_manager.py          AgentManager — per-project engines
+    research_memory.py        ResearchMemory
+    synthesizer.py            FinalSynthesizer
+    orchestrator.py           DeepResearchEngine
 
-NOTE: heavy modules (chromadb / sentence-transformers / google-generativeai)
-lazily import hote hain, taaki `import research_engine` sasta rahe aur pure
-logic offline test ho sake.
+Heavy modules lazily import so ``import research_engine`` remains cheap. A tiny
+pure-Python domain ambiguity guard is installed immediately because every later
+planner/relevance/connector caller must share the same domain decision.
 """
 from __future__ import annotations
+
+# Install before planner/relevance/connectors bind domain.detect. This module is
+# pure Python and has no heavy dependency/network side effect.
+from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
 
 from .models import (
     Claim,
@@ -49,10 +48,6 @@ __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
     "DepthConfig", "get_depth_config", "quota_note",
-    # lazy — har naam _LAZY mein bhi hona chahiye, warna
-    # `from research_engine import *` AttributeError deta hai.
-    # ("agent_manager" pehle yahan tha par _LAZY mein nahi — wo bug tha;
-    #  singleton ka asli naam "manager" hai.)
     "CitationEngine", "EvidenceEngine", "ContradictionEngine",
     "RelevanceEngine", "DeduplicationEngine", "ResearchPlanner",
     "SourceDiscovery", "DeepResearchEngine", "AgentManager", "manager",
@@ -62,7 +57,6 @@ __all__ = [
     "OCRProcessor", "TranscriptProcessor", "ContentFetcher",
 ]
 
-# PEP 562 — heavy cheezein tabhi load karo jab maangi jayen
 _LAZY = {
     "CitationEngine": ".citation",
     "EvidenceEngine": ".evidence",
@@ -86,7 +80,6 @@ _LAZY = {
     "ContentFetcher": ".content_fetcher",
     "DeepResearchEngine": ".orchestrator",
     "AgentManager": ".agent_manager",
-    # ready-to-use singleton (routes isse import karti hain)
     "manager": ".agent_manager",
 }
 
