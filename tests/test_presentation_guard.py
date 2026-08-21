@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from research_engine.models import EvidencePack, SourceRecord, SourceType
 from research_engine.presentation_guard import PresentationGuard
+from research_engine.synthesizer import FinalSynthesizer
 
 
 def _pack(*, complete: bool = True) -> EvidencePack:
@@ -16,9 +17,12 @@ def _pack(*, complete: bool = True) -> EvidencePack:
         quality_score=0.8,
     )
     source.source_id = "S1"
-    pack = EvidencePack(question="test question", sources=[source])
-    pack.reasoning_complete = complete
-    return pack
+    return EvidencePack(
+        question="test question",
+        sources=[source],
+        reasoning_planned=1,
+        reasoning_done=1 if complete else 0,
+    )
 
 
 def _complete_report(seedha: str = "Chhota jawab.") -> str:
@@ -119,15 +123,18 @@ def test_guard_strengthens_thin_seedha_only_from_existing_report_sections():
     assert any("Seedha jawab strengthened" in repair for repair in audit.repairs)
 
 
-def test_incomplete_run_must_say_it_is_not_complete_or_preliminary():
+def test_incomplete_run_is_detected_and_synthesizer_has_truthful_rewrite():
     text, audit = PresentationGuard().enforce(
         _complete_report(seedha="Detailed research result evidence aur uncertainty ke saath explain kiya gaya hai."),
         pack=_pack(complete=False),
         hypotheses=[{"statement": "test idea"}],
         status={"status": "RESEARCH INCOMPLETE"},
     )
-    # The guard audits honesty rather than fabricating a completion statement.
     assert audit.checks["J_incomplete_run_not_called_verified"] is False
+    repaired = FinalSynthesizer._repair_incomplete_honesty(text)
+    assert "Ye research run complete nahi hua" in repaired
+    assert "preliminary" in repaired
+    assert "fully verified final conclusion nahi" in repaired
 
 
 def test_A_to_L_checklist_is_exposed_internally_not_as_user_log():
