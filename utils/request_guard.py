@@ -40,14 +40,23 @@ class Limit:
     window_seconds: int
 
 
+_QUICK_PER_MINUTE = _int_env("RATE_QUICK_AI_PER_MINUTE", 12, 1, 120)
+_UPLOADS_PER_HOUR = _int_env("RATE_UPLOADS_PER_HOUR", 20, 1, 200)
+_AUDIO_PER_HOUR = _int_env("RATE_AUDIO_UPLOADS_PER_HOUR", 8, 1, 100)
+
 DEFAULT_LIMITS: dict[str, Limit] = {
+    # endpoints that can consume model/search quota
     "/api/v1/chat": Limit(_int_env("RATE_CHAT_PER_MINUTE", 30, 1, 300), 60),
+    "/api/v1/ask": Limit(_QUICK_PER_MINUTE, 60),
     "/api/v1/deep-research": Limit(_int_env("RATE_SYNC_RESEARCH_PER_HOUR", 4, 1, 60), 3600),
     "/api/v1/research-jobs": Limit(_int_env("RATE_RESEARCH_JOBS_PER_HOUR", 6, 1, 60), 3600),
-    "/api/v1/upload-document": Limit(_int_env("RATE_UPLOADS_PER_HOUR", 20, 1, 200), 3600),
-    "/api/v1/upload-pdf": Limit(_int_env("RATE_UPLOADS_PER_HOUR", 20, 1, 200), 3600),
-    "/api/v1/upload-audio": Limit(_int_env("RATE_AUDIO_UPLOADS_PER_HOUR", 8, 1, 100), 3600),
-    "/api/v1/transcribe-audio": Limit(_int_env("RATE_AUDIO_UPLOADS_PER_HOUR", 8, 1, 100), 3600),
+
+    # ingestion/processing endpoints that can use CPU, disk or local model time
+    "/api/v1/upload-document": Limit(_UPLOADS_PER_HOUR, 3600),
+    "/api/v1/upload-pdf": Limit(_UPLOADS_PER_HOUR, 3600),
+    "/api/v1/ingest-youtube": Limit(_UPLOADS_PER_HOUR, 3600),
+    "/api/v1/upload-audio": Limit(_AUDIO_PER_HOUR, 3600),
+    "/api/v1/transcribe-audio": Limit(_AUDIO_PER_HOUR, 3600),
 }
 
 
