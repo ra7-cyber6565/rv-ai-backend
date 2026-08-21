@@ -18,7 +18,6 @@ import heapq
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List
 
-# ── budget (page/chunk based, byte based NAHI) ────────────────────────────────
 DEFAULT_HEAD_PAGES = 3
 DEFAULT_TAIL_PAGES = 3
 DEFAULT_MAX_PAGES_SCANNED = 800
@@ -54,13 +53,7 @@ def sample_page_indices(
     head_pages: int = DEFAULT_HEAD_PAGES,
     tail_pages: int = DEFAULT_TAIL_PAGES,
 ) -> List[int]:
-    """Return sorted 0-based page indices spread across the whole document.
-
-    If the budget can cover the whole PDF, every page is returned.  Otherwise:
-    opening pages + ending pages are guaranteed where the budget allows, and the
-    remaining slots are distributed evenly through the interior.  This avoids
-    the old "first N pages only" blind spot while keeping RAM/runtime bounded.
-    """
+    """Return sorted 0-based page indices spread across the whole document."""
     total = max(0, int(page_count or 0))
     limit = int(max_pages or 0)
     if total <= 0:
@@ -81,12 +74,10 @@ def sample_page_indices(
 
     remaining = limit - len(picked)
     interior_start = head
-    interior_end = max(interior_start, total - tail)  # exclusive
+    interior_end = max(interior_start, total - tail)
     span = max(0, interior_end - interior_start)
 
     if remaining > 0 and span > 0:
-        # Interior points strictly between both ends.  Rounding can very rarely
-        # collide, so a deterministic fill pass below tops the set back up.
         for i in range(remaining):
             fraction = (i + 1) / (remaining + 1)
             candidate = interior_start + int(round(fraction * max(0, span - 1)))
@@ -94,8 +85,6 @@ def sample_page_indices(
             picked.add(candidate)
 
     if len(picked) < limit:
-        # Deterministic collision fill.  O(page_count) worst case, but stores
-        # only ``limit`` integers and normally exits almost immediately.
         for candidate in range(total):
             picked.add(candidate)
             if len(picked) >= limit:
@@ -130,7 +119,7 @@ class PageSelection:
 
     def note(self) -> str:
         if not self.pages_scanned:
-            return "PDF se ek bhi page inspect nahi kiya ja saka."
+            return "PDF se ek bhi page padha nahi / inspect nahi kiya ja saka."
         total = self.pages_total or self.pages_scanned
         pages = ", ".join(
             str(c.get("page")) for c in self.chunks[:8] if c.get("page")
@@ -210,7 +199,7 @@ def select_pages(
         file_name=file_name or "",
         sampling_mode=sampling_mode or "sequential",
     )
-    heap: List = []  # (score, page_no, text) — weakest at heap[0]
+    heap: List = []
     seq = 0
 
     for raw in pages or []:
