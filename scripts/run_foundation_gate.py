@@ -60,6 +60,7 @@ FOCUSED_PYTEST = (
     "tests/test_reasoning_zero_cost.py",
     "tests/test_reasoning_router.py",
     "tests/test_reasoning_router_integration.py",
+    "tests/test_provider_health.py",
     "tests/test_offline_reasoner.py",
     "tests/test_reasoning_status.py",
     "tests/test_quick_chat_resilience.py",
