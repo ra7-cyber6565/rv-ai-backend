@@ -72,15 +72,12 @@ def start_research_job(request: ResearchJobRequest):
     if not (request.question or "").strip():
         raise HTTPException(status_code=400, detail="question khaali nahi ho sakta")
 
-    # Fail before scheduling an orphaned long-running job if the backend cannot
-    # safely maintain private capability tokens.
     if not job_access.status().get("job_capability_tokens_ready"):
         raise HTTPException(
             status_code=503,
             detail="Research job private-access layer ready nahi hai; job start nahi kiya gaya.",
         )
 
-    # Lazy import keeps startup light.
     from research_engine.agent_manager import manager
 
     try:
@@ -92,8 +89,6 @@ def start_research_job(request: ResearchJobRequest):
             run=manager.research,
         )
     except RuntimeError as exc:
-        # Queue/process/storage internals may include local paths or operational
-        # details. Keep them server-side instead of reflecting raw exception text.
         raise HTTPException(
             status_code=429,
             detail="Research queue abhi busy/unavailable hai. Thodi der baad dobara try karein.",
@@ -150,9 +145,12 @@ def research_job_result(
             "status": "interrupted",
         })
     if item["status"] == "failed":
+        # The durable store keeps a redacted internal error for operator/debug
+        # use, but a public bearer-capability client does not need exception type,
+        # local path or provider detail. Never reflect it here.
         raise HTTPException(status_code=500, detail={
-            "message": "Research job fail hua",
-            "error": item.get("error", ""),
+            "message": "Research job complete nahi ho saka. Safe retry ya naya job start karein.",
+            "status": "failed",
         })
     return item["result"]
 
