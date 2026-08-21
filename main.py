@@ -1,4 +1,4 @@
-﻿import os
+import os
 
 # .env must be loaded BEFORE storage routing. Otherwise a laptop setting such as
 # INFINITY_DATA_ROOT=D:\InfinityResearchAI would be seen too late and caches
@@ -18,6 +18,7 @@ from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
 from knowledge.routes import router as knowledge_router
+from storage.provider_factory import provider_status
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
 from utils.request_guard import client_key, enabled as rate_limit_enabled, limit_for, limiter
@@ -88,6 +89,17 @@ WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 INDEX_HTML = os.path.join(WEB_DIR, "index.html")
 
 
+def _runtime_safety_status() -> dict:
+    """Aggregate only non-secret operational state for API/health responses."""
+    return {
+        "zero_cost_only": ZERO_COST_STATUS.enabled,
+        "rate_limit_enabled": rate_limit_enabled(),
+        "rate_limiter": limiter.stats(),
+        "cloud_archive": provider_status(),
+        "storage": storage_status(),
+    }
+
+
 @app.get("/")
 def website():
     """RV AI website — same origin as the API."""
@@ -105,15 +117,14 @@ def api_info():
         methods = sorted(getattr(route, "methods", set()) - {"HEAD", "OPTIONS"})
         if path.startswith("/api/") and methods:
             endpoints.append(f"{','.join(methods)} {path}")
+    safety = _runtime_safety_status()
     return {
         "message": "RV AI Backend - Production Ready",
         "version": app.version,
         "docs": "/docs",
         "website": "/",
-        "zero_cost_only": ZERO_COST_STATUS.enabled,
-        "rate_limit_enabled": rate_limit_enabled(),
+        **safety,
         "cors_origins": CORS_ORIGINS,
-        "storage": storage_status(),
         "endpoint_count": len(endpoints),
         "endpoints": sorted(endpoints),
     }
@@ -121,13 +132,18 @@ def api_info():
 
 @app.get("/health")
 def health_check():
-    """Health check including the configured storage drive."""
-    current_storage = storage_status()
+    """Health check including storage and non-secret archive readiness."""
+    safety = _runtime_safety_status()
+    current_storage = safety["storage"]
+    archive = safety["cloud_archive"]
+    degraded = not current_storage.get("available")
+    # Cloud archive is optional when disabled. If explicitly enabled but not
+    # ready, surface degraded health without crashing the research API.
+    if archive.get("enabled") and not archive.get("ready"):
+        degraded = True
     return {
-        "status": "healthy" if current_storage.get("available") else "degraded",
+        "status": "degraded" if degraded else "healthy",
         "service": "RV AI Backend",
         "version": app.version,
-        "zero_cost_only": ZERO_COST_STATUS.enabled,
-        "rate_limit_enabled": rate_limit_enabled(),
-        "storage": current_storage,
+        **safety,
     }
