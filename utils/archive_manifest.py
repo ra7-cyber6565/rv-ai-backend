@@ -172,7 +172,9 @@ class ArchiveManifest:
             existing = data["items"].get(archive_id)
             if existing:
                 # Idempotent re-registration of the same content/destination must
-                # not destroy a previously VERIFIED state.
+                # not destroy a previously VERIFIED state. A *new upload attempt*
+                # below will deliberately clear verification until remote stat is
+                # checked again.
                 existing["local_path"] = local
                 existing["size"] = os.path.getsize(local)
                 existing["updated_at"] = now
@@ -190,7 +192,12 @@ class ArchiveManifest:
             item = data["items"][key]
             item["attempts"] = int(item.get("attempts", 0)) + 1
             item["status"] = "failed" if error else "uploaded_unverified"
-            item["verified"] = False if error else bool(item.get("verified", False))
+            # A new upload can replace/alter the remote object. Even an archive
+            # record that was verified previously must become unverified until
+            # the post-upload stat/hash check succeeds again. Keeping
+            # status=uploaded_unverified with verified=True is internally
+            # contradictory and could mislead UI/cleanup code added later.
+            item["verified"] = False
             item["last_error"] = str(error)[:1000]
             item["updated_at"] = int(time.time())
             self._save(data)
