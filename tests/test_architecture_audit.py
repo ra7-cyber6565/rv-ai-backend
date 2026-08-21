@@ -14,6 +14,7 @@ def test_real_repository_audit_has_all_expected_check_names():
     report = audit.run_audit()
     names = {row["name"] for row in report.checks}
     assert "required-production-and-test-files" in names
+    assert "honesty:release-state-not-faked" in names
     assert "safety:zero-cost-provider-chain" in names
     assert "resilience:quota-does-not-blank-answer" in names
     assert "storage:bounded-and-verified" in names
@@ -40,6 +41,32 @@ def test_required_files_check_fails_closed(monkeypatch, tmp_path):
     result = audit._required_files(("exists.py", "missing.py"))
     assert result.passed is False
     assert "missing.py" in result.detail
+
+
+def test_release_honesty_rejects_production_ready_claim(monkeypatch, tmp_path):
+    (tmp_path / "main.py").write_text(
+        'RELEASE_STATE="foundation_verification_pending"\n'
+        'data={"release_state": RELEASE_STATE}\n'
+        'status={"status": "degraded" if degraded else "healthy"}\n'
+        'message="RV AI Backend - Production Ready"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    result = audit._release_honesty()
+    assert result.passed is False
+    assert "production_ready_claim=True" in result.detail
+
+
+def test_release_honesty_accepts_separate_health_and_release_state(monkeypatch, tmp_path):
+    (tmp_path / "main.py").write_text(
+        'RELEASE_STATE="foundation_verification_pending"\n'
+        'data={"release_state": RELEASE_STATE}\n'
+        'health={"status": "degraded" if degraded else "healthy"}\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    result = audit._release_honesty()
+    assert result.passed is True
 
 
 def test_secret_scan_detects_obvious_literal_in_production(monkeypatch, tmp_path):
