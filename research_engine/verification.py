@@ -1,14 +1,14 @@
-"""Enhanced verification facade with claim-level evidence verification A-E.
+"""Integrated verification facade: Claude physics/math + ChatGPT A-E honesty.
 
-The original verification implementation is kept in ``verification_legacy.py``
-for compatibility. This facade adds the missing claim-level evidence gate so a
-valid citation ID alone can never promote an answer to SOURCE GROUNDED.
+``verification_claude.py`` is the exact latest Claude verification implementation
+from main (including unit-aware physics sanity checks). This facade deliberately
+adds stricter claim-level A-E verification on top, so structural citation IDs
+can never by themselves produce SOURCE GROUNDED.
 
-A second honesty rule matters just as much: if the answer contains no labelled
-factual/evidence claim that the A-E verifier can inspect, SOURCE GROUNDED is also
-not allowed. "No check ran" is UNKNOWN, not PASS. Computational verification is
-kept separate: a real arithmetic/algebra check may still be computationally
-verified even when source-level A-E verification did not apply.
+If no labelled factual/evidence claim can be checked, source grounding fails
+closed to UNKNOWN/UNVERIFIABLE. Independent arithmetic/physics verification is
+preserved as a separate dimension rather than being erased by a missing A-E
+claim.
 """
 from __future__ import annotations
 
@@ -16,12 +16,13 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .evidence_verification import EvidenceVerifier
-from .verification_legacy import Check, VerificationReport as _LegacyVerificationReport
-from .verification_legacy import VerificationEngine as _LegacyVerificationEngine
+from .verification_claude import Check
+from .verification_claude import VerificationReport as _ClaudeVerificationReport
+from .verification_claude import VerificationEngine as _ClaudeVerificationEngine
 
 
 @dataclass
-class VerificationReport(_LegacyVerificationReport):
+class VerificationReport(_ClaudeVerificationReport):
     evidence_verification: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
@@ -30,8 +31,8 @@ class VerificationReport(_LegacyVerificationReport):
         return data
 
 
-class VerificationEngine(_LegacyVerificationEngine):
-    """Legacy math/logic checks + deterministic A-E claim evidence gate."""
+class VerificationEngine(_ClaudeVerificationEngine):
+    """Claude computational/physics checks + cumulative same-source A-E gate."""
 
     def __init__(self):
         super().__init__()
@@ -81,6 +82,7 @@ class VerificationEngine(_LegacyVerificationEngine):
             statistics=dict(base.statistics),
             data_for_verification=list(base.data_for_verification),
             limits=list(base.limits),
+            physics=dict(getattr(base, "physics", {}) or {}),
             evidence_verification=ev,
         )
 
@@ -102,10 +104,8 @@ class VerificationEngine(_LegacyVerificationEngine):
         gate_passed = bool(ev.get("gate_passed"))
 
         if claims_checked == 0:
-            # Critical fail-closed rule: structural citation checks from the
-            # legacy verifier cannot stand in for claim-level support. If A-E
-            # did not parse any factual/evidence claim, source grounding is
-            # simply unknown. Do NOT affect independent computation statuses.
+            # No check ran != pass. Legacy/Claude structural source grounding is
+            # not enough if there was no claim that A-E could inspect.
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
             report.warnings.append(
@@ -118,17 +118,13 @@ class VerificationEngine(_LegacyVerificationEngine):
                 "Valid citation IDs mile, lekin claim-level evidence verification A-E "
                 "poori pass nahi hui. Isliye answer ko fully source-verified nahi maana gaya."
             )
-            # Structural source linking is weaker than claim support. Never leave
-            # SOURCE GROUNDED/fully verified wording when A-E did not pass.
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
             elif report.status == "COMPUTATIONALLY VERIFIED":
-                # A calculation may be correct while its factual premises are
-                # not fully source-verified; say partial instead of fully verified.
+                # Calculation correct ho sakti hai, factual premise source-level
+                # par incomplete ho sakta hai — dono ko ek label mein mix na karo.
                 report.status = "COMPUTATIONALLY VERIFIED (partial)"
         elif report.status in {"UNVERIFIABLE HERE", "LOGICALLY CONSISTENT"}:
-            # Only promote after every labelled factual/evidence claim passed
-            # the cumulative same-source A-E gate.
             report.status = "SOURCE GROUNDED"
 
         return report
