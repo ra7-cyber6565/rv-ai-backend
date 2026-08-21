@@ -1,10 +1,13 @@
-"""Truthful presentation facade for the human-first research report.
+"""Truthful human-first presentation facade for final research reports.
 
-The large formatting implementation remains in ``synthesizer_legacy.py``. This
-facade tightens source-access wording so a downloaded large PDF with only
-selected relevant pages processed is never presented as "poora document padha".
-It also separates *source access depth* from *claim verification*: full-text
-access alone never proves that a claim is supported.
+The large formatter remains in ``synthesizer_legacy.py`` for compatibility. This
+facade adds two hardening layers:
+1) source-access wording never turns selected-page large-PDF reading into a
+   false "poora document padha" claim, and full-text access is not confused
+   with claim entailment;
+2) a deterministic A-L presentation guard runs after assembly and before the
+   report is returned, moving raw technical junk down and repairing structural
+   presentation issues without inventing research facts.
 """
 from __future__ import annotations
 
@@ -12,12 +15,18 @@ import re
 from typing import Dict, List, Optional
 
 from .models import EvidencePack
+from .presentation_guard import PresentationGuard
 from .synthesizer_legacy import *  # noqa: F401,F403 - compatibility exports
 from .synthesizer_legacy import FinalSynthesizer as _LegacyFinalSynthesizer
 
 
 class FinalSynthesizer(_LegacyFinalSynthesizer):
-    """Legacy human-first formatter with stricter access-depth honesty."""
+    """Legacy human-first formatter with final truth/presentation guardrails."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.presentation_guard = PresentationGuard()
+        self.last_presentation_check: Dict = {}
 
     @staticmethod
     def _is_partial_large_source(source) -> bool:
@@ -160,6 +169,35 @@ class FinalSynthesizer(_LegacyFinalSynthesizer):
             blocks.append("\n".join(lines))
         return "\n\n".join(blocks)
 
+    def assemble(self, *args, **kwargs) -> str:
+        """Assemble normally, then run the user's A-L presentation gate."""
+        report = super().assemble(*args, **kwargs)
+        pack = kwargs.get("pack")
+        if pack is None and len(args) > 1:
+            pack = args[1]
+        if pack is None:
+            # Defensive compatibility: if a future caller breaks the contract,
+            # return the legacy report rather than inventing missing run state.
+            self.last_presentation_check = {
+                "passed": False,
+                "failed": ["presentation_guard_missing_evidence_pack"],
+                "checks": {},
+                "repairs": [],
+            }
+            return report
 
-# Preserve the public section-order constant for existing imports/tests.
-SECTION_TITLES = SECTION_TITLES  # type: ignore[name-defined]  # noqa: F821
+        hypotheses = kwargs.get("hypotheses")
+        if hypotheses is None and len(args) > 5:
+            hypotheses = args[5]
+        status = kwargs.get("status")
+        if status is None and len(args) > 19:
+            status = args[19]
+
+        guarded, audit = self.presentation_guard.enforce(
+            report,
+            pack=pack,
+            hypotheses=hypotheses or [],
+            status=status or {},
+        )
+        self.last_presentation_check = audit.to_dict()
+        return guarded
