@@ -23,6 +23,7 @@ jobs:
       RATE_LIMIT_ENABLED: "true"
       INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-data
       GEMINI_API_KEY: ""
+      CLOUD_ARCHIVE_PROVIDER: "none"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -54,6 +55,9 @@ jobs:
             tests/test_archive_retry.py \
             tests/test_cloud_storage.py \
             tests/test_cloud_archive.py \
+            tests/test_process_lock.py \
+            tests/test_google_drive_rclone.py \
+            tests/test_provider_factory.py \
             tests/test_zero_cost_guard.py \
             tests/test_security_config.py \
             tests/test_request_guard.py \
