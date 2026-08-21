@@ -358,7 +358,13 @@ class GeminiReasoning:
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 self.attempts += 1
                 try:
-                    response = self._model.generate_content(prompt)
+                    # Bandhi hui waqt-seema ke saath. Latki hui call ab TRANSIENT
+                    # error ban kar wahi purana retry/backoff chalati hai — poori
+                    # HTTP request ko ghanton rok kar nahi rakhti (isi wajah se
+                    # website par aakhir mein "server se baat nahi ho paayi"
+                    # aata tha).
+                    from .gemini_model import generate as _generate
+                    response = _generate(self._model, prompt)
                     text = (getattr(response, "text", "") or "").strip()
                     if not text:
                         # khaali jawab bhi failure hai — chup-chaap "" lautana

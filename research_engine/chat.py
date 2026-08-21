@@ -15,9 +15,11 @@ Do cheezein spec/user ke hisaab se yahan zaroori hain:
 from __future__ import annotations
 
 import os
+import time
 from typing import Dict, List, Optional
 
-from .gemini_model import candidates, configure, friendly_error, reset_for_new_key
+from .gemini_model import (candidates, configure, friendly_error, generate,
+                           reset_for_new_key)
 from .key_pool import KeyPool
 from .local_language import normalize
 from .local_reasoning import quick_answer as offline_quick
@@ -25,6 +27,23 @@ from .local_reasoning import quick_answer as offline_quick
 # Sirf reference ke liye — asli naam runtime par Google se poochh kar chunte hain
 # (dekho gemini_model.resolve). Hard-coded naam hi "InvalidArgument" ki wajah tha.
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
+
+
+def _seconds(env_name: str, default: int, lo: int, hi: int) -> int:
+    try:
+        value = int(os.getenv(env_name, "") or default)
+    except (TypeError, ValueError):
+        value = default
+    return max(lo, min(value, hi))
+
+
+# QUICK chat ki do haddein (dono env se badli ja sakti hain):
+#   CALL_TIMEOUT   — ek Gemini call zyada se zyada itni der latak sakti hai
+#   TOTAL_BUDGET   — saare model milakar itne second se aage nahi jaana
+# Ye "feature kaatna" nahi hai — model list, key rotation, offline parat, sab
+# waise hi hain. Sirf intezaar ki hadd hai, taaki HTTP connection zinda rahe.
+CALL_TIMEOUT_SECONDS = _seconds("GEMINI_CHAT_TIMEOUT", 45, 10, 300)
+TOTAL_BUDGET_SECONDS = _seconds("GEMINI_CHAT_BUDGET", 100, 20, 600)
 
 _SYSTEM = """Tum "RV" ho — ek dost jaisa, samajhdaar AI assistant.
 
@@ -128,14 +147,33 @@ def _one_key_try(genai, prompt: str) -> Dict:
 
     `key_dead=True` ka matlab: is KEY ki hadd thi (quota/auth), model ki galti
     nahi — yaani doosri free key try karna sach mein kaam ka hai.
+
+    TIME KA HISAAB (2026-08-21): QUICK chat interactive hai — user screen ke
+    saamne baitha hai. Pehle ek latki hui call yahan anaadi kaal tak ruk sakti
+    thi, aur 4 model × latakna = browser/gateway ka connection kat jaana. Ab
+    do haddein hain: har call ka apna timeout (`CALL_TIMEOUT`) aur poori koshish
+    ka wall-clock budget (`TOTAL_BUDGET`). Budget khatam hote hi hum ruk jaate
+    hain — par khaali haath nahi lautte: upar wali offline parat phir bhi jawab
+    deti hai. Koi model ya feature band nahi hota.
     """
+    deadline = time.monotonic() + TOTAL_BUDGET_SECONDS
     tried: List[str] = []
     last_exc: Optional[Exception] = None
     key_dead = False
     for name in candidates(genai):
+        if tried and time.monotonic() >= deadline:
+            last_exc = last_exc or TimeoutError(
+                f"chat ka {TOTAL_BUDGET_SECONDS}s budget khatam ho gaya")
+            break
         tried.append(name)
         try:
-            resp = genai.GenerativeModel(name).generate_content(prompt)
+            # Bandhe hue time ke saath — ek latki hui call poori chat ko rok kar
+            # nahi rakh sakti (isi wajah se website par "server se baat nahi ho
+            # paayi" aata tha).
+            remaining = int(max(10, min(CALL_TIMEOUT_SECONDS,
+                                        deadline - time.monotonic())))
+            resp = generate(genai.GenerativeModel(name), prompt,
+                            timeout=remaining)
             text = (getattr(resp, "text", "") or "").strip()
             if text:
                 return {"text": text, "tried": tried, "exc": None,

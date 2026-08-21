@@ -125,8 +125,9 @@ par nahi. Key ki value yahan bhi kahin nahi jaati.
 | `git push` (sandbox GitHub tak nahi pahunch sakta) | intel | recurring | — | — |
 | Railway mein naya `GEMINI_API_KEY` + live MAXIMUM test | intel | pending | Railway Variables | — |
 | Android `RetrofitClient.kt` ka `BASE_URL` Railway URL par | intel | optional | `InfinityResearchAI/.../RetrofitClient.kt` | — |
-| `pytest -q tests/ test_research_engine.py` ka naya total (195 expected) | intel | pending | — | — |
+| `pytest -q tests/ test_research_engine.py` ka naya total (196 expected) | intel | pending | — | — |
 | USPTO ODP free key (optional) → Railway `USPTO_ODP_API_KEY` | intel | optional | Railway Variables | — |
+| Railway par timeout knobs (optional, default theek hain): `GEMINI_CALL_TIMEOUT`, `GEMINI_CHAT_TIMEOUT`, `GEMINI_CHAT_BUDGET` | intel | optional | Railway Variables | — |
 
 ## ChatGPT ke liye (is batch ke baad)
 
@@ -268,6 +269,48 @@ hi nahi hoti (neeche wala gap), isliye pytest ka naya total intel ke Windows se
 aayega — `tests/test_patents.py` module level par sirf ek test deti hai
 (`test_patents_all_checks_pass`), isliye pichhle **194** se **195** hona
 chahiye.
+
+## Live bug fix — "Abhi server se baat nahi ho paayi" (Owner: Claude, 2026-08-21)
+
+intel ki report: website par sawaal bhejo, aur aakhir mein
+"Abhi server se baat nahi ho paayi. Thodi der baad phir bhejo — main yahin hoon 🙂"
+aa jaata tha. Hukum: **"kuch htana mt, bss isko fix kro"** — isliye ek bhi
+feature, model, key-rotation, ya wo pyaari line khud, kuch bhi hataya NAHI gaya.
+Sirf jodha gaya hai.
+
+Asli wajah do thi (dono ab band):
+
+1. **Server par ek bhi call par timeout nahi tha.** `generate_content()` seedha
+   call hota tha; Google ka SDK default mein anaadi kaal tak ruk sakta hai. Ek
+   latki hui call poori HTTP request ko rok kar rakhti thi, aur beech mein
+   browser/Railway gateway connection kaat deta tha. User ko "server down" lagta
+   tha, jabki server sirf ek call par atka hua tha.
+2. **Browser har gadbad ko EK hi line bana deta tha.** Har fetch
+   `await (await fetch(...)).json()` tha — koi `r.ok` check nahi, koi status
+   nahi. 502 / khaali body / HTML error page / timeout, sab exception ban kar
+   wahi ek line dikhate the. Aur DEEP/MAX ka jawab, jo server par ban CHUKA
+   hota tha, connection katne par hamesha ke liye kho jaata tha.
+
+Kya badla:
+
+| File | Kya hua |
+|---|---|
+| `research_engine/gemini_model.py` | naya `call_timeout()` (env `GEMINI_CALL_TIMEOUT`, 10..600s, default 75) + `generate(model, prompt, timeout=None)`. `request_options` support per-callable `inspect.signature` se pata karta hai, isliye purane SDK aur test ke nakli model bina timeout waise hi chalte hain. |
+| `research_engine/chat.py` | QUICK chat ki do haddein: `CALL_TIMEOUT_SECONDS` (`GEMINI_CHAT_TIMEOUT`, def 45) aur `TOTAL_BUDGET_SECONDS` (`GEMINI_CHAT_BUDGET`, def 100). `_one_key_try` mein monotonic deadline — budget khatam hote hi rukta hai, par khaali haath nahi: offline parat phir bhi jawab deti hai. `key_dead`, 4-model cap, key rotation, offline fallback — sab jaise the waise hain. |
+| `research_engine/gemini_reasoning.py` | deep-research ki call bhi ab `gemini_model.generate()` se jaati hai. Timeout `model_errors.classify` ke liye TRANSIENT hai, isliye purana retry/backoff hi chalta hai — model band nahi hota. |
+| `web/index.html` | naya non-throwing network layer (`readBody`/`postJSON`/`getJSON`), `reasonLine(res)` jo status ko insaani "Wajah: …" banata hai, QUICK par ek automatic retry, "Phir bhejo" button (sawaal dobara type nahi karna padta), aur DEEP/MAX ke liye `matchingAnswers()` + `recoverAnswer()` jo `GET /api/v1/history/{project_id}` se kho gaya jawab wapas le aata hai (baseline ginti se, taaki purana jawab na uthe; sirf GET, nayi research trigger nahi hoti). |
+
+Naya test: `python3 tests/test_chat_resilience.py` — 10 stage, **43 check**, poora
+offline (na network, na API key). Mutation proof: `generate()` se timeout hataane
+par 4 FAIL, purani style wali `index.html` dene par 12 FAIL.
+
+Regression (sab is sandbox mein 2026-08-21 ko, sab `rc=0`):
+`tests/benchmark_cross_domain.py` **633/633**,
+`tests/benchmark_superconductivity.py` **146/146**,
+`test_research_engine.py` **593/0**, `test_missing_features.py` 14 assertion,
+aur `tests/test_*.py` ki saari **20** file `rc=0` (nayi wali samet).
+pytest ka total `194 → 196` hona chahiye (patent batch se +1, is fix se +1) —
+asli ginti intel ke Windows se aayegi.
 
 ## Known gaps (jaan-boojh kar khule)
 
