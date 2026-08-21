@@ -177,6 +177,49 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None,
     return "\n".join(out_lines), report
 
 
+def merge_reports(strict: Optional[Dict], depth: Optional[Dict]) -> Dict:
+    """
+    Label gate DO pass ka hai — dono ka hisaab ek jagah.
+
+    Kyun zaroori hai (cross-domain benchmark, 2026-08-21): pehle strict pass
+    (`claim_verification.enforce_strict_labels`) chalta hai, jo "poora text
+    padha par support nahi mila" wali line ko `[UNVERIFIED]` kar deta hai.
+    Uske BAAD depth pass (`downgrade()`) chalta hai — aur use us line par koi
+    strong label milta hi nahi, kyunki wo pehle hi gir chuki hai. Nateeja:
+    answer mein downgrade saaf dikhta tha, par machine-readable
+    `label_report` `checked: 0, downgraded: 0` bolta tha. Yaani engine ne kaam
+    kiya lekin apna hisaab kam karke bataya — audit ke liye ye jhooth hai.
+
+    Isliye ab dono pass ka total milta hai. `strict_unverified` alag se rehta
+    hai taaki pata rahe ki kaunsa pass ne giraya.
+    """
+    depth = dict(depth or {})
+    strict = dict(strict or {})
+    out: Dict = {
+        "checked": 0, "downgraded": 0, "to_source_reported": 0,
+        "to_unverified": 0, "entailment_blocked": 0, "strict_unverified": 0,
+        "details": [], "note": "",
+    }
+    out.update({k: v for k, v in depth.items() if k in out})
+    s_checked = int(strict.get("checked") or 0)
+    s_unver = int(strict.get("to_unverified") or 0)
+    # Strict pass pehle chala tha, isliye usne jitni lines dekhi wo depth pass
+    # ki ginti se kam nahi ho sakti — total wahi jo zyada hai.
+    out["checked"] = max(int(out.get("checked") or 0), s_checked)
+    out["downgraded"] = int(out.get("downgraded") or 0) + s_unver
+    out["to_unverified"] = int(out.get("to_unverified") or 0) + s_unver
+    out["strict_unverified"] = s_unver
+    details = list(out.get("details") or [])
+    for line in (strict.get("details") or []):
+        if len(details) >= 8:
+            break
+        details.append(f"{line} — poora text mila par claim ka support nahi")
+    out["details"] = details
+    notes = [n for n in (strict.get("note"), depth.get("note")) if n]
+    out["note"] = " ".join(notes)
+    return out
+
+
 def human_note(report: Optional[Dict]) -> str:
     """
     Audit section ke liye normal bhasha wali line (raw log nahi).

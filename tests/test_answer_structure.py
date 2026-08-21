@@ -322,5 +322,18 @@ def main() -> int:
     return 1 if FAIL else 0
 
 
+def test_answer_structure_checks_all_pass():
+    """
+    pytest ke liye entry point (2026-08-21).
+
+    CI `pytest -q tests/test_answer_structure.py` chalati hai, par is file ke
+    saare check `main()` ke ANDAR the — yaani pytest is file se 0 test collect
+    karta tha aur step chup-chaap green ho jaata tha. "Test chal gaya" aur "test
+    hai hi nahi" — dono ek jaise dikhte the. Ab pytest bhi wahi 51 check chalata
+    hai jo `python3 tests/test_answer_structure.py` chalata hai.
+    """
+    assert main() == 0
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

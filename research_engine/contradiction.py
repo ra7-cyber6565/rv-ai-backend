@@ -26,15 +26,52 @@ _SUPPORT_CUES = (
     "effective", "significant improvement", "significantly improved", "increases",
     "increased", "improves", "improved", "beneficial", "reduces risk", "associated with",
     "supports", "confirmed", "efficacious", "positive effect", "faayda", "labh",
+    # 2026-08-21 (cross-domain benchmark): upar ki poori list clinical-trial ki
+    # angrezi thi ("efficacious", "reduces risk"). Engineering/archaeology/
+    # economics/CS ke sources isi baat ko doosre shabdon mein kehte hain, isliye
+    # unka stance NEUTRAL nikalta tha aur contradiction detect hi nahi hoti thi.
+    # Ye cue jaan-boojh kar phrase-level hain (akela topic-shabd nahi), warna
+    # har paper "SUPPORT" ban jaayega.
+    "detected", "demonstrates", "demonstrated", "shows a", "shows that",
+    "showed a", "showed that", "consistent with", "successfully reproduced",
+    "reproduced the", "replicated", "confirms",
 )
 _OPPOSE_CUES = (
     "not effective", "ineffective", "no significant", "no effect", "no evidence",
     "failed to", "does not", "did not", "no association", "no benefit", "contradicts",
     "refuted", "disproved", "inconclusive", "no difference", "harmful", "adverse",
     "nuksan", "koi fayda nahi",
+    # Domain-neutral "null result" ki bhaasha — har field mein milti hai.
+    "not reproduced", "could not reproduce", "failed replication", "null result",
+    "no detectable", "no measurable", "not preserved", "no useful", "no reduction",
+    "no correlation", "no support for", "no improvement", "not statistically",
 )
 _HEDGE_CUES = ("may", "might", "suggests", "possible", "preliminary", "unclear",
                "further research", "limited evidence", "mixed")
+
+# Neeche wale OPPOSE cue "null finding" ki seedhi ghoshna hain — inka matlab
+# saaf hai. Aur _WEAK_SUPPORT_CUES wo shabd hain jo topic ke naam mein bhi aa
+# jaate hain (jaise "minimum wage increases" — yahan "increases" claim nahi,
+# sirf topic hai). Agar strong-oppose mila ho aur support ke naam par sirf yahi
+# kamzor shabd hon, to stance OPPOSE hai — MIXED nahi. Warna ek asli null
+# result sirf topic-shabd ki wajah se "mila-jula" ban jaata tha aur
+# contradiction chhoot jaati thi.
+_STRONG_OPPOSE_CUES = (
+    "not effective", "ineffective", "no significant", "no effect", "no evidence",
+    "failed to", "does not", "did not", "no association", "no benefit",
+    "no difference", "refuted", "disproved", "not reproduced",
+    "could not reproduce", "failed replication", "null result", "no detectable",
+    "no measurable", "not preserved", "no useful", "no reduction",
+    "no correlation", "no support for", "no improvement", "not statistically",
+)
+_WEAK_SUPPORT_CUES = ("increases", "increased", "improves", "improved",
+                      "associated with")
+
+# Support cue ke aage-peeche negation ho to wo support nahi hai:
+# "no measurable improvement" mein "improvement" ko support maanna galat hai.
+_NEGATORS = ("no ", "not ", "never ", "without ", "n't ", "neither ", "nor ",
+             "failed to ", "unable to ", "cannot ", "could not ", "did not ",
+             "does not ", "lack of ", "absence of ", "little ")
 
 _NUM_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s?%")
 _YEAR_GAP = 6          # itne saal ka farq ho to recency conflict dekhte hain
@@ -62,15 +99,43 @@ class Contradiction:
 
 class ContradictionEngine:
     # ── stance ───────────────────────────────────────────────────────────────
+    def _all_negated(self, low: str, cue: str) -> bool:
+        """
+        Cue ki HAR jagah negation ke peeche hai ya nahi.
+
+        "no measurable improvement in throughput" — yahan "improvement" ko
+        support maanna galat hai. Sirf tab True jab cue ka koi bhi occurrence
+        bina negation ke na ho (yani ek jagah bhi seedha daawa ho to support
+        maana jaayega).
+        """
+        hits = 0
+        negated = 0
+        start = 0
+        while True:
+            i = low.find(cue, start)
+            if i < 0:
+                break
+            hits += 1
+            if any(n in low[max(0, i - 16):i] for n in _NEGATORS):
+                negated += 1
+            start = i + len(cue)
+        return hits > 0 and negated == hits
+
     def stance(self, text: str) -> Tuple[str, List[str]]:
         low = (text or "").lower()
         # Pehle OPPOSE dekho — "not effective" ke andar "effective" bhi aata hai
         opposing = [c for c in _OPPOSE_CUES if c in low]
         supporting = [c for c in _SUPPORT_CUES if c in low and
-                      not any(c in o for o in opposing)]
+                      not any(c in o for o in opposing) and
+                      not self._all_negated(low, c)]
         hedging = [c for c in _HEDGE_CUES if c in low]
 
         if opposing and supporting:
+            strong = [c for c in opposing if c in _STRONG_OPPOSE_CUES]
+            if strong and all(c in _WEAK_SUPPORT_CUES for c in supporting):
+                # Saaf null result + support ke naam par sirf topic-shabd →
+                # ye MIXED nahi, OPPOSE hai.
+                return "OPPOSE", opposing
             return "MIXED", opposing + supporting
         if opposing:
             return "OPPOSE", opposing

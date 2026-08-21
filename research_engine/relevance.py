@@ -105,6 +105,22 @@ class RelevanceEngine:
             self._topic_cache[key] = cached
         return cached
 
+    # Poori content-shabd list (kaati hui nahi). Scoring ke liye top-8 hi theek
+    # hai (warna 300-shabd prompt ratio ko 0 kar deta hai), par kisi source ko
+    # HARD REJECT karne se pehle poora sawaal dekhna chahiye — isliye ye alag
+    # method hai, alag cache ke saath.
+    _WIDE_TERMS = 40
+
+    def wide_topic_of(self, query: str) -> List[str]:
+        key = "w:" + (query or "")[:600]
+        cached = self._topic_cache.get(key)
+        if cached is None:
+            cached = topic_terms(query, limit=self._WIDE_TERMS)
+            if len(self._topic_cache) > 64:
+                self._topic_cache.clear()
+            self._topic_cache[key] = cached
+        return cached
+
     # ── quality (Spec Section 7) ──────────────────────────────────────────────
     def score_quality(self, s: SourceRecord) -> float:
         score = 0.40
@@ -251,6 +267,51 @@ class RelevanceEngine:
             return 0.0
         s.rejected_reason = ""
 
+        # ── akela shabd = koi relevance nahi (2026-08-21, cross-domain benchmark)
+        #
+        # Ye trap engineering domain mein pakda gaya. Sawaal tha "induction motor
+        # ki bearing failure ka kaaran aur vibration monitoring", aur pack mein
+        # ghus gaya: "Bearing witness: oral history interviews with retired
+        # railway workers". Ek bhi cheez match nahi hoti thi — sirf shabd
+        # "bearing", aur wo bhi bilkul dusre matlab mein ("bearing witness" =
+        # gawahi dena, machine ka bearing nahi). Score 0.222 aaya, strict floor
+        # 0.22 — 0.002 se pass ho gaya.
+        #
+        # Anchor ginti se ise nahi pakda ja sakta: iska anchor_hits = 1 hai, aur
+        # usi field ke JAAYAZ metadata-only sources (ISO standard chapter) ka bhi
+        # anchor_hits = 1 hai. Farq sirf ek jagah dikhta hai — SUB-TOPIC:
+        #   ISO chapter  → branches ['diagnostics', 'standards']
+        #   oral history → branches []
+        # Yaani jaayaz source kisi na kisi research sub-question mein kaam aata
+        # hai; ye wala kisi mein nahi.
+        #
+        # Rule (sirf jaane-pehchane field mein, jahan branches ka matlab hai):
+        # poore sawaal ke content shabdon me se sirf EK mila, koi sub-topic nahi,
+        # aur anchor bhi ek se zyada nahi → reject. Teeno shart ek saath honi
+        # zaroori hain, isliye asli source (jiske 2+ shabd ya koi branch milta
+        # hai) is raaste se nahi girta.
+        #
+        # Ginti `topic_of()` ke top-8 par NAHI hoti — `wide_topic_of()` par hoti
+        # hai. Kyun: pehla attempt top-8 par tha aur usne ek jaayaz paper
+        # ("Transport mode share, road capacity and travel time in dense cities")
+        # ko bhi maar diya, kyunki Hinglish prompt ke top-8 mein 'badhne',
+        # 'logon', 'effects' jaisi bharti aa gayi thi aur 'transport/mode/road/
+        # emissions' — jinhe sawaal ne KHUD variables kaha tha — list se bahar
+        # reh gaye. Reject karne jaisa bada faisla lene ke liye poori list dekhni
+        # chahiye, kaati hui nahi. (Wo paper ab 8 shabd match karta hai.)
+        if (plan.is_known and s.source_type != SourceType.DOCUMENT
+                and verdict.branch_count == 0
+                and verdict.anchor_hits <= 1):
+            wide = self.wide_topic_of(query)
+            if len(wide) >= 3 and _hits(wide, f"{title} {body}") <= 1:
+                s.rejected_reason = (
+                    "poore sawaal me se sirf ek generic shabd match hua, is field "
+                    "ka koi sub-topic nahi — shabd ka matlab hi alag lag raha hai")
+                s.relevance_parts = {"hard_rejected": True,
+                                     "reason": s.rejected_reason,
+                                     "lone_keyword": True}
+                return 0.0
+
         # 1. lexical (purana behaviour — generic sawaalon ke liye zaroori)
         lexical = 0.0
         if terms:
@@ -395,8 +456,26 @@ class RelevanceEngine:
         strong = [s for s in on_topic if s.quality_score >= min_quality]
         weak = [s for s in on_topic if s.quality_score < min_quality]
 
+        # 2026-08-21 (cross-domain benchmark): padding wapas kaat di gayi.
+        #
+        # Purana code khaali slot bharne ke liye `borderline` (yaani field ke
+        # apne relevance floor se NEECHE wale) sources bhi utha leta tha, sirf
+        # isliye ki `max_sources` poora ho jaaye. Medicine ke sawaal par isi
+        # raaste se "Top 10 celebrity juice cleanses" (relevance 0.083, floor
+        # 0.22) evidence pack mein aa gaya aur uske aage ki poori chain — reading,
+        # evidence extraction, citation — uspar chali.
+        #
+        # Naya rule: jaane-pehchane (strict) field mein, agar ek bhi on-topic
+        # source mil gaya hai to pack ko floor se neeche wale sources se BHARA
+        # nahi jaata. Khaali slot chhod dena imaandaar hai; kachre se bharna
+        # nahi. Haan — agar on-topic ek bhi na mile to borderline hi sahara hai
+        # (warna engine andha ho jaayega), aur uski ginti `borderline_used`
+        # mein saaf jaati hai.
         picked = list(strong)
-        for bucket in (weak, borderline):      # zaroorat par hi, isi kram mein
+        buckets: List[List[SourceRecord]] = [weak]
+        if not plan.strict or not picked:
+            buckets.append(borderline)
+        for bucket in buckets:                 # zaroorat par hi, isi kram mein
             if len(picked) >= max_sources:
                 break
             picked.extend(bucket[: max_sources - len(picked)])
@@ -406,6 +485,10 @@ class RelevanceEngine:
 
         used_relevance = [s.relevance_score for s in final] or [0.0]
         hard = [s for s in offtopic if s.rejected_reason]
+        kept_ids = {id(s) for s in final}
+        # Jo borderline pack mein nahi aaya wo "chhoda gaya" hai — usko dropped
+        # ginti se bahar rakhna report ko jhootha bana deta hai.
+        borderline_dropped = [s for s in borderline if id(s) not in kept_ids]
         self.last_filter = {
             "topic_terms": terms,
             "candidates": len(unique),
@@ -414,14 +497,17 @@ class RelevanceEngine:
             "deduplicated": True,
             "duplicates_removed": max(0, len(sources) - len(unique)),
             "kept": len(final),
-            "dropped_offtopic": len(offtopic),
+            "dropped_offtopic": len(offtopic) + len(borderline_dropped),
+            "dropped_zero_overlap": len(offtopic),
+            "dropped_below_floor": len(borderline_dropped),
             "borderline_used": len([s for s in final
                                     if 0 < s.relevance_score < effective_floor]),
             "min_relevance": effective_floor,
             "requested_min_relevance": min_relevance,
             "avg_relevance": round(sum(used_relevance) / len(used_relevance), 3),
             "max_relevance": round(max(used_relevance), 3),
-            "offtopic_titles": [(s.title or s.url or "")[:80] for s in offtopic[:5]],
+            "offtopic_titles": [(s.title or s.url or "")[:80]
+                                for s in (offtopic + borderline_dropped)[:5]],
             # §2/§3/§5 ka honest hisaab: kis field ka sawaal mana gaya, aur
             # kaun-kaun HARD REJECT hua aur kyun.
             "domain": plan.key,
@@ -470,6 +556,7 @@ class RelevanceEngine:
         require_scholarly: bool = False,
         min_on_topic: int = 3,
         min_avg_relevance: float = 0.30,
+        min_source_quality: float = 0.30,
     ) -> Dict:
         """
         §15 ka asli root cause yahi function tha.
@@ -485,18 +572,36 @@ class RelevanceEngine:
         Ab sufficiency mein RELEVANCE bhi shaamil hai: kitne sources sach mein
         topic ke hain, aur unka average relevance kya hai. Off-topic dher se
         research "poori" nahi hoti.
+
+        2026-08-21 (cross-domain benchmark): usi bug ka dusra roop pakda gaya.
+        Aath mein se chhe field mein round 2 ke baad hi "sufficient = True" aa
+        raha tha, isliye round 3 chala hi nahi — aur round 3 mein hi contra
+        (ulta) evidence, snippet-only source aur meta index aate the. Wajah:
+        ginti mein ek Medium blog ("I think room temperature superconductors are
+        already secret") bhi ek "independent on-topic source" ki tarah gina ja
+        raha tha, jiska quality score sirf 0.20 tha. Yaani teen "kaafi" sources
+        mein se ek blog tha, aur us blog ki wajah se engine ne opposition
+        dhoondhna hi band kar diya.
+
+        Isliye ab GINTI sirf credible sources ki hoti hai: `quality_score`
+        `min_source_quality` (0.30 — wahi floor jo `rank()` strong/weak ke liye
+        use karta hai) se upar hona chahiye. Average (quality/relevance) phir
+        bhi SAARE sources par nikalta hai, kyunki wo ek imaandaar aankda hai
+        aur use chhupana nahi hai.
         """
         if not sources:
             return {"sufficient": False, "reasons": ["koi source nahi mila"]}
 
         reasons: List[str] = []
-        independent = len({s.independence_key for s in sources})
+        credible = [s for s in sources if s.quality_score >= min_source_quality]
+        weak_quality = len(sources) - len(credible)
+        independent = len({s.independence_key for s in credible})
         avg_quality = sum(s.quality_score for s in sources) / len(sources)
         scholarly = [
-            s for s in sources
+            s for s in credible
             if s.source_type in (SourceType.PAPER, SourceType.BOOK) or s.doi
         ]
-        on_topic = [s for s in sources if s.relevance_score >= min_avg_relevance]
+        on_topic = [s for s in credible if s.relevance_score >= min_avg_relevance]
         avg_relevance = sum(s.relevance_score for s in sources) / len(sources)
 
         if independent < min_independent:
@@ -510,6 +615,10 @@ class RelevanceEngine:
                            f"(chahiye {min_on_topic}) — ek aur round karna behtar hai")
         if avg_relevance < min_avg_relevance:
             reasons.append(f"average topic match kam hai ({avg_relevance:.2f})")
+        if reasons and weak_quality:
+            reasons.append(f"{weak_quality} source quality floor "
+                           f"({min_source_quality:.2f}) se neeche the, isliye unhe "
+                           f"'kaafi evidence' ki ginti mein nahi joda gaya")
 
         return {
             "sufficient": not reasons,
@@ -519,4 +628,5 @@ class RelevanceEngine:
             "scholarly_sources": len(scholarly),
             "on_topic_sources": len(on_topic),
             "avg_relevance": round(avg_relevance, 3),
+            "weak_quality_sources": weak_quality,
         }

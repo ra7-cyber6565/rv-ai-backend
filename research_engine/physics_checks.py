@@ -362,6 +362,32 @@ def _pretty(q: Quantity) -> str:
 
 
 # ── 3. comparison direction ──────────────────────────────────────────────────
+def _restated_from(text: str, quantities: List[Quantity]) -> Dict[int, int]:
+    """
+    Kaunsa number kis number ka DOBARA-likha roop hai — aur wo restatement
+    galat hai ya nahi.
+
+    "730 days (20 years)" mein '20 years' asli quantity ('730 days') ka
+    restatement hai, aur galat hai (730 din ≈ 2 saal). Aage jo tulna is '20
+    years' par khadi hai, wo bhi tabhi tak sahi lagti hai jab tak galat number
+    par bharosa karein. Isliye index-map banate hain: {restatement_index:
+    original_index} — sirf un jodon ka jinka conversion GALAT nikla.
+    """
+    out: Dict[int, int] = {}
+    for i in range(len(quantities) - 1):
+        a, b = quantities[i], quantities[i + 1]
+        gap = (text or "")[a.end:b.start]
+        if len(gap) > 24 or not _SAME_MEANING_RE.match(gap):
+            continue
+        if a.dimension != b.dimension or a.si is None or b.si is None:
+            continue
+        if a.unit.lower() == b.unit.lower() and a.value == b.value:
+            continue
+        if abs(a.si - b.si) > _tolerance(a.dimension, a.si):
+            out[i + 1] = i
+    return out
+
+
 def check_comparisons(text: str) -> List[SanityCheck]:
     """
     "250 K, jo 30 °C se zyada hai" — dono number theek, comparison ulta.
@@ -369,11 +395,20 @@ def check_comparisons(text: str) -> List[SanityCheck]:
     Sirf same-dimension jodon par chalta hai aur sirf tab jab dono ke beech
     40 characters se kam ka comparative phrase ho — warna do alag baaton ko
     jodne ka khatra hai.
+
+    2026-08-21 (cross-domain benchmark): ek keeda pakda gaya. "730 days (20
+    years) hai, jo 5 years se zyada hai" — yahan tulna '20 years' se ho rahi
+    thi, jo khud ek GALAT conversion hai (730 din ≈ 2 saal). Restated number
+    par tulna sahi baithti thi, isliye check PASS bol deta tha — jabki asli
+    number (730 days) 5 saal se kam hai, yaani baat ulti hai. Ab restatement
+    ke peeche wale ASLI number se bhi jaancha jaata hai.
     """
     quantities = parse_quantities(text)
+    restated = _restated_from(text, quantities)
     tested = 0
     wrong: List[str] = []
-    for a, b in zip(quantities, quantities[1:]):
+    for i in range(len(quantities) - 1):
+        a, b = quantities[i], quantities[i + 1]
         gap = (text or "")[a.end:b.start]
         if len(gap) > 40 or a.dimension != b.dimension:
             continue
@@ -389,9 +424,29 @@ def check_comparisons(text: str) -> List[SanityCheck]:
         if more and a.si < b.si:
             wrong.append(f"likha hai '{a.label()}' > '{b.label()}', lekin "
                          f"{_pretty(a)} < {_pretty(b)} hai")
-        elif less and a.si > b.si:
+            continue
+        if less and a.si > b.si:
             wrong.append(f"likha hai '{a.label()}' < '{b.label()}', lekin "
                          f"{_pretty(a)} > {_pretty(b)} hai")
+            continue
+        # Tulna dekhne mein sahi hai — par kya wo kisi galat restatement par
+        # khadi hai? Aisa ho to asli number se dobara jaancho.
+        for idx, side in ((i, "left"), (i + 1, "right")):
+            src = restated.get(idx)
+            if src is None:
+                continue
+            orig = quantities[src]
+            if orig.si is None:
+                continue
+            left = orig.si if side == "left" else a.si
+            right = orig.si if side == "right" else b.si
+            if (more and left < right) or (less and left > right):
+                sign = ">" if more else "<"
+                wrong.append(
+                    f"tulna '{a.label()}' {sign} '{b.label()}' galat "
+                    f"conversion par khadi hai: asli value '{orig.label()}' "
+                    f"({_pretty(orig)}) lene par baat ulti ho jaati hai")
+                break
     if not tested:
         return [SanityCheck("comparison direction", None,
                             "unit ke saath koi aisi tulna nahi mili jise "

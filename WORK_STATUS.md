@@ -151,6 +151,57 @@ mein `extract_entities_improved`, `extract_relationships_improved`,
 matlab naya module nahi — inhi ke beech ki wiring + cross-field edges ka
 scoring hai.
 
+## Naya batch — Cross-Domain Research Reliability Benchmark (Owner: Claude)
+
+intel ka instruction (2026-08-21): *"Ab koi naya flashy feature mat add karo.
+Pehle prove karo ki research engine alag-alag fields mein genuinely reliable hai."*
+Maqsad saaf tha — superconductivity par jo tuning hui, wo overfitting hai ya nahi.
+
+Aath bilkul alag domain, har ek mein 12 jaan-boojh kar bichhaye gaye trap
+(kaam ka source, keyword-overlap wala dhoka, duplicate/mirror, snippet-only,
+abstract-only, asli full text, ghatiya quality, ulta evidence, sirf-support
+evidence, na-kaafi evidence, retracted metadata, model-dead) aur har domain par
+16 category ke automatic check.
+
+| Task | Owner | Status | Files | Commit |
+|---|---|---|---|---|
+| 8-domain benchmark harness + fixtures + scorecard + confusion matrix | Claude | done | `tests/benchmark_cross_domain.py` (naya) | (is batch mein) |
+| 8 domain profiles (medicine/materials/energy/engineering/cs_ai/archaeology/economics/biology) + `must` branches | Claude | done | `research_engine/domain.py` | (is batch mein) |
+| stance lexicon domain-neutral (contradiction har field mein bane) | Claude | done | `research_engine/contradiction.py` | (is batch mein) |
+| label gate ka do-pass hisaab ek jagah (`merge_reports`) | Claude | done | `research_engine/claim_labels.py`, `research_engine/orchestrator.py` | (is batch mein) |
+| galat conversion par khadi comparison pakdo | Claude | done | `research_engine/physics_checks.py` | (is batch mein) |
+| hypothesis cap evidence gate ki izzat kare | Claude | done | `research_engine/hypothesis.py` | (is batch mein) |
+| lone-keyword trap rejection (`Bearing witness` type) | Claude | done | `research_engine/relevance.py` | (is batch mein) |
+| pytest bhi wahi test chalaye jo script chalati hai | Claude | done | `tests/test_pdf_chunking.py`, `tests/test_answer_structure.py`, `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py` | (is batch mein) |
+
+Chalane ka tareeka: `python3 tests/benchmark_cross_domain.py` (poora offline —
+network nahi, API key nahi, paisa nahi). Aakhir mein per-domain scorecard
+(domain / relevance / evidence / verification / consensus / hypothesis / fallback
+/ presentation) aur domain-confusion matrix chhapti hai.
+
+Benchmark ne 5 asli bug pakde (test aasan karke nahi, code theek karke gaye):
+
+1. **Contradiction sirf medicine mein banti thi.** Stance lexicon poori tarah
+   clinical-trial ki angrezi thi ("efficacious", "reduces risk"), isliye
+   engineering / cs_ai / archaeology / economics ke sources NEUTRAL nikalte the
+   aur "iske against kya mila?" khaali reh jaata tha. Ab null-result ki
+   domain-neutral bhaasha bhi cue hai, aur `_all_negated()` ki wajah se
+   "no improvement" support mein nahi ginta.
+2. **Jis field ka sabse bada failure mode retracted claim hai, usi ka
+   "kya ye replicate hua?" search nahi hota tha.** Superconductivity ke 17
+   branches mein `expanded_queries(limit=9)` replication/retraction wala angle
+   kaat deta tha. Ab `Branch.must` hai aur `controversy` + `mechanism` kabhi
+   nahi kat‑te.
+3. **Audit apna hi kaam kam karke batata tha.** Strict pass line ko pehle hi
+   `[UNVERIFIED]` kar deta tha, isliye depth pass imaandaari se `checked: 0`
+   likhta tha — jawab mein downgrade dikhta tha par `label_report` khaali.
+   `merge_reports()` dono pass ka total deta hai.
+4. **Galat conversion par khadi tulna pass ho jaati thi** ("730 days (20 years),
+   jo 5 years se zyada hai" — 730 din ≈ 2 saal). Ab restatement asli value se
+   dobara jaanchi jaati hai.
+5. **Evidence gate kaagaz par reh jaata tha.** Gate 1 hypothesis allow karta,
+   par parser ka floor `max(3, ...)` tha — report mein teen chhap jaati thi.
+
 ## Known gaps (jaan-boojh kar khule)
 
 - **⚠️ ChatGPT-owned file mein §14 ka edit hua (intel ko report kiya gaya).**
@@ -170,10 +221,30 @@ scoring hai.
   us file mein ek line bhi nahi badli. Regression:
   `tests/test_claim_verification.py::test_strict_label_contract`.
 - **`.github/workflows/foundation-tests.yml` (ChatGPT-owned) `pytest -q` chalata
-  hai**, par in suites ke test `main()` ke andar hain — pytest 0 test collect
-  karke exit 5 deta hai, aur workflow un test files ko bhi reference karta hai jo
-  `main` par nahi hain. Fix aasan hai (`def test_all(): assert main() == 0`
-  wrapper), par wo ChatGPT ki file hai — bina permission touch nahi kiya.
+  hai.** Meri taraf ka aadha hissa 2026-08-21 ko theek kar diya gaya: jin 4 suites
+  ke check `main()` ke andar the ya jo flat script thi, unme ab module-level
+  `def test_...(): assert main() == 0` wrapper hai — `tests/test_pdf_chunking.py`
+  (ye pytest mein **collection error** de rahi thi, kyunki module level par
+  `sys.exit()` tha), `tests/test_answer_structure.py`,
+  `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py`. Script wala
+  purana tareeka bilkul waisa hi chalta hai. **Baaki gap ChatGPT ka hai:** wo
+  workflow 20+ aisi test files reference karta hai jo `main` par maujood hi nahi
+  (`tests/test_upload_safety.py`, `tests/test_evidence_verification.py`,
+  `tests/test_domain_guardrails.py`, `tests/test_presentation_guard.py`,
+  `tests/test_user_presentation_contract.py` … `git ls-files tests` mein ek bhi
+  nahi hai), aur repo root ki `test_academic.py` / `test_connectors.py` /
+  `test_kg.py` / `test_progress.py` / `test_safety.py` / `test_web_search.py` se
+  pytest 0 test collect karti hai. Ye file aur wo tests ChatGPT ke naam par hain,
+  isliye chhue nahi.
+- **Is sandbox mein asli `pytest` chal hi nahi saka.** `pip install pytest`
+  blocked hai (proxy 403 — ₹0 se koi lena-dena nahi, network hi band hai).
+  Iski jagah ek pytest-jaisa collector chalaya gaya jo har test file se
+  module-level `test_*` functions collect karke chalata hai: **collected=219,
+  pass=216, fail=0, error=0, skip=3** (3 skip = `test_research_engine.py` ke wo
+  helper jo argument lete hain — asli pytest unhe "fixture not found" kahegi, par
+  CI us file ko script ki tarah chalati hai, `pytest` se nahi). Asli `pytest -q`
+  intel ke Windows par chalna baaki hai — usse pehle "pytest green hai" nahi
+  kaha ja sakta.
 - **§8 ke liye ChatGPT-owned `synthesizer.py` JAAN-BOOJH KAR NAHI chhua.**
   `key_switches` / `active_key` ko audit block mein alag row banane ke liye
   `_api_accounting_block()` badalna padta — wo file ChatGPT ki hai, isliye rok
