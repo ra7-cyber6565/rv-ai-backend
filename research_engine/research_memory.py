@@ -36,6 +36,7 @@ def _default_dir() -> str:
 
 _MAX_RUNS = 50
 _MAX_URLS = 400
+_MAX_DISCOVERIES = 50
 _STOP = {"kya", "hai", "the", "ka", "ki", "ke", "se", "mein", "aur", "what", "is",
          "of", "and", "the", "how", "why", "does", "do", "a", "an", "for", "in", "to"}
 
@@ -59,7 +60,7 @@ class ResearchMemory:
 
     def _blank(self) -> Dict:
         return {"project_id": self.project_id, "runs": [], "hypotheses": [],
-                "dead_ends": [], "seen_urls": []}
+                "discoveries": [], "dead_ends": [], "seen_urls": []}
 
     def load(self) -> Dict:
         if self._data is not None:
@@ -82,6 +83,7 @@ class ResearchMemory:
         data = self.load()
         data["runs"] = data["runs"][-_MAX_RUNS:]
         data["seen_urls"] = data["seen_urls"][-_MAX_URLS:]
+        data["discoveries"] = list(data.get("discoveries") or [])[-_MAX_DISCOVERIES:]
         try:
             os.makedirs(self.directory, exist_ok=True)
             fd, tmp = tempfile.mkstemp(prefix="memory_", suffix=".json", dir=self.directory)
@@ -127,6 +129,28 @@ class ResearchMemory:
                 "status": h.get("status", "UNTESTED HYPOTHESIS"),
             })
 
+    def remember_discovery(self, question: str, discovery: Dict) -> None:
+        """Store a compact discovery checkpoint, never the full evidence graph."""
+        if not isinstance(discovery, dict):
+            return
+        tournament = discovery.get("tournament") or {}
+        reality = discovery.get("reality_ladder") or {}
+        weakest = discovery.get("weakest_link") or {}
+        record = {
+            "at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "question": (question or "")[:500],
+            "status": str(discovery.get("status") or "")[:80],
+            "winner": str(tournament.get("winner") or "")[:40],
+            "reality_level": reality.get("level"),
+            "weakest_link": str(weakest.get("key") or "")[:80],
+        }
+        store = self.load().setdefault("discoveries", [])
+        if store and all(store[-1].get(key) == record.get(key)
+                         for key in ("question", "status", "winner",
+                                     "reality_level", "weakest_link")):
+            return
+        store.append(record)
+
     def remember_dead_end(self, what: str, why: str) -> None:
         store = self.load()["dead_ends"]
         if any(d.get("what") == what for d in store):
@@ -164,6 +188,18 @@ class ResearchMemory:
                 out.append(h)
         return out[-limit:]
 
+    def recall_discoveries(self, question: str, limit: int = 3) -> List[Dict]:
+        target = _words(question)
+        if not target:
+            return []
+        scored = []
+        for item in self.load().get("discoveries", []):
+            overlap = len(target & _words(item.get("question", "")))
+            if overlap >= 2:
+                scored.append((overlap, item))
+        scored.sort(key=lambda pair: pair[0], reverse=True)
+        return [item for _, item in scored[:limit]]
+
     def dead_ends(self) -> List[Dict]:
         return list(self.load()["dead_ends"])
 
@@ -174,8 +210,9 @@ class ResearchMemory:
         """Prompt mein daalne layak chhota note — pichhli baar kya hua tha."""
         runs = self.recall_related(question)
         hyps = self.known_hypotheses(question)
+        discoveries = self.recall_discoveries(question)
         dead = self.related_dead_ends(question)
-        if not runs and not hyps and not dead:
+        if not runs and not hyps and not discoveries and not dead:
             return ""
         lines = ["PICHHLI RESEARCH (isi project se):"]
         for run in runs:
@@ -186,6 +223,11 @@ class ResearchMemory:
         for h in hyps:
             lines.append(f"  - purani hypothesis ({h.get('status', 'UNTESTED')}): "
                          f"{(h.get('statement') or '')[:110]}")
+        for item in discoveries:
+            lines.append(
+                f"  - discovery checkpoint: status {item.get('status') or 'unknown'}, "
+                f"reality level {item.get('reality_level', 'unknown')}, "
+                f"weakest link {item.get('weakest_link') or 'not assessed'}")
         for d in dead:
             lines.append(f"  - pehle kaam nahi aaya: {(d.get('what') or '')[:60]} "
                          f"({(d.get('why') or '')[:70]})")

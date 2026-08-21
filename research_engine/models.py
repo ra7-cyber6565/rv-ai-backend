@@ -693,6 +693,9 @@ class ResearchResult:
     # frontend ko dobara text parse karna padta.
     requested_ledger: Dict = field(default_factory=dict)
     label_report: Dict = field(default_factory=dict)
+    # Advanced scientific-discovery assessment.  Structured and optional so
+    # older Android clients that ignore unknown fields remain compatible.
+    discovery: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

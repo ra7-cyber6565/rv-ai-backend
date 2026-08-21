@@ -236,6 +236,19 @@ def test_healthy_run_reaches_top_label():
     assert cov["offtopic_dropped"] == 0, cov
 
 
+def test_pipeline_returns_structured_advanced_discovery_without_extra_model_call():
+    result, fake = _run(_records(ON_TOPIC), read_ok=True)
+    discovery = result["discovery"]
+    assert discovery["schema_version"] == "1.0"
+    assert discovery["status"] in {"ASSESSMENT_READY", "NO_TESTABLE_HYPOTHESES"}
+    assert discovery["problem_decomposition"]["sub_questions"]
+    assert discovery["evidence_graph"]["source_nodes"] >= 1
+    assert discovery["simulation_executor"]["policy"]["arbitrary_python"] is False
+    assert discovery["global_novelty_claimed"] is False
+    assert discovery["real_world_success_probability_claimed"] is False
+    assert len(fake.prompts) == 3
+
+
 def test_healthy_run_answer_has_real_sections():
     """
     §16 ka naya structure. (Pehle ye test purane numbered headings —

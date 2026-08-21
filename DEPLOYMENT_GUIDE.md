@@ -20,6 +20,10 @@ In the backend's private `.env` file:
 ```env
 ZERO_COST_ONLY=true
 GEMINI_API_KEY=your_real_key_here
+# Set true ONLY after checking that every configured Gemini project/key has no
+# paid billing or spend path. Without this explicit confirmation startup/live
+# testing correctly blocks the key.
+GEMINI_ZERO_COST_CONFIRMED=false
 INFINITY_DATA_ROOT=D:\InfinityResearchAI
 CORS_ALLOWED_ORIGINS=
 ```
@@ -66,7 +70,7 @@ The repository includes `render.yaml`, but a configuration file saying `plan: fr
 1. Check the chosen host's current official pricing/quota page.
 2. Confirm there is no automatic paid overage/billing path you do not want.
 3. Set `ZERO_COST_ONLY=true`.
-4. Set `GEMINI_API_KEY` only if the key/project is configured for the genuinely free usage you intend.
+4. Set `GEMINI_API_KEY` only if the key/project is configured for the genuinely free usage you intend; then set `GEMINI_ZERO_COST_CONFIRMED=true` only after personally verifying there is no paid spend path.
 5. Do not set `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` in zero-cost mode; startup deliberately rejects them.
 6. Treat container-local disk as temporary unless the host explicitly provides durable storage under terms you have verified.
 
@@ -106,3 +110,37 @@ GitHub is for source code, tests, configuration templates and version history. I
 ## Android app
 
 When the backend URL is stable, configure the Android client's base URL to that backend. Keep all provider/API secrets on the backend; never package private API keys inside the Android APK.
+
+## Release validation commands
+
+Run the complete offline gate first. It forcibly blanks cloud credentials and
+cannot spend provider quota:
+
+```bat
+RUN_FOUNDATION_GATE.bat
+```
+
+Check live-test prerequisites without making a live call:
+
+```bat
+RUN_LIVE_ZERO_COST_GATE.bat
+```
+
+Only after the configured provider/account has been confirmed zero-cost, run:
+
+```bat
+RUN_LIVE_ZERO_COST_GATE.bat --execute
+```
+
+The live gate requires an explicit `INFINITY_DATA_ROOT`, a currently usable
+confirmed/free model layer, on-topic/full-text evidence, valid citations,
+claim verification, three testable hypotheses, the advanced discovery
+assessment, and sanitized public output. Its JSON receipt contains no answer,
+source text, URL, prompt or credential.
+
+The API's structured research result now also includes a `discovery` field with
+problem decomposition, evidence graph, conservative novelty screening,
+hypothesis ranking, falsification/virtual-experiment plans, calibrated
+pre-validation confidence, weakest-link analysis, a bounded next-query loop,
+domain requirements and a conservative reality/TRL ladder. These are research
+prioritisation aids—not proof, clinical advice or real-world success odds.

@@ -28,6 +28,7 @@ import re
 from typing import Dict, List, Optional
 
 from .citation import CitationEngine
+from .advanced_discovery import ScientificDiscoveryEngine
 from .claim_labels import downgrade as downgrade_labels
 from .claim_labels import merge_reports as merge_label_reports
 from .claim_verification import enforce_strict_labels
@@ -66,6 +67,7 @@ class DeepResearchEngine:
         self.hypotheses = HypothesisEngine()
         self.verifier = VerificationEngine()
         self.synthesizer = FinalSynthesizer()
+        self.scientific_discovery = ScientificDiscoveryEngine(self.planner)
         self.vectors = VectorSearch()
         self.graph = KnowledgeGraphAdapter(enabled=enable_kg)
         self.memory = ResearchMemory(self.project_id) if enable_memory else None
@@ -902,6 +904,36 @@ class DeepResearchEngine:
             label_report=label_report,
             claim_checks=claim_checks,
         )
+
+        # Advanced Scientific Discovery Engine.  This is a deterministic
+        # assessment of the evidence/hypotheses already produced above: no new
+        # provider/network call and no arbitrary code execution.  It stays a
+        # structured API field so the human-first answer is not cluttered.
+        remembered_hypotheses = (
+            self.memory.known_hypotheses(question, limit=12)
+            if self.memory else []
+        )
+        try:
+            discovery_analysis = self.scientific_discovery.analyze(
+                question=question,
+                plan=plan,
+                pack=pack,
+                hypotheses=passes["hypotheses"],
+                contradictions=contradiction_dicts,
+                verification=verification,
+                remembered_hypotheses=remembered_hypotheses,
+            )
+        except Exception as exc:
+            # Research answer must survive an auxiliary assessment failure, but
+            # the failure is explicit and never promoted to a successful gate.
+            discovery_analysis = {
+                "schema_version": "1.0",
+                "status": "ASSESSMENT_ERROR",
+                "reason": "advanced discovery assessment poora nahi ho paaya",
+                "human_review_required": True,
+            }
+            technical_errors.append(
+                f"advanced discovery assessment: {type(exc).__name__}")
         coverage = pack.coverage_report()
         coverage["evidence_table"] = self.evidence.evidence_table(claims)
         coverage["independence"] = self.evidence.independence_report(pack)
@@ -1052,6 +1084,7 @@ class DeepResearchEngine:
                 summary=(passes["analysis"] or "")[:400])
             if passes["hypotheses"]:
                 self.memory.remember_hypotheses(question, passes["hypotheses"])
+            self.memory.remember_discovery(question, discovery_analysis)
             self.memory.remember_urls(discovered["urls"])
             # Dead ends bhi yaad rakho (Spec Section 16). Ye sirf ek note hai,
             # block nahi — agli baar prompt mein dikh jaata hai ki is topic par
@@ -1083,6 +1116,7 @@ class DeepResearchEngine:
             coverage=coverage,
             requested_ledger=ledger,
             label_report=label_report,
+            discovery=discovery_analysis,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

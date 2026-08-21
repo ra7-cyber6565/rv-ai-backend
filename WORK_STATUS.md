@@ -63,14 +63,16 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY/RECOVERY DESIGN | No homemade/insecure crypto and no unrecoverable-key design |
 | Secondary compact metadata backup | ChatGPT | PLANNED | Only after a genuinely free private destination is selected |
 | Patents connector | ChatGPT | PENDING OFFICIAL-AUTH DESIGN | No unofficial scraping. Add only through an official zero-cost route |
-| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 strict default gate passed all 31 stages: 372 focused pytest, 555 full pytest, 593 core checks, every explicit script harness, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
+| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 strict default gate passed all 31 stages: 397 focused pytest, 581 full pytest, 593 core checks, every explicit script harness, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
 | Final architecture/integration audit | ChatGPT | OFFLINE PASS / LIVE GATE PENDING | Static architecture and provider/source-boundary audits pass; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
+| Advanced Scientific Discovery Engine | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED | Structured discovery field includes all 16 planned layers; arbitrary code, automatic real experiments, global-novelty claims and success-probability claims are fail-closed |
+| Live ₹0 release runner | ChatGPT | CODE COMPLETE / CREDENTIALS PENDING | No-call preflight is default; real run requires `--execute`, explicit D-root and a currently usable confirmed/free model layer; receipt contains no answer/source text/credentials |
 
 ## Latest independent offline validation — 2026-08-21
 
 - Strict default `scripts/run_foundation_gate.py` execution: **PASS, 31/31 stages**.
-- Focused release pytest: **372 passed**.
-- Full `pytest -q tests`: **555 passed**; root wrapper-inclusive collection separately passed **556/556**.
+- Focused release pytest: **397 passed**.
+- Full `pytest -q tests`: **581 passed**; root wrapper-inclusive collection separately passed **582/582**.
 - Ordered core regression: **593 passed, 0 failed**.
 - Cross-domain adversarial benchmark: **633 passed, 0 failed** across eight domains.
 - Superconductivity Benchmark V2: **146 passed, 0 failed**.
@@ -96,6 +98,8 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 15. The cross-domain benchmark fake model still parsed the pre-hardening evidence prompt, hiding label/contradiction coverage after the source-data guard changed. Updated the benchmark parser to consume both legacy and hardened prompt grammars and kept the 633/633 gate mandatory.
 16. Presentation cleanup treated clickable `[S#]` citations as raw diagnostic URLs and generated a developer-only block on healthy runs. Citation targets now collapse to stable source IDs in the human section while full URLs remain in Sources.
 17. Direct script-harness stages lost repository imports when the caller supplied a dependency-only `PYTHONPATH`. The strict runner now prepends the repository root and the default 31-stage gate executes every intended harness successfully.
+18. The advanced-discovery roadmap existed only as an aspirational checklist. Added one deterministic, network-free production layer covering all 16 planned stages and wired its bounded result into every research response without extra model calls.
+19. Final live verification had no safe one-command boundary. Added a no-call-by-default runner that refuses unconfirmed/non-free model configuration, requires an explicit runtime root and writes only a non-secret summary receipt after an explicitly requested live run.
 
 ## Required gates before foundation can be called reliable
 
@@ -124,24 +128,34 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 23. Live zero-cost benchmark reruns after integration and passes relevance/full-text/hypothesis/error-honesty expectations.
 24. Final end-to-end path matches the blueprint: discover -> fetch -> process -> evidence -> reason -> criticize -> hypothesize -> verify -> synthesize -> cite/audit.
 
-## Advanced Scientific Discovery Engine — after foundation passes
+## Advanced Scientific Discovery Engine — CODE COMPLETE / LIVE VALIDATION PENDING
 
-- Problem Decomposer
-- Evidence Graph
-- Physical-Limits Engine
-- Hypothesis Generator 2.0
-- Novelty Checker
-- Hypothesis Tournament
-- Falsification Engine
-- Simulation / Code Executor
-- Virtual Experiment Designer
-- Recursive Research Loop
-- Confidence Calibration
-- Weakest-Link Analysis
-- Alternative-Path Generator
-- TRL / Reality Ladder
-- Discovery Memory
-- Domain-Specific Validation Layer
+The deterministic production layer is wired into every research result under
+the backward-compatible top-level `discovery` field. It consumes the already
+retrieved evidence, hypotheses and verification report; it makes no additional
+provider/network call and never upgrades an idea to a proven fact.
+
+- [x] Problem Decomposer — planner sub-questions + domain branches
+- [x] Evidence Graph — explicit source/support/challenge edges only
+- [x] Physical-Limits Engine — existing verification physics/unit boundary reused
+- [x] Hypothesis Generator 2.0 — structured six-field/testability contract reused
+- [x] Novelty Checker — checked-evidence/project-memory screening; never global novelty
+- [x] Hypothesis Tournament — test-priority score, explicitly not truth probability
+- [x] Falsification Engine — measurable prediction/test/reject-condition completeness
+- [x] Simulation / Code Executor — bounded numeric AST only; no arbitrary Python/import/files/network/subprocess
+- [x] Virtual Experiment Designer — design-only; real execution always human-approved
+- [x] Recursive Research Loop — maximum two proposed extra iterations; never auto-network
+- [x] Confidence Calibration — evidence/access/verification caps; no success probability
+- [x] Weakest-Link Analysis — minimum evidence/verification/falsifiability factor
+- [x] Alternative-Path Generator — competing-explanation-first plans, no invented claim
+- [x] TRL / Reality Ladder — literature-only assessment hard-capped at level 3
+- [x] Discovery Memory — compact bounded checkpoint, legacy-memory compatible
+- [x] Domain-Specific Validation Layer — per-domain requirements and no real-world auto-approval
+
+The live runner is also code-complete: `RUN_LIVE_ZERO_COST_GATE.bat` performs a
+no-call preflight by default and requires `--execute` plus an explicitly
+confirmed/free model layer for the real benchmark. Its receipt excludes answer,
+prompt, sources/URLs and credentials.
 
 Every generated hypothesis must eventually carry support, counter-evidence, assumptions, unknowns, falsification criteria, required experiment/simulation, expected impact and calibrated confidence. Never invent arbitrary 90–95% real-world success claims.
 
