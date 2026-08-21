@@ -86,6 +86,53 @@ def _alive(names: List[str]) -> List[str]:
     return [n for n in names if not is_dead(n)]
 
 
+# ── ek call kitni der latak sakti hai ────────────────────────────────────────
+# LIVE BUG (2026-08-21, intel ne report kiya): website par sawaal bhejne ke baad
+# aakhir mein "Abhi server se baat nahi ho paayi" aa jaata tha. Wajah engine ka
+# jawab nahi tha — wajah ye thi ki `generate_content()` par KOI timeout nahi
+# lagta. Google ka SDK default mein anaadi kaal tak intezaar kar sakta hai, to
+# ek latki hui call poori HTTP request ko rok kar rakhti thi, aur beech mein
+# browser/gateway connection kaat deta tha. User ko lagta tha "server down hai",
+# jabki server sirf ek hi call par atka hua tha.
+#
+# Ab har call ki ek hadd hai. Timeout hone par exception aata hai jise
+# `model_errors.classify` TRANSIENT maanta hai — yaani wahi purana retry/backoff
+# chalta hai, model band nahi hota, aur koi feature nahi jaata. Hadd env se
+# badli ja sakti hai (`GEMINI_CALL_TIMEOUT`, seconds).
+def call_timeout() -> int:
+    try:
+        seconds = int(os.getenv("GEMINI_CALL_TIMEOUT", "") or 75)
+    except (TypeError, ValueError):
+        seconds = 75
+    return max(10, min(seconds, 600))
+
+
+# Purane SDK (aur test ke nakli model) `request_options` nahi lete. Isliye pehle
+# poochh kar dekhte hain ki wo kwarg banta hai ya nahi — aur na bane to bina
+# timeout wale purane tareeke se call hoti hai. Call fail KABHI nahi karti.
+def _accepts_request_options(func) -> bool:
+    try:
+        import inspect
+        params = inspect.signature(func).parameters
+    except (TypeError, ValueError):      # C-level / bina signature wala callable
+        return True                      # koshish kar lo, TypeError handle hai
+    if "request_options" in params:
+        return True
+    return any(p.kind is p.VAR_KEYWORD for p in params.values())
+
+
+def generate(model, prompt, timeout: Optional[int] = None):
+    """`model.generate_content(prompt)` — par bandhe hue time ke saath."""
+    call = getattr(model, "generate_content")
+    if _accepts_request_options(call):
+        try:
+            return call(prompt, request_options={"timeout": timeout or call_timeout()})
+        except TypeError as exc:
+            if "request_options" not in str(exc):
+                raise
+    return call(prompt)
+
+
 def available_models(genai) -> List[str]:
     out: List[str] = []
     for m in genai.list_models():

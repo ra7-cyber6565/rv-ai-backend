@@ -4,8 +4,8 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from api.agent_routes import ChatRequest, DeepResearchRequest
-from api.job_routes import ResearchJobRequest
+from api.agent_routes import ChatRequest, DeepResearchRequest, _custom as agent_custom
+from api.job_routes import ResearchJobRequest, _custom as job_custom
 from api.routes import QuestionRequest, YouTubeRequest
 
 
@@ -60,3 +60,15 @@ def test_youtube_reference_and_title_are_bounded():
     assert len(YouTubeRequest(video="abc123", title="t" * 300).title) == 300
     with pytest.raises(ValidationError):
         YouTubeRequest(video="abc123", title="t" * 301)
+
+
+def test_custom_patent_switch_reaches_both_research_entrypoints():
+    direct = DeepResearchRequest(
+        question="prior art", depth_mode="CUSTOM", use_patents=False,
+    )
+    durable = ResearchJobRequest(
+        question="prior art", depth_mode="CUSTOM", use_patents=False,
+    )
+
+    assert agent_custom(direct)["use_patents"] is False
+    assert job_custom(durable)["use_patents"] is False

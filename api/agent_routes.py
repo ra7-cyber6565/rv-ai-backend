@@ -43,6 +43,7 @@ class DeepResearchRequest(BaseModel):
     use_papers: Optional[bool] = None
     use_books: Optional[bool] = None
     use_datasets: Optional[bool] = None
+    use_patents: Optional[bool] = None
     use_red_team: Optional[bool] = None
 
 

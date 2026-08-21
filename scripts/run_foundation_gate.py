@@ -71,6 +71,7 @@ FOCUSED_PYTEST = (
     "tests/test_reasoning_status.py",
     "tests/test_gemini_key_status.py",
     "tests/test_quick_chat_resilience.py",
+    "tests/test_chat_resilience.py",
     "tests/test_gemini_diag_zero_call.py",
     "tests/test_quota_backup.py",
     "tests/test_provider_bypass_audit.py",
@@ -107,6 +108,7 @@ FOCUSED_PYTEST = (
     "tests/test_unverified_semantics.py",
     "tests/test_network_safety.py",
     "tests/test_advanced_discovery.py",
+    "tests/test_patents.py",
     "tests/test_live_zero_cost_gate.py",
     "tests/test_foundation_gate_runner.py",
 )

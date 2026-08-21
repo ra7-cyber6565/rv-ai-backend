@@ -6,6 +6,8 @@ Source connectors (Spec Section 2, 3, 11, 16)
     BookConnector    Internet Archive, Open Library, Google Books
     DatasetConnector Zenodo, data.gov (US), WHO GHO, World Bank, HuggingFace,
                      data.gov.in (key optional)
+    PatentDiscoveryConnector
+                     EPO linked open data (keyless), USPTO ODP (key optional)
 
 Naya provider add karna = BaseConnector ka ek naya subclass + facade list mein entry.
 """
@@ -47,6 +49,13 @@ from .paper_connector import (
     PubMedConnector,
     SemanticScholarConnector,
 )
+from .patent_connector import (
+    EpoLinkedDataConnector,
+    PatentDiscoveryConnector,
+    PatentProviderConnector,
+    UsptoOdpConnector,
+    espacenet_lookup,
+)
 from .web_connector import (
     DuckDuckGoConnector,
     TavilyConnector,
@@ -69,4 +78,7 @@ __all__ = [
     "GoogleBooksConnector",
     "DatasetConnector", "ZenodoConnector", "DataGovConnector", "WHOGhoConnector",
     "WorldBankConnector", "HuggingFaceDatasetsConnector", "DataGovInConnector",
+    # patents — alag tier, kyunki patent legal document hai, science proof nahi
+    "PatentDiscoveryConnector", "PatentProviderConnector",
+    "EpoLinkedDataConnector", "UsptoOdpConnector", "espacenet_lookup",
 ]

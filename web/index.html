@@ -13,7 +13,7 @@ header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:
 #scroll{flex:1;overflow:auto}#thread{max-width:var(--max);margin:auto;padding:24px 16px 120px}.welcome{text-align:center;max-width:590px;margin:11vh auto}.welcome h1{font-size:29px;margin:0 0 10px}.welcome p{color:var(--muted);margin:0}.chips{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px}.chip{border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:10px 13px;cursor:pointer;font-size:14px}.chip:hover{border-color:var(--brand)}
 .msg{display:flex;gap:12px;padding:15px 0}.av{width:30px;height:30px;flex:0 0 30px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:750}.user .av{background:#eef2f7}.rv .av{background:var(--brand);color:#fff}.body{min-width:0;flex:1}.txt{line-height:1.68;overflow-wrap:anywhere;white-space:normal}.txt p{margin:0 0 11px}.txt p:last-child{margin-bottom:0}
 .thinking{display:inline-flex;gap:5px}.thinking i{width:7px;height:7px;border-radius:50%;background:#8b8b8b;animation:p 1.25s infinite}.thinking i:nth-child(2){animation-delay:.18s}.thinking i:nth-child(3){animation-delay:.36s}@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
-.progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
+.progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.process{margin-top:14px;border:1px solid var(--line);border-radius:11px;background:var(--soft);padding:10px 12px}.process summary{cursor:pointer;font-weight:650}.process .meta{margin-top:7px}.process .log{margin-top:8px;max-height:180px}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
 footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
 @media(max-width:600px){header{padding:0 10px}.brand span:last-child{display:none}.modes button{padding:7px 10px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
@@ -60,8 +60,9 @@ function thinking(el){el.innerHTML='<span class="thinking"><i></i><i></i><i></i>
 function answer(el,text){el.innerHTML=htmlText(text);down();}
 function note(el,text){const n=document.createElement("div");n.className="note";n.textContent=text;el.appendChild(n);}
 function friendly(el,text){answer(el,IS_FILE?"Ye page file se khula hai. Backend server ke URL se page kholo, tab research chalegi.":(text||"Request safely complete nahi hui."));}
-function clientFailure(status,data,area="Request"){
-  const code=Number(status||0),rawWait=Number(data?.retry_after_seconds||0),wait=rawWait>0?Math.max(1,Math.min(3600,rawWait)):0;
+function clientFailure(status,data,area="Request",aborted=false){
+  const code=Number(status||0),retryWait=Number(data?.retry_after_seconds||0),wait=retryWait>0?Math.max(1,Math.min(3600,retryWait)):0;
+  if(aborted)return area+" ka safe wait-time khatam ho gaya. Question input mein wapas rakh diya hai; background research ya retry use karo.";
   if(code===429)return wait?area+" limit abhi busy hai. "+wait+" second baad retry karo.":area+" limit abhi busy hai; thoda ruk kar retry karo.";
   if(code===503)return "Backend ka private session/research layer ready nahi hai. Backend configuration aur writable data root check karna hoga.";
   if(code===401||code===403||code===404)return "Private session valid nahi rahi. Page refresh karke question dobara bhejo.";
@@ -71,7 +72,17 @@ function clientFailure(status,data,area="Request"){
 }
 function restoreQuestion(message){if(!input.value.trim()){input.value=message;resize();}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-async function jsonFetch(url,opts){const r=await fetch(url,opts);let data={};try{data=await r.json();}catch(_){data={};}return {r,data};}
+async function jsonFetch(url,opts={},timeoutMs=0){
+  const ctrl=("AbortController" in window)?new AbortController():null;let timer=null;
+  if(ctrl&&timeoutMs>0)timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  try{
+    const request={...opts,cache:"no-store",signal:ctrl?ctrl.signal:undefined};
+    const r=await fetch(url,request);const raw=await r.text();let data={};
+    try{data=raw?JSON.parse(raw):{};}catch(_){data={};}
+    return {r,data,aborted:false};
+  }catch(e){return {r:{ok:false,status:0},data:{},aborted:!!(e&&e.name==="AbortError")};}
+  finally{if(timer)clearTimeout(timer);}
+}
 
 function resetProjectSession(){PROJECT.id="";PROJECT.token="";sessionPromise=null;}
 async function ensureSession(){
@@ -86,21 +97,21 @@ async function ensureSession(){
   try{return await sessionPromise;}catch(e){sessionPromise=null;throw e;}
 }
 function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}
-async function projectPost(url,makePayload){
+async function projectPost(url,makePayload,timeoutMs=0){
   // A backend redeploy may rotate an ephemeral project-signing file while this
   // tab still has the old in-memory capability. One 404 refresh is safe; never
   // loop forever and never put either capability in a URL.
   for(let attempt=0;attempt<2;attempt++){
     await ensureSession();
     const payload=makePayload(PROJECT.id);
-    const out=await jsonFetch(API+url,{method:"POST",headers:projectHeaders(),body:JSON.stringify(payload)});
+    const out=await jsonFetch(API+url,{method:"POST",headers:projectHeaders(),body:JSON.stringify(payload)},timeoutMs);
     if(out.r.status!==404||attempt===1)return out;
     resetProjectSession();
   }
   throw new Error("project session recovery failed");
 }
 
-async function runChat(message,el){thinking(el);try{const {r,data}=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}));if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat"));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
+async function runChat(message,el){thinking(el);try{let out={r:{ok:false,status:0},data:{},aborted:false};for(let attempt=0;attempt<2;attempt++){out=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}),55000);if(out.r.ok||![0,502,503,504].includes(Number(out.r.status||0))||attempt===1)break;await sleep(1500);}const {r,data}=out;if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat",out.aborted));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
 
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
@@ -110,20 +121,24 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
+  const hardDeadline=Date.now()+30*60*1000,stallMs=6*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
     const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
-    if(prog.r.ok)paintProgress(ui,prog.data.progress);
+    if(prog.r.ok){const p=prog.data.progress||{};paintProgress(ui,p);const signature=[status.data.status,p.current_stage,p.stages_done,Array.isArray(p.log)?p.log.length:0].join("|");if(signature!==lastSignature){lastSignature=signature;lastChange=Date.now();}}
     if(status.data.status==="completed")break;
     if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
+    if(Date.now()>hardDeadline){friendly(el,"Research 30 minute ki browser wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
+    if(Date.now()-lastChange>stallMs){friendly(el,"Research progress 6 minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.");restoreQuestion(question);return false;}
     await sleep(1200);
   }
   const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
   if(!res.r.ok){friendly(el,clientFailure(res.r.status,res.data,"Research result"));restoreQuestion(question);return false;}renderResearch(el,res.data);return true;
 }catch(e){friendly(el,clientFailure(0,{},"Research"));restoreQuestion(question);return false;}}
 
-function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),href=safeHttpUrl(s.url),url=href?esc(href):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
+function appendResearchProcess(el,p){if(!p||p.available!==true)return;const details=document.createElement("details");details.className="process";const summary=document.createElement("summary");summary.textContent="Research process — "+Number(p.stages_done||0)+"/"+Number(p.stages_total||STAGES.length)+" stages";details.appendChild(summary);const meta=document.createElement("div");meta.className="meta";meta.textContent=Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text • "+Number(p.evidence_conflicts_found||0)+" conflicts checked";details.appendChild(meta);if(Array.isArray(p.log)&&p.log.length){const log=document.createElement("div");log.className="log";log.textContent=p.log.map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");details.appendChild(log);}el.appendChild(details);}
+function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});appendResearchProcess(el,data?.research_progress);const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),href=safeHttpUrl(s.url),url=href?esc(href):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
 
 async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");const completed=mode==="QUICK"?await runChat(message,r):await runResearch(message,r);if(!completed&&history.length&&history[history.length-1]?.role==="user")history.pop();busy=false;send.disabled=false;input.focus();}
 function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);

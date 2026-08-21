@@ -20,7 +20,6 @@ from __future__ import annotations
 import os
 import re
 from typing import Dict, List, Optional
-
 from .local_language import normalize
 from .reasoning_router_integrated import ResilientReasoning
 from utils.reasoning_status import reasoning_status
@@ -99,7 +98,6 @@ def _style(message: str) -> str:
     roman_hindi = ("bhai", "kya", "kaise", "kyu", "kyun", "nhi", "nahi",
                    "bta", "bata", "mera", "mujhe", "haan", "ha ", "theek")
     return "hinglish" if any(token in low for token in roman_hindi) else "en"
-
 
 def _smalltalk(message: str) -> str:
     """Zero-model answers for trivial conversation; empty means not small-talk."""

@@ -20,6 +20,10 @@ from .quality_signals import (
     methodology_rank,
     replication_label,
 )
+# patents.py bhi dependency-free hai aur models se KUCH import nahi karta,
+# isliye ye import safe hai (koi circular import nahi).
+from .patents import PATENT_EVIDENCE_NOTE
+from .patents import family_key as patent_family_key
 
 
 # ── Source types (Spec Section 2) ─────────────────────────────────────────────
@@ -31,19 +35,32 @@ class SourceType(str, Enum):
     ENCYCLOPEDIA = "encyclopedia"  # Wikipedia/Wikimedia
     DATASET = "dataset"            # government/public dataset
     TRANSCRIPT = "transcript"      # video/audio transcript
+    # Patent ek LEGAL document hai — iske claims legal dawe hote hain, koi
+    # experiment se saabit nateeja nahi. Isliye ise WEB/PAPER mein chhupana
+    # galat tha: paper maan lene par peer-review/quality scoring usko science
+    # ki tarah treat karti, aur "patent claim" report mein fact ban jaata.
+    PATENT = "patent"
 
 
 # ── Reading levels (Spec Section 2 ka honesty rule) ──────────────────────────
 # "Karodon sources mein search karna" aur "karodon sources ka poora text
 # padhna" alag cheezein hain. Isliye system har source ke saath ye level
 # report karta hai, aur final report mein isi ka breakdown chhapta hai.
-READ_LEVEL_ORDER = ["metadata", "snippet", "abstract", "full_text"]
+#
+# "claims" patent ke liye ek ASLI level hai: patent ka abstract padhna aur uske
+# claims padhna do bilkul alag gehraiyan hain, aur "patent padha" ka dawa sirf
+# claims/description process hone par hi sach hota hai. Ye list sirf display
+# order ke liye use hoti hai (read_level_counts), isliye naya level jodna kisi
+# purane consumer ko nahi todta.
+READ_LEVEL_ORDER = ["metadata", "snippet", "abstract", "claims", "full_text"]
 READ_LEVEL_LABELS = {
     "metadata": "sirf metadata (title/author/year)",
     "snippet": "search snippet",
     "abstract": "abstract",
+    "claims": "patent ke claims (legal dawe) process hue",
     "full_text": "full text",
 }
+
 
 
 # ── Claim classification (Spec Section 7) ────────────────────────────────────
@@ -166,6 +183,17 @@ class SourceRecord:
     relevance_parts: Dict = field(default_factory=dict)
     rejected_reason: str = ""              # khaali = reject nahi hua
 
+    # ── PATENT ka structured metadata (patents.PatentMeta.to_dict()) ─────────
+    # Khaali dict = ye patent nahi hai (ya provider ne kuch structured nahi
+    # diya). Yahan dict rakha hai, dataclass nahi, do wajah se:
+    #   1. `asdict()`/`to_dict()` bina kisi extra code ke API tak le jaata hai,
+    #   2. models.py ko patents.PatentMeta par type-level nirbhar nahi hona
+    #      padta (dependency-free rehna is file ka rule hai).
+    # Isme kabhi guess ki hui value nahi jaati — jo provider ne nahi diya, wo
+    # field khaali rehti hai aur `missing_fields` mein naam se dikhti hai.
+    patent_meta: Dict = field(default_factory=dict)
+
+
     # ── helpers ──
     @property
     def domain(self) -> str:
@@ -181,11 +209,34 @@ class SourceRecord:
         return re.sub(r"\s+", " ", t).strip()
 
     @property
+    def is_patent(self) -> bool:
+        return self.source_type == SourceType.PATENT
+
+    @property
+    def patent_family_key(self) -> str:
+        """Ek invention ki ek key (US/EP/WO members ek hi key par)."""
+        if not self.patent_meta:
+            return ""
+        return patent_family_key(self.patent_meta)
+
+    @property
     def independence_key(self) -> str:
         """
         Spec Section 7: "ek hi information ki 100 copied websites ko 100
         independent sources mat maano." DOI same = same work. Warna domain.
+
+        PATENT ka apna rule pehle aata hai: ek hi invention US, EP aur WO —
+        teen jagah publish hoti hai. Teeno ka domain bhi same provider ka hota
+        hai aur DOI kisi ka nahi hota, to purana rule unhe "domain:data.epo.org"
+        par ek saath daal deta — yaani do ALAG inventions bhi ek hi origin gin
+        jaate aur cap_per_origin unme se ek ko phenk deta. Family key se dono
+        baatein theek hoti hain: ek family = ek evidence, alag family = alag
+        evidence.
         """
+        if self.is_patent:
+            family = self.patent_family_key
+            if family:
+                return family
         if self.doi:
             return f"doi:{self.doi.lower()}"
         if self.source_type == SourceType.DOCUMENT:
@@ -200,9 +251,22 @@ class SourceRecord:
         # is source ko normal evidence ki tarah use nahi karna.
         if self.retracted is True:
             bits.append("RETRACTION se juda — evidence ki tarah use na karein")
+        # Patent ka warning bhi utna hi zaroori hai: prompt mein "patent" shabd
+        # dikhna kaafi nahi hai, kyunki model patent ke claims ko aasani se
+        # "proven result" maan leta hai. Isliye seedhi bhasha mein likha jaata
+        # hai ki ye legal dawa hai.
+        if self.is_patent:
+            bits.append(PATENT_EVIDENCE_NOTE)
+            number = (self.patent_meta or {}).get("number", "")
+            if number:
+                bits.append(str(number))
+            status = (self.patent_meta or {}).get("status_label", "")
+            if status:
+                bits.append(str(status))
         if self.source_type == SourceType.DOCUMENT:
             bits.append("tumhara uploaded document")
         else:
+
             # §6: content se nikala hua kind pehle. Connector-based mota label
             # (source_type) tab hi bolte hain jab content kuch pakka na bata
             # sake — warna "review" ko "dataset" keh dena jhooth ban jaata hai.
@@ -263,6 +327,15 @@ class SourceRecord:
         if self.read_level:
             return self.read_level
         text = (self.snippet or "").strip()
+        # PATENT: gehrai ka jawab patent_meta ke ASLI text se aata hai (kitne
+        # chars claims/description ke roop mein process hue), snippet ki lambai
+        # se nahi. Ye andaaza nahi hai — connector ne jo text sach mein diya
+        # hai, sirf usi par ye level banta hai, aur text na hone par "metadata"
+        # hi rehta hai.
+        if self.is_patent and self.patent_meta:
+            depth = str(self.patent_meta.get("read_depth") or "")
+            if depth in READ_LEVEL_ORDER:
+                return depth
         if not text:
             return "metadata"
         if self.source_type in (SourceType.PAPER,) and len(text) >= 250:
@@ -277,7 +350,11 @@ class SourceRecord:
         d["methodology_label"] = methodology_label(self.methodology) if self.methodology else ""
         d["methodology_rank"] = self.methodology_rank
         d["quality_signals"] = self.quality_signal_bits()
+        if self.is_patent:
+            d["patent_family_key"] = self.patent_family_key
+            d["patent_evidence_note"] = PATENT_EVIDENCE_NOTE
         return d
+
 
 
 # ── Passage ──────────────────────────────────────────────────────────────────
@@ -491,6 +568,23 @@ class EvidencePack:
             # [ESTABLISHED] label laga deta hai.
             if s.read_note:
                 meta.append(f"Read scope: {s.read_note}")
+            # PATENT ke liye ek aur line: kis daftar ka, kis family ka, aur
+            # kitna hissa (abstract / claims / description) sach mein process
+            # hua. Bina iske model "patent kehta hai X" ko "X saabit hai" bana
+            # deta hai — aur family info bina, ek hi invention ke US/EP/WO ko
+            # "teen patents isi baat par sehmat hain" likh deta hai.
+            if s.is_patent:
+                pm = s.patent_meta or {}
+                patent_bits = [b for b in (
+                    f"number: {pm.get('number', '')}" if pm.get("number") else "",
+                    f"office: {pm.get('jurisdiction_label', '')}" if pm.get("jurisdiction_label") else "",
+                    f"family: {pm.get('family_key', '')}" if pm.get("family_key") else "",
+                    f"claims: {pm.get('claim_count', 0)}" if pm.get("claim_count") else "claims text nahi mila",
+                    str(pm.get("status_label", "")),
+                ) if b]
+                meta.append("Patent info: " + " | ".join(patent_bits))
+                meta.append("Patent rule: " + PATENT_EVIDENCE_NOTE)
+
             body = (s.snippet or "").strip()[:max_chars_per_source]
             if body:
                 meta.append(f"Excerpt: {body}")
@@ -573,6 +667,77 @@ class EvidencePack:
     def retracted_sources(self) -> List[SourceRecord]:
         return [s for s in self.sources if s.retracted is True]
 
+    # ── PATENT roll-up (patent ≠ scientific proof) ───────────────────────────
+    def patent_sources(self) -> List[SourceRecord]:
+        return [s for s in self.sources if s.is_patent]
+
+    def science_sources(self) -> List[SourceRecord]:
+        """
+        Patent NIKAAL kar baaki sources — "scientific evidence" ki ginti isi
+        list par honi chahiye. Pehle poori list par ginti hoti, to 3 patent +
+        0 paper wala pack "3 sources sehmat hain" bol deta.
+        """
+        return [s for s in self.sources if not s.is_patent]
+
+    def patent_families(self) -> Dict[str, List[SourceRecord]]:
+        """family key → us family ke records (khaali key wale bahar)."""
+        groups: Dict[str, List[SourceRecord]] = {}
+        for s in self.patent_sources():
+            key = s.patent_family_key
+            if key:
+                groups.setdefault(key, []).append(s)
+        return groups
+
+    def patent_family_count(self) -> int:
+        """
+        Kitni ALAG inventions. Jis patent ka family key nahi bana (metadata
+        adhoora tha) usse alag-alag ginte hain — kyunki uske baare mein humein
+        pata NAHI hai ki wo kisi doosre ka family member hai ya nahi, aur
+        "pata nahi" ko "same family" maan lena evidence chhupana hoga.
+        """
+        keyed = self.patent_families()
+        unkeyed = len([s for s in self.patent_sources() if not s.patent_family_key])
+        return len(keyed) + unkeyed
+
+    def patent_read_depth_counts(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for s in self.patent_sources():
+            level = s.reading_level()
+            counts[level] = counts.get(level, 0) + 1
+        return {lvl: counts[lvl] for lvl in READ_LEVEL_ORDER if lvl in counts}
+
+    def patent_note(self) -> str:
+        """
+        Patent evidence ka imaandaar bayaan — ginti se banta hai, hardcoded
+        nahi. Do baatein jaan-boojh kar likhi jaati hain: (1) publications vs
+        alag families ka farq, aur (2) kitne patents ka claims text SACH MEIN
+        process hua — kyunki "patent padha" ka dawa sirf usi par ban sakta hai.
+        """
+        patents = self.patent_sources()
+        if not patents:
+            return ""
+        families = self.patent_family_count()
+        depth = self.patent_read_depth_counts()
+        read_deep = depth.get("claims", 0) + depth.get("full_text", 0)
+        note = (f"{len(patents)} patent publication mile, jo {families} alag "
+                f"invention family ko dikhate hain (ek hi invention ke US/EP/WO "
+                f"members ko alag evidence nahi gina gaya).")
+        if read_deep:
+            note += (f" Inme se {read_deep} ke claims/description sach mein "
+                     f"process hue; baaki par sirf metadata/abstract tak baat "
+                     f"ki ja sakti hai.")
+        else:
+            note += (" Kisi bhi patent ke claims/description process NAHI hue — "
+                     "isliye 'patent padha' jaisa dawa is jawab mein nahi "
+                     "banta.")
+        note += " " + PATENT_EVIDENCE_NOTE
+        if not self.science_sources():
+            note += (" CHETAVANI: is pack mein patent ke alawa koi source nahi "
+                     "hai — sirf patent ke bharose koi baat scientifically "
+                     "saabit nahi maani ja sakti.")
+        return note
+
+
     def strong_methodology_sources(self) -> List[SourceRecord]:
         return [s for s in self.sources if s.methodology_rank >= 5]
 
@@ -652,7 +817,16 @@ class EvidencePack:
             "coi_checked_sources": len(
                 [s for s in self.sources if s.coi_disclosed is not None]),
             "quality_signal_note": self.quality_signal_note(),
+            # ── patent evidence, scientific evidence se ALAG ginti mein ──
+            # Ye keys hamesha rehti hain (0 bhi ek imaandaar jawab hai), taaki
+            # audit padhne wale ko pata rahe ki patent tier dekha gaya tha.
+            "patent_sources": len(self.patent_sources()),
+            "patent_families": self.patent_family_count(),
+            "patent_read_levels": self.patent_read_depth_counts(),
+            "science_sources": len(self.science_sources()),
+            "patent_note": self.patent_note(),
         }
+
 
     def to_dict(self) -> Dict:
         return {

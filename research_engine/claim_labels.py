@@ -45,10 +45,10 @@ def _records(line: str, pack: Optional[EvidencePack]) -> List:
 
 
 def _has_full_text_cite(line: str, pack: Optional[EvidencePack]) -> bool:
-    """Whether the line has at least one real cited source read at full-text level."""
+    """Whether a non-patent cited source can enter the strict A-E gate."""
     for record in _records(line, pack):
         try:
-            if record.reading_level() == _FULL:
+            if not getattr(record, "is_patent", False) and record.reading_level() == _FULL:
                 return True
         except Exception:  # pragma: no cover - defensive
             continue
@@ -79,7 +79,13 @@ def line_verdict(
     pack: Optional[EvidencePack],
     check_entailment: bool = False,
 ) -> Tuple[str, str]:
-    """Return strongest label allowed by the requested checking depth."""
+    """Return the strongest label allowed by depth, A-E, and patent rules.
+
+    Patent claims are legal assertions rather than experimental proof. A
+    patent-only line therefore stays SOURCE-REPORTED even when its claims or
+    description were read. In the production strict path, a non-patent source
+    must independently pass the cumulative same-source A-E verification gate.
+    """
     ids = _cited_ids(line)
     records = _records(line, pack)
 
@@ -93,16 +99,28 @@ def line_verdict(
         return UNVERIFIED, "is line par koi [S#] citation nahi hai"
 
     levels = {}
+    patent_ids: List[str] = []
     for record in records:
         try:
             level = record.reading_level()
         except Exception:  # pragma: no cover
             level = "metadata"
         levels[record.source_id] = level
+        if getattr(record, "is_patent", False):
+            patent_ids.append(record.source_id)
 
-    full = [sid for sid, level in levels.items() if level == _FULL]
+    # Patent full text can provide prior-art context, never scientific proof.
+    full = [sid for sid, level in levels.items()
+            if level == _FULL and sid not in patent_ids]
     if not full:
+        patent_full = [sid for sid in patent_ids if levels.get(sid) == _FULL]
+        if patent_full and len(patent_ids) == len(levels):
+            return SOURCE_REPORTED, (
+                f"is line ka evidence sirf patent(s) hai ({', '.join(patent_full)}) — "
+                "patent ke claims LEGAL dawe hain, experiment ka proof nahi")
         detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
+        if patent_ids:
+            detail += f" (patent: {', '.join(patent_ids)} — legal dawa, proof nahi)"
         return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
 
     if not check_entailment:

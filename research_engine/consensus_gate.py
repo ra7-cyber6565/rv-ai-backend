@@ -23,6 +23,20 @@ vaakya jaata hai:
 
     "Consensus evaluate nahi kiya ja saka."
 
+SAATVI SHART — SIRF TAB JUDTI HAI JAB PACK MEIN PATENT HO (₹0 patent batch,
+point 4 + 7):
+
+  7. patent ke alawa kaafi scientific sources hon
+
+Patent legal document hai: uske claims "ye humara invention hai" wale dawe hain,
+kisi experiment ka nateeja nahi. Ek hi topic par 5 patent mil jaana bilkul aam
+hai (companies aas-paas file karti hain), aur purane counting rule mein wo 5
+"independent origin" ban kar consensus ka darwaza khol dete — yaani hum kehte
+"sources sehmat hain" jabki ek bhi scientific finding check nahi hui thi. Isliye
+patent wale pack mein consensus ke liye patent-ke-ALAWA sources ki ginti dekhi
+jaati hai. Jis pack mein patent hi nahi hai, us par ye shart lagti hi nahi (aur
+purane run/report ka behaviour waisa hi rehta hai).
+
 Module jaan-boojh kar pure-Python hai (koi model, koi network) taaki offline
 test ho sake.
 """
@@ -40,6 +54,9 @@ STRONG_RELEVANCE = 0.45       # "is source ka content sach mein kaam ka hai"
 MIN_STRONG_SOURCES = 3        # itne majboot sources se kam par consensus nahi
 MIN_EXTRACTED = 3             # itne sources ka asli text pada gaya ho
 MIN_INDEPENDENT = 3           # alag-alag origin
+# Patent wale pack mein: patent ke ALAWA itne sources chahiye, warna "sehmati"
+# asal mein patent claims ki ginti ban jaati hai (dekho module docstring, shart 7).
+MIN_SCIENCE_SOURCES = 3
 
 # Opposition search hui ya nahi — ye nishaan query text mein dhoondte hain.
 # "critical" jaan-boojh kar list mein NAHI hai: "critical temperature" ek normal
@@ -104,6 +121,30 @@ def _extracted_count(pack) -> int:
             # claim ho. Sirf title/metadata wale source kabhi nahi ginte.
             count += 1
     return count
+
+
+def _patent_split(pack) -> tuple:
+    """
+    (patent_sources, science_sources) — pack ke andar se, andaaze se nahi.
+
+    Naye pack ke paas apne helper hain (`patent_sources()`/`science_sources()`),
+    par ye module purane/fake pack objects par bhi chalta hai (test aur purane
+    run), isliye fallback mein `is_patent` / source_type dekh liya jaata hai.
+    """
+    sources = list(getattr(pack, "sources", None) or [])
+    getter = getattr(pack, "patent_sources", None)
+    science_getter = getattr(pack, "science_sources", None)
+    if callable(getter) and callable(science_getter):
+        try:
+            return list(getter() or []), list(science_getter() or [])
+        except Exception:      # pragma: no cover - defensive
+            pass
+    patents = [s for s in sources
+               if bool(getattr(s, "is_patent", False))
+               or str(getattr(getattr(s, "source_type", ""), "value",
+                              getattr(s, "source_type", ""))) == "patent"]
+    ids = {id(s) for s in patents}
+    return patents, [s for s in sources if id(s) not in ids]
 
 
 def _dedup_done(pack) -> bool:
@@ -173,6 +214,9 @@ def evaluate(pack, contradictions: Optional[Sequence] = None,
     """
     Chhe shart check karo. `contradictions=None` ka matlab "analysis chala hi
     nahi" hai; khaali list ka matlab "chala, kuch mila nahi" — dono alag hain.
+
+    Pack mein patent hone par ek SAATVI shart bhi judti hai ("patent ke alawa
+    kaafi scientific sources") — dekho module docstring.
     """
     result = GateResult()
     sources = list(getattr(pack, "sources", None) or [])
@@ -252,4 +296,18 @@ def evaluate(pack, contradictions: Optional[Sequence] = None,
                bool(contradiction_analysis_done) and bool(reasoning_complete),
                detail,
                ok="Contradiction + reasoning analysis dono poore hue.")
+
+    # 7. (SIRF patent wale pack par) patent ke alawa kaafi scientific sources
+    patent_sources, science = _patent_split(pack)
+    if patent_sources:
+        result.add(
+            "science_beyond_patents",
+            len(science) >= MIN_SCIENCE_SOURCES,
+            f"Is pack mein {len(patent_sources)} patent hain par patent ke alawa "
+            f"sirf {len(science)} source, chahiye {MIN_SCIENCE_SOURCES}. Patent "
+            f"legal dawa hai, experiment ka nateeja nahi — patent ginti se "
+            f"'sehmati' nahi banti.",
+            ok=(f"Patent ke alawa {len(science)} scientific source hain "
+                f"({len(patent_sources)} patent sirf context ke liye)."),
+        )
     return result

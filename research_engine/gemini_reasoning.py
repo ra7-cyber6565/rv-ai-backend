@@ -358,7 +358,13 @@ class GeminiReasoning:
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 self.attempts += 1
                 try:
-                    response = self._model.generate_content(prompt)
+                    # Bandhi hui waqt-seema ke saath. Latki hui call ab TRANSIENT
+                    # error ban kar wahi purana retry/backoff chalati hai — poori
+                    # HTTP request ko ghanton rok kar nahi rakhti (isi wajah se
+                    # website par aakhir mein "server se baat nahi ho paayi"
+                    # aata tha).
+                    from .gemini_model import generate as _generate
+                    response = _generate(self._model, prompt)
                     text = (getattr(response, "text", "") or "").strip()
                     if not text:
                         # khaali jawab bhi failure hai — chup-chaap "" lautana
@@ -540,6 +546,15 @@ class GeminiReasoning:
         from .requested import prompt_block
 
         extras = prompt_block(plan.get("requests") if isinstance(plan, dict) else None)
+        # PATENT RULE sirf tab jaata hai jab pack mein sach mein patent ho —
+        # warna har normal sawaal ke prompt mein bekaar tokens jaate.
+        patent_rules = ""
+        try:
+            if pack.patent_sources():
+                from .patents import PATENT_RULE_PROMPT
+                patent_rules = "\n" + PATENT_RULE_PROMPT
+        except Exception:          # pragma: no cover - purane pack objects
+            patent_rules = ""
         return f"""Tum ek Research Analyst ho. {_ROLE_HONESTY}
 
 SAWAL: {question}
@@ -555,6 +570,7 @@ RETRIEVED SOURCES (sirf inhi ka istemal karo):
 {CITATION_INSTRUCTION}
 
 {LABEL_RULE_PROMPT}
+{patent_rules}
 
 {style}
 

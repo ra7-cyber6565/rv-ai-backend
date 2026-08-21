@@ -408,6 +408,10 @@ class RelevanceEngine:
         "N off-topic hate" sach-much likha ja sake — chupchaap na ho.
         """
         unique = self.dedup.deduplicate(sources)
+        # Patent family collapse ka hisaab dedup ke ANDAR hota hai, isliye uski
+        # ginti alag se yahan likhi jaati hai — warna "3 patents mile" aur
+        # "1 patent bacha" ke beech ka farak report mein gayab ho jaata.
+        patent_families = self.dedup.patent_family_report(sources)
         terms = self.topic_of(query)
         plan = self.plan_of(query)
 
@@ -496,6 +500,12 @@ class RelevanceEngine:
             # lagane ke bajaye wo yahan se seedha padhta hai.
             "deduplicated": True,
             "duplicates_removed": max(0, len(sources) - len(unique)),
+            # Patent-specific: ek invention ke US/EP/WO members kitne mile aur
+            # kitne ek record mein sameta gaye (0/0 = pack mein patent nahi tha).
+            "patent_sources_found": patent_families["patent_sources"],
+            "patent_families": patent_families["families"],
+            "patent_family_duplicates_removed": patent_families["collapsed"],
+            "patent_family_unknown": patent_families["unknown_family"],
             "kept": len(final),
             "dropped_offtopic": len(offtopic) + len(borderline_dropped),
             "dropped_zero_overlap": len(offtopic),

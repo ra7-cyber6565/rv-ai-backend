@@ -316,19 +316,35 @@ def check_c(claim: str, records: Sequence[SourceRecord],
 
 # ── D: reading depth ────────────────────────────────────────────────────────
 def check_d(records: Sequence[SourceRecord]) -> Check:
+    """
+    Kitni gehrai tak padha gaya — aur patent ka apna alag rule.
+
+    PATENT (₹0 patent batch, point 4 + 6): patent ka full text padhna "reading
+    depth" ke liye asli kaam hai, par ye check aage `verify_claim()` mein
+    `genuine_support` ka darwaza kholta hai. Patent claims LEGAL dawe hote hain,
+    experiment ka nateeja nahi — isliye jab cited sources SIRF patent hain, ye
+    check PASS nahi hota. Wo UNKNOWN par rukta hai aur detail mein saaf likhta
+    hai ki patent ke claims process hue (yaani read depth chhupayi nahi ja rahi,
+    sirf uska matlab imaandaari se bataya ja raha hai).
+    """
     c = Check("D", CHECK_LABELS["D"])
     if not records:
         c.status = UNKNOWN
         c.detail = "koi source nahi"
         return c
     levels: Dict[str, str] = {}
+    patent_ids: List[str] = []
     for record in records:
         try:
             levels[record.source_id] = record.reading_level()
         except Exception:                   # pragma: no cover - defensive
             levels[record.source_id] = "metadata"
+        if getattr(record, "is_patent", False):
+            patent_ids.append(record.source_id)
     detail = ", ".join(f"{sid}={lvl}" for sid, lvl in levels.items())
-    full = [sid for sid, lvl in levels.items() if lvl == "full_text"]
+    patent_only = bool(patent_ids) and len(patent_ids) == len(levels)
+    full = [sid for sid, lvl in levels.items()
+            if lvl == "full_text" and sid not in patent_ids]
     if full:
         c.status = PASS
         c.detail = f"poora text padha gaya: {', '.join(full)} ({detail})"
@@ -337,6 +353,22 @@ def check_d(records: Sequence[SourceRecord]) -> Check:
                  if r.source_id in full and (r.read_note or "").strip()]
         if notes:
             c.detail += f" — dhyan rahe: {notes[0][:120]}"
+        if patent_ids:
+            c.detail += (f"; patent {', '.join(patent_ids)} sirf context hai "
+                         f"(legal dawa, proof nahi)")
+        return c
+    if patent_only:
+        deep = [sid for sid in patent_ids
+                if levels.get(sid) in ("claims", "full_text")]
+        c.status = UNKNOWN
+        if deep:
+            c.detail = (f"patent ka text process hua ({', '.join(deep)}) par "
+                        f"evidence SIRF patent hai ({detail}) — patent ke claims "
+                        f"legal dawe hain, experiment ka proof nahi, isliye ye "
+                        f"'genuine support' nahi ban sakta")
+        else:
+            c.detail = (f"sirf patent metadata/abstract mila ({detail}) — patent "
+                        f"ke claims process hi nahi hue")
         return c
     if any(lvl == "abstract" for lvl in levels.values()):
         c.status = UNKNOWN

@@ -69,6 +69,18 @@ def _safe_source_url(value: object) -> str:
 class FinalSynthesizer(_ClaudeFinalSynthesizer):
     """Claude latest formatter + final truth/presentation guardrails."""
 
+    _ACCESS_WORDS = {
+        **_ClaudeFinalSynthesizer._ACCESS_WORDS,
+        "claims": (
+            "PATENT CLAIMS REVIEWED — legal claims process hue; ye experimental "
+            "ya scientific verification nahi hai"
+        ),
+    }
+    _KIND_WORDS = {
+        **_ClaudeFinalSynthesizer._KIND_WORDS,
+        "patent": "patent document (legal filing; scientific proof nahi)",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.presentation_guard = PresentationGuard()
@@ -106,19 +118,20 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
         abstract = int(levels.get("abstract", 0) or 0)
         snippet = int(levels.get("snippet", 0) or 0)
         meta = int(levels.get("metadata", 0) or 0)
+        claims = int(levels.get("claims", 0) or 0)
         partial = [
             s for s in (getattr(pack, "sources", None) or [])
             if FinalSynthesizer._is_partial_large_source(s)
         ]
         full_whole = max(0, full - len(partial))
 
-        if not (full or abstract or snippet or meta):
+        if not (full or abstract or snippet or meta or claims):
             return (
                 "**Kitna gehra padha gaya:** iska data available nahi hai, isliye "
                 "source-access depth ko verify nahi kiya ja saka."
             )
 
-        total = full + abstract + snippet + meta
+        total = full + abstract + snippet + meta + claims
         lines = [
             "**Kitna gehra padha gaya (access depth confidence ko affect karti hai, "
             "lekin claim verification alag A-E check se hoti hai) — "
@@ -145,6 +158,11 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             lines.append(
                 f"- {abstract}/{total} source ka sirf abstract mila — paper ka summary, poora "
                 "method/result context nahi. Isse strong fact automatically nahi banta."
+            )
+        if claims:
+            lines.append(
+                f"- {claims}/{total} patent ke claims process hue. Ye invention par "
+                "LEGAL dawe hain; experimental result ya scientific verification nahi."
             )
         if snippet:
             lines.append(
@@ -195,6 +213,11 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             if s.peer_reviewed is True:
                 about.append("peer-reviewed")
             lines = [head, f"- Ye kya hai: {', '.join(x for x in about if x)}."]
+            if getattr(s, "is_patent", False):
+                lines.append(
+                    "- Evidence rule: patent ke claims legal dawe hain; inhe paper, "
+                    "experiment ya independently verified scientific result nahi maana gaya."
+                )
 
             took = _safe_source_display(s.snippet, 220)
             if took:

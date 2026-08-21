@@ -85,6 +85,7 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_reasoning_status.py",
         "tests/test_gemini_key_status.py",
         "tests/test_quick_chat_resilience.py",
+        "tests/test_chat_resilience.py",
         "tests/test_gemini_diag_zero_call.py",
         "tests/test_quota_backup.py",
         "tests/test_provider_bypass_audit.py",
@@ -95,6 +96,7 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_job_access.py",
         "tests/test_job_routes_access.py",
         "tests/test_network_safety.py",
+        "tests/test_patents.py",
         "tests/test_unverified_semantics.py",
         "tests/test_foundation_gate_runner.py",
     ):

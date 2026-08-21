@@ -18,6 +18,7 @@ from typing import Dict, List, Optional
 from .depth import DepthConfig
 from .domain import detect as domain_detect
 from .local_language import normalize
+from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
 from .requested import parse_requests
 
@@ -92,6 +93,21 @@ _BOOK_HINTS = ("book", "kitab", "kitaab", "granth", "mahagranth", "shastra", "ve
 
 
 class ResearchPlanner:
+    # Patent providers ki list connector layer ke paas hai (kaunsa provider key
+    # ke bina chal sakta hai, ye wahi jaanta hai). Import LAZY hai aur object ek
+    # baar banta hai: planner ka wada "rule-based aur sasta" hai, aur connectors
+    # package import karna network ya key kuch nahi maangta — par har call par
+    # naya object banana bekaar hai.
+    _PATENT_FACADE = None
+
+    @property
+    def _patent_providers(self):
+        cls = type(self)
+        if cls._PATENT_FACADE is None:
+            from .connectors import PatentDiscoveryConnector  # noqa: PLC0415
+            cls._PATENT_FACADE = PatentDiscoveryConnector()
+        return cls._PATENT_FACADE
+
     # ── 1 + 2. classify + fields ──────────────────────────────────────────────
     def classify(self, question: str) -> Dict:
         # Pehle local shorthand khol lo — warna "reserch" ya "smjao" kisi keyword
@@ -325,6 +341,30 @@ class ResearchPlanner:
         datasets, drop_d = dplan.route(sorted(set(datasets)), "datasets")
         dropped = drop_p + drop_b + drop_d
 
+        # Patents (₹0 patent batch, point 3) — routing ka poora faisla
+        # `patents.patent_intent()` ka hai, aur wo DETERMINISTIC hai (koi LLM
+        # nahi). Rule saaf hai: "Har generic question par patent connector
+        # wastefully call mat karna." Isliye patent tier tabhi bharta hai jab
+        #   (a) depth mode patents allow karta ho (QUICK nahi), AUR
+        #   (b) sawaal mein patent/prior-art ki baat seedhe ho, ya wo
+        #       invention-jaisa (technical cheez + banane/novelty ka iraada) ho.
+        # Jab patent search NAHI hoti, tab bhi wajah plan mein likhi jaati hai —
+        # taaki report mein "patent dekha hi nahi, aur ye kyun" saaf rahe.
+        patents: List[str] = []
+        intent = patent_intent(question or cls.get("question") or "")
+        patent_reason = intent.get("reason", "")
+        if not getattr(config, "use_patents", True):
+            patent_reason = (f"{config.name} mode mein patent search band hai "
+                             f"(patent APIs slow + fair-use limited hain)")
+        elif intent.get("wanted"):
+            # Key-gated provider ko list mein daalna hi nahi jab key nahi hai:
+            # wo har round "no_key" log karta, jo shor hai. Key ho to wo apne
+            # aap plan mein aa jaata hai.
+            patents = self._patent_providers.available_names()
+            if not patents:
+                patent_reason = ("patent search chahiye thi par koi patent "
+                                 "provider available nahi hai")
+
         # arXiv ko is field mein prathmikta chahiye to use sabse aage laao —
         # discovery ka wall-clock budget pehle sabse kaam ke connector par lage.
         prefer = list(dplan.profile.connectors)
@@ -336,6 +376,12 @@ class ResearchPlanner:
             "papers": papers,
             "books": books,
             "datasets": datasets,
+            # patents alag tier hai — patent legal document hai, science proof nahi
+            "patents": patents,
+            "patent_intent": {"wanted": bool(patents),
+                              "kind": intent.get("kind", ""),
+                              "signals": list(intent.get("signals", [])),
+                              "reason": patent_reason},
             # §3 ka disclosure — kaun band hua aur kyun
             "domain": dplan.key,
             "domain_label": dplan.profile.label,

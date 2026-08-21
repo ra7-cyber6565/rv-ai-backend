@@ -39,7 +39,7 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .connectors import (BaseConnector, BookConnector, DatasetConnector,
-                         PaperConnector, WebConnector)
+                         PaperConnector, PatentDiscoveryConnector, WebConnector)
 from .models import SourceRecord
 from .network_safety import public_error
 
@@ -53,6 +53,10 @@ class SourceDiscovery:
         self.papers = PaperConnector()
         self.books = BookConnector()
         self.datasets = DatasetConnector()
+        # Patents ek ALAG tier hai (paper tier mein ghusane se patent ka legal
+        # claim science jaisa dikhne lagta tha). Plan mein `patents` key na ho to
+        # ye tier chalta hi nahi — planner hi decide karta hai kab zaroorat hai.
+        self.patents = PatentDiscoveryConnector()
         self.max_workers = max_workers
 
     # ── task builders ────────────────────────────────────────────────────────
@@ -105,6 +109,16 @@ class SourceDiscovery:
                 tasks.append((connector.name,
                               self._single(connector, primary, max_per_connector)))
 
+        # Patents (₹0 patent batch) — SIRF tab jab planner ne `patents` bhara ho.
+        # Ye jaan-boojh kar PRIMARY query par hi chalta hai: patent APIs slow +
+        # fair-use limited hain (EPO ~10 search/min), aur "har generic sawaal par
+        # patent search" na sirf bekaar hai, wo humara hi quota kha jaata hai.
+        for name in plan.get("patents", []):
+            connector = self.patents.by_name(name)
+            if connector:
+                tasks.append((connector.name,
+                              self._single(connector, primary, max_per_connector)))
+
         return tasks
 
     def discover(
@@ -120,7 +134,7 @@ class SourceDiscovery:
         """
         queries: planner se aayi ek ya zyada search strings
         plan:    {"web": bool, "papers": [names], "books": [names],
-                  "datasets": [names]}
+                  "datasets": [names], "patents": [names]}
         budget_seconds: is round ki discovery ka wall-clock budget (depth config se)
         """
         tasks = self._tasks(queries, plan, max_per_connector, max_web)
@@ -203,9 +217,16 @@ class SourceDiscovery:
     #   khaali   — search sach mein chali aur kuch nahi mila
     #   chhanta  — mila tha, par HUMNE relevance guard se hataya (alag baat hai)
     #   ruka     — search hui hi nahi (rate_limited / blocked / timeout /
-    #              no_key / deadline)
+    #              no_key / deadline / no_query)
     #   fail     — code ya API error
-    _STOPPED_REASONS = ("rate_limited", "blocked", "timeout", "no_key", "deadline")
+    #
+    # `no_query` patent batch mein juda: patent connector ko query se kaam ka
+    # term chahiye (SPARQL FILTER banane ke liye). Term na bane to wo request
+    # bhejta hi nahi. Bina ise list mein daale wo entry "khaali (search chali,
+    # result 0)" bucket mein jaati thi — yaani hum keh rahe hote "EPO ne dekha,
+    # kuch nahi mila", jabki EPO ko koi call hi nahi gayi.
+    _STOPPED_REASONS = ("rate_limited", "blocked", "timeout", "no_key",
+                        "deadline", "no_query")
     # human-readable wajah — jo user seedhe padhega
     _REASON_TEXT = {
         "rate_limited": "API ne rate limit lagayi",
@@ -213,6 +234,7 @@ class SourceDiscovery:
         "timeout": "server slow tha",
         "no_key": "API key nahi hai",
         "deadline": "time budget khatam",
+        "no_query": "is sawaal se search-layak term nahi bana",
     }
 
     @classmethod
