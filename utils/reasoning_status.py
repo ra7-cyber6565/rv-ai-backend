@@ -10,6 +10,7 @@ from __future__ import annotations
 import os
 from urllib.parse import urlparse
 
+from utils.gemini_key_status import describe_gemini_keys
 from utils.provider_health import provider_health
 from utils.zero_cost_guard import gemini_credentials_configured
 
@@ -38,6 +39,10 @@ def _local_url(value: object) -> bool:
 def reasoning_status(env=None) -> dict:
     source = env if env is not None else os.environ
     zero_cost = _truthy(source.get("ZERO_COST_ONLY", "true"))
+
+    # Public-safe backup-key setup information. This is local env inspection only:
+    # no provider call, no raw key, no key length/hash/fingerprint/prefix.
+    gemini_key_setup = describe_gemini_keys(source)
 
     # Primary or any backup/list Gemini credential counts as configured. This
     # must match the key-pool/zero-cost guard; otherwise backup-only deployments
@@ -112,6 +117,7 @@ def reasoning_status(env=None) -> dict:
     return {
         "zero_cost_only": zero_cost,
         "fallback_chain": chain,
+        "gemini_key_setup": gemini_key_setup,
         "model_layers_configured": len(configured_model_layers),
         "model_layers_usable_now": len(usable_now),
         "has_model_backup": any(name != "gemini_primary" for name in configured_model_layers),
@@ -121,6 +127,7 @@ def reasoning_status(env=None) -> dict:
         "note": (
             "Configured ka matlab ₹0 policy/config ready hai. Temporarily_skipped recent quota/auth/network failure ki "
             "short process-local cooldown memory hai; cooldown ke baad provider automatically probe ho sakta hai. "
+            "Gemini key setup sirf local counts/names dikhata hai, credential-derived fingerprint nahi. "
             "Saare model providers unavailable hon tab bhi deterministic evidence fallback available hai."
         ),
     }
