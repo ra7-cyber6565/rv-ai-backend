@@ -28,8 +28,26 @@ def test_unknown_or_paid_sounding_provider_fails_closed(monkeypatch):
         with pytest.raises(RuntimeError, match="approved zero-cost"):
             configured_provider_name()
         status = provider_status()
-        assert status["enabled"] is False
+        # Explicit-but-invalid configuration is treated as enabled/not-ready so
+        # /health degrades rather than silently pretending archive was disabled.
+        assert status["enabled"] is True
         assert status["ready"] is False
+        assert status["provider"] == "invalid"
+        assert name not in repr(status).lower()
+        assert status["reason"] == "archive_provider_configuration_invalid"
+
+
+def test_invalid_provider_status_never_reflects_arbitrary_env_value(monkeypatch):
+    marker = "private-env-value-do-not-reflect"
+    monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", marker)
+    status = provider_status()
+    assert marker not in repr(status)
+    assert status == {
+        "provider": "invalid",
+        "enabled": True,
+        "ready": False,
+        "reason": "archive_provider_configuration_invalid",
+    }
 
 
 def test_drive_status_does_not_expose_remote_secret_material(monkeypatch):
@@ -44,6 +62,8 @@ def test_drive_status_does_not_expose_remote_secret_material(monkeypatch):
     assert "oauth" not in text
     assert "token" not in text
     assert "secret" not in text
+    # Status reports only presence/readiness, never the configured rclone remote.
+    assert "'drive'" not in text
 
 
 def test_build_drive_provider_requires_actual_remote_and_executable(monkeypatch):
