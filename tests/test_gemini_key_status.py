@@ -122,6 +122,29 @@ def test_reasoning_status_exposes_same_safe_setup_without_key_values(monkeypatch
     assert _K1 not in repr(report)
 
 
+def test_public_parser_matches_runtime_key_pool_counts():
+    # The public status parser is intentionally lightweight, while the runtime
+    # pool owns the SDK credential values. Lock their supported-env semantics
+    # together so a future alias change cannot make diagnostics lie.
+    from research_engine.key_pool import describe as runtime_describe
+
+    env = {
+        "GEMINI_API_KEY": _K1,
+        "GEMINI_API_KEY2": _K2,
+        "GEMINI_API_KEY_BACKUP": _K1,
+        "GEMINI_API_KEYS": f"{_K3},{_K2}",
+    }
+    public = describe_gemini_keys(env)
+    runtime = runtime_describe(env)
+    for key in (
+        "names_present", "configured_entries", "unique_keys",
+        "duplicates_dropped", "backup_slots",
+    ):
+        assert public[key] == runtime[key]
+    _assert_no_secret_metadata(public)
+    _assert_no_secret_metadata(runtime)
+
+
 def test_diagnostic_module_contains_no_network_dependency_contract():
     # Structural guard: this utility should remain stdlib/local-env only.
     import inspect
