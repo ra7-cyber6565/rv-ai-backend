@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel
 
 from research_engine.depth import BOOL_FIELDS, depth_limits
 from utils.admin_guard import require_admin
+from utils.job_access import job_access
 from utils.progress_tracker import get_progress
 from utils.research_jobs import runner
 
@@ -41,14 +42,41 @@ def _custom(request: ResearchJobRequest) -> Optional[Dict]:
     return values or None
 
 
+def _authorized_job(
+    job_id: str,
+    token: str | None,
+    *,
+    include_result: bool = False,
+) -> Dict:
+    """Capability check before returning any per-job metadata/result.
+
+    Deliberately returns the same 404 for unknown job and wrong/missing token so
+    the public endpoint cannot be used as a job-id existence oracle.
+    """
+    if not job_access.verify(job_id, token):
+        raise HTTPException(status_code=404, detail="Research job nahi mila")
+    item = runner.get(job_id, include_result=include_result)
+    if not item:
+        raise HTTPException(status_code=404, detail="Research job nahi mila")
+    return item
+
+
 @router.post("/research-jobs", status_code=202)
 def start_research_job(request: ResearchJobRequest):
-    """Research ko background worker mein start karke turant job_id do."""
+    """Research ko background worker mein start karke turant job id + private token do."""
     mode = (request.depth_mode or "DEEP").upper().strip()
     if mode not in {"QUICK", "DEEP", "MAXIMUM", "CUSTOM"}:
         raise HTTPException(status_code=400, detail="depth_mode invalid hai")
     if not (request.question or "").strip():
         raise HTTPException(status_code=400, detail="question khaali nahi ho sakta")
+
+    # Fail before scheduling an orphaned long-running job if the backend cannot
+    # safely maintain private capability tokens.
+    if not job_access.status().get("job_capability_tokens_ready"):
+        raise HTTPException(
+            status_code=503,
+            detail="Research job private-access layer ready nahi hai; job start nahi kiya gaya.",
+        )
 
     # Lazy import keeps startup light.
     from research_engine.agent_manager import manager
@@ -64,37 +92,46 @@ def start_research_job(request: ResearchJobRequest):
     except RuntimeError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
 
+    access_token = job_access.issue(job.job_id)
     return {
         "job_id": job.job_id,
+        "job_access_token": access_token,
+        "job_access_header": "X-Research-Job-Token",
         "status": job.status,
         "status_url": f"/api/v1/research-jobs/{job.job_id}",
         "result_url": f"/api/v1/research-jobs/{job.job_id}/result",
         "progress_url": f"/api/v1/research-jobs/{job.job_id}/progress",
-        "note": "Request disconnect/timeout hone par bhi process ke zinda rehne tak research chal sakti hai. Completed results local durable store me save hote hain.",
+        "note": (
+            "Request disconnect/timeout hone par bhi process ke zinda rehne tak research chal sakti hai. "
+            "Completed results local durable store me save hote hain. Poll/result requests me returned "
+            "job_access_token ko X-Research-Job-Token header me bhejein; token ko URL/log me mat daalein."
+        ),
     }
 
 
 @router.get("/research-jobs/{job_id}")
-def research_job_status(job_id: str):
-    item = runner.get(job_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Research job nahi mila")
-    return item
+def research_job_status(
+    job_id: str,
+    x_research_job_token: str | None = Header(default=None, alias="X-Research-Job-Token"),
+):
+    return _authorized_job(job_id, x_research_job_token)
 
 
 @router.get("/research-jobs/{job_id}/progress")
-def research_job_progress(job_id: str):
-    item = runner.get(job_id)
-    if not item:
-        raise HTTPException(status_code=404, detail="Research job nahi mila")
+def research_job_progress(
+    job_id: str,
+    x_research_job_token: str | None = Header(default=None, alias="X-Research-Job-Token"),
+):
+    item = _authorized_job(job_id, x_research_job_token)
     return {"job": item, "progress": get_progress(job_id)}
 
 
 @router.get("/research-jobs/{job_id}/result")
-def research_job_result(job_id: str):
-    item = runner.get(job_id, include_result=True)
-    if not item:
-        raise HTTPException(status_code=404, detail="Research job nahi mila")
+def research_job_result(
+    job_id: str,
+    x_research_job_token: str | None = Header(default=None, alias="X-Research-Job-Token"),
+):
+    item = _authorized_job(job_id, x_research_job_token, include_result=True)
     if item["status"] in {"queued", "running"}:
         raise HTTPException(status_code=202, detail={
             "message": "Research abhi chal rahi hai",
