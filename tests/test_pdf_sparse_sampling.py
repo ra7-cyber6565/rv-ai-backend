@@ -1,12 +1,13 @@
 """Regression tests for huge-PDF whole-document sparse sampling.
 
-These tests are pure Python: no network, API key or PyMuPDF required.  They
-protect against the subtle failure where a 3000-page PDF scan budget inspected
-only pages 1..2500 and could never see important evidence near the end.
+Pure Python: no network, API key or PyMuPDF required. These tests protect
+against the subtle failure where a scan budget inspects only the first N pages
+and systematically misses later chapters.
 """
 from __future__ import annotations
 
 from research_engine.processing import pdf_chunker
+from research_engine.processing.pdf_sampling import spread_page_indices
 
 
 QUESTION = "room temperature superconductivity ambient pressure critical temperature"
@@ -22,7 +23,7 @@ IRRELEVANT = (
 
 
 def test_sparse_indices_cover_beginning_middle_and_end_not_only_first_n():
-    indices = pdf_chunker.sample_page_indices(3000, 100, head_pages=3, tail_pages=3)
+    indices = spread_page_indices(3000, 100, head_pages=3, tail_pages=3)
     assert len(indices) == 100
     assert indices == sorted(set(indices))
     assert indices[:3] == [0, 1, 2]
@@ -30,26 +31,41 @@ def test_sparse_indices_cover_beginning_middle_and_end_not_only_first_n():
     assert any(1400 <= i <= 1600 for i in indices), indices
     assert max(indices) > 2900
     assert indices != list(range(100)), "whole-document sample first-N-only nahi hona chahiye"
+    assert pdf_chunker.sample_page_indices(3000, 100) == indices
+
+
+def test_sampling_is_not_front_third_biased():
+    indices = spread_page_indices(3000, 100, head_pages=3, tail_pages=3)
+    interior = indices[3:-3]
+    thirds = [
+        sum(1 for i in interior if i < 1000),
+        sum(1 for i in interior if 1000 <= i < 2000),
+        sum(1 for i in interior if i >= 2000),
+    ]
+    # Roughly even coverage; allow a few pages of rounding difference.
+    assert max(thirds) - min(thirds) <= 3, thirds
 
 
 def test_sampling_returns_all_pages_when_budget_is_large_enough():
-    assert pdf_chunker.sample_page_indices(8, 20) == list(range(8))
-    assert pdf_chunker.sample_page_indices(8, 8) == list(range(8))
-    assert pdf_chunker.sample_page_indices(0, 5) == []
+    assert spread_page_indices(8, 20) == list(range(8))
+    assert spread_page_indices(8, 8) == list(range(8))
+    assert spread_page_indices(0, 5) == []
+    assert spread_page_indices(8, 0) == []
 
 
 def test_late_relevant_page_can_survive_sparse_selection_and_scope_is_honest():
     total = 3000
-    indices = pdf_chunker.sample_page_indices(total, 120, head_pages=3, tail_pages=3)
-    late_index = indices[-4]  # late interior sample, not one of the forced final 3 pages
+    indices = spread_page_indices(total, 120, head_pages=3, tail_pages=3)
+    late_index = indices[-4]
     assert late_index > 2500
 
-    pages = []
-    for index in indices:
-        pages.append({
+    pages = [
+        {
             "page": index + 1,
             "text": RELEVANT if index == late_index else IRRELEVANT,
-        })
+        }
+        for index in indices
+    ]
 
     selected = pdf_chunker.select_pages(
         pages,
