@@ -46,15 +46,20 @@ def configured_provider_name() -> str:
 
 
 def provider_status() -> dict[str, Any]:
-    """Return non-secret readiness information without forcing provider login."""
+    """Return non-secret readiness information without forcing provider login.
+
+    Invalid configuration is intentionally normalized. The raw environment value
+    is useful in local logs/errors but must not be reflected by public /health or
+    /api responses because environment values are not inherently non-secret.
+    """
     try:
         name = configured_provider_name()
-    except Exception as exc:  # noqa: BLE001 - config status should remain readable
+    except Exception:  # noqa: BLE001 - public status is stable/fail-closed
         return {
             "provider": "invalid",
-            "enabled": False,
+            "enabled": True,
             "ready": False,
-            "reason": str(exc)[:240],
+            "reason": "archive_provider_configuration_invalid",
         }
 
     if name == "none":
