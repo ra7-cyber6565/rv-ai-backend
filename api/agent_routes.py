@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from research_engine.agent_manager import manager
 from research_engine.depth import (BOOL_FIELDS, depth_limits,
@@ -12,20 +12,26 @@ from utils.reasoning_status import reasoning_status
 
 router = APIRouter()
 
+# Public JSON endpoints must not accept arbitrarily large single strings. Large
+# source material belongs in the streaming upload path; a question/message stays
+# bounded so one request cannot consume unbounded memory or prompt budget.
+_MAX_QUESTION_CHARS = 20_000
+_MAX_PROJECT_ID_CHARS = 80
+
 
 class ChatRequest(BaseModel):
     # QUICK mode = seedhi, turant baat-cheet. Koi deep research nahi unless every
     # configured chat model is unavailable; then the route automatically falls
     # back to QUICK evidence research instead of returning a quota/server error.
-    message: str
+    message: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
     history: Optional[List[Dict]] = None
-    project_id: str = "default"
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
 
 
 class DeepResearchRequest(BaseModel):
-    question: str
-    project_id: str = "default"
-    depth_mode: str = "DEEP"          # QUICK | DEEP | MAXIMUM | CUSTOM
+    question: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
+    depth_mode: str = Field(default="DEEP", min_length=1, max_length=16)  # QUICK | DEEP | MAXIMUM | CUSTOM
     max_sources: Optional[int] = None
     max_rounds: Optional[int] = None
     gemini_calls: Optional[int] = None
