@@ -1,0 +1,347 @@
+"""Static architecture audit for Infinity Research AI.
+
+This is not a substitute for runtime tests.  It is a deterministic, zero-cost
+release gate that catches a different class of regression: a refactor can leave
+individual unit tests green while accidentally disconnecting a whole capability
+from the real application path.
+
+The audit therefore checks that the production entrypoint is still wired as:
+
+    API -> research manager/orchestrator -> discover -> read/process -> evidence
+    -> reasoning/fallback -> claim verification -> citations -> verification
+    -> human-first synthesizer/audit
+
+It also checks the project's hard safety invariants (₹0 provider guard, local
+fallback, strict CORS, bounded storage/jobs, no obvious committed secrets).
+
+Exit code:
+    0  all required checks pass
+    1  one or more required checks fail
+
+No network, API key, model or external service is used.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import re
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import Iterable, List, Sequence
+
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+@dataclass(frozen=True)
+class AuditCheck:
+    name: str
+    passed: bool
+    detail: str
+
+
+@dataclass(frozen=True)
+class AuditReport:
+    schema_version: int
+    passed: bool
+    checks: list[dict]
+    failed: list[str]
+
+
+def _read(path: str) -> str:
+    target = ROOT / path
+    try:
+        return target.read_text(encoding="utf-8")
+    except Exception:
+        return ""
+
+
+def _exists(path: str) -> bool:
+    return (ROOT / path).is_file()
+
+
+def _contains(path: str, *needles: str) -> AuditCheck:
+    text = _read(path)
+    missing = [needle for needle in needles if needle not in text]
+    return AuditCheck(
+        name=f"wiring:{path}",
+        passed=bool(text) and not missing,
+        detail=("required wiring present" if text and not missing
+                else "missing: " + ", ".join(missing or ["file unreadable"])),
+    )
+
+
+def _ordered(path: str, labels: Sequence[tuple[str, str]]) -> AuditCheck:
+    """Require important pipeline markers to occur in the expected order."""
+    text = _read(path)
+    positions: List[tuple[str, int]] = []
+    for label, needle in labels:
+        positions.append((label, text.find(needle)))
+    missing = [label for label, pos in positions if pos < 0]
+    monotonic = all(
+        positions[index][1] < positions[index + 1][1]
+        for index in range(len(positions) - 1)
+        if positions[index][1] >= 0 and positions[index + 1][1] >= 0
+    )
+    return AuditCheck(
+        name=f"pipeline-order:{path}",
+        passed=bool(text) and not missing and monotonic,
+        detail=(" -> ".join(label for label, _ in positions)
+                if not missing and monotonic else
+                f"missing={missing}; positions={dict(positions)}"),
+    )
+
+
+def _required_files(paths: Iterable[str]) -> AuditCheck:
+    missing = [path for path in paths if not _exists(path)]
+    return AuditCheck(
+        name="required-production-and-test-files",
+        passed=not missing,
+        detail="all present" if not missing else "missing: " + ", ".join(missing),
+    )
+
+
+def _no_wildcard_cors() -> AuditCheck:
+    joined = _read("main.py") + "\n" + _read("utils/security_config.py")
+    bad_patterns = (
+        'allow_origins=["*"]',
+        "allow_origins=['*']",
+        'CORS_ALLOWED_ORIGINS="*"',
+        "CORS_ALLOWED_ORIGINS='*'",
+    )
+    found = [pattern for pattern in bad_patterns if pattern in joined]
+    return AuditCheck(
+        name="security:no-wildcard-cors",
+        passed=not found and "allowed_cors_origins" in joined,
+        detail="exact-origin CORS guard present" if not found else f"unsafe: {found}",
+    )
+
+
+def _zero_cost_chain() -> AuditCheck:
+    guard = _read("utils/zero_cost_guard.py")
+    router = _read("research_engine/reasoning_router.py")
+    env = _read(".env.example")
+    required_guard = (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_ZERO_COST_CONFIRMED",
+        "GROQ_ZERO_COST_CONFIRMED",
+        "OPENROUTER_MODEL",
+        "OLLAMA_BASE_URL",
+    )
+    required_router = (
+        "openrouter/free",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+        "OLLAMA_ENABLED",
+        "_local_ollama_url",
+    )
+    required_env = (
+        "ZERO_COST_ONLY=true",
+        "REASONING_FALLBACK_CHAIN=groq,openrouter,ollama",
+        "GEMINI_ZERO_COST_CONFIRMED=false",
+        "GROQ_ZERO_COST_CONFIRMED=false",
+        "OPENROUTER_MODEL=openrouter/free",
+        "OLLAMA_ENABLED=false",
+    )
+    missing = (
+        [f"guard:{x}" for x in required_guard if x not in guard]
+        + [f"router:{x}" for x in required_router if x not in router]
+        + [f"env:{x}" for x in required_env if x not in env]
+    )
+    return AuditCheck(
+        name="safety:zero-cost-provider-chain",
+        passed=not missing,
+        detail="fail-closed free-provider routing present" if not missing else "missing: " + ", ".join(missing),
+    )
+
+
+def _fallback_wired() -> AuditCheck:
+    init = _read("research_engine/__init__.py")
+    synth = _read("research_engine/synthesizer.py")
+    orchestrator = _read("research_engine/orchestrator.py")
+    status = _read("utils/reasoning_status.py")
+    missing: List[str] = []
+    expectations = (
+        (init, "reasoning_router_integrated", "package resilient-router facade"),
+        (synth, "OfflineEvidenceReasoner", "deterministic evidence fallback"),
+        (synth, "PresentationGuard", "presentation guard"),
+        (orchestrator, "extractive_summary(question, pack)", "orchestrator no-model fallback"),
+        (status, "deterministic", "runtime fallback readiness"),
+    )
+    for text, needle, label in expectations:
+        if needle not in text:
+            missing.append(label)
+    return AuditCheck(
+        name="resilience:quota-does-not-blank-answer",
+        passed=not missing,
+        detail="provider + local/deterministic fallbacks wired" if not missing else "missing: " + ", ".join(missing),
+    )
+
+
+def _storage_fail_closed() -> AuditCheck:
+    paths = _read("utils/storage_paths.py")
+    quota = _read("utils/storage_quota.py")
+    jobs = _read("utils/research_jobs.py")
+    process_lock = _read("utils/process_lock.py")
+    archive = _read("utils/archive_manifest.py") + _read("utils/cloud_storage.py")
+    required = [
+        (paths, "INFINITY_DATA_ROOT", "central storage root"),
+        (quota, "INFINITY_MIN_FREE_GB", "minimum free-space guard"),
+        (jobs, "RESEARCH_JOB_RESULT_MAX_MB", "job result cap"),
+        (process_lock, "process", "single-writer/process lock"),
+        (archive, "verified", "verified cloud lifecycle"),
+    ]
+    missing = [label for text, needle, label in required if needle not in text]
+    return AuditCheck(
+        name="storage:bounded-and-verified",
+        passed=not missing,
+        detail="bounded durable storage invariants present" if not missing else "missing: " + ", ".join(missing),
+    )
+
+
+def _obvious_secret_scan() -> AuditCheck:
+    """Catch obvious real credential literals in production files.
+
+    This is intentionally conservative and excludes tests/docs/examples so fake
+    fixtures such as `gsk_test` do not make the release gate noisy.  It is not a
+    full secret scanner and never claims to be one.
+    """
+    production_roots = [ROOT / "research_engine", ROOT / "api", ROOT / "utils", ROOT / "storage"]
+    files: List[Path] = [ROOT / "main.py"]
+    for base in production_roots:
+        if base.is_dir():
+            files.extend(path for path in base.rglob("*.py") if path.is_file())
+
+    patterns = {
+        "google-like": re.compile(r"AIza[0-9A-Za-z_-]{25,}"),
+        "openai-like": re.compile(r"sk-[0-9A-Za-z_-]{20,}"),
+        "groq-like": re.compile(r"gsk_[0-9A-Za-z_-]{20,}"),
+        "openrouter-like": re.compile(r"sk-or-v1-[0-9A-Za-z]{20,}"),
+    }
+    hits: List[str] = []
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        for name, pattern in patterns.items():
+            if pattern.search(text):
+                hits.append(f"{path.relative_to(ROOT).as_posix()}:{name}")
+    return AuditCheck(
+        name="security:no-obvious-credential-literals",
+        passed=not hits,
+        detail="no obvious credential literal found" if not hits else "hits: " + ", ".join(hits[:10]),
+    )
+
+
+def run_audit() -> AuditReport:
+    required = (
+        "main.py",
+        "research_engine/orchestrator.py",
+        "research_engine/source_discovery.py",
+        "research_engine/content_fetcher.py",
+        "research_engine/evidence.py",
+        "research_engine/claim_verification.py",
+        "research_engine/contradiction.py",
+        "research_engine/gemini_reasoning.py",
+        "research_engine/reasoning_router.py",
+        "research_engine/reasoning_router_integrated.py",
+        "research_engine/offline_reasoner.py",
+        "research_engine/hypothesis.py",
+        "research_engine/verification.py",
+        "research_engine/synthesizer.py",
+        "research_engine/presentation_guard.py",
+        "utils/zero_cost_guard.py",
+        "utils/request_guard.py",
+        "utils/research_jobs.py",
+        "utils/storage_paths.py",
+        "utils/storage_quota.py",
+        "tests/test_relevance_domain.py",
+        "tests/test_claim_verification.py",
+        "tests/test_reasoning_router_integration.py",
+        "tests/test_offline_reasoner.py",
+        "tests/benchmark_superconductivity.py",
+    )
+
+    checks = [
+        _required_files(required),
+        _contains(
+            "main.py",
+            "enforce_zero_cost_config()",
+            "protect_free_quota",
+            "include_router",
+            "reasoning_status",
+        ),
+        _contains(
+            "research_engine/orchestrator.py",
+            "self._discover(",
+            "self._run_passes(",
+            "verify_claims(",
+            "self.citations.verify(",
+            "self.verifier.verify(",
+            "self.synthesizer.assemble(",
+        ),
+        _ordered(
+            "research_engine/orchestrator.py",
+            (
+                ("discover", "self._discover("),
+                ("reason", "self._run_passes("),
+                ("claim-check", "verify_claims("),
+                ("citation-check", "self.citations.verify("),
+                ("verification", "self.verifier.verify("),
+                ("synthesis", "self.synthesizer.assemble("),
+            ),
+        ),
+        _zero_cost_chain(),
+        _fallback_wired(),
+        _storage_fail_closed(),
+        _no_wildcard_cors(),
+        _obvious_secret_scan(),
+        _contains(
+            ".github/workflows/foundation-tests.yml",
+            "ubuntu-latest",
+            "scripts/run_foundation_gate.py",
+        ),
+        _contains(
+            "scripts/run_foundation_gate.py",
+            "benchmark_superconductivity_v2",
+            "test_reasoning_router_integration.py",
+            "test_offline_reasoner.py",
+        ),
+    ]
+    failed = [check.name for check in checks if not check.passed]
+    return AuditReport(
+        schema_version=1,
+        passed=not failed,
+        checks=[asdict(check) for check in checks],
+        failed=failed,
+    )
+
+
+def _write_json(path: Path, report: AuditReport) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(asdict(report), ensure_ascii=False, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="Audit production research-engine wiring and safety invariants.")
+    parser.add_argument("--json", dest="json_path", help="Optional JSON report path.")
+    args = parser.parse_args(argv)
+
+    report = run_audit()
+    for row in report.checks:
+        marker = "PASS" if row["passed"] else "FAIL"
+        print(f"[{marker}] {row['name']}: {row['detail']}")
+    if args.json_path:
+        _write_json(Path(args.json_path).expanduser().resolve(), report)
+        print(f"Architecture audit JSON: {Path(args.json_path).expanduser().resolve()}")
+    print("ARCHITECTURE AUDIT: " + ("PASS" if report.passed else "FAIL"))
+    return 0 if report.passed else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
