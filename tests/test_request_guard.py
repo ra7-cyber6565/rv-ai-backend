@@ -93,8 +93,16 @@ def test_unknown_post_endpoint_is_not_limited():
     assert limit_for("POST", "/health") is None
 
 
-def test_expensive_post_endpoints_are_guarded():
+def test_session_creation_is_bounded_even_though_it_uses_no_model_quota():
+    limit = limit_for("POST", "/api/v1/session")
+    assert limit is not None
+    assert limit.window_seconds == 3600
+    assert limit.requests >= 1
+
+
+def test_expensive_or_namespace_minting_post_endpoints_are_guarded():
     for path in (
+        "/api/v1/session",
         "/api/v1/chat",
         "/api/v1/ask",
         "/api/v1/deep-research",
