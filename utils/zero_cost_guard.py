@@ -1,21 +1,23 @@
 """Hard guardrails for the project's zero-cost runtime policy.
 
 The app owner requires that normal runtime must not silently use paid AI APIs.
-Known paid-provider credentials are blocked outright. Gemini is different: the
-same API key can belong to a project with a free/no-billing setup or to a
-billing-enabled project. Code cannot reliably query that billing state from the
-generative API, so ZERO_COST_ONLY requires an explicit owner confirmation before
-a Gemini key is allowed at all.
+Known paid-provider credentials are blocked outright. Gemini and Groq keys can
+belong to free or billing-enabled projects/accounts, so ZERO_COST_ONLY requires
+an explicit owner confirmation before either can be used. OpenRouter is allowed
+only through its explicit free router / ``:free`` model variants. Local Ollama
+is allowed only on localhost so a remote paid inference endpoint cannot be
+silently disguised as "Ollama".
 
 This is still not a billing oracle. Provider/model routing and request budgets
-must separately stay conservative, and the confirmation must only be set after
-checking that the Google project has no paid billing/spend path enabled.
+must separately stay conservative, and confirmations must only be set after the
+corresponding account/project is verified to have no paid spend path.
 """
 from __future__ import annotations
 
 import os
 from dataclasses import dataclass
 from typing import Mapping
+from urllib.parse import urlparse
 
 
 TRUTHY = {"1", "true", "yes", "on"}
@@ -25,9 +27,10 @@ FORBIDDEN_IN_ZERO_COST_MODE = (
     "ANTHROPIC_API_KEY",
 )
 
-# Synthetic guard name shown in startup errors. This is not a secret/env key;
-# it explains exactly what must be confirmed before Gemini can run.
 _GEMINI_UNCONFIRMED = "GEMINI_API_KEY (GEMINI_ZERO_COST_CONFIRMED missing/false)"
+_GROQ_UNCONFIRMED = "GROQ_API_KEY (GROQ_ZERO_COST_CONFIRMED missing/false)"
+_OPENROUTER_NONFREE = "OPENROUTER_API_KEY (OPENROUTER_MODEL is not free-only)"
+_REMOTE_OLLAMA = "OLLAMA_BASE_URL (ZERO_COST_ONLY permits localhost only)"
 
 
 @dataclass(frozen=True)
@@ -42,6 +45,22 @@ class ZeroCostStatus:
 
 def _truthy(value: object) -> bool:
     return str(value or "").strip().lower() in TRUTHY
+
+
+def _openrouter_model_is_free(model: object) -> bool:
+    value = str(model or "openrouter/free").strip().lower()
+    return value == "openrouter/free" or value.endswith(":free")
+
+
+def _ollama_is_local(value: object) -> bool:
+    raw = str(value or "http://127.0.0.1:11434").strip()
+    try:
+        parsed = urlparse(raw)
+        return parsed.scheme in {"http", "https"} and parsed.hostname in {
+            "127.0.0.1", "localhost", "::1"
+        }
+    except Exception:
+        return False
 
 
 def zero_cost_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -65,6 +84,19 @@ def inspect_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostSt
     if gemini_key and not _truthy(source.get("GEMINI_ZERO_COST_CONFIRMED", "")):
         blocked.append(_GEMINI_UNCONFIRMED)
 
+    groq_key = str(source.get("GROQ_API_KEY", "")).strip()
+    if groq_key and not _truthy(source.get("GROQ_ZERO_COST_CONFIRMED", "")):
+        blocked.append(_GROQ_UNCONFIRMED)
+
+    openrouter_key = str(source.get("OPENROUTER_API_KEY", "")).strip()
+    if openrouter_key and not _openrouter_model_is_free(source.get("OPENROUTER_MODEL")):
+        blocked.append(_OPENROUTER_NONFREE)
+
+    if _truthy(source.get("OLLAMA_ENABLED", "")) and not _ollama_is_local(
+        source.get("OLLAMA_BASE_URL")
+    ):
+        blocked.append(_REMOTE_OLLAMA)
+
     return ZeroCostStatus(enabled=True, blocked_keys=tuple(blocked))
 
 
@@ -73,13 +105,24 @@ def enforce_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostSt
     status = inspect_zero_cost_config(env)
     if status.blocked_keys:
         joined = ", ".join(status.blocked_keys)
-        extra = ""
+        hints = []
         if _GEMINI_UNCONFIRMED in status.blocked_keys:
-            extra = (
-                " For Gemini, set GEMINI_ZERO_COST_CONFIRMED=true only after you "
-                "have verified that the Google project/key has no paid billing/spend "
-                "path enabled; otherwise leave Gemini disabled."
+            hints.append(
+                "Gemini confirmation tabhi true karein jab Google project par paid billing/spend path disabled verify ho."
             )
+        if _GROQ_UNCONFIRMED in status.blocked_keys:
+            hints.append(
+                "Groq confirmation tabhi true karein jab key Free plan/no-billing account ki ho."
+            )
+        if _OPENROUTER_NONFREE in status.blocked_keys:
+            hints.append(
+                "OpenRouter model ko openrouter/free ya explicit :free variant par rakhein."
+            )
+        if _REMOTE_OLLAMA in status.blocked_keys:
+            hints.append(
+                "ZERO_COST_ONLY mein Ollama ko localhost par hi chalaya ja sakta hai."
+            )
+        extra = (" " + " ".join(hints)) if hints else ""
         raise RuntimeError(
             "ZERO_COST_ONLY is enabled, but unsafe/unconfirmed AI credential "
             f"configuration was found: {joined}.{extra}"
