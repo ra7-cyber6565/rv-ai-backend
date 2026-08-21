@@ -20,6 +20,7 @@ from typing import Dict, List, Optional
 from .citation import CITATION_INSTRUCTION
 from .claim_labels import LABEL_RULE_PROMPT
 from .explain_style import style_block
+from .key_pool import KeyPool
 from .model_errors import AUTH, DAILY_QUOTA, FailureLedger
 from .model_errors import classify as classify_error
 from .models import EvidencePack
@@ -51,6 +52,19 @@ _ROLE_HONESTY = (
 _BACKOFF_SECONDS = (1.5, 4.0)      # ek pass ke andar max ~6s rukte hain
 _MAX_SLEEP_SECONDS = 6.0           # server 21s maange to bhi itna hi rukte hain
 _MAX_MODELS = 4                    # pehla + teen fallback (quota per model hota hai)
+
+# ── §8 backup FREE keys (2026-08-21 ki demand) ───────────────────────────────
+# intel: "gimini ko call krte h to quta khatam ho jaata h ... iska quta khatam ho
+# gya, ye kaam nhi kiya, iss wajah se jawab thoda week rah gya."
+#
+# Model rotation (upar) sirf tab bachaata hai jab quota PER MODEL khatam ho. Par
+# free tier ki asli deewar `GenerateRequestsPerDayPerProject` hai — us halat mein
+# us KEY ke saare model ek saath band ho jaate hain. Uska ek hi ₹0 ilaaj hai:
+# doosri FREE key (alag AI Studio project) par shift kar jaana — `key_pool.py`.
+#
+# Do niyam pakke hain:
+#   * key badalna RETRY NAHI hai — §14 ka hisaab isse alag ginta hai.
+#   * key ki VALUE kabhi note/error/audit mein nahi jaati, sirf "free key #2".
 
 
 def _classify(exc: Exception) -> str:
@@ -88,6 +102,10 @@ class GeminiReasoning:
         # batata hai; ye list "mila ya nahi" batati hai. Purane audit mein
         # "3/3 reasoning pass" chhapta tha jabki teeno khaali laut sakte the.
         self.pass_log: List[Dict] = []
+        # §8 — free key ki kataar. Ek hi key ho to `has_backup()` hamesha False
+        # rehta hai, isliye purana behaviour bilkul waisa hi chalta hai.
+        self.keys = KeyPool()
+        self.key_switches = 0                # doosri FREE key par kitni baar gaye
 
     # ── model access (lazy) ──────────────────────────────────────────────────
     def model(self):
@@ -95,10 +113,14 @@ class GeminiReasoning:
             import google.generativeai as genai  # lazy — import sasta rahe
             from dotenv import load_dotenv
 
-            from .gemini_model import resolve
+            from .gemini_model import configure, resolve
 
             load_dotenv()
-            genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
+            if not self.keys.has_key():
+                # .env ab load hui hai — ho sakta hai key ab dikhe (constructor
+                # ke waqt process env khaali tha).
+                self.keys = KeyPool()
+            configure(genai, self.keys.active())
             # Hard-coded naam ("gemini-flash-latest") kai keys par maujood nahi
             # hota aur Google InvalidArgument/NotFound bhej deta hai. Isliye
             # naam Google ki asli list se chunte hain. GEMINI_MODEL env set ho
@@ -107,6 +129,48 @@ class GeminiReasoning:
                 self.model_name = resolve(genai)
             self._model = genai.GenerativeModel(self.model_name)
         return self._model
+
+    # ── §8: agli FREE key par shift ──────────────────────────────────────────
+    def _switch_key(self, tag: str, reason: str = "quota") -> bool:
+        """
+        Agli free key par jao. True tabhi jab sach mein ek aur key thi.
+
+        Naye key par purani key ki poori memory bekaar hai: kaunsa model band
+        tha, kaunsa naam 404 de raha tha, auth fail hua tha — ye sab key ke saath
+        badalta hai. Isliye sab saaf karke naye sire se model resolve karte hain.
+        """
+        if not self.keys.has_backup():
+            return False
+        dead = self.keys.label()
+        if not self.keys.advance(reason):
+            return False
+        self.key_switches += 1
+        # is key ke faisle purani key ke the — bhula do
+        self.blocked.clear()
+        self.stopped = False
+        self._model = None
+        self.model_name = MODEL_NAME
+        try:
+            from .gemini_model import reset_for_new_key
+            reset_for_new_key()
+        except Exception:                      # noqa: BLE001
+            pass
+        try:
+            import google.generativeai as genai
+
+            from .gemini_model import configure, resolve
+
+            configure(genai, self.keys.active())
+            self.model_name = resolve(genai, force=True)
+            self._model = genai.GenerativeModel(self.model_name)
+        except Exception as exc:               # noqa: BLE001 — kabhi crash nahi
+            self.errors.append(f"{tag}: nayi free key par model setup: "
+                               f"{type(exc).__name__}: {exc}")
+            self._model = None
+        # NOTE: yahan sirf LABEL jaata hai, key ki value kabhi nahi.
+        self.notes.append(f"{tag}: {dead} ki free limit khatam thi — "
+                          f"{self.keys.label()} par shift kiya (ye retry nahi hai)")
+        return True
 
     def _model_order(self) -> List[str]:
         """Pehla = abhi ka model, uske baad gemini_model ke fallbacks."""
@@ -204,7 +268,7 @@ class GeminiReasoning:
 
     def _generate(self, prompt: str, label: str = "") -> str:
         """
-        Asli call loop.
+        Asli call loop — do parat: bahar KEY, andar MODEL.
 
         Budget LOGICAL calls ka hai (pass ka), retry us budget ko nahi khaata:
         warna ek 429 phir se poora pass kha jaata. Budget khatam ho to
@@ -213,6 +277,11 @@ class GeminiReasoning:
 
         §7 ke baad: kitni koshish honi hai, ye error ka MATLAB decide karta hai
         (model_errors.classify), andha 3-retry loop nahi.
+
+        §8 ke baad: agar is key par SAB model gir gaye (din ka quota / auth), to
+        hum ek aur FREE key par shift karke poora model-cycle dobara chalate hain.
+        Ek hi key wale setup mein `has_backup()` False hota hai, isliye kuch nahi
+        badalta.
         """
         if self.remaining <= 0:
             raise QuotaExhausted(f"call budget ({self.budget}) khatam — '{label}' skip hua")
@@ -225,19 +294,48 @@ class GeminiReasoning:
                                f"aur koshish nahi ki gayi")
             return ""
 
+        # ek pass ke andar zyada se zyada itni key try hongi (kataar ki lambai)
+        for _ in range(max(1, self.keys.count)):
+            text, key_level = self._one_key_cycle(prompt, tag)
+            if text:
+                return text
+            if not key_level:
+                # dikkat key ki nahi thi (safety block, khaali jawab, setup) —
+                # nayi key bhi wahi jawab degi, isliye key barbaad mat karo
+                return ""
+            if not self._switch_key(tag, "free limit khatam"):
+                if self.keys.count > 1:
+                    self.notes.append(
+                        f"{tag}: saari {self.keys.count} free keys ki limit "
+                        f"khatam ho gayi — ab engine ka apna offline reasoning "
+                        f"chalega")
+                return ""
+        return ""
+
+    def _one_key_cycle(self, prompt: str, tag: str):
+        """
+        EK key par poora model-cycle. Lautata hai `(text, key_level_failure)`.
+
+        `key_level_failure=True` ka matlab: jo gira wo MODEL ki galti nahi, is
+        KEY ki hadd thi (din ka quota / auth / is key par koi model bacha nahi).
+        Sirf us halat mein doosri key try karna samajhdaari hai.
+        """
+        key_level = False
         first_model = self.model_name
         try:
             self.model()                        # lazy resolve, taaki naam asli ho
         except Exception as exc:                # noqa: BLE001
             self.errors.append(f"{tag} failed: model setup: "
                                f"{type(exc).__name__}: {exc}")
-            return ""
+            return "", False
 
         order = self._usable_models()
         if not order:
             self.errors.append(f"{tag} skip: is run mein koi model bacha hi nahi "
                                f"(band: {', '.join(sorted(self.blocked)) or '-'})")
-            return ""
+            # is key par kuch nahi bacha — doosri key par sab model phir zinda
+            # ho sakte hain (quota per project hota hai)
+            return "", bool(self.blocked)
 
         for model_index, name in enumerate(order):
             if name not in self.models_tried:
@@ -273,7 +371,7 @@ class GeminiReasoning:
                             f"'{name}' par chala")
                     elif attempt:
                         self.notes.append(f"{tag}: {attempt + 1} koshish ke baad chala")
-                    return text
+                    return text, False
                 except Exception as exc:        # noqa: BLE001
                     v = classify_error(exc)
                     self.ledger.add(name, tag, v, attempt=attempt + 1)
@@ -281,10 +379,11 @@ class GeminiReasoning:
                         f"{tag} failed (model={name}, try={attempt + 1}, "
                         f"{v.kind}): {type(exc).__name__}: {exc}")
 
-                    if v.stop_all:              # auth — sab band
+                    if v.stop_all:              # auth — is key par sab band
                         self.stopped = True
                         self.notes.append(f"{tag}: {v.human} — aage koshish rok di")
-                        return ""
+                        # key hi galat/band hai: doosri free key kaam kar sakti hai
+                        return "", True
                     if v.permanent:
                         try:
                             from .gemini_model import mark_dead
@@ -293,6 +392,10 @@ class GeminiReasoning:
                             pass
                     if v.disable_model:
                         self.blocked[name] = v.kind
+                        # din ka quota is KEY/PROJECT ka hai — isliye ye key-level
+                        # ishaara hai (doosri key par wahi model chal sakta hai)
+                        if v.kind == DAILY_QUOTA:
+                            key_level = True
                         self.notes.append(
                             f"{tag}: '{name}' {v.human} — is run mein isse "
                             f"dobara nahi poochha jaayega")
@@ -313,7 +416,7 @@ class GeminiReasoning:
                         self.same_model_retries += 1
                         continue
                     break                       # is model par bas — agla model
-        return ""
+        return "", key_level
 
     # ── §14: pass-level sach (maanga vs mila) ────────────────────────────────
     def passes_with_output(self) -> int:
@@ -345,6 +448,11 @@ class GeminiReasoning:
             # Ye jaan-boojh kar "retry" nahi kehta: doosre model par jaana retry
             # nahi hai, aur pehle audit dono ko ek hi number mein mila deta tha.
             bits.append(f"{self.switched_models} baar doosre model par shift karna pada")
+        if self.key_switches:
+            # §8 — key badalna bhi "retry" NAHI hai. Aur yahan sirf ginti aur
+            # label jaata hai, key ki value kabhi nahi.
+            bits.append(f"{self.key_switches} baar backup free key par shift karna "
+                        f"pada (abhi {self.keys.label()})")
         if self.errors:
             bits.append(f"{len(self.errors)} error aaye")
         if self.blocked:
@@ -397,6 +505,17 @@ class GeminiReasoning:
             "retries": self.same_model_retries,
             "models_tried": list(self.models_tried),
             "model_switches": self.switched_models,
+            # §8 — free key ka hisaab. `key_switches` ko kabhi "retry" mat
+            # padho: nayi key par jaana pehli koshish hoti hai, dobari nahi.
+            # Isliye identity ab ye hai:
+            #   actual_http_attempts
+            #     == (1 + key_switches) + same_model_retries + model_switches
+            # Ek hi key wale setup mein key_switches = 0, yaani purana formula
+            # jaisa ka waisa.
+            "keys_available": self.keys.count,
+            "key_switches": self.key_switches,
+            "active_key": self.keys.label(),      # sirf label — value kabhi nahi
+            "keys_note": self.keys.note(),
             "blocked_models": dict(self.blocked),
             "failure_kinds": self.ledger.kinds(),
             "failure_summary": self.ledger.summary(),
