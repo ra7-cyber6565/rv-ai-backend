@@ -60,22 +60,45 @@ app.add_middleware(
     ],
 )
 
+_WEB_CSP = (
+    "default-src 'self'; "
+    "base-uri 'none'; object-src 'none'; frame-ancestors 'none'; "
+    "form-action 'self'; connect-src 'self'; "
+    "img-src 'self' data: https:; font-src 'self' data:; "
+    "script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'"
+)
+
 
 def _harden_response(response, path: str):
-    """Attach cheap privacy/security headers without exposing capability data.
+    """Attach privacy/security headers without exposing capability data.
 
-    `/api/v1` includes responses that can contain newly-issued project/job bearer
-    capabilities, research text, document metadata and private progress. Custom
-    bearer headers are not the same as standard HTTP Authorization semantics for
-    every intermediary, so explicitly forbid caching instead of trusting proxies
-    or browser defaults. This also covers validation/rate-limit responses.
+    `/api/v1` can contain newly-issued project/job bearer capabilities, research
+    text and private progress. Custom bearer headers are not guaranteed to get
+    Authorization-like cache treatment from every intermediary, so private API
+    responses are explicitly non-cacheable.
+
+    The shipped `/` client only needs same-origin network calls. Its CSP blocks
+    remote scripts, frames, objects, forms and unexpected network destinations.
+    Inline script/style are currently required by the deliberately small
+    single-file client; external source links are separately allowlisted to
+    http/https before the browser makes them clickable.
     """
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
-    if str(path or "").startswith("/api/v1/"):
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+    )
+    response.headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    normalized = str(path or "")
+    if normalized.startswith("/api/v1/"):
         response.headers["Cache-Control"] = "no-store, max-age=0"
         response.headers["Pragma"] = "no-cache"
+        response.headers.setdefault("X-Robots-Tag", "noindex, nofollow, noarchive")
+    if normalized == "/":
+        response.headers.setdefault("Content-Security-Policy", _WEB_CSP)
+        response.headers.setdefault("Cache-Control", "no-store, max-age=0")
     return response
 
 
