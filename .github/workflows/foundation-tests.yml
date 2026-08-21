@@ -42,7 +42,7 @@ jobs:
       - name: Compile Python sources
         run: python -m compileall -q .
 
-      - name: Run infrastructure regression
+      - name: Run infrastructure and zero-cost regression
         run: |
           pytest -q \
             tests/test_upload_safety.py \
@@ -50,6 +50,7 @@ jobs:
             tests/test_storage_paths.py \
             tests/test_storage_quota.py \
             tests/test_archive_manifest.py \
+            tests/test_archive_manifest_concurrency.py \
             tests/test_archive_retry.py \
             tests/test_cloud_storage.py \
             tests/test_cloud_archive.py \
@@ -60,6 +61,26 @@ jobs:
             tests/test_security_config.py \
             tests/test_request_guard.py \
             tests/test_research_jobs.py
+
+      - name: Independently test Claude research hardening
+        run: |
+          pytest -q \
+            tests/test_relevance_domain.py \
+            tests/test_pdf_chunking.py \
+            tests/test_consensus_gate.py \
+            tests/test_gemini_retry.py \
+            tests/test_pipeline_offline.py \
+            tests/test_answer_structure.py \
+            tests/test_claim_labels.py \
+            tests/test_evidence_honesty.py \
+            tests/test_explain_style.py \
+            tests/test_domain_guardrails.py
+
+      - name: Run claim evidence verification A-E
+        run: pytest -q tests/test_evidence_verification.py
+
+      - name: Run user's human-first presentation contract
+        run: pytest -q tests/test_user_presentation_contract.py
 
       - name: Run core offline regression
         run: python test_research_engine.py
