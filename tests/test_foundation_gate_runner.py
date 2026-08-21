@@ -62,6 +62,7 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "tests/test_reasoning_router.py" in focused_command
     assert "tests/test_reasoning_router_integration.py" in focused_command
     assert "tests/test_reasoning_zero_cost.py" in focused_command
+    assert "tests/test_provider_health.py" in focused_command
     assert "tests/test_offline_reasoner.py" in focused_command
     assert "tests/test_reasoning_status.py" in focused_command
     assert "tests/test_quick_chat_resilience.py" in focused_command
