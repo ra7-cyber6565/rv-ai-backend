@@ -1,4 +1,4 @@
-"""Integration tests: Claude pass accounting + ChatGPT free-provider fallback.
+"""Integration tests: Gemini/key accounting + ChatGPT free-provider fallback.
 
 Pure offline: fake Gemini/fallback providers only. No API key/network call.
 """
@@ -57,18 +57,31 @@ def quota_failure(provider: str, model: str) -> ProviderResult:
         attempts=1,
         kind="quota",
         human="free quota abhi available nahi",
-        technical=f"HTTP 429 private-{provider}-quota-detail",
+        technical=f"HTTP 429 private-{provider}-quota-detail protobuf SECRET",
         block_for_run=True,
     )
+
+
+def _clear_backup_keys(monkeypatch) -> None:
+    names = [
+        "GEMINI_API_KEY_BACKUP", "GEMINI_API_KEY_FALLBACK",
+        "GEMINI_API_KEYS", "GEMINI_API_KEY_LIST", "GEMINI_BACKUP_KEYS",
+    ]
+    names += [f"GEMINI_API_KEY_{i}" for i in range(2, 10)]
+    names += [f"GEMINI_API_KEY{i}" for i in range(2, 10)]
+    for name in names:
+        monkeypatch.delenv(name, raising=False)
 
 
 def _force_no_gemini(monkeypatch) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.delenv("GEMINI_ZERO_COST_CONFIRMED", raising=False)
+    _clear_backup_keys(monkeypatch)
     monkeypatch.setenv("ZERO_COST_ONLY", "true")
 
 
 def _force_fake_gemini(monkeypatch, brain: ResilientReasoning, script) -> FakeGeminiModel:
+    _clear_backup_keys(monkeypatch)
     monkeypatch.setenv("ZERO_COST_ONLY", "true")
     monkeypatch.setenv("GEMINI_API_KEY", "test-key-never-sent")
     monkeypatch.setenv("GEMINI_ZERO_COST_CONFIRMED", "true")
@@ -82,6 +95,20 @@ def _force_fake_gemini(monkeypatch, brain: ResilientReasoning, script) -> FakeGe
 
 def test_package_runtime_uses_integrated_router():
     assert gemini_reasoning.GeminiReasoning is ResilientReasoning
+
+
+def test_confirmed_backup_only_gemini_is_allowed_by_integrated_router(monkeypatch):
+    _force_no_gemini(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEY_2", "backup-secret")
+    monkeypatch.setenv("GEMINI_ZERO_COST_CONFIRMED", "true")
+    assert ResilientReasoning._gemini_allowed() is True
+
+
+def test_unconfirmed_backup_only_gemini_is_blocked_by_integrated_router(monkeypatch):
+    _force_no_gemini(monkeypatch)
+    monkeypatch.setenv("GEMINI_API_KEYS", "backup-secret")
+    monkeypatch.setenv("GEMINI_ZERO_COST_CONFIRMED", "false")
+    assert ResilientReasoning._gemini_allowed() is False
 
 
 def test_no_gemini_key_fallback_success_is_one_completed_logical_pass(monkeypatch):
@@ -151,7 +178,7 @@ def test_dead_gemini_is_not_retried_on_next_logical_pass(monkeypatch):
     assert all(row["ok"] for row in acc["pass_log"])
 
 
-def test_all_backups_exhausted_records_incomplete_pass_without_raw_user_error(monkeypatch):
+def test_all_backups_exhausted_records_incomplete_pass_without_raw_user_or_audit_error(monkeypatch):
     _force_no_gemini(monkeypatch)
     a = FakeProvider("groq", "free-a", [quota_failure("groq", "free-a")])
     b = FakeProvider("openrouter", "openrouter/free", [
@@ -171,9 +198,11 @@ def test_all_backups_exhausted_records_incomplete_pass_without_raw_user_error(mo
     user_errors = " ".join(brain.errors)
     assert "HTTP 429" not in user_errors
     assert "private-" not in user_errors
-    developer_details = " ".join(brain.technical_details())
-    assert "private-groq" in developer_details
-    assert "private-openrouter" in developer_details
+    public_details = " ".join(brain.technical_details())
+    for raw in ("HTTP 429", "private-groq", "private-openrouter", "protobuf", "SECRET"):
+        assert raw not in public_details
+    assert "provider:groq: quota" in public_details
+    assert "provider:openrouter: quota" in public_details
 
 
 def test_provider_fallback_is_never_counted_as_same_model_retry(monkeypatch):
