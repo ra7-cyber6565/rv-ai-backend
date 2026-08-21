@@ -7,7 +7,8 @@ from research_engine.verification import VerificationEngine
 
 
 def _source(*, snippet: str, read_level: str = "full_text", relevance: float = 0.9,
-            quality: float = 0.8, retracted: bool = False, source_id: str = "S1") -> SourceRecord:
+            quality: float = 0.8, retracted: bool = False, source_id: str = "S1",
+            year: int | None = None) -> SourceRecord:
     s = SourceRecord(
         title="Urban density and car travel",
         url="https://example.org/paper",
@@ -18,6 +19,7 @@ def _source(*, snippet: str, read_level: str = "full_text", relevance: float = 0
         relevance_score=relevance,
         quality_score=quality,
         retracted=retracted,
+        year=year,
     )
     s.source_id = source_id
     s.full_text_chars = len(snippet) if read_level == "full_text" else 0
@@ -44,6 +46,27 @@ def test_strong_fact_passes_only_when_citation_relevance_support_depth_and_quali
     assert all(value is True for value in report.checks.values())
 
 
+def test_percent_word_and_percent_symbol_are_normalized():
+    source = _source(snippet="Car travel fell by 30 percent with higher urban density.")
+    report = EvidenceVerifier().verify(
+        "[FACT] Higher urban density was linked to 30% lower car travel [S1].",
+        _pack(source),
+    )
+    assert report.items[0].source_checks[0]["numeric_match"] is True
+
+
+def test_publication_year_in_structured_metadata_does_not_false_fail_numeric_gate():
+    source = _source(
+        snippet="Higher urban density reduces per-capita car travel in the reported analysis.",
+        year=2021,
+    )
+    report = EvidenceVerifier().verify(
+        "[FACT] A 2021 study reports lower per-capita car travel with higher urban density [S1].",
+        _pack(source),
+    )
+    assert report.items[0].source_checks[0]["numeric_match"] is True
+
+
 def test_valid_citation_does_not_hide_wrong_numeric_claim():
     source = _source(
         snippet="Higher urban density reduces per-capita car travel by 30 percent in the studied cities."
@@ -54,6 +77,29 @@ def test_valid_citation_does_not_hide_wrong_numeric_claim():
     assert report.items[0].citation is True
     assert report.items[0].support is False
     assert report.checks["C_support"] is False
+
+
+def test_obvious_direction_reversal_fails_support_even_with_same_keywords():
+    source = _source(
+        snippet="Higher urban density reduces and lowers per-capita car travel in the studied cities."
+    )
+    report = EvidenceVerifier().verify(
+        "[FACT] Higher urban density increases per-capita car travel [S1].",
+        _pack(source),
+    )
+    assert report.items[0].support is False
+    assert report.gate_passed is False
+
+
+def test_hinglish_paraphrase_with_shared_technical_terms_is_not_blindly_rejected():
+    source = _source(
+        snippet="Higher urban density reduces per-capita car travel in the reported analysis."
+    )
+    report = EvidenceVerifier().verify(
+        "[FACT] Urban density badhne par per-capita car travel kam hota hai [S1].",
+        _pack(source),
+    )
+    assert report.items[0].support is not False
 
 
 def test_off_topic_source_with_real_id_fails_relevance_and_support_gate():
