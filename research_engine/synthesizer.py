@@ -334,12 +334,20 @@ Ab jawab likho:"""
         return "\n\n".join(blocks)
 
     # ── §6: hypothesis ko bacche ko samjhane wale tarike se likho ────────────
+    # `fallback` 2026-08-21 (point 10) mein juda: LLM quota/error se mar jaaye to
+    # yahan pehle khaali "hypothesis nahi bani" line jaati thi. Ab uski jagah
+    # system ka khud banaya research plan (`hypothesis.fallback_plan()`) chhapta
+    # hai — wo AI hypothesis nahi hai aur khud ko hypothesis bolta bhi nahi.
     def _hypothesis_section(self, hypotheses: List[Dict],
                             requests: Optional[Dict] = None,
                             reasons: Optional[List[str]] = None,
-                            pack: Optional[EvidencePack] = None) -> str:
+                            pack: Optional[EvidencePack] = None,
+                            fallback: Optional[Dict] = None) -> str:
         requests = requests or {}
         asked = int(requests.get("hypothesis_count") or 0)
+        plan_text = ""
+        if isinstance(fallback, dict) and not fallback.get("is_hypothesis", False):
+            plan_text = str(fallback.get("text") or "").strip()
         if not hypotheses:
             # Purani report yahan likhti thi: "nayi hypothesis generate nahi ki
             # gayi (zaroorat nahi thi)". Jab user ne saaf-saaf 3 maangi thi, wo
@@ -348,12 +356,15 @@ Ab jawab likho:"""
                 why = "; ".join(str(r) for r in (reasons or [])[:3]) \
                     or "wajah record nahi hui"
                 target = f"{asked} " if asked else ""
-                return (f"❌ Aapne {target}nayi hypotheses maangi thi, lekin is run "
+                head = (f"❌ Aapne {target}nayi hypotheses maangi thi, lekin is run "
                         f"mein ek bhi poori nahi ban paayi. Ye \"zaroorat nahi thi\" "
                         f"wali baat nahi hai — zaroorat thi.\n\n"
                         f"**Asli wajah:** {why}\n\n"
                         f"Isliye is section ko adhoora maanein. Quota/error theek "
                         f"hone ke baad dobara chalane par ye ban jayengi.")
+                return f"{head}\n\n{plan_text}" if plan_text else head
+            if plan_text:
+                return plan_text
             return ("Is sawal par nayi hypothesis banane ki zaroorat nahi padi: "
                     "sources ke beech koi khaas disagreement nahi tha aur sawal "
                     "unsolved-research type ka nahi hai. Agar aap chahte hain to "
@@ -400,6 +411,17 @@ Ab jawab likho:"""
                 test_bits.append(f"Agar ye sahi hai to ye dikhna chahiye — {pred_text}")
             if test_bits:
                 body.append("**Isko test kaise karenge:** " + " ".join(test_bits))
+            # point 11: experiment aur falsification ab alag-alag dikhte hain.
+            # Pehle dono "how to test" ke andar mile-jule the, isliye user ko
+            # pata hi nahi chalta ki inme se kya missing hai.
+            experiment = str(h.get("experiment") or "").strip()
+            if experiment and experiment not in (h.get("how_to_test") or ""):
+                body.append("**Zaroori experiment / simulation:** "
+                            + self._join_prose(experiment))
+            falsify = str(h.get("falsification_test") or "").strip()
+            if falsify:
+                body.append("**Kaunsa result ise galat sabit kar dega:** "
+                            + self._join_prose(falsify))
             if h.get("if_true"):
                 body.append("**Agar ye sahi hua:** " + self._join_prose(h["if_true"]))
             if h.get("if_false"):
@@ -409,13 +431,42 @@ Ab jawab likho:"""
             if h.get("confidence_reasoning_based"):
                 body.append(f"**Kitna bharosa (sirf reasoning par, proof nahi):** "
                             f"{h['confidence_reasoning_based']}")
+            missing = [str(m) for m in (h.get("missing_fields") or []) if str(m).strip()]
+            if missing:
+                body.append("⚠️ **Is hypothesis mein ye cheezein nahi aayi:** "
+                            + ", ".join(missing)
+                            + ". Yaani ise poori tarah testable nahi maana ja sakta.")
             body.append(f"**Current status: {h.get('status', 'UNTESTED HYPOTHESIS')}** — "
                         f"abhi real-world test nahi hua.")
             blocks.append("\n\n".join(body))
         if asked and len(hypotheses) < asked:
             blocks.append(f"⚠️ Aapne {asked} maangi thi, {len(hypotheses)} ban paayi — "
                           f"isliye ye list adhoori hai.")
+        if plan_text:
+            # Kuch hypotheses bani par request poori nahi hui — tab poora
+            # "hypothesis nahi bani" wala block lagana galat hoga (bani to hai),
+            # isliye sirf khule sawaal + agla kadam jodte hain.
+            blocks.append(self._plan_tail(fallback))
         return "\n\n".join(blocks)
+
+    @staticmethod
+    def _plan_tail(fallback: Optional[Dict]) -> str:
+        data = fallback or {}
+        questions = [str(q).strip() for q in (data.get("questions") or [])
+                     if str(q).strip()]
+        steps = [str(s).strip() for s in (data.get("steps") or []) if str(s).strip()]
+        lines = ["**Jo is list ke baad bhi baaki hai** (ye system ne gina hai, "
+                 "AI ka idea nahi):"]
+        if questions:
+            lines.extend(f"- {q}" for q in questions[:5])
+        if steps:
+            lines.append("")
+            lines.append("**Agla kadam:**")
+            lines.extend(f"{i}. {s}" for i, s in enumerate(steps[:4], 1))
+        if str(data.get("note") or "").strip():
+            lines.append("")
+            lines.append(f"_{data['note']}_")
+        return "\n".join(lines)
 
     @staticmethod
     def _short_title(text: str, limit: int = 80) -> str:
@@ -623,7 +674,8 @@ Ab jawab likho:"""
         return "\n\n".join(parts)
 
     # ── §16 item 7: test kaise karenge ───────────────────────────────────────
-    def _test_section(self, hypotheses: List[Dict], verification: Dict) -> str:
+    def _test_section(self, hypotheses: List[Dict], verification: Dict,
+                      fallback: Optional[Dict] = None) -> str:
         lines: List[str] = []
         if hypotheses:
             lines.append("**Hypothesis-wise test plan:**")
@@ -631,9 +683,17 @@ Ab jawab likho:"""
                 bits: List[str] = []
                 if h.get("how_to_test"):
                     bits.append(self._join_prose(h["how_to_test"]))
+                # point 11: `experiment` alag field hai — test plan mein isse
+                # chhodna hi wo purani kami thi jisme "test kaise karein" ka
+                # jawab sirf ek line ka reh jaata tha.
+                if h.get("experiment") and h.get("experiment") != h.get("how_to_test"):
+                    bits.append(self._join_prose(str(h["experiment"])))
                 pred_text = self._prediction_text(h)
                 if pred_text:
                     bits.append(pred_text)
+                if h.get("falsification_test"):
+                    bits.append("Galat sabit karne wala result: "
+                                + self._join_prose(str(h["falsification_test"])))
                 if h.get("if_false"):
                     bits.append("Galat hone ka signal: "
                                 + self._join_prose(h["if_false"]))
@@ -647,6 +707,16 @@ Ab jawab likho:"""
             lines.append("**System ke hisaab se ye check hona zaroori hai:**")
             for test in required[:4]:
                 lines.append(test if test.startswith(("-", "*", "#")) else f"- {test}")
+        # point 10: hypothesis na bane (LLM quota/error) to bhi is section mein
+        # kaam ki cheez honi chahiye — system ka deterministic agla-kadam plan.
+        steps = [str(s).strip() for s in ((fallback or {}).get("steps") or [])
+                 if str(s).strip()] if not hypotheses else []
+        if steps:
+            lines.append("")
+            lines.append("**Nayi hypothesis nahi bani, isliye system ka agla-kadam "
+                         "plan (ye AI ka idea nahi, sources ki haalat se nikla hai):**")
+            for i, step in enumerate(steps, 1):
+                lines.append(f"{i}. {step}")
         if not lines:
             lines.append("Is jawab ke liye koi alag test plan nahi bana, kyunki nayi "
                          "hypothesis is run mein nahi bani.")
@@ -723,6 +793,16 @@ Ab jawab likho:"""
             "har factual baat ke saath source laga hai ya nahi",
         "cited sources retraction-free":
             "cite kiye gaye kaam mein koi wapas liya gaya (retracted) paper hai ya nahi",
+        # point 12 — maths/physics sanity checks
+        "physical limits":
+            "numbers kisi physical deewar (0 kelvin, light speed, 100%) ko todte "
+            "hain ya nahi",
+        "unit conversion":
+            "ek hi value do units mein likhi gayi ho to dono match karte hain ya nahi",
+        "comparison direction":
+            "'zyada/kam' wali tulna unit badalne ke baad bhi sahi rehti hai ya nahi",
+        "superconductivity range":
+            "Tc aur pressure aaj tak measure hui range ke andar hain ya nahi",
     }
     # Fail hone par label nahi, seedhi problem-wali baat likhni hai (§11 ka
     # GOOD example): "Ek number ki consistency mein problem mili hai..."
@@ -735,6 +815,14 @@ Ab jawab likho:"""
             "Kuch factual baatein kisi source se judi hui nahi hain",
         "cited sources retraction-free":
             "Cite kiye gaye kaam mein retraction ka signal mila",
+        "physical limits":
+            "Jawab ka ek number physical limit hi tod raha hai",
+        "unit conversion":
+            "Ek hi value do units mein alag-alag likhi gayi hai",
+        "comparison direction":
+            "Tulna ulti hai — unit convert karne par claim palat jaata hai",
+        "superconductivity range":
+            "Tc/pressure ka number aaj tak measure hui range se bahar hai",
     }
     _STATUS_WORDS = {
         "MATH ERROR FOUND": "Ek calculation galat nikli — detail neeche hai.",
@@ -812,6 +900,12 @@ Ab jawab likho:"""
             lines.append("**Khud check karne ke liye available data** (system ne inhe "
                          "verify nahi kiya, sirf raasta diya hai):")
             lines.extend(f"- {d}" for d in datasets[:6])
+        # point 12 — maths/physics sanity pass ka ek line ka honest summary.
+        # Non-quantitative sawal par ye jaan-boojh kar kuch nahi likhta.
+        physics = verification.get("physics") or {}
+        if physics.get("applicable") and str(physics.get("note") or "").strip():
+            lines.append("")
+            lines.append(f"**Maths/physics sanity check:** {physics['note']}")
         return "\n".join(lines).strip()
 
     # ── coverage: "kitna kaam asli mein hua" ─────────────────────────────────
@@ -923,6 +1017,75 @@ Ab jawab likho:"""
         "NO CLEAR STANCE": "Sources ne is sawal par koi saaf position hi nahi li.",
     }
 
+    # ── §13 — claim-level A–E block ──────────────────────────────────────────
+    _CHECK_WORDS = {
+        "A": "citation likhi hui hai aur wo source asli pack mein maujood hai",
+        "B": "wo source is sawaal se juda hua hai",
+        "C": "us source ke text mein is claim ka support asli mein mila",
+        "D": "us source ko kaafi gehrai tak padha gaya",
+        "E": "us source ki quality itni hai ki uspar dava tik sake",
+    }
+
+    def _claim_check_block(self, claim_checks: Optional[Dict]) -> str:
+        """
+        A–E ka user-facing hissa — denominator ke saath, bina jargon ke.
+
+        Ye dict `claim_verification.VerificationReport.to_dict()` se aata hai.
+        Khaali/None hone par section chhapti hi nahi (§10: khaali heading nahi).
+        """
+        data = claim_checks or {}
+        total = int(data.get("total_claims") or 0)
+        if not total:
+            return ""
+        genuine = int(data.get("genuine_support") or 0)
+        reported = int(data.get("source_reported") or 0)
+        cited_only = int(data.get("cited_only") or 0)
+        unsupported = int(data.get("unsupported") or 0)
+        not_checkable = int(data.get("entailment_not_checkable") or 0)
+
+        lines = [
+            f"Is jawab ki **{total}** aisi lines thi jo 'ye baat sach hai' ka dava "
+            f"karti hain. Har line par paanch alag sawaal poochhe gaye:",
+            "",
+        ]
+        for key in ("A", "B", "C", "D", "E"):
+            row = (data.get("check_counts") or {}).get(key) or {}
+            lines.append(
+                f"- **{key}** — {self._CHECK_WORDS[key]}: "
+                f"{int(row.get('pass') or 0)} par haan, "
+                f"{int(row.get('fail') or 0)} par nahi, "
+                f"{int(row.get('unknown') or 0)} par check ho hi nahi saka")
+        lines += [
+            "",
+            f"Iska nateeja: **{genuine}** claim par poora text padh kar support "
+            f"mila, **{reported}** sirf 'source ye report karta hai' level par "
+            f"hain, **{cited_only}** mein citation to thi par us text mein support "
+            f"nahi dikha, aur **{unsupported}** ke peeche koi valid source hi "
+            f"nahi tha.",
+        ]
+        if not_checkable:
+            lines.append(
+                f"**{not_checkable}** claim ka support check HO HI NAHI SAKA "
+                f"(us source ka text system ke paas nahi tha) — inhe "
+                f"jaan-boojh kar 'verified' nahi gina gaya.")
+        lines.append(
+            "_Yahan sabse zaroori baat: sirf **C** hi 'asli support' dikhata hai. "
+            "**A** pass hona itna hi batata hai ki citation likhne ka tareeka "
+            "theek tha — na ki baat sahi hai. Aur **C** ek text-matching check "
+            "hai (shabd + number milaan), insaani padhai nahi._")
+
+        overclaims = [o for o in (data.get("overclaims") or []) if isinstance(o, dict)]
+        if overclaims:
+            lines.append("")
+            lines.append(f"⚠️ **{len(overclaims)} jagah label zarurat se zyada strong "
+                         f"tha** (established/fact, jabki upar ke check usse support "
+                         f"nahi karte):")
+            for item in overclaims[:5]:
+                claim = str(item.get("claim") or "").strip()
+                reason = str(item.get("reason") or "").strip()
+                lines.append(f"- {claim[:150]}" + (f" — {reason[:130]}" if reason else ""))
+        return "\n".join(lines)
+
     def _audit_section(self, pack: EvidencePack, verification: Dict, coverage: Dict,
                        honesty: Optional[Dict] = None, consensus: Optional[Dict] = None,
                        discovery_note: str = "", quota_note: str = "",
@@ -934,6 +1097,7 @@ Ab jawab likho:"""
                        status: Optional[Dict] = None,
                        technical_details: Optional[List[str]] = None,
                        api_accounting: Optional[Dict] = None,
+                       claim_checks: Optional[Dict] = None,
                        missing_sections: Optional[List[str]] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
@@ -978,6 +1142,14 @@ Ab jawab likho:"""
                                f"source aaye — unhe alag-alag saboot nahi maana gaya.")
         if source_bits:
             blocks.append("### Sources ki checking\n" + "\n\n".join(source_bits))
+
+        # §13 / point 7 — paanch check ALAG-ALAG. Pehle "citation verified" ek
+        # hi number tha, aur uska matlab sirf itna tha ki [S3] naam ka source
+        # pack mein maujood hai. Ab A–E alag chhapte hain, aur saaf likha hai ki
+        # sirf C "asli support" dikhata hai.
+        claim_text = self._claim_check_block(claim_checks)
+        if claim_text:
+            blocks.append("### Har claim ki paanch-check jaanch (A–E)\n" + claim_text)
 
         coverage_text = self._coverage_section(coverage, pack, discovery_note)
         if coverage_text:
@@ -1212,7 +1384,9 @@ Ab jawab likho:"""
                  requests: Optional[Dict] = None,
                  status: Optional[Dict] = None,
                  technical_details: Optional[List[str]] = None,
-                 api_accounting: Optional[Dict] = None) -> str:
+                 api_accounting: Optional[Dict] = None,
+                 claim_checks: Optional[Dict] = None,
+                 hypothesis_plan: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1251,7 +1425,8 @@ Ab jawab likho:"""
                     "hai, aur jo nahi mil paaya wo bhi saaf likha hai."))
             elif index == 5:
                 engine_text = self._hypothesis_section(hypotheses, requests,
-                                                       reasons, pack)
+                                                       reasons, pack,
+                                                       hypothesis_plan)
                 parts.append(engine_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
@@ -1265,6 +1440,7 @@ Ab jawab likho:"""
                     notes=notes, usage_note=usage_note, status=status,
                     technical_details=technical_details,
                     api_accounting=api_accounting,
+                    claim_checks=claim_checks,
                     missing_sections=missing_sections)
                 parts.append(engine_text)
             else:
@@ -1276,7 +1452,8 @@ Ab jawab likho:"""
                     engine_text = self._against_section(critique or {}, hypotheses,
                                                         contradictions)
                 elif index == 6:
-                    engine_text = self._test_section(hypotheses, verification)
+                    engine_text = self._test_section(hypotheses, verification,
+                                                     hypothesis_plan)
                 elif index == 8:
                     engine_text = self._conclusion_block(evidence_level,
                                                          confidence_note, pack, ledger)

@@ -244,6 +244,13 @@ class CitationEngine:
             f"(independent: **{pack.independent_source_count}**, "
             f"candidates screened: **{pack.discovered_count}**)",
             f"- Citations verified against real sources: **{len(report.cited)}**",
+            # §13 (2026-08-21) — is number ka matlab OVER-claim na ho. Upar wali
+            # ginti sirf itna kehti hai ki likhi hui [S#] asli source par point
+            # karti hai. "Us source ka text ye claim keh raha hai" ek ALAG check
+            # hai (C), aur wo report ke A–E block mein alag chhapta hai.
+            "  - Iska matlab: citation asli source par point karti hai. "
+            "\"Us source ka text ye baat keh raha hai\" ye alag check hai — "
+            "wo neeche A–E block mein alag likha gaya hai.",
         ]
         if report.invalid_ids:
             lines.append(

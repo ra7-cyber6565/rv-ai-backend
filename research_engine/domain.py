@@ -185,6 +185,28 @@ _SC_BRANCHES = (
            ("magnet", "mri", "power transmission", "maglev", "squid",
             "quantum computing", "fusion", "levitation"),
            "superconductor applications magnets power transmission"),
+    # Ye teen intents jaan-boojh kar ALAG rakhe gaye hain (2026-08-21).
+    # "applications" ek hi jhaadu tha jisme MRI, maglev, grid aur qubit sab
+    # ghus jaate the — yaani teen bilkul alag literatures ek hi query par
+    # depend kar rahi thi. Superconducting cable ka paper Jc measurement ke
+    # paper se aur qubit coherence ke paper se alag jagah chhapta hai, isliye
+    # ab teeno ki apni search intent hai.
+    Branch("transport", "current-carrying capacity / transport properties",
+           ("critical current density", "jc", "flux pinning", "vortex",
+            "pinning centre", "pinning center", "irreversibility field",
+            "upper critical field", "hc2", "current carrying", "ampacity"),
+           "superconductor critical current density flux pinning transport"),
+    Branch("grid", "power grid / transmission engineering",
+           ("power grid", "transmission cable", "superconducting cable",
+            "fault current limiter", "sfcl", "energy storage", "smes",
+            "utility", "substation", "cryogenic cooling cost"),
+           "superconducting power transmission cable grid demonstration"),
+    Branch("computing", "computing / quantum hardware",
+           ("qubit", "josephson junction", "single flux quantum", "sfq",
+            "rsfq", "quantum processor", "coherence time", "quantum annealer",
+            "cryogenic electronics", "digital logic", "quantum computing",
+            "quantum computer"),
+           "superconducting qubit josephson junction quantum computing hardware"),
 )
 
 _SC_ANCHORS = (
@@ -601,6 +623,79 @@ class DomainPlan:
             add(b.query)
         return out[:limit]
 
+    # ── search intents (ek sawaal, kai alag literatures) ────────────────────
+    def search_intents(self, base: str = "", limit: int = 8) -> List[Dict]:
+        """
+        Ek research SAWAAL ke andar kai alag SEARCH INTENT hote hain, aur unki
+        literature alag-alag jagah rehti hai.
+
+        Superconductivity ka hi sawaal lo: "Tc kitna hai" (condensed-matter
+        physics), "kitna current le jaa sakta hai" (applied superconductivity /
+        transport), "grid par laga sakte hain kya" (power engineering),
+        "computing mein kya fayda" (quantum hardware). Ek hi generic query in
+        chaaron ko nahi la sakti — pehle wahi ho raha tha, isliye report ek hi
+        tarah ke papers se bhari hoti thi.
+
+        Ab har intent apni query, apne terms aur apne useful connectors ke saath
+        alag mile. Jo intent sawaal ne khud chhua hai (focus branch) wo pehle
+        aata hai, phir field ke baaki intents — taaki coverage bane, aur report
+        mein saaf likha ja sake ki kis intent par kya mila. Sab deterministic
+        hai: ek bhi LLM call nahi (§15).
+        """
+        if not self.is_known:
+            base_q = " ".join((base or self.question or "").split())
+            return ([{"key": "general", "label": "general search",
+                      "query": base_q, "terms": [],
+                      "connectors": list(self.profile.connectors),
+                      "focus": True}] if base_q else [])
+
+        focus_keys = {b.key for b in self.focus_branches()}
+        ordered = list(self.focus_branches()) + [
+            b for b in self.profile.branches if b.key not in focus_keys]
+
+        anchor = self.anchor_phrase()
+        intents: List[Dict] = []
+        seen: Set[str] = set()
+        for branch in ordered:
+            query = " ".join((branch.query or branch.label or "").split())
+            if not query:
+                continue
+            # Anchor kabhi nahi girta — yahi §4 ka asli sabak hai. "power grid
+            # demonstration" akela search karne par superconductivity ka koi
+            # rishta hi nahi bachta.
+            if anchor and anchor.lower() not in query.lower():
+                query = f"{query} {anchor}"
+            key = query.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            intents.append({
+                "key": branch.key,
+                "label": branch.label,
+                "query": query,
+                "terms": list(branch.terms[:6]),
+                "connectors": list(self.profile.connectors),
+                "focus": branch.key in focus_keys,
+            })
+            if len(intents) >= max(1, limit):
+                break
+        return intents
+
+    def intent_note(self, intents: Optional[Sequence[Dict]] = None) -> str:
+        """Report/audit ke liye ek line — kaun-kaun se intents par search hui."""
+        items = list(intents if intents is not None else self.search_intents())
+        if not items:
+            return ""
+        focused = [i["label"] for i in items if i.get("focus")]
+        rest = [i["label"] for i in items if not i.get("focus")]
+        bits = [f"{self.profile.label} ke {len(items)} alag search intents par "
+                f"search hui"]
+        if focused:
+            bits.append("sawaal ne khud jo maanga: " + ", ".join(focused))
+        if rest:
+            bits.append("coverage ke liye: " + ", ".join(rest[:6]))
+        return "; ".join(bits)
+
     def fallback_queries(self, base: str, round_no: int = 2,
                          limit: int = 4) -> List[str]:
         """
@@ -613,6 +708,7 @@ class DomainPlan:
         return rotated[:limit]
 
     def to_dict(self) -> Dict:
+        intents = self.search_intents()
         return {
             "domain": self.profile.key,
             "domain_label": self.profile.label,
@@ -620,6 +716,10 @@ class DomainPlan:
             "strict": self.strict,
             "sub_domains": [b.key for b in self.focus_branches()],
             "all_branches": [b.key for b in self.profile.branches],
+            "search_intents": [{"key": i["key"], "label": i["label"],
+                                "query": i["query"], "focus": i["focus"]}
+                               for i in intents],
+            "intent_note": self.intent_note(intents),
             "anchors": list(self.profile.anchors[:10]),
             "preferred_connectors": list(self.profile.connectors),
             "avoid_connectors": list(self.profile.avoid_connectors),

@@ -56,13 +56,21 @@ def _cited_ids(line: str) -> List[str]:
     return out
 
 
-def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
+def line_verdict(line: str, pack: Optional[EvidencePack],
+                 check_entailment: bool = False) -> Tuple[str, str]:
     """
     Ek line ke liye faisla: (naya_label, wajah).
 
     - koi valid [S#] nahi → UNVERIFIED (source ke bina "established" impossible)
     - kam se kam ek cited source ka reading_level() == "full_text" → ESTABLISHED
     - warna → SOURCE-REPORTED
+
+    `check_entailment=True` (§13 / point 7) ek EXTRA sharti gate laga deta hai:
+    full text padha gaya ho, par us text mein claim ka support hi na dikhe, to
+    label phir bhi ESTABLISHED nahi rehta. Ye OPT-IN hai kyunki entailment ek
+    deterministic proxy hai (claim_verification.check_c) — pipeline jaan-boojh
+    kar isse on karta hai, aur jahan support check HO HI NA SAKE wahan gate chup
+    rehta hai (sirf saaf FAIL par girata hai).
     """
     ids = _cited_ids(line)
     if pack is not None:
@@ -89,12 +97,26 @@ def line_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[str, str]:
 
     full = [sid for sid, level in levels.items() if level == _FULL]
     if full:
+        if check_entailment and _entailment_blocked(line, pack):
+            return SOURCE_REPORTED, (
+                f"full text to padha gaya ({', '.join(full)}), par us text mein "
+                f"is claim ka support nahi dikha")
         return ESTABLISHED, f"full text padha gaya: {', '.join(full)}"
     detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
     return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
 
 
-def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict]:
+def _entailment_blocked(line: str, pack: Optional[EvidencePack]) -> bool:
+    """claim_verification ka gate — import lazy, aur fail hone par chup (False)."""
+    try:
+        from .claim_verification import entailment_blocked
+        return bool(entailment_blocked(line, pack))
+    except Exception:                          # pragma: no cover - defensive
+        return False
+
+
+def downgrade(text: str, pack: Optional[EvidencePack] = None,
+              check_entailment: bool = False) -> Tuple[str, Dict]:
     """
     Answer text mein har "verified" dave ka label asli read-level se match karao.
 
@@ -102,13 +124,16 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
         checked          — kitni lines par strong label tha
         downgraded       — kitni neeche ki gayi
         to_source_reported / to_unverified — ginti
+        entailment_blocked — kitni lines full text ke BAAVJOOD giri (support hi
+                             nahi mila) — sirf `check_entailment=True` par
         details          — max 8 chhoti lines (user ko dikhane ke liye)
         note             — ek line ka human-readable summary ("" agar sab theek)
     Text kabhi nahi kaata jaata — sirf label badalta hai, taaki content na khoye.
     """
     body = text or ""
     report: Dict = {"checked": 0, "downgraded": 0, "to_source_reported": 0,
-                    "to_unverified": 0, "details": [], "note": ""}
+                    "to_unverified": 0, "entailment_blocked": 0,
+                    "details": [], "note": ""}
     if not body.strip():
         return body, report
 
@@ -118,7 +143,7 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
             out_lines.append(raw)
             continue
         report["checked"] += 1
-        verdict, why = line_verdict(raw, pack)
+        verdict, why = line_verdict(raw, pack, check_entailment=check_entailment)
         if verdict == ESTABLISHED:
             out_lines.append(raw)
             continue
@@ -129,6 +154,8 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
             report["to_source_reported"] += 1
         else:
             report["to_unverified"] += 1
+        if "support nahi dikha" in why:
+            report["entailment_blocked"] += 1
         if len(report["details"]) < 8:
             snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_line).strip()
             report["details"].append(f"{snippet[:150]} — {why}")
@@ -143,6 +170,10 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None) -> Tuple[str, Dict
             f"{report['downgraded']}/{report['checked']} 'established' dave "
             f"neeche kiye gaye (" + ", ".join(bits) + ") — kyunki un sources ka "
             f"poora text nahi padha gaya, sirf abstract/snippet mila.")
+        if report["entailment_blocked"]:
+            report["note"] += (
+                f" Inme {report['entailment_blocked']} jagah poora text to padha "
+                f"gaya tha, par us text mein claim ka support nahi mila.")
     return "\n".join(out_lines), report
 
 

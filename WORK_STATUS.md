@@ -27,14 +27,26 @@ Owner column: `Claude` = is session ka agent, `ChatGPT` = doosra agent,
 | §1/§9/§10 RESEARCH INCOMPLETE status, no raw errors, no empty sections | Claude | done | `research_engine/run_status.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `research_engine/models.py`, `tests/test_pipeline_offline.py`, `tests/test_answer_structure.py`, `test_research_engine.py` | (is batch mein) |
 | §11 consensus gate (6 preconditions) | Claude | done | `research_engine/consensus_gate.py`, `contradiction.py`, `synthesizer.py`, `orchestrator.py`, `models.py`, `evidence.py`, `relevance.py`, `planner.py`, `tests/test_consensus_gate.py` | (is batch mein) |
 | §12 chunked/streaming large-PDF reading | Claude | done | `research_engine/content_fetcher.py`, `research_engine/processing/pdf_chunker.py` (naya), `research_engine/processing/pdf_processor.py`, `research_engine/processing/document_processor.py`, `research_engine/models.py`, `tests/test_pdf_chunking.py` (naya) | (is batch mein) |
-| §13 verification checks A–E (citation/relevance/entailment/depth/quality) | Claude | pending | `research_engine/citation.py`, `research_engine/verification.py` | — |
+| §13 verification checks A–E (citation/relevance/entailment/depth/quality) | Claude | done | `research_engine/claim_verification.py` (naya), `claim_labels.py`, `citation.py`, `synthesizer.py`, `orchestrator.py`, `tests/test_claim_verification.py` (naya) | (agle batch mein) |
 | §14 audit denominators + honest API accounting | Claude | partly done | `research_engine/synthesizer.py`, `research_engine/gemini_reasoning.py` | — |
-| §15 search rounds LLM ke bina bhi chalein | Claude | pending | `research_engine/orchestrator.py`, `research_engine/planner.py` | — |
+| §15 search rounds LLM ke bina bhi chalein | Claude | done | `research_engine/orchestrator.py`, `research_engine/planner.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
 | §16 automated tests A–I + full regression | Claude | A–I done (regression green) | `tests/test_gemini_retry.py`, `tests/test_pipeline_offline.py`, `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py`, `tests/test_pdf_chunking.py` | (is batch mein) |
 | §17 nine-part report back | Claude | pending | — | — |
 
-## intel ke haath ka kaam
+## Naya batch — 15-point "Research Quality Hardening + Benchmark V2" (Owner: Claude)
 
+| Task | Owner | Status | Files | Commit |
+|---|---|---|---|---|
+| point 3 domain-aware query planning (alag search intents per sub-domain) | Claude | done | `research_engine/planner.py`, `research_engine/query_builder.py`, `research_engine/domain.py` | (pichhle batch mein) |
+| point 7 verification A–E enforce | Claude | done | `research_engine/claim_verification.py`, `research_engine/claim_labels.py`, `research_engine/synthesizer.py`, `tests/test_claim_verification.py` | (pichhle batch mein) |
+| point 10/11 hypothesis quality + evidence gate | Claude | done | `research_engine/hypothesis.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_hypothesis_quality.py` (naya) | (is batch mein) |
+| point 12 maths/physics sanity checks | Claude | done | `research_engine/physics_checks.py` (naya), `research_engine/verification.py`, `research_engine/orchestrator.py`, `research_engine/synthesizer.py`, `tests/test_physics_sanity.py` (naya) | (is batch mein) |
+| §15 / point 9 search round crash-safety (ek round gire to run zinda) | Claude | done | `research_engine/orchestrator.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
+| point 14 baaki regression tests (relevance, false consensus, raw-error leak, quota, incomplete) | Claude | in progress | `tests/` | — |
+| point 1 superconductivity Benchmark V2 (offline runner) | Claude | pending | `tests/benchmark_superconductivity.py` | — |
+| point 14 §14 audit denominators + honest API accounting | Claude | partly done | `research_engine/synthesizer.py`, `research_engine/gemini_reasoning.py` | — |
+
+## intel ke haath ka kaam
 | Task | Owner | Status | Files | Commit |
 |---|---|---|---|---|
 | `git push` (sandbox GitHub tak nahi pahunch sakta) | intel | recurring | — | — |

@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .models import EvidencePack, SourceType
+from . import physics_checks
 
 # 12 + 8 = 20   |   45 × 3 = 135
 _ARITH_RE = re.compile(
@@ -93,6 +94,10 @@ class VerificationReport:
     statistics: Dict = field(default_factory=dict)          # kaunse source mein stats DIKHE
     data_for_verification: List[str] = field(default_factory=list)  # raw datasets user khud check kare
     limits: List[str] = field(default_factory=list)         # simulation/backtest jaisi honest seemayein
+    # point 12 — maths/physics sanity pass ka poora record (units, physical
+    # limits, comparison direction). Non-quantitative sawal par ye khaali/
+    # applicable=False rehta hai.
+    physics: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return {
@@ -103,6 +108,7 @@ class VerificationReport:
             "statistics": self.statistics,
             "data_for_verification": self.data_for_verification,
             "limits": self.limits,
+            "physics": self.physics,
             "note": "Verification sirf computational/logical level pe hui hai. "
                     "Physical, clinical ya lab verification ye system nahi kar sakta. "
                     "Statistics sirf presence ke liye dekhe gaye — verify ya invent "
@@ -413,11 +419,23 @@ class VerificationEngine:
                 "'run karke verify kiya gaya' mat samjho.")
         return limits
 
+    # ── 8. maths/physics sanity (point 12) ────────────────────────────────────
+    def check_physics(self, answer: str, question: str = "") -> Dict:
+        """
+        Units, physical limits aur comparison direction ka deterministic check.
+
+        Sirf quantitative sawal par chalta hai (`physics_checks.is_quantitative`),
+        warna har jawab par bekaar "physics check" ka section lag jaata hai.
+        Poora code local hai — koi API, koi paid service, koi randomness.
+        """
+        return physics_checks.run(answer or "", question or "")
+
     # ── main ─────────────────────────────────────────────────────────────────
     def verify(self, answer: str, pack: EvidencePack,
                citation_ok: bool = True, ungrounded_count: int = 0,
                hypotheses: Optional[List[Dict]] = None,
-               cited_ids: Optional[List[str]] = None) -> VerificationReport:
+               cited_ids: Optional[List[str]] = None,
+               question: str = "") -> VerificationReport:
         report = VerificationReport()
         hypotheses = hypotheses or []
 
@@ -454,6 +472,19 @@ class VerificationEngine:
         ))
 
         report.warnings.extend(self.check_overclaims(answer, bool(hypotheses)))
+
+        # point 12 — units/physical limits/comparison. Ye checks bhi usi
+        # `checks` list mein jaate hain taaki report ka "numbers check" wala
+        # section inhe apne aap dikha de, aur fail hone par status bhi badle.
+        report.physics = self.check_physics(answer, question)
+        physics_failed: List[Check] = []
+        for raw in report.physics.get("checks", []):
+            chk = Check(str(raw.get("check") or "physics check"),
+                        raw.get("passed"), str(raw.get("detail") or ""))
+            report.checks.append(chk)
+            if chk.passed is False:
+                physics_failed.append(chk)
+        report.warnings.extend(report.physics.get("warnings", []))
 
         # Spec Section 11 — dataset/statistics awareness (sab local, deterministic)
         report.statistics = self.audit_statistics(pack)
@@ -504,6 +535,10 @@ class VerificationEngine:
                             if c.name == "internal numeric consistency"), None)
 
         if math_failed:
+            report.status = "MATH ERROR FOUND"
+        elif physics_failed:
+            # Unit/limit ki galti bhi numeric galti hai — ise "source grounded"
+            # dikhana user ko dhokha dega.
             report.status = "MATH ERROR FOUND"
         elif report.required_tests:
             report.status = "REQUIRES PHYSICAL TEST"
