@@ -9,7 +9,7 @@ zero-cost gate from one command and writes a machine-readable receipt outside
 Git by default.
 
 The default mode is deliberately strict:
-- forces Gemini/API cloud archive off for the offline gate;
+- forces every cloud reasoning provider and cloud archive off for the offline gate;
 - runs compile checks;
 - runs targeted infrastructure/integration pytest gates;
 - runs the legacy/core regression;
@@ -18,7 +18,9 @@ The default mode is deliberately strict:
 - continues after failures so the final receipt shows *all* broken stages;
 - exits non-zero if any stage failed/timed out/could not start.
 
-No paid API/service is used by this runner.
+No paid API/service is used by this runner, and configured user API keys are
+explicitly blanked so a developer machine cannot accidentally spend quota while
+testing.
 """
 from __future__ import annotations
 
@@ -52,6 +54,9 @@ FOCUSED_PYTEST = (
     "tests/test_google_drive_rclone.py",
     "tests/test_provider_factory.py",
     "tests/test_zero_cost_guard.py",
+    "tests/test_reasoning_zero_cost.py",
+    "tests/test_reasoning_router.py",
+    "tests/test_reasoning_router_integration.py",
     "tests/test_security_config.py",
     "tests/test_request_guard.py",
     "tests/test_research_jobs.py",
@@ -102,14 +107,25 @@ def _safe_env() -> dict[str, str]:
         {
             "ZERO_COST_ONLY": "true",
             "RATE_LIMIT_ENABLED": "true",
+            # Every cloud reasoning key is blanked even if the developer has a
+            # real key in their shell. Tests inject fakes explicitly when they
+            # need to exercise fallback behaviour.
             "GEMINI_API_KEY": "",
             "GEMINI_ZERO_COST_CONFIRMED": "false",
+            "GROQ_API_KEY": "",
+            "GROQ_ZERO_COST_CONFIRMED": "false",
+            "OPENROUTER_API_KEY": "",
+            "OPENROUTER_MODEL": "openrouter/free",
+            "OLLAMA_ENABLED": "false",
+            "OLLAMA_BASE_URL": "http://127.0.0.1:11434",
+            "REASONING_FALLBACK_CHAIN": "groq,openrouter,ollama",
             "CLOUD_ARCHIVE_PROVIDER": "none",
+            "GOOGLE_DRIVE_RCLONE_REMOTE": "",
             "TERABOX_CLIENT_ID": "",
             "TERABOX_CLIENT_SECRET": "",
             "TERABOX_PRIVATE_SECRET": "",
-            # Common HTTP client convention. Production code does not rely on
-            # this variable; tests may use it as an additional no-network hint.
+            # Common project convention. Production code does not rely on this
+            # alone; tests may use it as an additional no-network hint.
             "INFINITY_OFFLINE_TEST": "true",
         }
     )
