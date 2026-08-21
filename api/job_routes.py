@@ -10,6 +10,7 @@ from research_engine.depth import BOOL_FIELDS, depth_limits
 from utils.admin_guard import require_admin
 from utils.job_access import job_access
 from utils.progress_tracker import get_progress
+from utils.project_guard import require_project_access
 from utils.research_jobs import runner
 
 
@@ -64,8 +65,12 @@ def _authorized_job(
 
 
 @router.post("/research-jobs", status_code=202)
-def start_research_job(request: ResearchJobRequest):
-    """Research ko background worker mein start karke turant job id + private token do."""
+def start_research_job(
+    request: ResearchJobRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Start long research only inside the caller's private project namespace."""
+    require_project_access(request.project_id, x_project_token)
     mode = (request.depth_mode or "DEEP").upper().strip()
     if mode not in {"QUICK", "DEEP", "MAXIMUM", "CUSTOM"}:
         raise HTTPException(status_code=400, detail="depth_mode invalid hai")
@@ -145,9 +150,6 @@ def research_job_result(
             "status": "interrupted",
         })
     if item["status"] == "failed":
-        # The durable store keeps a redacted internal error for operator/debug
-        # use, but a public bearer-capability client does not need exception type,
-        # local path or provider detail. Never reflect it here.
         raise HTTPException(status_code=500, detail={
             "message": "Research job complete nahi ho saka. Safe retry ya naya job start karein.",
             "status": "failed",
