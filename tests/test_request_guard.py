@@ -35,6 +35,21 @@ def test_unknown_post_endpoint_is_not_limited():
     assert limit_for("POST", "/health") is None
 
 
+def test_expensive_post_endpoints_are_guarded():
+    for path in (
+        "/api/v1/chat",
+        "/api/v1/ask",
+        "/api/v1/deep-research",
+        "/api/v1/research-jobs",
+        "/api/v1/upload-document",
+        "/api/v1/upload-pdf",
+        "/api/v1/ingest-youtube",
+        "/api/v1/upload-audio",
+        "/api/v1/transcribe-audio",
+    ):
+        assert limit_for("POST", path) is not None, path
+
+
 def test_client_key_does_not_trust_forwarded_header_by_default(monkeypatch):
     monkeypatch.delenv("TRUST_PROXY_HEADERS", raising=False)
     request = SimpleNamespace(
