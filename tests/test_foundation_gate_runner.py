@@ -40,6 +40,7 @@ def test_default_stage_plan_contains_real_release_gates():
     assert names[0] == "compileall"
     assert "focused_pytest" in names
     assert "core_regression" in names
+    assert "provider_bypass_audit" in names
     assert "architecture_audit" in names
     assert "benchmark_superconductivity_v2" in names
     assert any(name.startswith("standalone:tests/test_") for name in names)
@@ -50,11 +51,15 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "tests/test_reasoning_zero_cost.py" in focused_command
     assert "tests/test_offline_reasoner.py" in focused_command
     assert "tests/test_reasoning_status.py" in focused_command
+    assert "tests/test_quick_chat_resilience.py" in focused_command
+    assert "tests/test_provider_bypass_audit.py" in focused_command
     assert "tests/test_architecture_audit.py" in focused_command
+    assert "tests/test_release_state.py" in focused_command
 
 
-def test_architecture_audit_runs_before_benchmark():
+def test_provider_and_architecture_audits_run_before_benchmark():
     names = [name for name, _ in gate.build_stage_plan("python")]
+    assert names.index("provider_bypass_audit") < names.index("architecture_audit")
     assert names.index("architecture_audit") < names.index("benchmark_superconductivity_v2")
 
 
