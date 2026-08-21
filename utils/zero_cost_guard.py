@@ -1,11 +1,15 @@
 """Hard guardrails for the project's zero-cost runtime policy.
 
 The app owner requires that normal runtime must not silently use paid AI APIs.
-This module is intentionally small and deterministic: if zero-cost mode is on,
-known paid-provider credentials cause startup to fail instead of risking a bill.
+Known paid-provider credentials are blocked outright. Gemini is different: the
+same API key can belong to a project with a free/no-billing setup or to a
+billing-enabled project. Code cannot reliably query that billing state from the
+generative API, so ZERO_COST_ONLY requires an explicit owner confirmation before
+a Gemini key is allowed at all.
 
-This is not a billing oracle. Free-tier services can still change terms, so
-provider/model routing must separately restrict itself to explicitly free models.
+This is still not a billing oracle. Provider/model routing and request budgets
+must separately stay conservative, and the confirmation must only be set after
+checking that the Google project has no paid billing/spend path enabled.
 """
 from __future__ import annotations
 
@@ -16,12 +20,14 @@ from typing import Mapping
 
 TRUTHY = {"1", "true", "yes", "on"}
 
-# Direct vendor API keys that can incur usage charges. Keep this list narrow to
-# avoid blocking research/data services that may have genuine free quotas.
 FORBIDDEN_IN_ZERO_COST_MODE = (
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
 )
+
+# Synthetic guard name shown in startup errors. This is not a secret/env key;
+# it explains exactly what must be confirmed before Gemini can run.
+_GEMINI_UNCONFIRMED = "GEMINI_API_KEY (GEMINI_ZERO_COST_CONFIRMED missing/false)"
 
 
 @dataclass(frozen=True)
@@ -32,6 +38,10 @@ class ZeroCostStatus:
     @property
     def ok(self) -> bool:
         return not self.blocked_keys
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in TRUTHY
 
 
 def zero_cost_enabled(env: Mapping[str, str] | None = None) -> bool:
@@ -46,20 +56,32 @@ def inspect_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostSt
     if not enabled:
         return ZeroCostStatus(enabled=False, blocked_keys=())
 
-    blocked = tuple(
+    blocked = [
         key for key in FORBIDDEN_IN_ZERO_COST_MODE
         if str(source.get(key, "")).strip()
-    )
-    return ZeroCostStatus(enabled=True, blocked_keys=blocked)
+    ]
+
+    gemini_key = str(source.get("GEMINI_API_KEY", "")).strip()
+    if gemini_key and not _truthy(source.get("GEMINI_ZERO_COST_CONFIRMED", "")):
+        blocked.append(_GEMINI_UNCONFIRMED)
+
+    return ZeroCostStatus(enabled=True, blocked_keys=tuple(blocked))
 
 
 def enforce_zero_cost_config(env: Mapping[str, str] | None = None) -> ZeroCostStatus:
-    """Fail closed when a known paid-provider credential is configured."""
+    """Fail closed when runtime configuration could create a paid AI path."""
     status = inspect_zero_cost_config(env)
     if status.blocked_keys:
         joined = ", ".join(status.blocked_keys)
+        extra = ""
+        if _GEMINI_UNCONFIRMED in status.blocked_keys:
+            extra = (
+                " For Gemini, set GEMINI_ZERO_COST_CONFIRMED=true only after you "
+                "have verified that the Google project/key has no paid billing/spend "
+                "path enabled; otherwise leave Gemini disabled."
+            )
         raise RuntimeError(
-            "ZERO_COST_ONLY is enabled, but paid-provider credential(s) are set: "
-            f"{joined}. Remove them or explicitly disable zero-cost mode."
+            "ZERO_COST_ONLY is enabled, but unsafe/unconfirmed AI credential "
+            f"configuration was found: {joined}.{extra}"
         )
     return status
