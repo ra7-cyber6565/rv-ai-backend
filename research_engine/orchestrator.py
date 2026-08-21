@@ -41,6 +41,7 @@ from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from .models import EvidencePack, ResearchResult, SourceRecord
+from .patents import novelty_note, novelty_overclaim
 from .planner import ResearchPlanner
 from .requested import build_ledger, looks_like_chain, looks_like_math_model
 from .research_memory import ResearchMemory
@@ -229,6 +230,68 @@ class DeepResearchEngine:
             "round_errors": round_errors,
             "round_error_details": round_error_details,
         }
+
+    # ── prior art honesty (₹0 patent batch, point 8) ─────────────────────────
+    # "Koi matching patent nahi mila" ka matlab "idea novel hai" NAHI hota.
+    # Patent search coverage kabhi poori nahi hoti — applications 18 mahine tak
+    # publish hi nahi hoti, har jurisdiction search nahi hui, aur provider
+    # quota/timeout se ruk bhi sakta hai. Isliye engine yahan sirf itna likhta
+    # hai: kaunse patent source SACH MEIN search hue, kaun ruk gaya, aur unme
+    # kitne prior-art signal mile. Legal novelty/patentability ki opinion kabhi
+    # nahi jaati (wo kaam patent attorney ka hai, engine ka nahi).
+    def _patent_prior_art(self, plan: Dict, discovered: Dict,
+                          pack: EvidencePack) -> Dict:
+        requested = list(plan.get("patents") or [])
+        intent = dict(plan.get("patent_intent") or {})
+        out: Dict = {
+            "requested": bool(requested),
+            "providers_planned": requested,
+            "providers_searched": [],
+            "providers_stopped": [],
+            "hits": 0,
+            "families": 0,
+            "reason": str(intent.get("reason", "")),
+            "note": "",
+        }
+        if not requested:
+            # Patent search maangi hi nahi gayi thi — ye koi kami nahi hai, par
+            # wajah likhi rehni chahiye (planner ka apna reason).
+            return out
+
+        stopped_reasons = tuple(getattr(self.discovery, "_STOPPED_REASONS", ())
+                                or ("rate_limited", "blocked", "timeout",
+                                    "no_key", "deadline", "no_query", "error"))
+        searched: List[str] = []
+        stopped: List[str] = []
+        for entry in discovered.get("log") or []:
+            name = str(entry.get("connector", "") or "")
+            if name not in requested:
+                continue
+            reason = str(entry.get("reason", "") or "")
+            if reason in stopped_reasons or entry.get("error"):
+                if name not in stopped:
+                    stopped.append(name)
+            elif name not in searched:
+                searched.append(name)
+        # Ek provider jo ek round mein chala aur doosre mein ruka — usse "chala"
+        # hi maana jaata hai (uska data pack mein hai), par stopped list mein
+        # bhi wo dikh jaata hai taaki adhoori coverage chhupe na.
+        out["providers_searched"] = searched
+        out["providers_stopped"] = [n for n in stopped]
+
+        patents = pack.patent_sources() if hasattr(pack, "patent_sources") else []
+        out["hits"] = len(patents)
+        try:
+            out["families"] = int(pack.patent_family_count())
+        except Exception:          # pragma: no cover - purane pack objects
+            out["families"] = len(patents)
+        out["note"] = novelty_note(
+            hit_count=out["hits"],
+            providers_searched=searched,
+            providers_stopped=out["providers_stopped"],
+            families=out["families"],
+        )
+        return out
 
     # ── 3. gemini passes (budget-aware) ──────────────────────────────────────
     def _remember_dead_ends(self, question: str, discovered: Dict,
@@ -672,6 +735,19 @@ class DeepResearchEngine:
         if doc_note:
             discovery_note = f"{doc_note} | {discovery_note}"
 
+        # 3a. PRIOR ART ka imaandaar bayaan (point 8). Ye discovery ke turant baad
+        # banta hai, kyunki iske liye sirf log + pack chahiye — kisi LLM call ka
+        # intezaar nahi. Quota khatam ho jaaye to bhi ye line report mein jaati hai.
+        prior_art = self._patent_prior_art(plan, discovered, pack)
+        if prior_art.get("requested") and not prior_art.get("providers_searched"):
+            warnings.append(
+                "Patent/prior-art search maangi gayi thi par koi patent provider "
+                "chal nahi paaya"
+                + (f" ({', '.join(prior_art['providers_stopped'])})"
+                   if prior_art.get("providers_stopped") else "")
+                + " — isliye is jawab mein prior art ke baare mein koi bhi dava "
+                  "nahi hai, na 'mila' na 'nahi mila'.")
+
         # §15 — koi search round beech mein gir gaya. User ko sirf itna pata
         # chalna chahiye ki us round ka data MISSING hai (na ki "0 mila"), aur
         # raw exception ka ek shabd bhi yahan nahi aata (point 9).
@@ -808,6 +884,10 @@ class DeepResearchEngine:
         # chain). Ye Gemini ki ek bhi nayi call nahi karta — sirf analysis pass
         # ka pehle se likha hua block wapas laata hai.
         engine_notes: List[str] = [str(n) for n in passes.get("notes", [])]
+        # Prior-art line report ke notes mein jaati hai (point 8). Ye Gemini ke
+        # kisi output par nirbhar nahi hai — engine ka apna, deterministic bayaan.
+        if prior_art.get("note"):
+            engine_notes.append(prior_art["note"])
         requests: Dict = passes.get("requests") or {}
         gemini_answer, recovered = self._recover_extras(
             requests, gemini_answer, passes["analysis"])
@@ -837,6 +917,25 @@ class DeepResearchEngine:
                                                        check_entailment=True)
         if label_report.get("note"):
             warnings.append(label_report["note"])
+
+        # 6d. NOVELTY OVERCLAIM (point 8). Prompt mein rule pehle se hai, par
+        # bharosa uspar nahi. Model ne phir bhi "ye idea novel hai / patentable
+        # hai" jaisa dava likh diya to text kaata nahi jaata — saath mein engine
+        # ka sach likh diya jaata hai, taaki user ko dono dikhein.
+        overclaims = novelty_overclaim(gemini_answer)
+        if overclaims:
+            line = ("Jawab mein novelty/patentability jaisa dava dikha "
+                    f"(\"{overclaims[0]}\") — ye engine ka nateeja NAHI hai. "
+                    "Patent search coverage kabhi poori nahi hoti aur legal "
+                    "novelty ki opinion sirf patent attorney de sakta hai.")
+            if prior_art.get("note"):
+                line += f" Asli sthiti: {prior_art['note']}"
+            elif not prior_art.get("requested"):
+                line += (" Is sawaal par patent search chali bhi nahi thi"
+                         + (f" ({prior_art['reason']})" if prior_art.get("reason")
+                            else "") + ".")
+            warnings.append(line)
+            engine_notes.append(line)
         # Dono pass ka hisaab ek jagah. Warna strict pass jo lines pehle hi
         # [UNVERIFIED] kar chuka hai wo depth pass ko dikhti hi nahi, aur
         # `label_report` "checked: 0, downgraded: 0" bolta hai — jabki downgrade
@@ -896,6 +995,10 @@ class DeepResearchEngine:
         coverage = pack.coverage_report()
         coverage["evidence_table"] = self.evidence.evidence_table(claims)
         coverage["independence"] = self.evidence.independence_report(pack)
+        # Patent evidence ka apna block — science ke numbers mein mila kar nahi.
+        # UI/Android isse padh kar "prior-art signal" dikha sakte hain bina
+        # report ka text parse karne ke.
+        coverage["prior_art"] = dict(prior_art)
         by_type: Dict[str, int] = {}
         for source in pack.sources:
             key = source.source_type.value

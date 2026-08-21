@@ -71,6 +71,15 @@ def line_verdict(line: str, pack: Optional[EvidencePack],
     deterministic proxy hai (claim_verification.check_c) — pipeline jaan-boojh
     kar isse on karta hai, aur jahan support check HO HI NA SAKE wahan gate chup
     rehta hai (sirf saaf FAIL par girata hai).
+
+    PATENT KA GATE (₹0 patent batch, point 4):
+    Patent ka poora text padh lena bhi ESTABLISHED ka haq nahi deta. Patent ke
+    claims LEGAL dawe hote hain — grant ka matlab "examiner ko novel/non-obvious
+    laga", "experiment se saabit ho gaya" NAHI. Isliye patent source ESTABLISHED
+    ki ginti se BAHAR hai: agar line par sirf patent(s) cite hain to label
+    SOURCE-REPORTED rehta hai, chahe read depth full_text ho. Line par koi
+    non-patent source full text ke saath ho to wo apne bal par ESTABLISHED de
+    sakta hai (patent uske saath extra context ban jaata hai).
     """
     ids = _cited_ids(line)
     if pack is not None:
@@ -88,21 +97,35 @@ def line_verdict(line: str, pack: Optional[EvidencePack],
         return UNVERIFIED, "is line par koi [S#] citation nahi hai"
 
     levels = {}
+    patent_ids: List[str] = []
     for record in records:
         try:
             level = record.reading_level()
         except Exception:                      # noqa: BLE001 — kabhi crash na kare
             level = "metadata"
         levels[record.source_id] = level
+        if getattr(record, "is_patent", False):
+            patent_ids.append(record.source_id)
 
-    full = [sid for sid, level in levels.items() if level == _FULL]
+    # patent full-text bhi ESTABLISHED nahi de sakta (docstring dekho)
+    full = [sid for sid, level in levels.items()
+            if level == _FULL and sid not in patent_ids]
     if full:
         if check_entailment and _entailment_blocked(line, pack):
             return SOURCE_REPORTED, (
                 f"full text to padha gaya ({', '.join(full)}), par us text mein "
                 f"is claim ka support nahi dikha")
         return ESTABLISHED, f"full text padha gaya: {', '.join(full)}"
+
+    patent_full = [sid for sid in patent_ids if levels.get(sid) == _FULL]
+    if patent_full and len(patent_ids) == len(levels):
+        return SOURCE_REPORTED, (
+            f"is line ka evidence sirf patent(s) hai ({', '.join(patent_full)}) — "
+            f"patent ke claims LEGAL dawe hain, experiment ka proof nahi, isliye "
+            f"ESTABLISHED nahi ban sakta")
     detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
+    if patent_ids:
+        detail += f" (patent: {', '.join(patent_ids)} — legal dawa, proof nahi)"
     return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
 
 

@@ -8,6 +8,18 @@ Isliye ye engine do kaam karta hai:
     1. Exact duplicates hatao (same URL / same DOI / same title).
     2. Jo bache unhe INDEPENDENCE GROUPS mein baanto (same domain ya same DOI =
        ek hi independent voice), taaki evidence strength inflate na ho.
+
+PATENT FAMILY (₹0 patent batch, point 5):
+    Ek hi invention ek hi din US, EP aur WO — teen jagah file hoti hai, aur teeno
+    ke title/number/URL alag hote hain. Purane teen rules (URL/DOI/title) inhe
+    duplicate NAHI pakadte: URL alag, DOI hi nahi hota, aur title translated ya
+    thoda badla hua ho sakta hai. Nateeja seedha jhooth hota: "3 independent
+    sources is baat par sehmat hain", jabki wo EK hi application ki teen copies
+    thi. Isliye patents ke liye ek chautha rule hai — same FAMILY = ek source.
+    Family ke andar se wo member bachta hai jiska text sabse gehra padha gaya
+    (full text > claims > abstract > metadata), aur baaki members chupchaap gayab
+    nahi hote: unke number survivor ke `patent_meta["family_members"]` mein aur
+    uske read note mein likhe jaate hain.
 """
 from __future__ import annotations
 
@@ -25,6 +37,48 @@ _STOP = {
 def _title_tokens(title: str) -> frozenset:
     words = re.findall(r"\b\w{3,}\b", (title or "").lower())
     return frozenset(w for w in words if w not in _STOP)
+
+
+# Gehrai ka kram — sirf yahan se aata hai, kahin dobara likha nahi jaata.
+_DEPTH_ORDER = ("metadata", "snippet", "abstract", "claims", "full_text")
+
+
+def _depth_rank(record) -> int:
+    """Is record ka read level kitna gehra hai (0 = sirf metadata)."""
+    level = ""
+    reader = getattr(record, "reading_level", None)
+    if callable(reader):
+        try:
+            level = str(reader() or "")
+        except Exception:          # pragma: no cover - defensive
+            level = ""
+    level = level or str(getattr(record, "read_level", "") or "") or "metadata"
+    try:
+        return _DEPTH_ORDER.index(level)
+    except ValueError:
+        return 0
+
+
+def _text_chars(record) -> int:
+    meta = dict(getattr(record, "patent_meta", None) or {})
+    chars = 0
+    for key in ("description_chars", "claims_chars", "abstract_chars"):
+        try:
+            chars += int(meta.get(key) or 0)
+        except (TypeError, ValueError):
+            continue
+    if chars:
+        return chars
+    return len(str(getattr(record, "snippet", "") or "").strip())
+
+
+def _member_note(record) -> str:
+    """Family ke ek member ka chhota, imaandaar descriptor."""
+    meta = dict(getattr(record, "patent_meta", None) or {})
+    number = str(meta.get("number") or "").strip() or (
+        str(getattr(record, "title", "") or "")[:40])
+    depth = _DEPTH_ORDER[_depth_rank(record)]
+    return f"{number} [{depth}]"
 
 
 class DeduplicationEngine:
@@ -58,12 +112,102 @@ class DeduplicationEngine:
                 setattr(survivor, name, getattr(dropped, name))
         return survivor
 
+    # ── patent family collapse (₹0 patent batch, point 5 + 6) ────────────────
+    # Ek invention US, EP aur WO — teen jagah publish hoti hai. Unke URL alag,
+    # DOI kisi ka nahi, aur title translated/badla hua ho sakta hai — isliye
+    # upar wale teen rule inhe pakad hi nahi paate. Family key (patents.family_key)
+    # se wo teeno EK evidence ban jaate hain.
+    #
+    # Kaun bachta hai: jiska text sabse gehra padha gaya (full_text > claims >
+    # abstract > metadata). Barabari par jiska metadata zyada poora hai, phir
+    # jiska text zyada bada hai, phir jo pehle aaya (deterministic).
+    #
+    # Girne wale chupchaap gayab NAHI hote — point 6 ka "'patent padha' tabhi
+    # bolo jab claims/description process hue" tabhi sach reh sakta hai jab har
+    # member ka apna read depth likha ho. Isliye survivor ke
+    # patent_meta["family_members"] mein har dropped member ka number + uska
+    # apna read depth jaata hai, aur read_note mein ek human line.
+    @staticmethod
+    def _family_rank(pair) -> tuple:
+        index, record = pair
+        meta = dict(getattr(record, "patent_meta", None) or {})
+        missing = len(list(meta.get("missing_fields") or []))
+        return (-_depth_rank(record), missing, -_text_chars(record), index)
+
+    def collapse_patent_families(self, sources: List[SourceRecord]) -> List[SourceRecord]:
+        """Ek family = ek record. Non-patent aur bina-family patents waise hi rehte."""
+        families: Dict[str, List[tuple]] = {}
+        for index, s in enumerate(sources):
+            if not getattr(s, "is_patent", False):
+                continue
+            key = getattr(s, "patent_family_key", "") or ""
+            if not key:
+                # Bilkul unknown patent: family ka pata hi nahi, to do alag
+                # inventions ko ek maan lena galat hoga.
+                continue
+            families.setdefault(key, []).append((index, s))
+
+        collapsible = {k: v for k, v in families.items() if len(v) > 1}
+        if not collapsible:
+            return list(sources)
+
+        winners: Dict[int, SourceRecord] = {}
+        dropped_indexes = set()
+        for members in collapsible.values():
+            ordered = sorted(members, key=self._family_rank)
+            keep_index, survivor = ordered[0]
+            notes: List[str] = []
+            recorded: List[Dict] = list(
+                (getattr(survivor, "patent_meta", None) or {}).get("family_members") or [])
+            for index, other in ordered[1:]:
+                dropped_indexes.add(index)
+                self.merge_signals(survivor, other)
+                meta = dict(getattr(other, "patent_meta", None) or {})
+                recorded.append({
+                    "number": str(meta.get("number") or ""),
+                    "jurisdiction": str(meta.get("jurisdiction") or ""),
+                    "read_depth": _DEPTH_ORDER[_depth_rank(other)],
+                    "url": str(getattr(other, "url", "") or ""),
+                })
+                notes.append(_member_note(other))
+            if isinstance(getattr(survivor, "patent_meta", None), dict):
+                survivor.patent_meta["family_members"] = recorded
+            if notes:
+                line = (f"isi invention ki {len(notes)} aur publication mili "
+                        f"({', '.join(notes)}) — same family, isliye alag "
+                        f"independent source nahi gina gaya")
+                existing = str(getattr(survivor, "read_note", "") or "").strip()
+                survivor.read_note = f"{existing}; {line}" if existing else line
+            winners[keep_index] = survivor
+
+        out: List[SourceRecord] = []
+        for index, s in enumerate(sources):
+            if index in dropped_indexes:
+                continue
+            out.append(winners.get(index, s))
+        return out
+
+    def patent_family_report(self, sources: List[SourceRecord]) -> Dict:
+        """Kitne patent, kitni families, kitne bina-family — audit ke liye."""
+        patents = [s for s in sources if getattr(s, "is_patent", False)]
+        keys = [getattr(s, "patent_family_key", "") or "" for s in patents]
+        known = [k for k in keys if k]
+        return {
+            "patent_sources": len(patents),
+            "families": len(set(known)),
+            "unknown_family": len(keys) - len(known),
+            "collapsed": len(known) - len(set(known)),
+        }
+
     # ── exact + near duplicate removal ───────────────────────────────────────
     def deduplicate(self, sources: List[SourceRecord]) -> List[SourceRecord]:
         by_url: Dict[str, SourceRecord] = {}
         by_doi: Dict[str, SourceRecord] = {}
         kept_titles: List[tuple] = []          # [(tokens, record), ...]
         unique: List[SourceRecord] = []
+
+        # Patent family pehle: URL/DOI/title in members ko nahi pakad sakte.
+        sources = self.collapse_patent_families(list(sources or []))
 
         for s in sources:
             url_key = (s.url or "").strip().rstrip("/").lower()
@@ -76,8 +220,19 @@ class DeduplicationEngine:
                 self.merge_signals(by_doi[doi_key], s)
                 continue
 
+            # TITLE RULE PATENTS PAR NAHI CHALTA — jaan-boojh kar.
+            # Do wajah, dono live traps se:
+            #   * Ek hi topic par ek PAPER aur ek PATENT ka title bahut milta-julta
+            #     hota hai. Title par gira dene se dono mein se ek gayab ho jaata
+            #     aur patent-vs-paper ka disagreement hi chhup jaata — jabki wahi
+            #     sabse zaroori signal hai.
+            #   * Ek hi assignee ke do ALAG inventions ke title bhi 85% match ho
+            #     jaate hain ("...for lithium-ion battery" wale). Patents ka asli
+            #     rishta family key batati hai, title nahi — aur wo kaam upar
+            #     collapse_patent_families() pehle hi kar chuka hai.
+            is_patent = bool(getattr(s, "is_patent", False))
             tokens = _title_tokens(s.title)
-            if tokens and len(tokens) >= 3:
+            if tokens and len(tokens) >= 3 and not is_patent:
                 twin = self._near_duplicate_of(tokens, kept_titles)
                 if twin is not None:
                     self.merge_signals(twin, s)
@@ -87,7 +242,7 @@ class DeduplicationEngine:
                 by_url[url_key] = s
             if doi_key:
                 by_doi[doi_key] = s
-            if tokens:
+            if tokens and not is_patent:
                 kept_titles.append((tokens, s))
             unique.append(s)
 

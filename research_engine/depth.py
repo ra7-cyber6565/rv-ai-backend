@@ -23,6 +23,18 @@ class DepthConfig:
     use_papers: bool = True
     use_books: bool = False
     use_datasets: bool = True       # Spec §2 + §11 — public datasets / raw data
+    # Patents (₹0 patent batch) — SIRF invention/prior-art wale sawaalon par
+    # chalta hai, aur wo faisla planner ka `patent_intent()` karta hai. Ye flag
+    # uske UPAR ka switch hai: QUICK mein patent search ka koi matlab nahi
+    # (QUICK ka wada "turant jawab" hai, aur patent APIs slow + fair-use limited
+    # hain).
+    #
+    # JAAN-BOOJH KAR `BOOL_FIELDS` mein NAHI hai: BOOL_FIELDS ka har naam
+    # api/agent_routes.py ke request model mein bhi hona zaroori hai (test ise
+    # check karta hai), aur wo file is batch ke ownership rule ke hisaab se
+    # ChatGPT ki hai. Isliye CUSTOM mode se ise abhi toggle nahi kiya ja sakta —
+    # ye known limitation report mein likhi gayi hai, na ki chupchaap chhodi gayi.
+    use_patents: bool = True
     use_red_team: bool = True
     chars_per_source: int = 1200
     # Spec Section 3/4 — kitne top sources ka LEGALLY-FREE full text download
@@ -47,6 +59,7 @@ class DepthConfig:
 QUICK = DepthConfig(
     name="QUICK", gemini_calls=1, max_sources=5, max_per_connector=2,
     max_rounds=1, use_papers=False, use_books=False, use_datasets=False,
+    use_patents=False,
     use_red_team=False,
     chars_per_source=800, max_fulltext=1, discovery_seconds=45,
 )
@@ -54,6 +67,7 @@ QUICK = DepthConfig(
 DEEP = DepthConfig(
     name="DEEP", gemini_calls=2, max_sources=10, max_per_connector=3,
     max_rounds=2, use_papers=True, use_books=False, use_datasets=True,
+    use_patents=True,
     use_red_team=True,
     chars_per_source=1200, max_fulltext=3, discovery_seconds=90,
 )
@@ -61,6 +75,7 @@ DEEP = DepthConfig(
 MAXIMUM = DepthConfig(
     name="MAXIMUM", gemini_calls=3, max_sources=18, max_per_connector=4,
     max_rounds=3, use_papers=True, use_books=True, use_datasets=True,
+    use_patents=True,
     use_red_team=True,
     chars_per_source=1500, max_fulltext=6, discovery_seconds=150,
 )

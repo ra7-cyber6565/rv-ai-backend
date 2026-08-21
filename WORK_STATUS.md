@@ -125,6 +125,8 @@ par nahi. Key ki value yahan bhi kahin nahi jaati.
 | `git push` (sandbox GitHub tak nahi pahunch sakta) | intel | recurring | — | — |
 | Railway mein naya `GEMINI_API_KEY` + live MAXIMUM test | intel | pending | Railway Variables | — |
 | Android `RetrofitClient.kt` ka `BASE_URL` Railway URL par | intel | optional | `InfinityResearchAI/.../RetrofitClient.kt` | — |
+| `pytest -q tests/ test_research_engine.py` ka naya total (195 expected) | intel | pending | — | — |
+| USPTO ODP free key (optional) → Railway `USPTO_ODP_API_KEY` | intel | optional | Railway Variables | — |
 
 ## ChatGPT ke liye (is batch ke baad)
 
@@ -202,6 +204,71 @@ Benchmark ne 5 asli bug pakde (test aasan karke nahi, code theek karke gaye):
 5. **Evidence gate kaagaz par reh jaata tha.** Gate 1 hypothesis allow karta,
    par parser ka floor `max(3, ...)` tha — report mein teen chhap jaati thi.
 
+## Naya batch — ₹0 Patent Research + Patent Evidence Integration (Owner: Claude)
+
+intel ka instruction (2026-08-21): *"Advanced Scientific Discovery Engine abhi
+start MAT karo. Pehle original source-discovery blueprint ka real missing piece
+close karo: PATENTS."* Hard rule: koi paid API nahi, koi scraping/bypass nahi,
+sirf official/public endpoints, credentials repo mein kabhi nahi, aur provider
+down ho to engine crash na kare.
+
+| Task | Owner | Status | Files | Commit |
+|---|---|---|---|---|
+| PATENT first-class source type (`PatentMeta`, read-depth, family key, status label, novelty helpers) | Claude | done | `research_engine/patents.py` (naya) | (is batch mein) |
+| Do keyless/official connector + `safe_search()` failure contract | Claude | done | `research_engine/connectors/patent_connector.py` (naya), `research_engine/connectors/__init__.py` | (is batch mein) |
+| `SourceType.PATENT`, patent-aware `SourceRecord` / `EvidencePack` counters | Claude | done | `research_engine/models.py` | (is batch mein) |
+| Routing: patent connector sirf invention/prior-art/novelty sawaal par | Claude | done | `research_engine/planner.py`, `research_engine/depth.py`, `research_engine/source_discovery.py` | (is batch mein) |
+| Patent-family collapse (US/EP/WO = ek evidence) | Claude | done | `research_engine/dedup.py` | (is batch mein) |
+| "Patent ≠ proof" ke teen alag gate | Claude | done | `research_engine/claim_labels.py`, `research_engine/claim_verification.py`, `research_engine/consensus_gate.py` | (is batch mein) |
+| Prompt-level patent rule (sirf patent pack par inject) | Claude | done | `research_engine/gemini_reasoning.py` | (is batch mein) |
+| Prior-art honesty + novelty-overclaim catcher report mein | Claude | done | `research_engine/orchestrator.py` | (is batch mein) |
+| Relevance guard patent metrics + "filtered ≠ 0 mila" | Claude | done | `research_engine/relevance.py` | (is batch mein) |
+| 152-check offline patent suite (10 deliberate trap) | Claude | done | `tests/test_patents.py` (naya) | (is batch mein) |
+
+Provider chunav (dono ₹0 aur official):
+
+- **EPO Linked Open Data SPARQL** (`epo_lod`) — `https://data.epo.org/linked-data/query`,
+  bilkul **keyless**, EPO ka apna public endpoint. Fair-use ~10 search/min hai
+  isliye `retries=0` aur `LIMIT 5`. SPARQL injection band: har quoted term
+  `^[0-9a-z \-]*$` par saaf hota hai, FILTER sirf REQUIRED triple par lagti hai.
+  EPO ka legal-status data official publication **nahi** maana jaata — isliye
+  source string mein wahi likha jaata hai.
+- **USPTO Open Data Portal** (`uspto_odp`) — free account ki API key se, isliye
+  **optional**: key na ho to connector `available_names()` mein hi nahi aata aur
+  reason `no_key` jaata hai (crash nahi). Key sirf `USPTO_ODP_API_KEY` env se
+  padhi jaati hai, sirf `X-API-KEY` header mein jaati hai, aur kisi log/record/
+  URL/params mein leak nahi hoti (test isse assert karta hai).
+
+Patent evidence science evidence se **alag** rehta hai, teen jagah:
+
+1. `claim_labels.line_verdict` — patent-only line `full_text` par bhi
+   `[SOURCE-REPORTED]` rehti hai (reason: "LEGAL dawe").
+2. `claim_verification.check_d` — patent-only claim ka verdict `UNKNOWN`.
+3. `consensus_gate` ka 7th condition `science_beyond_patents` — sirf tab judta
+   hai jab pack mein patent hain, aur 3 non-patent science source maangta hai.
+   Plus `coverage_report()["prior_art"]` ek alag block hai, science counters
+   mein mila hua nahi.
+
+Chalane ka tareeka: `python3 tests/test_patents.py` (poora offline — network
+nahi, API key nahi, paisa nahi). 11 stage, **152 check**. Suite khokhli nahi
+hai: teen mutation inject karke check kiya gaya — family-collapse band karne par
+7 FAIL, `patent_intent` hamesha-on karne par 1 FAIL, `is_patent` hamesha False
+karne par 30 FAIL.
+
+Regression (sab is sandbox mein 2026-08-21 ko chalaye gaye, sab `rc=0`):
+`tests/benchmark_cross_domain.py` **633/633**, `tests/benchmark_superconductivity.py`
+**146/146**, `test_research_engine.py` **593 pass / 0 fail**,
+`test_missing_features.py` 14 assertion, aur `tests/test_*.py` ki saari 19 file
+`rc=0` (test_claim_verification 143/0, test_hypothesis_quality 137/0,
+test_quota_backup 122/0, test_physics_sanity 86/0, test_audit_accounting 70/0,
+test_pdf_chunking 56/0, test_answer_structure 51/0, test_search_rounds 51/0,
+test_relevance_domain 39/0, test_consensus_gate 28/0, test_patents 152/0 —
+baaki file summary line print nahi karti). Asli `pytest` is sandbox mein import
+hi nahi hoti (neeche wala gap), isliye pytest ka naya total intel ke Windows se
+aayega — `tests/test_patents.py` module level par sirf ek test deti hai
+(`test_patents_all_checks_pass`), isliye pichhle **194** se **195** hona
+chahiye.
+
 ## Known gaps (jaan-boojh kar khule)
 
 - **⚠️ ChatGPT-owned file mein §14 ka edit hua (intel ko report kiya gaya).**
@@ -267,8 +334,21 @@ Benchmark ne 5 asli bug pakde (test aasan karke nahi, code theek karke gaye):
   mein jaati hain aur audit block wahi note pehle se chhapta hai
   (`api_accounting()` dict mein `keys_available` / `key_switches` /
   `active_key` / `keys_note` bhi maujood hain, jab ChatGPT chaahe use kar le).
-- **Patents connector nahi hai.** §3 "patents" ko priority connector maanta hai,
-  par repo mein koi patent connector maujood nahi (papers/books/datasets/web hi
-  hain). Naya connector add karna alag task hai — is batch ka hissa nahi.
+- **~~Patents connector nahi hai~~ — 2026-08-21 ko ho gaya**, par teen cheezein
+  jaan-boojh kar khuli hain:
+  - **CUSTOM mode se `use_patents` toggle nahi hota.** `depth.py` mein flag
+    maujood hai (QUICK=False, DEEP/MAXIMUM=True), par CUSTOM ka payload parsing
+    `api/agent_routes.py` mein hai — wo file ChatGPT ki hai, isliye chhui nahi.
+    CUSTOM abhi apne base depth ka default use karta hai.
+  - **`synthesizer.py` patent ke `"claims"` ko raw hi render karta hai.** Uske
+    liye us file ka block badalna padta (ChatGPT-owned) — rok diya. Info gaayab
+    nahi: read depth `patent_meta` + `coverage_report()["patent_read_levels"]`
+    mein hai, aur prior-art line engine ke notes mein pehle se jaati hai.
+  - **`family_id` sirf EPO deta hai.** USPTO ODP wale record ka `family_id`
+    jaan-boojh kar `""` rehta hai (ODP is endpoint par bharosemand family id
+    nahi deta) — us case mein family key priority-date + title slug se banti
+    hai, aur kuch bhi na mile to key khaali rehti hai matlab wo record kabhi
+    dedup mein nahi girta. Guess karke do alag invention ko ek maan lena isse
+    bura hota.
 - Kuch declared-but-unused packages `requirements.txt` mein hain. Inhe **hataya
   nahi gaya** (feature/dependency kabhi nahi hatate — intel ka rule).
