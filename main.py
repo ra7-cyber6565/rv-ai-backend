@@ -22,6 +22,7 @@ from storage.provider_factory import provider_status
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
 from utils.request_guard import client_key, enabled as rate_limit_enabled, limit_for, limiter
+from utils.reasoning_status import reasoning_status
 
 # Project policy: zero-cost mode is ON by default. If a known paid-provider
 # credential is accidentally configured, fail at startup instead of risking a bill.
@@ -95,6 +96,7 @@ def _runtime_safety_status() -> dict:
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
+        "reasoning_resilience": reasoning_status(),
         "cloud_archive": provider_status(),
         "storage": storage_status(),
     }
@@ -132,7 +134,7 @@ def api_info():
 
 @app.get("/health")
 def health_check():
-    """Health check including storage and non-secret archive readiness."""
+    """Health check including storage and non-secret archive/reasoning readiness."""
     safety = _runtime_safety_status()
     current_storage = safety["storage"]
     archive = safety["cloud_archive"]
@@ -141,6 +143,10 @@ def health_check():
     # ready, surface degraded health without crashing the research API.
     if archive.get("enabled") and not archive.get("ready"):
         degraded = True
+    # Hosted/free reasoning providers are intentionally NOT a health-failure
+    # condition: deterministic local evidence fallback remains available even if
+    # every cloud quota is exhausted. The detailed non-secret readiness is still
+    # exposed under reasoning_resilience for diagnostics/UI.
     return {
         "status": "degraded" if degraded else "healthy",
         "service": "RV AI Backend",
