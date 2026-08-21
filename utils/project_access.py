@@ -14,6 +14,12 @@ secure device storage and send it only in ``X-Project-Token`` headers.
 
 This is namespace isolation, not an identity/account system. It prevents casual
 cross-project poisoning/enumeration while keeping the project ₹0 and self-hosted.
+
+Secret creation is also race-safe. Multiple signer instances in the same process
+share a path lock, and a short-lived OS file lock serializes first creation across
+processes. That matters because two workers creating different HMAC secrets at the
+same path could otherwise issue tokens that become invalid immediately after one
+secret overwrites the other.
 """
 from __future__ import annotations
 
@@ -25,15 +31,32 @@ import re
 import secrets
 import tempfile
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 
+from utils.process_lock import ExclusiveProcessFileLock, ProcessLockError
 from utils.storage_paths import ensure_layout
 
 
 _PROJECT_ID_RE = re.compile(r"^p_[A-Za-z0-9_-]{20,78}$")
 _SECRET_BYTES = 32
 _SECRET_FILENAME = "project_capability.key"
+_CREATE_LOCK_WAIT_SECONDS = 2.0
+_CREATE_LOCK_POLL_SECONDS = 0.01
+
+_LOCKS_GUARD = threading.Lock()
+_PATH_LOCKS: dict[str, threading.RLock] = {}
+
+
+def _lock_for(path: str) -> threading.RLock:
+    key = os.path.normcase(os.path.abspath(path))
+    with _LOCKS_GUARD:
+        lock = _PATH_LOCKS.get(key)
+        if lock is None:
+            lock = threading.RLock()
+            _PATH_LOCKS[key] = lock
+        return lock
 
 
 def _b64url(raw: bytes) -> str:
@@ -54,7 +77,7 @@ def default_secret_path() -> str:
 class ProjectCapabilitySigner:
     def __init__(self, secret_path: Optional[str] = None):
         self.secret_path = os.path.abspath(secret_path or default_secret_path())
-        self._lock = threading.RLock()
+        self._lock = _lock_for(self.secret_path)
         self._secret: bytes | None = None
 
     @staticmethod
@@ -71,6 +94,7 @@ class ProjectCapabilitySigner:
 
     @staticmethod
     def _write_new_secret(path: str, raw: bytes) -> None:
+        """Atomically publish a fully-written secret while caller holds create lock."""
         parent = os.path.dirname(path)
         Path(parent).mkdir(parents=True, exist_ok=True)
         fd, temp_path = tempfile.mkstemp(prefix="project_capability_", suffix=".tmp", dir=parent)
@@ -99,20 +123,55 @@ class ProjectCapabilitySigner:
         with self._lock:
             if self._secret is not None:
                 return self._secret
+
             existing = self._read_secret(self.secret_path)
             if existing:
                 self._secret = existing
                 return existing
-            raw = secrets.token_bytes(_SECRET_BYTES)
-            try:
-                self._write_new_secret(self.secret_path, raw)
-            except OSError as exc:
-                raise RuntimeError("Project access secret safely persist nahi ho saka") from exc
-            persisted = self._read_secret(self.secret_path)
-            if not hmac.compare_digest(raw, persisted):
-                raise RuntimeError("Project access secret verification fail hua")
-            self._secret = persisted
-            return persisted
+
+            deadline = time.monotonic() + _CREATE_LOCK_WAIT_SECONDS
+            create_lock_path = self.secret_path + ".create.lock"
+
+            while True:
+                guard = ExclusiveProcessFileLock(create_lock_path)
+                try:
+                    guard.acquire()
+                except ProcessLockError:
+                    # Another process is probably publishing the first secret.
+                    # Re-read before sleeping so normal startup races resolve fast.
+                    existing = self._read_secret(self.secret_path)
+                    if existing:
+                        self._secret = existing
+                        return existing
+                    if time.monotonic() >= deadline:
+                        raise RuntimeError(
+                            "Project access secret creation lock busy raha; safe startup fail-closed hua"
+                        )
+                    time.sleep(_CREATE_LOCK_POLL_SECONDS)
+                    continue
+
+                try:
+                    # Double-check after obtaining the OS lock because another
+                    # process may have created the secret while we were waiting.
+                    existing = self._read_secret(self.secret_path)
+                    if existing:
+                        self._secret = existing
+                        return existing
+
+                    raw = secrets.token_bytes(_SECRET_BYTES)
+                    try:
+                        self._write_new_secret(self.secret_path, raw)
+                    except OSError as exc:
+                        raise RuntimeError(
+                            "Project access secret safely persist nahi ho saka"
+                        ) from exc
+                    persisted = self._read_secret(self.secret_path)
+                    if not hmac.compare_digest(raw, persisted):
+                        raise RuntimeError("Project access secret verification fail hua")
+                    self._secret = persisted
+                    return persisted
+                finally:
+                    guard.release()
 
     def create(self) -> dict[str, str]:
         """Create one random anonymous project namespace + bearer capability."""
