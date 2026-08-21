@@ -60,6 +60,24 @@ app.add_middleware(
 )
 
 
+def _harden_response(response, path: str):
+    """Attach cheap privacy/security headers without exposing capability data.
+
+    `/api/v1` includes responses that can contain newly-issued project/job bearer
+    capabilities, research text, document metadata and private progress. Custom
+    bearer headers are not the same as standard HTTP Authorization semantics for
+    every intermediary, so explicitly forbid caching instead of trusting proxies
+    or browser defaults. This also covers validation/rate-limit responses.
+    """
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "no-referrer")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    if str(path or "").startswith("/api/v1/"):
+        response.headers["Cache-Control"] = "no-store, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @app.middleware("http")
 async def protect_free_quota(request: Request, call_next):
     """Bound expensive creation/upload traffic and rapid async-job polling.
@@ -77,7 +95,7 @@ async def protect_free_quota(request: Request, call_next):
                 limit,
             )
             if not allowed:
-                return JSONResponse(
+                response = JSONResponse(
                     status_code=429,
                     content={
                         "detail": "Free quota/server protection: bahut requests aa gayi hain. Thodi der baad dobara try karein.",
@@ -85,7 +103,9 @@ async def protect_free_quota(request: Request, call_next):
                     },
                     headers={"Retry-After": str(retry_after)},
                 )
-    return await call_next(request)
+                return _harden_response(response, request.url.path)
+    response = await call_next(request)
+    return _harden_response(response, request.url.path)
 
 # Session is zero-model/zero-cloud and creates a random isolated project namespace.
 app.include_router(session_router, prefix="/api/v1", tags=["Session"])
