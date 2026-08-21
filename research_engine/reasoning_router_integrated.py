@@ -170,7 +170,13 @@ class ResilientReasoning(_Router):
         return text
 
     def technical_details(self, limit: int = 8) -> List[str]:
-        """Return coarse failure metadata only, never raw provider bodies."""
+        """Return coarse failure metadata only, never raw provider bodies.
+
+        This intentionally stays sanitized even when no provider-level fallback
+        is configured. The inherited Gemini ledger stores raw SDK detail for
+        local debugging, so delegating to ``super().technical_details()`` in that
+        case would leak protobuf/HTTP/proxy text through the public audit path.
+        """
         rows: List[str] = []
         for event in list(getattr(getattr(self, "ledger", None), "events", []) or []):
             if not isinstance(event, dict):
