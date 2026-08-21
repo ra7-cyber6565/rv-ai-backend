@@ -59,11 +59,6 @@ app.add_middleware(
         "X-Infinity-Admin-Token",
     ],
 )
-# This pure-ASGI guard is intentionally added after CORS so it is outermost in
-# Starlette's user middleware stack. It counts raw bytes before JSON/multipart
-# parsing, closing the gap where a huge chunked upload could spool before the
-# route-level UploadFile size check ever runs.
-app.add_middleware(RequestBodyLimitMiddleware)
 
 
 def _harden_response(response, path: str):
@@ -112,6 +107,13 @@ async def protect_free_quota(request: Request, call_next):
                 return _harden_response(response, request.url.path)
     response = await call_next(request)
     return _harden_response(response, request.url.path)
+
+
+# Added last so this pure-ASGI guard is outermost among user middleware. It
+# counts raw bytes before FastAPI/Starlette JSON or multipart parsing, closing
+# the gap where an oversized/chunked upload could spool before route-level
+# UploadFile limits ever run.
+app.add_middleware(RequestBodyLimitMiddleware)
 
 # Session is zero-model/zero-cloud and creates a random isolated project namespace.
 app.include_router(session_router, prefix="/api/v1", tags=["Session"])
