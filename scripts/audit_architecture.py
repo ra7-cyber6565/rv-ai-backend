@@ -12,8 +12,8 @@ The audit therefore checks that the production entrypoint is still wired as:
     -> human-first synthesizer/audit
 
 It also checks the project's hard safety invariants (₹0 provider guard, local
-fallback, strict CORS, bounded storage/jobs, honest release state, no obvious
-committed secrets).
+fallback, provider cooldown memory, strict CORS, private async-job capabilities,
+bounded storage/jobs, honest release state, no obvious committed secrets).
 
 Exit code:
     0  all required checks pass
@@ -200,6 +200,51 @@ def _fallback_wired() -> AuditCheck:
     )
 
 
+def _provider_cooldown_wired() -> AuditCheck:
+    registry = _read("utils/provider_health.py")
+    facade = _read("research_engine/reasoning_router_integrated.py")
+    status = _read("utils/reasoning_status.py")
+    env = _read(".env.example")
+    required = [
+        (registry, "class ProviderHealthRegistry", "provider health registry"),
+        (registry, "record_failure", "failure recording"),
+        (registry, "record_success", "success recovery"),
+        (facade, "_HealthAwareProvider", "fallback-provider wrapper"),
+        (facade, 'provider_health.blocked("gemini")', "Gemini cross-request skip"),
+        (status, "temporarily_skipped", "public non-secret cooldown status"),
+        (env, "PROVIDER_HEALTH_RATE_LIMIT_SECONDS", "cooldown configuration"),
+    ]
+    missing = [label for text, needle, label in required if needle not in text]
+    return AuditCheck(
+        name="resilience:cross-request-provider-cooldown",
+        passed=not missing,
+        detail=("known-dead providers are temporarily skipped across requests"
+                if not missing else "missing: " + ", ".join(missing)),
+    )
+
+
+def _async_job_privacy() -> AuditCheck:
+    routes = _read("api/job_routes.py")
+    capability = _read("utils/job_access.py")
+    required = [
+        (routes, "X-Research-Job-Token", "private polling header"),
+        (routes, "_authorized_job", "per-job authorization helper"),
+        (routes, "job_access.verify", "capability verification"),
+        (routes, "Depends(require_admin)", "server-wide listing admin guard"),
+        (capability, "hmac.new", "HMAC capability token"),
+        (capability, "secrets.token_bytes", "random server secret"),
+        (capability, "research_job_capability.key", "durable local secret"),
+        (capability, "compare_digest", "constant-time token comparison"),
+    ]
+    missing = [label for text, needle, label in required if needle not in text]
+    return AuditCheck(
+        name="security:async-job-capability",
+        passed=not missing,
+        detail=("job status/progress/result require an opaque capability"
+                if not missing else "missing: " + ", ".join(missing)),
+    )
+
+
 def _storage_fail_closed() -> AuditCheck:
     paths = _read("utils/storage_paths.py")
     quota = _read("utils/storage_quota.py")
@@ -259,6 +304,7 @@ def _obvious_secret_scan() -> AuditCheck:
 def run_audit() -> AuditReport:
     required = (
         "main.py",
+        "api/job_routes.py",
         "research_engine/orchestrator.py",
         "research_engine/source_discovery.py",
         "research_engine/content_fetcher.py",
@@ -274,6 +320,8 @@ def run_audit() -> AuditReport:
         "research_engine/synthesizer.py",
         "research_engine/presentation_guard.py",
         "utils/zero_cost_guard.py",
+        "utils/provider_health.py",
+        "utils/job_access.py",
         "utils/request_guard.py",
         "utils/research_jobs.py",
         "utils/storage_paths.py",
@@ -281,6 +329,9 @@ def run_audit() -> AuditReport:
         "tests/test_relevance_domain.py",
         "tests/test_claim_verification.py",
         "tests/test_reasoning_router_integration.py",
+        "tests/test_provider_health.py",
+        "tests/test_job_access.py",
+        "tests/test_job_routes_access.py",
         "tests/test_offline_reasoner.py",
         "tests/test_release_state.py",
         "tests/benchmark_superconductivity.py",
@@ -318,6 +369,8 @@ def run_audit() -> AuditReport:
         ),
         _zero_cost_chain(),
         _fallback_wired(),
+        _provider_cooldown_wired(),
+        _async_job_privacy(),
         _storage_fail_closed(),
         _no_wildcard_cors(),
         _obvious_secret_scan(),
@@ -331,6 +384,8 @@ def run_audit() -> AuditReport:
             "architecture_audit",
             "benchmark_superconductivity_v2",
             "test_reasoning_router_integration.py",
+            "test_provider_health.py",
+            "test_job_access.py",
             "test_offline_reasoner.py",
             "test_release_state.py",
         ),
