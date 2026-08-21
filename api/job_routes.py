@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from typing import Dict, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from research_engine.depth import BOOL_FIELDS, depth_limits
+from utils.admin_guard import require_admin
 from utils.progress_tracker import get_progress
 from utils.research_jobs import runner
 
@@ -113,5 +114,6 @@ def research_job_result(job_id: str):
 
 
 @router.get("/research-jobs")
-def list_research_jobs(limit: int = 20):
+def list_research_jobs(limit: int = 20, _admin: None = Depends(require_admin)):
+    """Server-wide job listing is operational metadata and therefore admin-only."""
     return {"jobs": runner.list(limit=limit)}
