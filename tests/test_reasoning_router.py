@@ -59,9 +59,11 @@ def _fail(name: str, model: str, kind: str = "quota", block: bool = True):
     )
 
 
-def test_package_exports_resilient_subclass_without_replacing_primary_implementation():
-    assert gemini_reasoning.GeminiReasoning is ResilientReasoning
-    assert issubclass(ResilientReasoning, object)
+def test_package_exports_accounting_integrated_resilient_subclass():
+    # Package export is the small accounting-integration subclass layered over
+    # this base provider router. This preserves old provider behaviour while
+    # fixing Claude's new pass_log/accounting fields after a fallback succeeds.
+    assert issubclass(gemini_reasoning.GeminiReasoning, ResilientReasoning)
 
 
 def test_quota_on_first_fallback_moves_to_second_and_completes_same_logical_pass():
@@ -120,7 +122,7 @@ def test_accounting_separates_provider_fallback_from_same_model_retry():
     assert acc["provider_fallbacks"] == 1
     assert acc["provider_attempts"] == {"groq": 1, "openrouter": 1}
     assert acc["provider_successes"] == {"openrouter": 1}
-    assert acc["same_model_retries"] is None
+    assert acc["same_model_retries"] == 0
     assert acc["retries"] == 0, "provider switch ko retry kehna galat hai"
 
 
