@@ -62,6 +62,7 @@ function friendly(el,text="Abhi server se baat nahi ho paayi. Thodi der baad phi
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 async function jsonFetch(url,opts){const r=await fetch(url,opts);let data={};try{data=await r.json();}catch(_){data={};}return {r,data};}
 
+function resetProjectSession(){PROJECT.id="";PROJECT.token="";sessionPromise=null;}
 async function ensureSession(){
   if(PROJECT.id&&PROJECT.token)return PROJECT;
   if(sessionPromise)return sessionPromise;
@@ -74,15 +75,27 @@ async function ensureSession(){
   try{return await sessionPromise;}catch(e){sessionPromise=null;throw e;}
 }
 function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}
+async function projectPost(url,makePayload){
+  // A backend redeploy may rotate an ephemeral project-signing file while this
+  // tab still has the old in-memory capability. One 404 refresh is safe; never
+  // loop forever and never put either capability in a URL.
+  for(let attempt=0;attempt<2;attempt++){
+    await ensureSession();
+    const payload=makePayload(PROJECT.id);
+    const out=await jsonFetch(API+url,{method:"POST",headers:projectHeaders(),body:JSON.stringify(payload)});
+    if(out.r.status!==404||attempt===1)return out;
+    resetProjectSession();
+  }
+  throw new Error("project session recovery failed");
+}
 
-async function runChat(message,el){thinking(el);try{await ensureSession();const {r,data}=await jsonFetch(API+"/api/v1/chat",{method:"POST",headers:projectHeaders(),body:JSON.stringify({message,history,project_id:PROJECT.id})});if(!r.ok)throw new Error("chat failed");const text=data.answer||"Is baar jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});}catch(e){friendly(el);}}
+async function runChat(message,el){thinking(el);try{const {r,data}=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}));if(!r.ok)throw new Error("chat failed");const text=data.answer||"Is baar jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});}catch(e){friendly(el);}}
 
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
 
 async function runResearch(question,el){const ui=progressPanel(el);let jobId="",jobToken="";try{
-  await ensureSession();
-  const start=await jsonFetch(API+"/api/v1/research-jobs",{method:"POST",headers:projectHeaders(),body:JSON.stringify({question,project_id:PROJECT.id,depth_mode:mode})});
+  const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:mode}));
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token)throw new Error("job start failed");
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
