@@ -9,6 +9,10 @@ from scripts import run_foundation_gate as gate
 
 def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     monkeypatch.setenv("GEMINI_API_KEY", "should-not-survive")
+    monkeypatch.setenv("GEMINI_API_KEY_2", "backup-should-not-survive")
+    monkeypatch.setenv("GEMINI_API_KEY9", "backup-nine-should-not-survive")
+    monkeypatch.setenv("GEMINI_API_KEYS", "list-one,list-two")
+    monkeypatch.setenv("GEMINI_API_KEY_BACKUP", "named-backup")
     monkeypatch.setenv("GROQ_API_KEY", "should-not-survive")
     monkeypatch.setenv("OPENROUTER_API_KEY", "should-not-survive")
     monkeypatch.setenv("OLLAMA_ENABLED", "true")
@@ -22,6 +26,10 @@ def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
 
     assert env["ZERO_COST_ONLY"] == "true"
     assert env["GEMINI_API_KEY"] == ""
+    assert env["GEMINI_API_KEY_2"] == ""
+    assert env["GEMINI_API_KEY9"] == ""
+    assert env["GEMINI_API_KEYS"] == ""
+    assert env["GEMINI_API_KEY_BACKUP"] == ""
     assert env["GEMINI_ZERO_COST_CONFIRMED"] == "false"
     assert env["GROQ_API_KEY"] == ""
     assert env["GROQ_ZERO_COST_CONFIRMED"] == "false"
@@ -58,6 +66,7 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "tests/test_reasoning_status.py" in focused_command
     assert "tests/test_quick_chat_resilience.py" in focused_command
     assert "tests/test_gemini_diag_zero_call.py" in focused_command
+    assert "tests/test_quota_backup.py" in focused_command
     assert "tests/test_provider_bypass_audit.py" in focused_command
     assert "tests/test_architecture_audit.py" in focused_command
     assert "tests/test_release_state.py" in focused_command
