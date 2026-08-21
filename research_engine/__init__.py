@@ -15,7 +15,9 @@ Package layout:
     citation.py               CitationEngine (Spec 7,14)
     contradiction.py          ContradictionEngine (Spec 8)
     gemini_reasoning.py       GeminiReasoning (Spec 9)
-    reasoning_router.py       quota-resilient ₹0 provider fallback facade
+    reasoning_router.py       quota-resilient ₹0 provider fallback base
+    reasoning_router_integrated.py
+                              provider fallback + latest pass accounting facade
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -32,7 +34,9 @@ network call then. It simply replaces the exported ``GeminiReasoning`` class
 with a backwards-compatible subclass. With no configured fallback provider it
 behaves exactly like Claude's Gemini implementation; with a confirmed/free
 fallback configured it can finish the same logical pass through Groq,
-OpenRouter-free or local Ollama instead of returning a quota error.
+OpenRouter-free or local Ollama instead of returning a quota error. The
+integrated facade preserves Claude's latest pass-level/API accounting even when
+a fallback provider completes a pass after Gemini fails.
 """
 from __future__ import annotations
 
@@ -42,9 +46,10 @@ from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
 
 # Preserve Claude's Gemini implementation as the primary, but let every normal
 # import (including orchestrator's direct module import) see the resilient
-# subclass. reasoning_router captures the original class before this assignment.
+# subclass. reasoning_router captures the original class before this assignment;
+# the integrated facade then adds the latest pass-log/accounting compatibility.
 from . import gemini_reasoning as _gemini_reasoning
-from .reasoning_router import ResilientReasoning as _ResilientReasoning
+from .reasoning_router_integrated import ResilientReasoning as _ResilientReasoning
 _gemini_reasoning.GeminiReasoning = _ResilientReasoning
 
 from .models import (
