@@ -1,6 +1,7 @@
 """Offline tests for async research-job capability tokens."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from utils.job_access import JobCapabilitySigner
@@ -66,3 +67,18 @@ def test_status_exposes_only_boolean_readiness(tmp_path):
     text = repr(status)
     assert str(path) not in text
     assert path.read_bytes() not in text.encode("utf-8")
+
+
+def test_parallel_signer_instances_publish_one_secret_and_same_token(tmp_path):
+    path = str(tmp_path / "secret.bin")
+    job_id = "parallel_job_abcdefghijklmnop"
+
+    def issue_once(_index: int) -> str:
+        return JobCapabilitySigner(path).issue(job_id)
+
+    with ThreadPoolExecutor(max_workers=12) as pool:
+        tokens = list(pool.map(issue_once, range(48)))
+
+    assert len(set(tokens)) == 1
+    assert len(Path(path).read_bytes()) == 32
+    assert JobCapabilitySigner(path).verify(job_id, tokens[0]) is True
