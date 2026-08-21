@@ -11,7 +11,7 @@ def _source(*, snippet: str, read_level: str = "full_text", relevance: float = 0
             year: int | None = None) -> SourceRecord:
     s = SourceRecord(
         title="Urban density and car travel",
-        url="https://example.org/paper",
+        url=f"https://example.org/{source_id.lower()}",
         snippet=snippet,
         source_type=SourceType.PAPER,
         peer_reviewed=True,
@@ -27,9 +27,13 @@ def _source(*, snippet: str, read_level: str = "full_text", relevance: float = 0
 
 
 def _pack(source: SourceRecord) -> EvidencePack:
+    return _pack_many([source])
+
+
+def _pack_many(sources: list[SourceRecord]) -> EvidencePack:
     return EvidencePack(
         question="Does higher urban density reduce per-capita car travel?",
-        sources=[source],
+        sources=sources,
         topic_terms=["urban", "density", "car", "travel"],
     )
 
@@ -162,6 +166,36 @@ def test_low_quality_or_retracted_source_cannot_pass_quality_gate():
     retracted_report = EvidenceVerifier().verify(answer, _pack(retracted))
     assert retracted_report.items[0].quality is False
     assert retracted_report.gate_passed is False
+
+
+def test_AE_dimensions_cannot_be_mixed_across_different_cited_sources():
+    # S1 genuinely supports the claim but is deliberately too low quality.
+    supporting_but_weak = _source(
+        source_id="S1",
+        snippet="Higher urban density reduces per-capita car travel by 30 percent.",
+        relevance=0.9,
+        quality=0.1,
+    )
+    # S2 is high quality, but is explicitly about the opposite result. Old
+    # independent aggregation could incorrectly take support from S1 + quality
+    # from S2 and declare the claim verified. Same-source cumulative A-E must fail.
+    strong_but_contradicting = _source(
+        source_id="S2",
+        snippet="Higher urban density increases per-capita car travel by 30 percent.",
+        relevance=0.9,
+        quality=0.95,
+    )
+    pack = _pack_many([supporting_but_weak, strong_but_contradicting])
+    report = EvidenceVerifier().verify(
+        "[FACT] Higher urban density reduces per-capita car travel by 30% [S1, S2].",
+        pack,
+    )
+    assert report.gate_passed is False
+    assert report.items[0].citation is True
+    assert report.items[0].support is True
+    assert report.items[0].quality is False
+    assert report.checks["E_quality"] is False
+    assert "mix" in report.note.lower()
 
 
 def test_missing_or_invented_citation_fails_A_gate():
