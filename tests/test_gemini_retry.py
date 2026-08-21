@@ -129,8 +129,6 @@ def test_transient_error_is_retried_on_same_model():
     brain = _brain({"model-a": [_quota(), "asli jawab"]})
     text = brain.generate("prompt", "critique")
     assert text == "asli jawab", text
-    # LOGICAL budget ek hi khaya (retry budget nahi khaata) — ye zaroori hai,
-    # warna ek 429 phir se poora pass kha jaata
     assert brain.calls_used == 1, brain.calls_used
     assert brain.attempts == 2, brain.attempts
     assert brain.remaining == 1
@@ -149,7 +147,6 @@ def test_retry_gives_up_on_same_model_and_moves_to_next():
 
 
 def test_model_not_found_does_not_retry_same_model():
-    """404 par usi model ko dobara maarna bekaar hai — seedha agla model."""
     brain = _brain({"model-a": [RuntimeError("404 models/model-a is not found")],
                     "model-b": ["theek hai"]})
     assert brain.generate("prompt", "analysis") == "theek hai"
@@ -157,20 +154,22 @@ def test_model_not_found_does_not_retry_same_model():
 
 
 def test_empty_response_counts_as_failure():
-    """Khaali jawab ko 'safal' maan lena hi purana chhupa hua bug tha."""
     brain = _brain({"model-a": ["   ", "ab jawab aaya"]})
     assert brain.generate("prompt", "analysis") == "ab jawab aaya"
     assert brain.attempts == 2
 
 
-def test_everything_fails_returns_empty_but_records_why():
+def test_everything_fails_returns_empty_but_records_safe_reason():
     brain = _brain({"model-a": [_quota(), _quota(), _quota()],
                     "model-b": [_quota(), _quota(), _quota()]})
     assert brain.generate("prompt", "critique") == ""
     assert brain.calls_used == 1
     assert brain.attempts == 6, brain.attempts
     assert brain.errors, "wajah record honi chahiye"
-    assert any("429" in e for e in brain.errors)
+    joined = " ".join(brain.errors)
+    assert "rate_limit" in joined
+    for raw in ("429", "ResourceExhausted", "quota exceeded"):
+        assert raw not in joined
 
 
 def test_budget_exhausted_raises_quota_exhausted():
@@ -197,11 +196,6 @@ def test_usage_note_tells_the_truth():
 
 # ── TEST D (§16): daily quota par bekaar retry nahi ──────────────────────────
 def test_daily_quota_is_not_retried_uselessly():
-    """
-    Live run mein ek daily-quota 429 par system 3 baar usi model ko maarta tha,
-    phir agle model par bhi 3 baar — 9 bekaar call, 6s sleep, aur jawab "".
-    Ab: ek model = ek attempt, aur seedha agla model.
-    """
     brain = _brain({"model-a": [_daily(), _daily(), _daily()],
                     "model-b": ["doosre model ne jawab diya"]})
     text = brain.generate("prompt", "synthesis")
@@ -214,7 +208,6 @@ def test_daily_quota_is_not_retried_uselessly():
 
 
 def test_blocked_model_is_skipped_in_later_passes():
-    """Ek pass mein jo model daily-quota de chuka, agle pass mein poochha na jaaye."""
     brain = _brain({"model-a": [_daily(), _daily()],
                     "model-b": ["pehla", "doosra"]}, budget=2)
     assert brain.generate("p", "analysis") == "pehla"
@@ -225,7 +218,6 @@ def test_blocked_model_is_skipped_in_later_passes():
 
 
 def test_long_retry_delay_prefers_next_model_over_sleeping():
-    """Server 21s maange to user ko atkaane se behtar hai agla model."""
     gemini_reasoning._MAX_SLEEP_SECONDS = 6.0
     slow = RuntimeError("429 ResourceExhausted: rate limit; retry_delay { seconds: 21 }")
     brain = _brain({"model-a": [slow, "late jawab"], "model-b": ["turant jawab"]})
@@ -248,7 +240,6 @@ def test_deprecated_model_is_marked_dead_and_skipped():
 
 
 def test_dead_model_never_returned_by_candidates():
-    """`candidates()` mare hue naam dobara offer karta tha — wahi §7 ka bug."""
     gemini_model.forget_dead()
     gemini_model._cache = None
     gemini_model._seen = ["gemini-2.0-flash", "gemini-2.5-flash"]
@@ -276,15 +267,14 @@ def test_auth_failure_stops_everything():
     assert brain.fakes["model-a"].calls == 1
     assert brain.fakes["model-b"].calls == 0, "key galat hai — doosra model bhi bekaar"
     assert brain.stopped is True
-    # agla pass bina ek bhi HTTP call ke skip ho
     attempts = brain.attempts
     assert brain.generate("p", "synthesis") == ""
     assert brain.attempts == attempts, "auth fail ke baad HTTP call nahi honi chahiye"
     assert brain.failure_kind() == AUTH
 
 
-# ── §9/§25: wajah insaani bhasha mein, raw error sirf sabse neeche ───────────
-def test_failure_reason_is_human_and_details_are_separate():
+# ── §9/§25: user/audit dono mein raw provider payload leak nahi ───────────────
+def test_failure_reason_and_public_details_are_sanitized():
     brain = _brain({"model-a": [_daily()], "model-b": [_daily()]})
     assert brain.generate("p", "synthesis") == ""
     reason = brain.failure_reason()
@@ -293,7 +283,10 @@ def test_failure_reason_is_human_and_details_are_separate():
     for bad in ("ResourceExhausted", "quota_id", "429", "Traceback"):
         assert bad not in reason, f"user-facing line mein raw error nahi: {reason}"
     details = brain.technical_details()
-    assert details and any("quota_id" in d for d in details), details
+    assert details and any("daily_quota" in d for d in details), details
+    joined = " ".join(details)
+    for bad in ("ResourceExhausted", "quota_id", "429", "protobuf"):
+        assert bad not in joined
 
 
 def test_api_accounting_is_honest():
@@ -305,11 +298,7 @@ def test_api_accounting_is_honest():
     assert acc["actual_http_attempts"] == 4, acc
     assert acc["successful_calls"] == 1
     assert acc["failed_http_attempts"] == 3, acc
-    assert acc["failed_attempts"] == 3, acc          # purana naam bhi chalta hai
-    # NOTE (2026-08-21, §14): pehle yahan `retries == 3` likha tha, jo galat tha.
-    # Asli hisaab: model-a par 1 pehli koshish + 2 retry, phir model-b par shift
-    # (1 attempt). Yaani retry 2, switch 1 — 3 retry nahi. Purana formula
-    # `attempts - calls_used` model fallback ko bhi "retry" gin leta tha.
+    assert acc["failed_attempts"] == 3, acc
     assert acc["same_model_retries"] == 2, acc
     assert acc["retries"] == 2, acc
     assert acc["model_switches"] == 1
@@ -317,7 +306,6 @@ def test_api_accounting_is_honest():
     assert RATE_LIMIT in acc["failure_kinds"], acc
     assert acc["failure_summary"], acc
     assert acc["stopped_early"] is False
-    # attempts ka poora hisaab: 1 pehli koshish (pass) + retry + switch
     assert acc["actual_http_attempts"] == (
         1 + acc["same_model_retries"] + acc["model_switches"]), acc
 
