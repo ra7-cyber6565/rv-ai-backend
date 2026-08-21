@@ -37,6 +37,24 @@ def _cited_ids(line: str) -> List[str]:
     return out
 
 
+def _records(line: str, pack: Optional[EvidencePack]) -> List:
+    if pack is None:
+        return []
+    rows = [pack.by_id(sid) for sid in _cited_ids(line)]
+    return [row for row in rows if row is not None]
+
+
+def _has_full_text_cite(line: str, pack: Optional[EvidencePack]) -> bool:
+    """Whether the line has at least one real cited source read at full-text level."""
+    for record in _records(line, pack):
+        try:
+            if record.reading_level() == _FULL:
+                return True
+        except Exception:  # pragma: no cover - defensive
+            continue
+    return False
+
+
 def _ae_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[Optional[bool], str]:
     """Cumulative same-source A-E result; None means context unavailable."""
     if pack is None or not str(getattr(pack, "question", "") or "").strip():
@@ -63,10 +81,7 @@ def line_verdict(
 ) -> Tuple[str, str]:
     """Return strongest label allowed by the requested checking depth."""
     ids = _cited_ids(line)
-    records = []
-    if pack is not None:
-        records = [pack.by_id(sid) for sid in ids]
-        records = [record for record in records if record is not None]
+    records = _records(line, pack)
 
     if not records:
         if _NO_SOURCE_RE.search(line or ""):
@@ -117,8 +132,9 @@ def downgrade(
         "to_unverified": 0,
         "a_e_checked": 0,
         "a_e_failed": 0,
-        # Claude compatibility name; in production this means the stricter A-E
-        # gate blocked a strong label, not merely a lexical entailment proxy.
+        # Compatibility name used by Claude's older tests. It now means a
+        # full-text strong label was blocked by the stricter A-E gate; an
+        # abstract/snippet depth downgrade is NOT counted here.
         "entailment_blocked": 0,
         "details": [],
         "note": "",
@@ -133,8 +149,13 @@ def downgrade(
             continue
 
         report["checked"] += 1
+        ae_attempted = bool(check_entailment and _has_full_text_cite(raw, pack))
         verdict, why = line_verdict(raw, pack, check_entailment=check_entailment)
-        if check_entailment:
+
+        # A-E is a separate stage from access-depth gating. Do not report an
+        # abstract/snippet downgrade as "A-E checked and failed" when the A-E
+        # verifier was never actually reached.
+        if ae_attempted:
             report["a_e_checked"] += 1
             if verdict != ESTABLISHED:
                 report["a_e_failed"] += 1
@@ -164,7 +185,7 @@ def downgrade(
         strict_reason = (
             "full text hone ke baad bhi same cited source par claim-level A-E support "
             "nahi mila"
-            if check_entailment and report["a_e_failed"]
+            if report["a_e_failed"]
             else "source access depth strong label ke liye enough nahi thi"
         )
         report["note"] = (
