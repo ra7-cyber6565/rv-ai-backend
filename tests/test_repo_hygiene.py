@@ -37,3 +37,14 @@ def test_gitignore_keeps_runtime_files_out_after_first_run():
     )
     missing = [entry for entry in required if entry not in text]
     assert not missing, missing
+
+
+def main() -> int:
+    test_generated_runtime_files_are_not_present_in_source_tree()
+    test_gitignore_keeps_runtime_files_out_after_first_run()
+    print("repo hygiene: PASS")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
