@@ -7,11 +7,13 @@ def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def test_main_wires_archive_router_and_runtime_status():
+def test_main_wires_archive_router_but_keeps_health_status_cheap():
     main = _read("main.py")
     assert "from api.archive_routes import router as archive_router" in main
     assert "include_router(archive_router" in main
-    assert '"cloud_archive": archive_runtime.public_status()' in main
+    assert '"cloud_archive": provider_status()' in main
+    assert "archive_runtime.public_status()" not in main
+    assert "/api/v1/archive/status" in main
 
 
 def test_archive_runtime_persists_intent_before_worker_submission():
