@@ -1,0 +1,72 @@
+name: Foundation tests
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [chatgpt-upload-safety]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  offline-regression:
+    # Standard GitHub-hosted runners are free for public repositories.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      ZERO_COST_ONLY: "true"
+      RATE_LIMIT_ENABLED: "true"
+      INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-data
+      GEMINI_API_KEY: ""
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Compile Python sources
+        run: |
+          python -m compileall -q .
+
+      - name: Run ChatGPT infrastructure tests
+        run: |
+          pytest -q \
+            tests/test_upload_safety.py \
+            tests/test_work_root.py \
+            tests/test_storage_paths.py \
+            tests/test_storage_quota.py \
+            tests/test_archive_manifest.py \
+            tests/test_cloud_storage.py \
+            tests/test_cloud_archive.py \
+            tests/test_zero_cost_guard.py \
+            tests/test_security_config.py \
+            tests/test_request_guard.py \
+            tests/test_research_jobs.py
+
+      - name: Run core offline regression
+        run: |
+          python test_research_engine.py
+
+      - name: Run standalone offline test files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in tests/test_*.py; do
+            echo "=== $file ==="
+            python "$file"
+          done
