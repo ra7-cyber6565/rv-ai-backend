@@ -18,6 +18,7 @@ def test_real_repository_audit_has_all_expected_check_names():
     assert "safety:zero-cost-provider-chain" in names
     assert "resilience:quota-does-not-blank-answer" in names
     assert "resilience:cross-request-provider-cooldown" in names
+    assert "security:project-namespace-capability" in names
     assert "security:async-job-capability" in names
     assert "storage:bounded-and-verified" in names
     assert "security:no-wildcard-cors" in names
@@ -90,6 +91,48 @@ def test_provider_cooldown_audit_fails_when_facade_is_not_wired(monkeypatch, tmp
     assert "fallback-provider wrapper" in result.detail
 
 
+def test_project_isolation_audit_fails_when_web_forgets_project_header(monkeypatch, tmp_path):
+    for folder in ("api", "utils", "web"):
+        (tmp_path / folder).mkdir()
+    (tmp_path / "main.py").write_text(
+        'include_router(session_router)\n"X-Project-Token"\n'
+        'status={"project_isolation": project_access.status()}\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "api" / "session_routes.py").write_text(
+        "project_access.create()\nproject_capability_tokens_ready\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "utils" / "project_access.py").write_text(
+        "hmac.new\nsecrets.token_urlsafe\nproject_capability.key\nExclusiveProcessFileLock\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "utils" / "project_guard.py").write_text(
+        "project_access.verify\nstatus_code=404\n", encoding="utf-8"
+    )
+    (tmp_path / "api" / "agent_routes.py").write_text(
+        "require_project_access(request.project_id, x_project_token)\n", encoding="utf-8"
+    )
+    (tmp_path / "api" / "job_routes.py").write_text(
+        "require_project_access(request.project_id, x_project_token)\n", encoding="utf-8"
+    )
+    (tmp_path / "api" / "routes.py").write_text(
+        "require_project_access(project_id, x_project_token)\n", encoding="utf-8"
+    )
+    # Session exists, but the private bearer header is deliberately missing.
+    (tmp_path / "web" / "index.html").write_text(
+        'API+"/api/v1/session"\nasync function projectPost(){}\nattempt<2\n', encoding="utf-8"
+    )
+    (tmp_path / "utils" / "request_guard.py").write_text(
+        '"/api/v1/session"\nRATE_SESSION_PER_HOUR\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+
+    result = audit._project_isolation()
+    assert result.passed is False
+    assert "web project bearer header" in result.detail
+
+
 def test_async_job_privacy_audit_fails_without_capability_verification(monkeypatch, tmp_path):
     (tmp_path / "api").mkdir()
     (tmp_path / "utils").mkdir()
@@ -98,7 +141,7 @@ def test_async_job_privacy_audit_fails_without_capability_verification(monkeypat
         encoding="utf-8",
     )
     (tmp_path / "utils" / "job_access.py").write_text(
-        "hmac.new\nsecrets.token_bytes\nresearch_job_capability.key\ncompare_digest\n",
+        "hmac.new\nsecrets.token_bytes\nresearch_job_capability.key\nExclusiveProcessFileLock\ncompare_digest\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(audit, "ROOT", tmp_path)
