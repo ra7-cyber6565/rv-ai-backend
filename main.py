@@ -19,7 +19,7 @@ from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
 from api.archive_routes import router as archive_router
 from knowledge.routes import router as knowledge_router
-from storage.archive_runtime import archive_runtime
+from storage.provider_factory import provider_status
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
 from utils.request_guard import (
@@ -96,16 +96,19 @@ INDEX_HTML = os.path.join(WEB_DIR, "index.html")
 
 
 def _runtime_safety_status() -> dict:
-    """Aggregate only non-secret/public-safe operational state."""
+    """Aggregate only non-secret/public-safe operational state.
+
+    Keep /health cheap: hosting platforms may call it frequently, so it must not
+    recursively scan a large D: workspace. Detailed manifest/retry/storage
+    archive state lives at /api/v1/archive/status instead.
+    """
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "release_state": RELEASE_STATE,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
         "reasoning_resilience": reasoning_status(),
-        # Runtime archive status includes provider readiness + manifest/retry
-        # counts, but strips local/remote paths and raw provider errors.
-        "cloud_archive": archive_runtime.public_status(),
+        "cloud_archive": provider_status(),
         # Never expose STORAGE_STATUS/storage_status() directly: internal status
         # includes absolute filesystem paths and may include raw OS error text.
         "storage": public_storage_status(),
@@ -148,9 +151,8 @@ def health_check():
     safety = _runtime_safety_status()
     current_storage = safety["storage"]
     archive = safety["cloud_archive"]
-    archive_provider = archive.get("provider") or {}
     degraded = not current_storage.get("available")
-    if archive_provider.get("enabled") and not archive_provider.get("ready"):
+    if archive.get("enabled") and not archive.get("ready"):
         degraded = True
     # Hosted/free reasoning providers are not a health-failure condition because
     # deterministic local evidence fallback remains available.
