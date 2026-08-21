@@ -45,12 +45,21 @@ app = FastAPI(
 # Website isi FastAPI origin se serve hoti hai, isliye browser CORS default se
 # closed rakha gaya hai. Separate frontend ho to CORS_ALLOWED_ORIGINS mein exact
 # http(s) origins comma-separated set karo; wildcard deliberately reject hota hai.
+# Async Deep/Max polling uses an opaque per-job capability header. Keep it in the
+# CORS allow-list (not in URL/localStorage) so a separately-hosted *approved*
+# browser frontend can still poll securely. The admin header is included only for
+# explicit operator tools; its token must never be embedded in public JS/Android.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
     allow_credentials=False,
     allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=[
+        "Content-Type",
+        "Authorization",
+        "X-Research-Job-Token",
+        "X-Infinity-Admin-Token",
+    ],
 )
 
 
