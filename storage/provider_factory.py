@@ -10,6 +10,7 @@ confirmed. Google Drive may be enabled through the open-source rclone adapter.
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from typing import Any
 
@@ -69,8 +70,6 @@ def provider_status() -> dict[str, Any]:
         executable = str(os.getenv("RCLONE_EXE", "rclone") or "rclone").strip()
         # Do not instantiate when merely asking status: that would fail if rclone
         # is absent and makes health/status endpoints unnecessarily fragile.
-        import shutil
-
         available = bool(shutil.which(executable) or os.path.isfile(executable))
         ready = bool(remote and available)
         return {
@@ -82,7 +81,6 @@ def provider_status() -> dict[str, Any]:
             "reason": "" if ready else "rclone install/authentication configuration incomplete",
         }
 
-    # Defensive fail-closed fallback; configured_provider_name already validates.
     return {"provider": name, "enabled": False, "ready": False, "reason": "unavailable"}
 
 
