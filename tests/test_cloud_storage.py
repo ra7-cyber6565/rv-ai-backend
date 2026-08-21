@@ -12,9 +12,8 @@ from utils.cloud_storage import ArchiveCoordinator, RemoteObject
 
 
 class FakeProvider:
-    name = "fake-free-cloud"
-
-    def __init__(self, *, fail_upload: bool = False, wrong_size: bool = False):
+    def __init__(self, *, name: str = "fake-free-cloud", fail_upload: bool = False, wrong_size: bool = False):
+        self.name = name
         self.fail_upload = fail_upload
         self.wrong_size = wrong_size
         self.objects = {}
@@ -54,6 +53,7 @@ def test_verified_upload_can_delete_local():
         coordinator, _, retry = _coordinator(root, FakeProvider())
         out = coordinator.archive(local, "/archive/paper.pdf", delete_local=True)
         assert out["verified"] is True
+        assert out["archive_id"].startswith("a_")
         assert out["local_deleted"] is True
         assert not os.path.exists(local)
         assert retry.items() == []
@@ -125,3 +125,25 @@ def test_retry_due_marks_missing_local_copy_without_crash():
         assert out["results"][0]["error"] == "local_copy_missing"
         current = {row["key"]: row for row in retry.items()}[item["key"]]
         assert current["attempts"] == 1
+
+
+def test_same_content_can_be_verified_in_drive_then_terabox_without_manifest_collision():
+    with tempfile.TemporaryDirectory() as root:
+        local = _file(root)
+        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        drive_retry = ArchiveRetryQueue(os.path.join(root, "drive-retry.json"))
+        tera_retry = ArchiveRetryQueue(os.path.join(root, "tera-retry.json"))
+        drive = ArchiveCoordinator(FakeProvider(name="google-drive-rclone"), manifest, drive_retry)
+        tera = ArchiveCoordinator(FakeProvider(name="terabox"), manifest, tera_retry)
+
+        drive_out = drive.archive(local, "/InfinityResearchAI/paper.pdf")
+        tera_out = tera.archive(local, "/archive/paper.pdf")
+
+        assert drive_out["sha256"] == tera_out["sha256"]
+        assert drive_out["archive_id"] != tera_out["archive_id"]
+        assert len(manifest.items()) == 2
+        assert manifest.get(drive_out["archive_id"])["provider"] == "google-drive-rclone"
+        assert manifest.get(tera_out["archive_id"])["provider"] == "terabox"
+        # Legacy hash lookup becomes intentionally ambiguous and must not silently
+        # choose one cloud copy.
+        assert manifest.get(drive_out["sha256"]) is None
