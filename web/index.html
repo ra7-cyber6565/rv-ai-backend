@@ -49,7 +49,7 @@ const API="", IS_FILE=location.protocol==="file:";
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
 const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — sabse gehri available research. Isme zyada time lag sakta hai."};
-let mode="QUICK",busy=false;const history=[];const PROJECT_ID="web-"+Math.random().toString(36).slice(2,10);
+let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
 const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function htmlText(s){return esc(s).split(/\n{2,}/).map(p=>"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");}
@@ -62,13 +62,27 @@ function friendly(el,text="Abhi server se baat nahi ho paayi. Thodi der baad phi
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
 async function jsonFetch(url,opts){const r=await fetch(url,opts);let data={};try{data=await r.json();}catch(_){data={};}return {r,data};}
 
-async function runChat(message,el){thinking(el);try{const {r,data}=await jsonFetch(API+"/api/v1/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({message,history,project_id:PROJECT_ID})});if(!r.ok)throw new Error("chat failed");const text=data.answer||"Is baar jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});}catch(e){friendly(el);}}
+async function ensureSession(){
+  if(PROJECT.id&&PROJECT.token)return PROJECT;
+  if(sessionPromise)return sessionPromise;
+  sessionPromise=(async()=>{
+    const {r,data}=await jsonFetch(API+"/api/v1/session",{method:"POST"});
+    if(!r.ok||!data.project_id||!data.project_access_token)throw new Error("private session unavailable");
+    PROJECT.id=data.project_id;PROJECT.token=data.project_access_token;
+    return PROJECT;
+  })();
+  try{return await sessionPromise;}catch(e){sessionPromise=null;throw e;}
+}
+function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}
+
+async function runChat(message,el){thinking(el);try{await ensureSession();const {r,data}=await jsonFetch(API+"/api/v1/chat",{method:"POST",headers:projectHeaders(),body:JSON.stringify({message,history,project_id:PROJECT.id})});if(!r.ok)throw new Error("chat failed");const text=data.answer||"Is baar jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});}catch(e){friendly(el);}}
 
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
 
 async function runResearch(question,el){const ui=progressPanel(el);let jobId="",jobToken="";try{
-  const start=await jsonFetch(API+"/api/v1/research-jobs",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({question,project_id:PROJECT_ID,depth_mode:mode})});
+  await ensureSession();
+  const start=await jsonFetch(API+"/api/v1/research-jobs",{method:"POST",headers:projectHeaders(),body:JSON.stringify({question,project_id:PROJECT.id,depth_mode:mode})});
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token)throw new Error("job start failed");
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
@@ -78,7 +92,7 @@ async function runResearch(question,el){const ui=progressPanel(el);let jobId="",
     const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
     if(prog.r.ok)paintProgress(ui,prog.data.progress);
     if(status.data.status==="completed")break;
-    if(status.data.status==="failed")throw new Error(status.data.error||"research failed");
+    if(status.data.status==="failed")throw new Error("research failed");
     await sleep(1200);
   }
   const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
