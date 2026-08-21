@@ -21,19 +21,17 @@ from knowledge.routes import router as knowledge_router
 from storage.provider_factory import provider_status
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
-from utils.request_guard import client_key, enabled as rate_limit_enabled, limit_for, limiter
+from utils.request_guard import (
+    bucket_for,
+    client_key,
+    enabled as rate_limit_enabled,
+    limit_for,
+    limiter,
+)
 from utils.reasoning_status import reasoning_status
 
-# Project policy: zero-cost mode is ON by default. If a known paid-provider
-# credential is accidentally configured, fail at startup instead of risking a bill.
 ZERO_COST_STATUS = enforce_zero_cost_config()
 CORS_ORIGINS = allowed_cors_origins()
-
-# Release readiness is deliberately fail-closed. An environment variable alone
-# must never be able to turn an unverified build into "production_ready". When
-# the integrated offline gate + live zero-cost benchmark + final review are all
-# actually green, this constant is changed in a reviewed commit (or replaced by
-# a future signed/validated release-proof mechanism).
 RELEASE_STATE = "foundation_verification_pending"
 
 app = FastAPI(
@@ -42,13 +40,8 @@ app = FastAPI(
     version="0.2.0"
 )
 
-# Website isi FastAPI origin se serve hoti hai, isliye browser CORS default se
-# closed rakha gaya hai. Separate frontend ho to CORS_ALLOWED_ORIGINS mein exact
-# http(s) origins comma-separated set karo; wildcard deliberately reject hota hai.
-# Async Deep/Max polling uses an opaque per-job capability header. Keep it in the
-# CORS allow-list (not in URL/localStorage) so a separately-hosted *approved*
-# browser frontend can still poll securely. The admin header is included only for
-# explicit operator tools; its token must never be embedded in public JS/Android.
+# Same-origin website needs no CORS grant. A separately-hosted approved frontend
+# may use the exact configured origins and the private per-job polling header.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -65,40 +58,34 @@ app.add_middleware(
 
 @app.middleware("http")
 async def protect_free_quota(request: Request, call_next):
-    """Bound expensive POST endpoints so a public deployment cannot burn free quota.
+    """Bound expensive creation/upload traffic and rapid async-job polling.
 
-    This limiter is process-local and intentionally modest. It adds no paid
-    infrastructure and can be disabled with RATE_LIMIT_ENABLED=false for local
-    development. Proxy headers are trusted only when TRUST_PROXY_HEADERS=true.
+    Dynamic job ids are normalized to one rate bucket per client so legitimate
+    polling works while a flood of random job-id URLs cannot explode limiter
+    memory. Proxy headers remain untrusted unless explicitly enabled.
     """
     if rate_limit_enabled():
         limit = limit_for(request.method, request.url.path)
         if limit is not None:
             allowed, retry_after = limiter.check(
-                client_key(request), request.url.path, limit
+                client_key(request),
+                bucket_for(request.method, request.url.path),
+                limit,
             )
             if not allowed:
                 return JSONResponse(
                     status_code=429,
                     content={
-                        "detail": "Free quota protection: bahut requests aa gayi hain. Thodi der baad dobara try karein.",
+                        "detail": "Free quota/server protection: bahut requests aa gayi hain. Thodi der baad dobara try karein.",
                         "retry_after_seconds": retry_after,
                     },
                     headers={"Retry-After": str(retry_after)},
                 )
     return await call_next(request)
 
-# RAG routes — upload & basic Q&A
 app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
-
-# Agent routes — existing synchronous research/chat API
 app.include_router(agent_router, prefix="/api/v1", tags=["Agents"])
-
-# Job routes — preferred for long DEEP/MAXIMUM runs so HTTP timeout does not
-# throw away the user's ability to fetch the eventual result.
 app.include_router(job_router, prefix="/api/v1", tags=["Research Jobs"])
-
-# Knowledge routes — project management
 app.include_router(knowledge_router, prefix="/api/v1", tags=["Knowledge"])
 
 
@@ -158,14 +145,10 @@ def health_check():
     current_storage = safety["storage"]
     archive = safety["cloud_archive"]
     degraded = not current_storage.get("available")
-    # Cloud archive is optional when disabled. If explicitly enabled but not
-    # ready, surface degraded health without crashing the research API.
     if archive.get("enabled") and not archive.get("ready"):
         degraded = True
-    # Hosted/free reasoning providers are intentionally NOT a health-failure
-    # condition: deterministic local evidence fallback remains available even if
-    # every cloud quota is exhausted. The detailed non-secret readiness is still
-    # exposed under reasoning_resilience for diagnostics/UI.
+    # Hosted/free reasoning providers are not a health-failure condition because
+    # deterministic local evidence fallback remains available.
     return {
         "status": "degraded" if degraded else "healthy",
         "service": "RV AI Backend",
