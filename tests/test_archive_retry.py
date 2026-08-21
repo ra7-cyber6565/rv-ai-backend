@@ -1,6 +1,7 @@
 """Offline tests for durable archive retry queue."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from utils.archive_retry import ArchiveRetryQueue
@@ -56,3 +57,28 @@ def test_summary_reports_missing_local_copy(tmp_path):
     assert summary["pending"] == 1
     assert summary["missing_local_files"] == 1
     assert summary["providers"] == {"drive": 1}
+
+
+def test_parallel_enqueue_does_not_drop_retry_records(tmp_path):
+    queue = ArchiveRetryQueue(str(tmp_path / "retry.json"))
+    paths = [
+        _file(tmp_path, name=f"data-{i}.bin", content=f"payload-{i}".encode())
+        for i in range(24)
+    ]
+
+    def add(index: int) -> None:
+        queue.enqueue(
+            local_path=paths[index],
+            remote_path=f"/archive/data-{index}.bin",
+            provider="drive",
+            now=100 + index,
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(add, range(len(paths))))
+
+    rows = queue.items()
+    assert len(rows) == len(paths)
+    assert {row["remote_path"] for row in rows} == {
+        f"/archive/data-{i}.bin" for i in range(len(paths))
+    }
