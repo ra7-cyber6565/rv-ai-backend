@@ -3,6 +3,8 @@ name: Foundation tests
 on:
   pull_request:
     branches: [main]
+  push:
+    branches: [chatgpt-upload-safety]
   workflow_dispatch:
 
 permissions:
@@ -24,7 +26,7 @@ jobs:
       GEMINI_API_KEY: ""
       CLOUD_ARCHIVE_PROVIDER: "none"
     steps:
-      - name: Checkout PR code
+      - name: Checkout integrated branch/PR code
         uses: actions/checkout@v4
 
       - name: Set up Python
@@ -62,7 +64,7 @@ jobs:
             tests/test_request_guard.py \
             tests/test_research_jobs.py
 
-      - name: Independently test Claude research hardening
+      - name: Independently test research hardening
         run: |
           pytest -q \
             tests/test_relevance_domain.py \
@@ -94,7 +96,7 @@ jobs:
       - name: Run core offline regression
         run: python test_research_engine.py
 
-      - name: Run standalone offline test files
+      - name: Run every standalone offline regression file
         shell: bash
         run: |
           set -euo pipefail
@@ -102,3 +104,6 @@ jobs:
             echo "=== $file ==="
             python "$file"
           done
+
+      - name: Run superconductivity Benchmark V2
+        run: python tests/benchmark_superconductivity.py
