@@ -78,7 +78,10 @@ jobs:
             tests/test_domain_guardrails.py
 
       - name: Run claim evidence verification A-E
-        run: pytest -q tests/test_evidence_verification.py
+        run: |
+          pytest -q \
+            tests/test_evidence_verification.py \
+            tests/test_claim_label_ae_gate.py
 
       - name: Run user's human-first presentation contract
         run: |
