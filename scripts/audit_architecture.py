@@ -12,8 +12,9 @@ The audit therefore checks that the production entrypoint is still wired as:
     -> human-first synthesizer/audit
 
 It also checks the project's hard safety invariants (₹0 provider guard, local
-fallback, provider cooldown memory, strict CORS, private async-job capabilities,
-bounded storage/jobs, honest release state, no obvious committed secrets).
+fallback, provider cooldown memory, strict CORS, anonymous project namespace
+capabilities, private async-job capabilities, bounded storage/jobs, honest release
+state, no obvious committed secrets).
 
 Exit code:
     0  all required checks pass
@@ -234,6 +235,7 @@ def _async_job_privacy() -> AuditCheck:
         (capability, "hmac.new", "HMAC capability token"),
         (capability, "secrets.token_bytes", "random server secret"),
         (capability, "research_job_capability.key", "durable local secret"),
+        (capability, "ExclusiveProcessFileLock", "race-safe secret creation"),
         (capability, "compare_digest", "constant-time token comparison"),
     ]
     missing = [label for text, needle, label in required if needle not in text]
@@ -242,6 +244,51 @@ def _async_job_privacy() -> AuditCheck:
         passed=not missing,
         detail=("job status/progress/result require an opaque capability"
                 if not missing else "missing: " + ", ".join(missing)),
+    )
+
+
+def _project_isolation() -> AuditCheck:
+    """Require project namespace auth all the way from server to shipped client."""
+    main = _read("main.py")
+    session = _read("api/session_routes.py")
+    access = _read("utils/project_access.py")
+    guard = _read("utils/project_guard.py")
+    agent = _read("api/agent_routes.py")
+    jobs = _read("api/job_routes.py")
+    rag = _read("api/routes.py")
+    web = _read("web/index.html")
+    limiter = _read("utils/request_guard.py")
+
+    required = [
+        (main, "include_router(session_router", "session router mounted"),
+        (main, '"X-Project-Token"', "project CORS/header contract"),
+        (main, '"project_isolation": project_access.status()', "public readiness"),
+        (session, "project_access.create()", "server-issued project session"),
+        (session, "project_capability_tokens_ready", "session fail-closed readiness"),
+        (access, "hmac.new", "HMAC project capability"),
+        (access, "secrets.token_urlsafe", "random project namespace"),
+        (access, "project_capability.key", "durable server-local project secret"),
+        (access, "ExclusiveProcessFileLock", "race-safe project secret creation"),
+        (guard, "project_access.verify", "project capability verification"),
+        (guard, "status_code=404", "non-enumerating failure"),
+        (agent, "require_project_access(request.project_id, x_project_token)", "chat/deep guard"),
+        (jobs, "require_project_access(request.project_id, x_project_token)", "job-create guard"),
+        (rag, "require_project_access(", "RAG/upload namespace guard"),
+        (web, 'API+"/api/v1/session"', "web session creation"),
+        (web, '"X-Project-Token":PROJECT.token', "web project bearer header"),
+        (web, "async function projectPost", "web stale-session recovery wrapper"),
+        (web, "attempt<2", "bounded one-refresh retry"),
+        (limiter, '"/api/v1/session"', "session mint rate guard"),
+        (limiter, "RATE_SESSION_PER_HOUR", "session rate configuration"),
+    ]
+    missing = [label for text, needle, label in required if needle not in text]
+    return AuditCheck(
+        name="security:project-namespace-capability",
+        passed=not missing,
+        detail=(
+            "server-issued project capability guards public namespace access"
+            if not missing else "missing: " + ", ".join(missing)
+        ),
     )
 
 
@@ -305,6 +352,7 @@ def run_audit() -> AuditReport:
     required = (
         "main.py",
         "api/job_routes.py",
+        "api/session_routes.py",
         "research_engine/orchestrator.py",
         "research_engine/source_discovery.py",
         "research_engine/content_fetcher.py",
@@ -322,16 +370,23 @@ def run_audit() -> AuditReport:
         "utils/zero_cost_guard.py",
         "utils/provider_health.py",
         "utils/job_access.py",
+        "utils/project_access.py",
+        "utils/project_guard.py",
         "utils/request_guard.py",
         "utils/research_jobs.py",
         "utils/storage_paths.py",
         "utils/storage_quota.py",
+        "web/index.html",
         "tests/test_relevance_domain.py",
         "tests/test_claim_verification.py",
         "tests/test_reasoning_router_integration.py",
         "tests/test_provider_health.py",
         "tests/test_job_access.py",
         "tests/test_job_routes_access.py",
+        "tests/test_project_access.py",
+        "tests/test_project_route_guards.py",
+        "tests/test_project_wiring.py",
+        "tests/test_web_job_capability.py",
         "tests/test_offline_reasoner.py",
         "tests/test_release_state.py",
         "tests/benchmark_superconductivity.py",
@@ -370,6 +425,7 @@ def run_audit() -> AuditReport:
         _zero_cost_chain(),
         _fallback_wired(),
         _provider_cooldown_wired(),
+        _project_isolation(),
         _async_job_privacy(),
         _storage_fail_closed(),
         _no_wildcard_cors(),
@@ -386,6 +442,9 @@ def run_audit() -> AuditReport:
             "test_reasoning_router_integration.py",
             "test_provider_health.py",
             "test_job_access.py",
+            "test_project_access.py",
+            "test_project_route_guards.py",
+            "test_project_wiring.py",
             "test_offline_reasoner.py",
             "test_release_state.py",
         ),
