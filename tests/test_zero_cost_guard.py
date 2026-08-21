@@ -33,10 +33,38 @@ def test_guard_raises_when_paid_key_present():
         assert "ANTHROPIC_API_KEY" in str(exc)
 
 
+def test_gemini_key_is_blocked_until_owner_confirms_no_paid_billing_path():
+    status = inspect_zero_cost_config({"GEMINI_API_KEY": "secret"})
+    assert status.enabled is True
+    assert status.ok is False
+    assert any("GEMINI_ZERO_COST_CONFIRMED" in item for item in status.blocked_keys)
+
+
+def test_confirmed_zero_cost_gemini_key_is_allowed():
+    status = enforce_zero_cost_config({
+        "GEMINI_API_KEY": "secret",
+        "GEMINI_ZERO_COST_CONFIRMED": "true",
+    })
+    assert status.ok is True
+    assert status.blocked_keys == ()
+
+
+def test_false_gemini_confirmation_is_not_accepted():
+    try:
+        enforce_zero_cost_config({
+            "GEMINI_API_KEY": "secret",
+            "GEMINI_ZERO_COST_CONFIRMED": "false",
+        })
+        raise AssertionError("expected RuntimeError")
+    except RuntimeError as exc:
+        assert "no paid billing/spend path" in str(exc)
+
+
 def test_explicit_opt_out_allows_paid_key_for_future_manual_use():
     status = enforce_zero_cost_config({
         "ZERO_COST_ONLY": "false",
         "OPENAI_API_KEY": "secret",
+        "GEMINI_API_KEY": "secret",
     })
     assert status.enabled is False
     assert status.ok is True
