@@ -12,13 +12,23 @@ from utils.cloud_storage import ArchiveCoordinator, RemoteObject
 
 
 class FakeProvider:
-    def __init__(self, *, name: str = "fake-free-cloud", fail_upload: bool = False, wrong_size: bool = False):
+    def __init__(
+        self,
+        *,
+        name: str = "fake-free-cloud",
+        fail_upload: bool = False,
+        wrong_size: bool = False,
+        on_upload=None,
+    ):
         self.name = name
         self.fail_upload = fail_upload
         self.wrong_size = wrong_size
+        self.on_upload = on_upload
         self.objects = {}
 
     def upload_file(self, local_path: str, remote_path: str) -> RemoteObject:
+        if self.on_upload:
+            self.on_upload()
         if self.fail_upload:
             raise RuntimeError("simulated upload failure")
         size = os.path.getsize(local_path)
@@ -69,10 +79,42 @@ def test_upload_failure_keeps_local_file_and_queues_retry():
         record = manifest.items()[0]
         assert record["status"] == "failed"
         assert record["verified"] is False
+        # The start + failure update describe ONE network attempt, not two.
+        assert record["attempts"] == 1
         queued = retry.items()
         assert len(queued) == 1
         assert queued[0]["local_path"] == os.path.abspath(local)
         assert queued[0]["provider"] == "fake-free-cloud"
+
+
+def test_previous_verified_state_is_cleared_before_provider_upload_runs():
+    with tempfile.TemporaryDirectory() as root:
+        local = _file(root)
+        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        retry = ArchiveRetryQueue(os.path.join(root, "retry.json"))
+        original = manifest.register(
+            local, remote_path="/archive/paper.pdf", provider="fake-free-cloud"
+        )
+        manifest.mark_upload_attempt(original["archive_id"])
+        manifest.mark_verified(
+            original["archive_id"], remote_size=os.path.getsize(local)
+        )
+        assert manifest.safe_to_delete_local(original["archive_id"]) is True
+
+        seen_during_upload: list[bool] = []
+        provider = FakeProvider(
+            on_upload=lambda: seen_during_upload.append(
+                manifest.safe_to_delete_local(original["archive_id"])
+            )
+        )
+        coordinator = ArchiveCoordinator(provider, manifest, retry)
+        out = coordinator.archive(local, "/archive/paper.pdf")
+
+        assert seen_during_upload == [False]
+        assert out["verified"] is True
+        final = manifest.get(original["archive_id"])
+        assert final is not None
+        assert final["attempts"] == 2
 
 
 def test_remote_verification_failure_keeps_local_file_and_queues_retry():
