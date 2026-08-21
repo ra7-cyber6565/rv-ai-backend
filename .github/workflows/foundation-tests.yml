@@ -67,6 +67,7 @@ jobs:
           pytest -q \
             tests/test_relevance_domain.py \
             tests/test_pdf_chunking.py \
+            tests/test_pdf_sparse_sampling.py \
             tests/test_consensus_gate.py \
             tests/test_gemini_retry.py \
             tests/test_pipeline_offline.py \
