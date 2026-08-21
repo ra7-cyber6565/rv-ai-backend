@@ -82,7 +82,8 @@ jobs:
         run: |
           pytest -q \
             tests/test_evidence_verification.py \
-            tests/test_claim_label_ae_gate.py
+            tests/test_claim_label_ae_gate.py \
+            tests/test_verification_fail_closed.py
 
       - name: Run user's human-first presentation contract
         run: |
