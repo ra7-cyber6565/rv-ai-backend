@@ -1,13 +1,13 @@
-"""Truthful human-first presentation facade for final research reports.
+"""Integrated human-first synthesizer facade.
 
-The large formatter remains in ``synthesizer_legacy.py`` for compatibility. This
-facade adds two hardening layers:
-1) source-access wording never turns selected-page large-PDF reading into a
-   false "poora document padha" claim, and full-text access is not confused
-   with claim entailment;
-2) a deterministic A-L presentation guard runs after assembly and before the
-   report is returned, moving raw technical junk down and repairing structural
-   presentation issues without inventing research facts.
+``synthesizer_claude.py`` is the exact latest Claude formatter from main,
+including claim-check, physics-sanity and hypothesis-quality presentation. This
+facade keeps those features and adds ChatGPT's stricter user-facing safeguards:
+
+1. selected-page large-PDF reading is never described as the whole document;
+2. full-text ACCESS is never confused with claim verification;
+3. the deterministic A-L presentation guard runs before the report is returned;
+4. incomplete runs get an explicit opening warning if the model omitted it.
 """
 from __future__ import annotations
 
@@ -16,12 +16,12 @@ from typing import Dict, List, Optional
 
 from .models import EvidencePack
 from .presentation_guard import PresentationGuard
-from .synthesizer_legacy import *  # noqa: F401,F403 - compatibility exports
-from .synthesizer_legacy import FinalSynthesizer as _LegacyFinalSynthesizer
+from .synthesizer_claude import *  # noqa: F401,F403 - compatibility exports
+from .synthesizer_claude import FinalSynthesizer as _ClaudeFinalSynthesizer
 
 
-class FinalSynthesizer(_LegacyFinalSynthesizer):
-    """Legacy human-first formatter with final truth/presentation guardrails."""
+class FinalSynthesizer(_ClaudeFinalSynthesizer):
+    """Claude latest formatter + final truth/presentation guardrails."""
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -185,7 +185,7 @@ class FinalSynthesizer(_LegacyFinalSynthesizer):
         return report[:insert] + warning + report[insert:]
 
     def assemble(self, *args, **kwargs) -> str:
-        """Assemble normally, then run and enforce the user's A-L presentation gate."""
+        """Assemble with Claude features, then enforce the user's A-L presentation gate."""
         report = super().assemble(*args, **kwargs)
         pack = kwargs.get("pack")
         if pack is None and len(args) > 1:
@@ -214,8 +214,6 @@ class FinalSynthesizer(_LegacyFinalSynthesizer):
         )
         first_repairs = list(audit.repairs)
 
-        # User requirement J: if an incomplete run is not clearly disclosed,
-        # rewrite the opening before returning rather than merely recording FAIL.
         if audit.checks.get("J_incomplete_run_not_called_verified") is False:
             guarded = self._repair_incomplete_honesty(guarded)
             guarded, audit = self.presentation_guard.enforce(
