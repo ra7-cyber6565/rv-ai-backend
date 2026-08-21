@@ -69,7 +69,7 @@ def start_research_job(request: ResearchJobRequest):
         "status_url": f"/api/v1/research-jobs/{job.job_id}",
         "result_url": f"/api/v1/research-jobs/{job.job_id}/result",
         "progress_url": f"/api/v1/research-jobs/{job.job_id}/progress",
-        "note": "Request disconnect/timeout hone par bhi process ke zinda rehne tak research chal sakti hai.",
+        "note": "Request disconnect/timeout hone par bhi process ke zinda rehne tak research chal sakti hai. Completed results local durable store me save hote hain.",
     }
 
 
@@ -98,6 +98,11 @@ def research_job_result(job_id: str):
         raise HTTPException(status_code=202, detail={
             "message": "Research abhi chal rahi hai",
             "status": item["status"],
+        })
+    if item["status"] == "interrupted":
+        raise HTTPException(status_code=409, detail={
+            "message": "Research server/process restart ki wajah se beech me ruk gayi. Is job ko dobara start karein.",
+            "status": "interrupted",
         })
     if item["status"] == "failed":
         raise HTTPException(status_code=500, detail={
