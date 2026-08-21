@@ -285,8 +285,37 @@ def prompt_block(requests: Optional[Dict]) -> str:
 
 
 # ── ledger ───────────────────────────────────────────────────────────────────
+def _dedupe_reasons(reasons: List[str]) -> List[str]:
+    """
+    Ek hi baat do-teen baar mat likho.
+
+    Orchestrator kai jagah se wajah bhejta hai (reasoning note, Gemini error,
+    hypothesis shortfall) aur unmein se ek badi line ke andar chhoti lines pehle
+    se maujood hoti hain. Bina safai ke user ko aisa dikhta tha:
+
+        "... free daily limit khatam ho gayi; 0/3 hypotheses hi ban paayi jo
+         aapne maangi thi.; aaj ke liye is model ki free daily limit khatam ho
+         gayi; 0/3 hypotheses hi ban paayi jo aapne maangi thi."
+
+    Yahan sirf duplicate aur "kisi badi line ke andar pehle se maujood" wali
+    line hatti hai — koi wajah chhupti nahi. Kram wahi rehta hai jo bheja gaya
+    tha (deterministic, taaki do run ka jawab same rahe).
+    """
+    cleaned = [str(r).strip() for r in (reasons or []) if str(r).strip()]
+    keep: List[str] = []
+    for reason in cleaned:
+        low = reason.lower()
+        # Pehle se rakhi kisi line mein ye poori baat aa gayi hai? Chhod do.
+        if any(low in kept.lower() for kept in keep):
+            continue
+        # Ye nayi line pehle rakhi chhoti line ko nigal leti hai? Chhoti hata do.
+        keep = [kept for kept in keep if kept.lower() not in low]
+        keep.append(reason)
+    return keep
+
+
 def _why(reasons: List[str]) -> str:
-    reasons = [str(r).strip() for r in (reasons or []) if str(r).strip()]
+    reasons = _dedupe_reasons(reasons)
     if not reasons:
         return "Wajah record nahi hui."
     return "Wajah: " + "; ".join(reasons[:3])

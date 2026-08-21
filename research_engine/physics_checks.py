@@ -174,8 +174,17 @@ def _resolve(unit_raw: str, original: str) -> Tuple[str, Optional[float], float]
 def parse_quantities(text: str) -> List[Quantity]:
     """Text mein se (number + unit) nikaalo. Jo samajh na aaye, chhod do."""
     out: List[Quantity] = []
-    for m in _UNIT_RE.finditer(text or ""):
-        value = _clean_number(m.group(1))
+    source = text or ""
+    for m in _UNIT_RE.finditer(source):
+        raw_number = m.group(1)
+        # "250-288 K" ek RANGE hai, "-288 K" nahi. Pehle ye hyphen minus sign
+        # ban jaata tha aur check "-288 K absolute zero se neeche hai" bolkar
+        # ek bilkul sahi jawab par physics warning laga deta tha. Isliye: minus
+        # se pehle agar digit hai to wo range ka dash hai, sign nahi.
+        if raw_number.startswith("-") and m.start() > 0 \
+                and source[m.start() - 1].isdigit():
+            raw_number = raw_number[1:]
+        value = _clean_number(raw_number)
         if value is None:
             continue
         unit_raw = m.group(2)

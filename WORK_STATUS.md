@@ -43,8 +43,19 @@ Owner column: `Claude` = is session ka agent, `ChatGPT` = doosra agent,
 | point 12 maths/physics sanity checks | Claude | done | `research_engine/physics_checks.py` (naya), `research_engine/verification.py`, `research_engine/orchestrator.py`, `research_engine/synthesizer.py`, `tests/test_physics_sanity.py` (naya) | (is batch mein) |
 | §15 / point 9 search round crash-safety (ek round gire to run zinda) | Claude | done | `research_engine/orchestrator.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
 | point 14 baaki regression tests (relevance, false consensus, raw-error leak, quota, incomplete) | Claude | in progress | `tests/` | — |
-| point 1 superconductivity Benchmark V2 (offline runner) | Claude | pending | `tests/benchmark_superconductivity.py` | — |
+| point 1 superconductivity Benchmark V2 (offline runner, 10-point scorecard, 146 checks) | Claude | done | `tests/benchmark_superconductivity.py` (naya) | (is batch mein) |
+| point 12 fix: "250-288 K" range ko negative temperature samajhna band | Claude | done | `research_engine/physics_checks.py` | (is batch mein) |
+| point 13 fix: ledger ki wajah do-teen baar repeat hona band | Claude | done | `research_engine/requested.py` | (is batch mein) |
 | point 14 §14 audit denominators + honest API accounting | Claude | partly done | `research_engine/synthesizer.py`, `research_engine/gemini_reasoning.py` | — |
+
+Benchmark V2 chalane ka tareeka: `python3 tests/benchmark_superconductivity.py`
+(poora offline — koi network, koi API key, koi paisa). Wahi superconductivity
+sawal fixed fixtures par chalta hai aur 10 cheezein pakadta hai: junk source
+rejection, ranking, imaandaar read-level labels, raw 429/protobuf leak, honest
+status, consensus gate (support-only run par "Consensus evaluate nahi kiya ja
+saka"), unit-conversion/comparison sanity, 3 poori hypotheses vs LLM-dead plan,
+report ka kram (insaan pehle, audit aakhir) aur determinism (do run ka jawab
+shabd-ba-shabd same).
 
 ## intel ke haath ka kaam
 | Task | Owner | Status | Files | Commit |
