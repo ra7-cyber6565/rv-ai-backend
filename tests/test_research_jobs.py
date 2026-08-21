@@ -2,8 +2,9 @@
 from __future__ import annotations
 
 import json
-import os
 import time
+
+import pytest
 
 from utils.research_jobs import ResearchJobRunner
 
@@ -35,6 +36,7 @@ def test_job_returns_result_after_background_execution():
     assert done["status"] == "completed"
     assert done["result"]["answer"] == "ok"
     assert done["result"]["job_id"] == job.job_id
+    runner.close()
 
 
 def test_job_failure_is_captured_instead_of_crashing_request():
@@ -53,6 +55,7 @@ def test_job_failure_is_captured_instead_of_crashing_request():
     done = _wait(runner, job.job_id)
     assert done["status"] == "failed"
     assert "provider unavailable" in done["error"]
+    runner.close()
 
 
 def test_raw_provider_trace_and_secret_are_not_exposed():
@@ -78,6 +81,7 @@ def test_raw_provider_trace_and_secret_are_not_exposed():
     assert "protobuf" not in lowered
     assert "resourceexhausted" not in lowered
     assert "technical details hidden" in lowered
+    runner.close()
 
 
 def test_empty_question_is_rejected_before_worker_submission():
@@ -88,6 +92,7 @@ def test_empty_question_is_rejected_before_worker_submission():
         pass
     else:
         raise AssertionError("empty question should fail")
+    runner.close()
 
 
 def test_completed_result_survives_runner_restart_in_separate_gzip_file(tmp_path):
@@ -111,6 +116,7 @@ def test_completed_result_survives_runner_restart_in_separate_gzip_file(tmp_path
     assert row["result_file"].endswith(".json.gz")
     result_path = store.parent / "results" / row["result_file"]
     assert result_path.is_file()
+    runner1.close()
 
     runner2 = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
     restored = runner2.get(job.job_id, include_result=True)
@@ -118,11 +124,25 @@ def test_completed_result_survives_runner_restart_in_separate_gzip_file(tmp_path
     assert restored["status"] == "completed"
     assert restored["result_durable"] is True
     assert restored["result"]["answer"] == "saved"
+    runner2.close()
+
+
+def test_second_process_owner_is_blocked_for_same_store(tmp_path):
+    store = tmp_path / "jobs.json"
+    runner1 = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
+    try:
+        with pytest.raises(RuntimeError, match="single worker"):
+            ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
+    finally:
+        runner1.close()
+
+    # Lock release must allow a clean restart afterwards.
+    runner2 = ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(store), persist=True)
+    runner2.close()
 
 
 def test_oversized_result_is_compacted_and_disclosed(tmp_path):
     store = tmp_path / "jobs.json"
-    # 1 KiB minimum cap is deliberately tiny so the test forces compaction.
     runner = ResearchJobRunner(
         max_workers=1,
         max_jobs=5,
@@ -149,6 +169,7 @@ def test_oversized_result_is_compacted_and_disclosed(tmp_path):
     assert done["result_bytes"] > 1024
     assert done["result"].get("_storage_compacted") is True
     assert done["result"].get("answer") == "important final answer"
+    runner.close()
 
 
 def test_pruning_old_job_removes_external_result_file(tmp_path):
@@ -177,6 +198,7 @@ def test_pruning_old_job_removes_external_result_file(tmp_path):
     assert _wait(runner, second.job_id)["status"] == "completed"
     assert runner.get(first.job_id) is None
     assert not first_path.exists()
+    runner.close()
 
 
 def test_previously_running_job_is_marked_interrupted(tmp_path):
@@ -202,6 +224,7 @@ def test_previously_running_job_is_marked_interrupted(tmp_path):
     assert restored is not None
     assert restored["status"] == "interrupted"
     assert "restart" in restored["error"].lower()
+    runner.close()
 
 
 def test_old_inline_completed_result_is_migrated(tmp_path):
@@ -231,3 +254,4 @@ def test_old_inline_completed_result_is_migrated(tmp_path):
     row = ledger["jobs"][0]
     assert row["result"] is None
     assert row["result_file"].endswith(".json.gz")
+    runner.close()
