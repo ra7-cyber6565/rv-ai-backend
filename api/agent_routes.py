@@ -81,8 +81,6 @@ def _safe_research_chat_fallback(request: ChatRequest) -> Dict:
         answer = str(result.get("answer") or "").strip()
         if not answer:
             raise RuntimeError("research result had no answer")
-        # Preserve research evidence/audit fields. Add compatibility fields used
-        # by the normal chat UI without pretending this was a normal model pass.
         result["ok"] = True
         result["degraded"] = True
         result["mode"] = result.get("mode") or "QUICK"
@@ -107,18 +105,7 @@ def _safe_research_chat_fallback(request: ChatRequest) -> Dict:
 
 @router.post("/chat")
 def chat(request: ChatRequest):
-    """QUICK chat with zero-cost provider failover and evidence fallback.
-
-    Normal path:
-        deterministic trivial-chat reply (0 API calls), or
-        confirmed Gemini -> confirmed Groq free -> OpenRouter free-only ->
-        localhost Ollama.
-
-    If every configured model layer is unavailable, the same message is sent to
-    QUICK research. That path can retrieve evidence and has its own deterministic
-    evidence-only last resort, so a Gemini quota outage no longer means the chat
-    endpoint simply stops working.
-    """
+    """QUICK chat with zero-cost provider failover and evidence fallback."""
     from research_engine.chat import quick_chat
 
     result = quick_chat(request.message, request.history)
@@ -129,14 +116,7 @@ def chat(request: ChatRequest):
 
 @router.get("/chat/diag")
 def chat_diag():
-    """Read-only, zero-call reasoning readiness report.
-
-    The old diagnostic endpoint performed a real `Say OK` Gemini generation on
-    every request, which consumed quota just to diagnose quota. This endpoint now
-    makes **zero provider calls** and exposes only non-secret configuration/policy
-    readiness. Live quota/reachability is learned naturally when a real user
-    request runs through the resilient router.
-    """
+    """Read-only, zero-call reasoning readiness report."""
     return reasoning_status()
 
 
@@ -163,7 +143,13 @@ def depth_modes():
 
 
 @router.get("/progress/{project_id}")
-def get_research_progress(project_id: str):
+def get_research_progress(project_id: str, _admin: None = Depends(require_admin)):
+    """Legacy project-id progress feed is server-side metadata, so admin-only.
+
+    The public web app uses the random job-id capability endpoint instead. Keeping
+    this legacy project-id feed public would let callers probe predictable IDs such
+    as `default` and read another run's stage/log metadata.
+    """
     return get_progress(project_id)
 
 
