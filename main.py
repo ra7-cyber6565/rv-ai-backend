@@ -17,8 +17,9 @@ from fastapi.responses import FileResponse, JSONResponse
 from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
+from api.archive_routes import router as archive_router
 from knowledge.routes import router as knowledge_router
-from storage.provider_factory import provider_status
+from storage.archive_runtime import archive_runtime
 from utils.zero_cost_guard import enforce_zero_cost_config
 from utils.security_config import allowed_cors_origins
 from utils.request_guard import (
@@ -86,6 +87,7 @@ async def protect_free_quota(request: Request, call_next):
 app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
 app.include_router(agent_router, prefix="/api/v1", tags=["Agents"])
 app.include_router(job_router, prefix="/api/v1", tags=["Research Jobs"])
+app.include_router(archive_router, prefix="/api/v1", tags=["Archive"])
 app.include_router(knowledge_router, prefix="/api/v1", tags=["Knowledge"])
 
 
@@ -101,7 +103,9 @@ def _runtime_safety_status() -> dict:
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
         "reasoning_resilience": reasoning_status(),
-        "cloud_archive": provider_status(),
+        # Runtime archive status includes provider readiness + manifest/retry
+        # counts, but strips local/remote paths and raw provider errors.
+        "cloud_archive": archive_runtime.public_status(),
         # Never expose STORAGE_STATUS/storage_status() directly: internal status
         # includes absolute filesystem paths and may include raw OS error text.
         "storage": public_storage_status(),
@@ -144,8 +148,9 @@ def health_check():
     safety = _runtime_safety_status()
     current_storage = safety["storage"]
     archive = safety["cloud_archive"]
+    archive_provider = archive.get("provider") or {}
     degraded = not current_storage.get("available")
-    if archive.get("enabled") and not archive.get("ready"):
+    if archive_provider.get("enabled") and not archive_provider.get("ready"):
         degraded = True
     # Hosted/free reasoning providers are not a health-failure condition because
     # deterministic local evidence fallback remains available.
