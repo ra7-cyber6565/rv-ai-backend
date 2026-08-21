@@ -1,26 +1,20 @@
 """
 Gemini model chunna — guess ki jagah, server se poochh kar.
 
-Dikkat jo aayi thi: code mein model ka naam hard-code tha ("gemini-flash-latest").
-Agar wo naam is API key / is SDK version ke liye maujood na ho, to Google
-`InvalidArgument`/`NotFound` (400/404) bhejta hai aur user ko sirf
-"Ek dikkat aa gayi (InvalidArgument)" dikhta hai — jo bekaar hai.
-
 Normal REASONING request ke andar hum Google se model list discover kar sakte
 hain, phir usable naam cache karte hain. Diagnostics alag hai: diagnostics ko
 khud quota/network burn nahi karna chahiye, isliye `diagnose()` default se
 **zero-network / zero-generation-call** hai. Explicit `active_discovery=True`
 par sirf model-list discovery chal sakti hai, wo bhi ZERO_COST_ONLY mein tabhi
-jab Gemini project ko explicitly no-paid-spend confirm kiya gaya ho. Diagnostic
-kabhi `generate_content("Say OK")` nahi karta.
+jab Gemini project(s) ko explicitly no-paid-spend confirm kiya gaya ho.
+Diagnostic kabhi `generate_content("Say OK")` nahi karta.
 
-§7 (2026-08-20 ki live failure ke baad):
-  1. DYNAMIC DISCOVERY PEHLE, GUESS BAAD MEIN.
-  2. DEAD-MODEL MEMORY — permanent 404/not-supported naam repeat nahi hote.
+§7: dynamic discovery + dead-model memory.
+§8: free backup key par shift hone par model/dead-name cache reset hota hai.
 
-₹0 rule: Gemini access ko project-level billing oracle samajhna galat hoga.
-Actual use se pehle `utils.zero_cost_guard` ka explicit confirmation gate lagta
-hai; ye module us guard ko bypass nahi karta.
+₹0 rule: actual Gemini use se pehle startup zero-cost guard har primary/backup
+credential ko confirmation policy ke neeche rakhta hai. Ye module billing oracle
+hone ka daawa nahi karta aur guard ko bypass nahi karta.
 """
 from __future__ import annotations
 
@@ -52,12 +46,10 @@ def _truthy(value: object) -> bool:
 
 
 def _clean(name: str) -> str:
-    """`models/gemini-2.0-flash` -> `gemini-2.0-flash`."""
     return name.split("/", 1)[1] if name.startswith("models/") else name
 
 
 def mark_dead(name: str, reason: str = "model_not_found") -> None:
-    """Is naam ko poore process ke liye chhod do (sirf permanent errors par)."""
     if name:
         _dead.setdefault(_clean(name), reason or "model_not_found")
 
@@ -74,12 +66,27 @@ def forget_dead() -> None:
     _dead.clear()
 
 
+def reset_for_new_key() -> None:
+    """Backup key switch ke baad key-specific model/dead-name memory clear karo."""
+    global _cache, _seen
+    _cache = None
+    _seen = []
+    _dead.clear()
+
+
+def configure(genai, key: str) -> bool:
+    """SDK ko key do without logging/returning the credential value."""
+    if not key:
+        return False
+    genai.configure(api_key=key)
+    return True
+
+
 def _alive(names: List[str]) -> List[str]:
     return [n for n in names if not is_dead(n)]
 
 
 def available_models(genai) -> List[str]:
-    """Jo model is key ke liye generateContent support karte hain."""
     out: List[str] = []
     for m in genai.list_models():
         methods = getattr(m, "supported_generation_methods", []) or []
@@ -109,7 +116,6 @@ def _pick(names: List[str]) -> Optional[str]:
 
 
 def resolve(genai, force: bool = False) -> str:
-    """Normal reasoning ke liye usable model name resolve karo."""
     global _cache, _seen
     if _cache and not force and not is_dead(_cache):
         return _cache
@@ -136,7 +142,6 @@ def resolve(genai, force: bool = False) -> str:
 
 
 def candidates(genai) -> List[str]:
-    """Try order: resolved model -> discovered alive models -> safe name guesses."""
     first = resolve(genai)
     order = [first] if not is_dead(first) else []
     for name in _alive(_seen) + _alive(list(FALLBACKS)):
@@ -152,7 +157,7 @@ def candidates(genai) -> List[str]:
 
 
 def friendly_error(exc: Exception) -> str:
-    """Legacy human-readable mapping; provider router handles production fallback."""
+    """Raw provider/protobuf details ke bina coarse user-safe reason."""
     text = str(exc).lower()
     if "api key not valid" in text or "api_key_invalid" in text:
         return "Gemini key valid nahi lag rahi; app doosra configured free fallback try karega."
@@ -168,19 +173,28 @@ def friendly_error(exc: Exception) -> str:
 
 
 def diagnose(active_discovery: bool = False) -> Dict:
-    """Non-secret Gemini readiness diagnostic.
+    """Non-secret Gemini readiness diagnostic with zero generation calls.
 
-    Default call performs **zero network calls** and never generates text. It
-    intentionally does not expose API-key length/value. `active_discovery=True`
-    may call `list_models()` only; in ZERO_COST_ONLY it refuses even that unless
-    GEMINI_ZERO_COST_CONFIRMED=true. No diagnostic path performs generateContent.
+    Default call makes zero network calls. Active discovery may make exactly one
+    model-list request, never a text-generation request, and is blocked in
+    ZERO_COST_ONLY until all configured Gemini keys/projects are explicitly
+    confirmed no-paid-spend.
     """
-    key = str(os.getenv("GEMINI_API_KEY", "") or "").strip()
+    try:
+        from .key_pool import KeyPool
+        pool = KeyPool()
+    except Exception:
+        pool = None
+
+    key_count = pool.count if pool is not None else 0
+    key = pool.active() if pool is not None else str(os.getenv("GEMINI_API_KEY", "") or "").strip()
     zero_cost = _truthy(os.getenv("ZERO_COST_ONLY", "true"))
     confirmed = _truthy(os.getenv("GEMINI_ZERO_COST_CONFIRMED", ""))
     wanted = str(os.getenv("GEMINI_MODEL", "") or "").strip()
     report: Dict = {
-        "key_present": bool(key),
+        "key_present": bool(key_count or key),
+        "keys_available": key_count or (1 if key else 0),
+        "keys": pool.labels() if pool is not None else (["free key #1"] if key else []),
         "zero_cost_only": zero_cost,
         "zero_cost_confirmed": confirmed,
         "active_discovery_requested": bool(active_discovery),
@@ -196,7 +210,7 @@ def diagnose(active_discovery: bool = False) -> Dict:
         return report
     if not key:
         report["status"] = "not_configured"
-        report["error"] = "GEMINI_API_KEY set nahi hai."
+        report["error"] = "Gemini key set nahi hai."
         return report
     if zero_cost and not confirmed:
         report["status"] = "blocked_by_zero_cost_policy"
@@ -208,7 +222,7 @@ def diagnose(active_discovery: bool = False) -> Dict:
 
     try:
         import google.generativeai as genai
-        genai.configure(api_key=key)
+        configure(genai, key)
         report["network_calls"] = 1
         names = available_models(genai)
         report["models_found"] = names[:25]
@@ -217,7 +231,6 @@ def diagnose(active_discovery: bool = False) -> Dict:
         )
         report["status"] = "model_list_discovered"
     except Exception as exc:
-        # Keep raw SDK/protobuf text out of diagnostic response.
         report["status"] = "discovery_failed"
         report["error"] = friendly_error(exc)
     report["dead_models"] = dead_models()
