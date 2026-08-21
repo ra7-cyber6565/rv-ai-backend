@@ -25,7 +25,7 @@ def allowed_cors_origins(env: Mapping[str, str] | None = None) -> list[str]:
             continue
         if origin == "*":
             raise RuntimeError(
-                "CORS_ALLOWED_ORIGINS='*' is not allowed. Add explicit origins instead."
+                "Wildcard CORS origins are not allowed. Add explicit origins instead."
             )
         if not (origin.startswith("https://") or origin.startswith("http://")):
             raise RuntimeError(

@@ -798,7 +798,10 @@ def full_text_urls(case: DomainCase) -> set:
 # read-level ke test jhoothe ho jaayenge (kabhi pass, kabhi fail — pack ka kram
 # badalne par). Isliye ye model prompt se asli source ID aur asli read level
 # nikaalta hai, bilkul jaise ek imaandaar model karta.
-_HEAD_RE = re.compile(r"^\[(S\d+)\] \(", re.M)
+# Support both the legacy prompt shape (``[S1] (...)``) and the hardened
+# source-data grammar (``[S1] SOURCE DESCRIPTOR ...``). The benchmark fake
+# model must read the same guarded prompt production sends to real models.
+_HEAD_RE = re.compile(r"^\[(S\d+)\](?:\s+\(|\s+SOURCE DESCRIPTOR)", re.M)
 _WORD_RE = re.compile(r"[a-z0-9]{4,}")
 
 RAW_TOKENS = ("ResourceExhausted", "grpc_status", "quota_id", "retry_delay",
@@ -812,7 +815,7 @@ def _pack_info(prompt: str) -> List[Tuple[str, str, str]]:
     for i, m in enumerate(marks):
         end = marks[i + 1].start() if i + 1 < len(marks) else len(prompt)
         block = prompt[m.start():end]
-        lvl = re.search(r"^Read:\s*(\S+)", block, re.M)
+        lvl = re.search(r"^Read:\s*(?:DATA>\s*)?(\S+)", block, re.M)
         out.append((m.group(1), lvl.group(1) if lvl else "snippet", block))
     return out
 

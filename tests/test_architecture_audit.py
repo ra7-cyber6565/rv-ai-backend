@@ -26,6 +26,20 @@ def test_real_repository_audit_has_all_expected_check_names():
     assert any(name.startswith("pipeline-order:") for name in names)
 
 
+def test_architecture_audit_wires_cross_domain_and_network_safety_into_release_gate():
+    report = audit.run_audit()
+    required = next(
+        row for row in report.checks
+        if row["name"] == "required-production-and-test-files"
+    )
+    gate = next(
+        row for row in report.checks
+        if row["name"] == "wiring:scripts/run_foundation_gate.py"
+    )
+    assert required["passed"] is True, required["detail"]
+    assert gate["passed"] is True, gate["detail"]
+
+
 def test_order_check_fails_when_verification_moves_before_discovery(monkeypatch, tmp_path):
     target = tmp_path / "pipeline.py"
     target.write_text("verify()\ndiscover()\nsynthesize()\n", encoding="utf-8")

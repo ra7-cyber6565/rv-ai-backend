@@ -6,9 +6,20 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 from research_engine import gemini_reasoning
 from research_engine.reasoning_router import ProviderResult, ReasoningProvider
 from research_engine.reasoning_router_integrated import ResilientReasoning
+from utils.provider_health import provider_health
+
+
+@pytest.fixture(autouse=True)
+def _isolated_provider_health():
+    """Each case owns global cooldown state; one fake outage cannot poison another."""
+    provider_health.clear()
+    yield
+    provider_health.clear()
 
 
 class FakeProvider(ReasoningProvider):

@@ -223,11 +223,31 @@ def _bounded_result(result: Dict[str, Any], max_bytes: int) -> tuple[bytes, int,
     if len(candidate) <= max_bytes:
         return candidate, original_size, True
 
-    emergency = {
+    emergency: Dict[str, Any] = {
         "_storage_compacted": True,
         "_original_serialized_bytes": original_size,
         "_storage_note": "Result was too large for the configured durable-storage cap.",
     }
+    # Even under the emergency cap, keep the user-facing answer/report whenever
+    # it fits. Large debug/source blobs must never evict a small final answer.
+    for key in priority:
+        if key not in result:
+            continue
+        trial = dict(emergency)
+        trial[key] = _clamp_json(
+            result[key],
+            max_depth=3,
+            string_limit=max(128, max_bytes // 2),
+            list_limit=8,
+            dict_limit=20,
+        )
+        if len(_json_bytes(trial)) <= max_bytes:
+            emergency = trial
+            # One final-answer-shaped field is enough for emergency recovery;
+            # retaining it exactly is more valuable than packing lower-priority
+            # metadata around it.
+            if key in priority[:7]:
+                break
     return _json_bytes(emergency), original_size, True
 
 

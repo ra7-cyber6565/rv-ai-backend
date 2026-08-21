@@ -20,6 +20,10 @@ from .models import EvidencePack
 
 _HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
 _URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
+_SOURCE_LINK_RE = re.compile(
+    r"\[(S\d+)\]\(https?://[^)\s]+\)",
+    re.IGNORECASE,
+)
 _RAW_LINE_RE = re.compile(
     r"(?:^\s*\[(?:PASS|FAIL)\]\s*|ResourceExhausted|protobuf|google\.rpc|"
     r"grpc\.|Traceback \(most recent call last\)|quota_id|Evidence Pack|"
@@ -115,6 +119,11 @@ def _clean_main_technical_junk(text: str) -> Tuple[str, List[str]]:
         if stripped and _RAW_LINE_RE.search(stripped):
             moved.append(stripped)
             continue
+        # CitationEngine deliberately renders source IDs as clickable Markdown
+        # links. They are citations, not raw diagnostic URLs: keep the sentence
+        # in the human answer and collapse the target back to the stable [S#]
+        # form. The full URL remains available in the Sources section.
+        line = _SOURCE_LINK_RE.sub(r"[\1]", line)
         # Detailed URLs belong in Sources. Keep the sentence, remove just the URL.
         if "http://" in line or "https://" in line:
             cleaned = _URL_RE.sub("", line).rstrip()

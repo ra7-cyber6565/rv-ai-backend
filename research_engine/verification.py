@@ -12,6 +12,7 @@ claim.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
@@ -64,6 +65,7 @@ class VerificationEngine(_ClaudeVerificationEngine):
         ungrounded_count: int = 0,
         hypotheses: Optional[List[Dict]] = None,
         cited_ids: Optional[List[str]] = None,
+        question: str = "",
     ) -> VerificationReport:
         base = super().verify(
             answer,
@@ -72,11 +74,28 @@ class VerificationEngine(_ClaudeVerificationEngine):
             ungrounded_count=ungrounded_count,
             hypotheses=hypotheses,
             cited_ids=cited_ids,
+            question=question,
         )
         ev = self.evidence_verifier.verify(answer, pack).to_dict()
+        # Direct ``check_math`` diagnostics retain the claimed result in the
+        # check name (useful when comparing correct/incorrect equations). The
+        # integrated report exposes the operation as the stable check identity;
+        # pass/fail plus detail carries the verdict/result separately.
+        report_checks: List[Check] = []
+        arithmetic_name = re.compile(
+            r"^(\d[\d,]*(?:\.\d+)?)\s*([+\-*x×/])\s*"
+            r"(\d[\d,]*(?:\.\d+)?)\s*=\s*\d[\d,]*(?:\.\d+)?$"
+        )
+        for check in base.checks:
+            match = arithmetic_name.match(str(check.name or ""))
+            if match:
+                a, op, b = match.groups()
+                report_checks.append(Check(f"{a} {op} {b}", check.passed, check.detail))
+            else:
+                report_checks.append(check)
         report = VerificationReport(
             status=base.status,
-            checks=list(base.checks),
+            checks=report_checks,
             warnings=list(base.warnings),
             required_tests=list(base.required_tests),
             statistics=dict(base.statistics),

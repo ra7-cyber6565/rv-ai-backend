@@ -55,16 +55,20 @@ def describe_gemini_keys(env: Mapping[str, str] | None = None) -> dict[str, obje
     source = env if env is not None else os.environ
     entries: list[tuple[str, str]] = []
 
-    for name in _SINGLE_VARS:
-        value = str(source.get(name, "") or "").strip()
-        if value:
-            entries.append((name, value))
+    value = str(source.get(_PRIMARY, "") or "").strip()
+    if value:
+        entries.append((_PRIMARY, value))
 
     for i in range(2, 10):
         for name in (f"{_PRIMARY}_{i}", f"{_PRIMARY}{i}"):
             value = str(source.get(name, "") or "").strip()
             if value:
                 entries.append((name, value))
+
+    for name in _SINGLE_VARS[1:]:
+        value = str(source.get(name, "") or "").strip()
+        if value:
+            entries.append((name, value))
 
     for name in _LIST_VARS:
         for value in _split_list(source.get(name, "")):

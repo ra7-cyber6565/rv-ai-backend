@@ -180,8 +180,57 @@ class EvidenceEngine:
     _MIN_AVG_RELEVANCE = 0.20     # is se neeche = retrieval bharosemand nahi
     _MIN_ON_TOPIC = 2             # kam se kam itne sources sach mein topic ke ho
 
-    def _honesty_gate(self, pack: EvidencePack,
-                      check_reasoning: bool = True) -> Optional[str]:
+    @staticmethod
+    def _claim_boundary_reason(
+        label_report: Optional[Dict] = None,
+        claim_checks: Optional[Dict] = None,
+    ) -> Optional[str]:
+        """Why a source-count grade may not claim VERIFIED/STRONG.
+
+        Source quantity/quality describes the *pack*.  It cannot rescue a
+        conclusion whose actual labelled claims failed claim-level A-E.  The
+        arguments are optional for backwards-compatible pre-reasoning/source
+        diagnostics; the production orchestrator supplies both final reports.
+        """
+        labels = label_report or {}
+        failed_labels = max(
+            int(labels.get("a_e_failed") or 0),
+            int(labels.get("entailment_blocked") or 0),
+            int(labels.get("strict_unverified") or 0),
+        )
+        if failed_labels:
+            return (
+                f"{failed_labels} strong claim claim-level A-E gate pass nahi kar saka"
+            )
+        if int(labels.get("to_unverified") or 0):
+            return "ek ya zyada conclusion claim UNVERIFIED reh gaye"
+
+        if claim_checks is not None:
+            checks = claim_checks or {}
+            total = int(checks.get("total_claims") or 0)
+            genuine = int(checks.get("genuine_support") or 0)
+            non_genuine = (
+                int(checks.get("source_reported") or 0)
+                + int(checks.get("cited_only") or 0)
+                + int(checks.get("unsupported") or 0)
+                + int(checks.get("entailment_not_checkable") or 0)
+            )
+            if checks.get("overclaims"):
+                return "claim verification ne evidence se zyada strong conclusion pakda"
+            if total and (genuine < total or non_genuine):
+                return (
+                    f"claim verification mein sirf {genuine}/{total} labelled claims ko "
+                    "genuine full-text support mila"
+                )
+        return None
+
+    def _honesty_gate(
+        self,
+        pack: EvidencePack,
+        check_reasoning: bool = True,
+        label_report: Optional[Dict] = None,
+        claim_checks: Optional[Dict] = None,
+    ) -> Optional[str]:
         """
         Kya is pack ko "VERIFIED/STRONG" kehne ka haq hai?
 
@@ -205,10 +254,15 @@ class EvidenceEngine:
         if check_reasoning and not pack.reasoning_complete:
             return (f"reasoning adhoora raha "
                     f"({pack.reasoning_done}/{pack.reasoning_planned} pass poore)")
+        claim_block = self._claim_boundary_reason(label_report, claim_checks)
+        if claim_block:
+            return claim_block
         return None
 
     def grade_evidence(self, pack: EvidencePack, claims: Optional[List[Claim]] = None,
-                       check_reasoning: bool = True) -> str:
+                       check_reasoning: bool = True,
+                       label_report: Optional[Dict] = None,
+                       claim_checks: Optional[Dict] = None) -> str:
         """
         Purane system ka 'evidence_level' string, par ab real signals se banta hai
         (source count, independence, peer review, grounded ratio) — hardcoded nahi.
@@ -234,7 +288,12 @@ class EvidenceEngine:
         deserves_strong = ((scholarly >= 2 or docs >= 2) and independent >= 3)
 
         if deserves_top or deserves_strong:
-            blocked = self._honesty_gate(pack, check_reasoning=check_reasoning)
+            blocked = self._honesty_gate(
+                pack,
+                check_reasoning=check_reasoning,
+                label_report=label_report,
+                claim_checks=claim_checks,
+            )
             if blocked:
                 # ginti se to top label banta tha, par sach usse rok raha hai —
                 # aur wajah saath likhi jaati hai, chhupayi nahi jaati.

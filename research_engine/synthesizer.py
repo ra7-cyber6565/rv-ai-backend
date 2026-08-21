@@ -84,7 +84,14 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
         human-readable sections so quota exhaustion does not turn into a blank
         answer or server error.
         """
-        return self.offline_reasoner.synthesize(question, pack)
+        summary = self.offline_reasoner.synthesize(question, pack)
+        honesty = (
+            "Reasoning model is run mein nahi chala; ye deterministic, "
+            "retrieved-evidence-only fallback hai."
+        )
+        if summary.startswith("## Seedha jawab\n"):
+            return summary.replace("## Seedha jawab\n", f"## Seedha jawab\n{honesty}\n\n", 1)
+        return f"## Seedha jawab\n{honesty}\n\n{summary}"
 
     @staticmethod
     def _is_partial_large_source(source) -> bool:
@@ -93,13 +100,16 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
         return total > 0 and read > 0 and read < total
 
     @staticmethod
-    def _access_block(coverage: Dict, pack: EvidencePack) -> str:
+    def _access_block(coverage: Dict, pack: Optional[EvidencePack]) -> str:
         levels = (coverage or {}).get("read_levels") or {}
         full = int(levels.get("full_text", 0) or 0)
         abstract = int(levels.get("abstract", 0) or 0)
         snippet = int(levels.get("snippet", 0) or 0)
         meta = int(levels.get("metadata", 0) or 0)
-        partial = [s for s in pack.sources if FinalSynthesizer._is_partial_large_source(s)]
+        partial = [
+            s for s in (getattr(pack, "sources", None) or [])
+            if FinalSynthesizer._is_partial_large_source(s)
+        ]
         full_whole = max(0, full - len(partial))
 
         if not (full or abstract or snippet or meta):
@@ -108,19 +118,21 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 "source-access depth ko verify nahi kiya ja saka."
             )
 
+        total = full + abstract + snippet + meta
         lines = [
             "**Kitna gehra padha gaya (access depth confidence ko affect karti hai, "
-            "lekin claim verification alag A-E check se hoti hai):**"
+            "lekin claim verification alag A-E check se hoti hai) — "
+            f"kul {total} sources par:**"
         ]
         if full_whole:
             lines.append(
-                f"- {full_whole} source ka legally available full text process hua. "
+                f"- {full_whole}/{total} source ka POORA text mila aur process hua. "
                 "Isse strong checking possible hoti hai, lekin sirf full text milne "
                 "se koi claim automatically verified nahi maana jaata."
             )
         if partial:
             lines.append(
-                f"- {len(partial)} badi PDF/document mein poora document ek saath nahi "
+                f"- {len(partial)}/{total} badi PDF/document mein poora document ek saath nahi "
                 "padha gaya; sawal se relevant pages page-by-page select karke process hue."
             )
             for source in partial[:4]:
@@ -131,17 +143,17 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 )
         if abstract:
             lines.append(
-                f"- {abstract} source ka sirf abstract mila — paper ka summary, poora "
+                f"- {abstract}/{total} source ka sirf abstract mila — paper ka summary, poora "
                 "method/result context nahi. Isse strong fact automatically nahi banta."
             )
         if snippet:
             lines.append(
-                f"- {snippet} source se sirf search snippet mila. Ye weak/supporting "
+                f"- {snippet}/{total} source se sirf ek chhota snippet mila. Ye weak/supporting "
                 "signal ho sakta hai, verification nahi."
             )
         if meta:
             lines.append(
-                f"- {meta} source ka sirf title/metadata mila — content-level claim "
+                f"- {meta}/{total} source ka sirf title/metadata mila — content-level claim "
                 "verify nahi ki ja sakti."
             )
         if not full:

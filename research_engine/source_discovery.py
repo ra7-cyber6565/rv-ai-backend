@@ -41,6 +41,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from .connectors import (BaseConnector, BookConnector, DatasetConnector,
                          PaperConnector, WebConnector)
 from .models import SourceRecord
+from .network_safety import public_error
 
 
 class SourceDiscovery:
@@ -149,7 +150,7 @@ class SourceDiscovery:
                         result = future.result()
                     except Exception as exc:
                         log.append({"connector": label, "count": 0, "reason": "error",
-                                    "error": f"{type(exc).__name__}: {exc}"})
+                                    "error": public_error(exc)})
                         continue
                     for record in result.get("records", []):
                         key = (record.url or "").strip().rstrip("/").lower()

@@ -14,9 +14,9 @@ Zero Gemini quota — sirf HTTP calls.
 """
 from __future__ import annotations
 
-import time
 from typing import Dict, Optional
-import requests
+
+from .connectors.base import http_get
 
 HEADERS = {"User-Agent": "InfinityResearchAI/1.0 (research engine)"}
 OPENALEX_BASE = "https://api.openalex.org"
@@ -40,7 +40,7 @@ def fetch_citation_count(doi: str = "", openalex_id: str = "",
         if doi:
             doi_clean = doi.replace("https://doi.org/", "").strip()
             url = f"{OPENALEX_BASE}/works/doi:{doi_clean}"
-            resp = requests.get(url, headers=HEADERS, timeout=timeout)
+            resp = http_get(url, headers=HEADERS, timeout=(timeout, timeout), retries=0)
             if resp.status_code == 200:
                 data = resp.json()
                 count = data.get("cited_by_count", 0)
@@ -50,7 +50,7 @@ def fetch_citation_count(doi: str = "", openalex_id: str = "",
         # 2. OpenAlex ID se direct (also fast)
         if openalex_id:
             url = f"{OPENALEX_BASE}/works/{openalex_id}"
-            resp = requests.get(url, headers=HEADERS, timeout=timeout)
+            resp = http_get(url, headers=HEADERS, timeout=(timeout, timeout), retries=0)
             if resp.status_code == 200:
                 data = resp.json()
                 count = data.get("cited_by_count", 0)
@@ -63,7 +63,10 @@ def fetch_citation_count(doi: str = "", openalex_id: str = "",
             search_q = " ".join(query)
             url = f"{OPENALEX_BASE}/works"
             params = {"search": search_q, "per_page": 1}
-            resp = requests.get(url, params=params, headers=HEADERS, timeout=timeout)
+            resp = http_get(
+                url, params=params, headers=HEADERS,
+                timeout=(timeout, timeout), retries=0,
+            )
             if resp.status_code == 200:
                 data = resp.json()
                 if data.get("results"):
@@ -73,8 +76,6 @@ def fetch_citation_count(doi: str = "", openalex_id: str = "",
 
         return None
 
-    except requests.exceptions.RequestException:
-        return None
     except Exception:
         return None
 

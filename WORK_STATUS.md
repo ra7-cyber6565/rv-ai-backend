@@ -40,11 +40,12 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Legacy RAG provider bypass | ChatGPT | FIXED / VERIFY | `rag/pipeline.py` no longer imports/calls Gemini directly; it uses resilient router + conservative document extract fallback |
 | Provider-bypass release audit | ChatGPT | DONE / VERIFY | Static audit fails release if production code outside approved adapters directly calls Gemini/Groq/OpenRouter/Ollama generation surfaces |
 | Raw provider-error redaction | ChatGPT | HARDENED / VERIFY | Integrated reasoning returns normalized model/provider failure kinds; raw SDK/HTTP/protobuf bodies are excluded from public errors/technical details |
+| Discovery/full-text network boundary | ChatGPT | HARDENED / OFFLINE VERIFIED | Shared URL guard blocks private/local/reserved targets, credentials, unsafe ports and redirect pivots; connector/fetch responses enforce content-type and compressed/decompressed byte bounds |
 | Human-first presentation contract | ChatGPT audit | DONE / VERIFY | Deterministic presentation guard + A-L tests; sources/audit last; raw technical junk kept out of main explanation |
 | Release-state honesty | ChatGPT | DONE / VERIFY | API cannot become `Production Ready` through an env flag; release stays `foundation_verification_pending` until reviewed proof exists |
 | Public operational metadata privacy | ChatGPT | HARDENED / VERIFY | project/history/global-job-list routes are fail-closed behind backend-only admin token; public storage health no longer exposes absolute filesystem paths/raw OS errors |
 | Static architecture wiring audit | ChatGPT | DONE / VERIFY | Release gate checks end-to-end production wiring, ₹0 chain, storage/security invariants and premature release claims |
-| Superconductivity benchmark V2 | Claude + ChatGPT | PENDING LIVE RETEST | Offline benchmark is in strict gate; live zero-cost rerun still required |
+| Superconductivity benchmark V2 | Claude + ChatGPT | OFFLINE 146/146 / LIVE RETEST PENDING | Strict offline gate is green; live zero-cost rerun is still a separate required gate |
 | Central D-drive runtime routing | ChatGPT | DONE / VERIFY | Heavy runtime/cache/vector/temp/research data routes under configured root; explicit root failure is fail-closed |
 | Streaming upload safety | ChatGPT | DONE / VERIFY | Bounded streaming, early stop, partial cleanup, storage reservation |
 | ₹0 startup guard | ChatGPT | HARDENED / VERIFY | Paid-key paths blocked; every Gemini primary/backup/list credential is subject to one explicit zero-cost confirmation; Groq confirmed-only; OpenRouter free-only; remote Ollama blocked |
@@ -62,8 +63,19 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY/RECOVERY DESIGN | No homemade/insecure crypto and no unrecoverable-key design |
 | Secondary compact metadata backup | ChatGPT | PLANNED | Only after a genuinely free private destination is selected |
 | Patents connector | ChatGPT | PENDING OFFICIAL-AUTH DESIGN | No unofficial scraping. Add only through an official zero-cost route |
-| Integrated regression | ChatGPT | REQUIRED / NEEDS ACTUAL EXECUTION | Strict runner now executes focused pytest + full `pytest -q tests` (not fake `python test_file.py` imports), core regression, script harnesses, provider/architecture audits and Superconductivity Benchmark V2 |
-| Final architecture/integration audit | ChatGPT | ACTIVE | Manual audit continues; every finding is fixed before foundation sign-off |
+| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 strict default gate passed all 31 stages: 372 focused pytest, 555 full pytest, 593 core checks, every explicit script harness, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
+| Final architecture/integration audit | ChatGPT | OFFLINE PASS / LIVE GATE PENDING | Static architecture and provider/source-boundary audits pass; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
+
+## Latest independent offline validation — 2026-08-21
+
+- Strict default `scripts/run_foundation_gate.py` execution: **PASS, 31/31 stages**.
+- Focused release pytest: **372 passed**.
+- Full `pytest -q tests`: **555 passed**; root wrapper-inclusive collection separately passed **556/556**.
+- Ordered core regression: **593 passed, 0 failed**.
+- Cross-domain adversarial benchmark: **633 passed, 0 failed** across eight domains.
+- Superconductivity Benchmark V2: **146 passed, 0 failed**.
+- Provider-bypass audit, architecture audit and source-boundary audit: **PASS**.
+- This is offline/₹0 verification only. The live zero-cost benchmark and deployment/runtime checks remain required before production sign-off.
 
 ## Current independent audit findings fixed
 
@@ -79,6 +91,11 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 10. Claude's new Gemini backup-key pool initially created a zero-cost policy gap: backup/list keys could exist while the startup guard checked only `GEMINI_API_KEY`. The guard now covers every supported backup/list variable.
 11. Backup-only Gemini config was recognized by the key pool but not by provider-router/status readiness. All three now share the same credential definition and confirmation rule.
 12. Provider/Gemini “technical details” could still carry raw HTTP/protobuf/provider payload into a user-visible audit footer. Integrated production reasoning now emits normalized failure kinds only.
+13. Discovery connectors and full-text fetches trusted redirects/hosts too broadly and did not share one decompressed-size/content-type boundary. Added one network-safety layer with DNS/IP validation, per-hop redirect checks, exact discovery allowlists, byte caps and sanitized failures.
+14. `[UNVERIFIED]` collapsed into speculative claim semantics and source-count grading could still print a top evidence label after a failed claim-level A-E check. Added a distinct internal state with backward-compatible serialization and made final grading consume label/A-E reports.
+15. The cross-domain benchmark fake model still parsed the pre-hardening evidence prompt, hiding label/contradiction coverage after the source-data guard changed. Updated the benchmark parser to consume both legacy and hardened prompt grammars and kept the 633/633 gate mandatory.
+16. Presentation cleanup treated clickable `[S#]` citations as raw diagnostic URLs and generated a developer-only block on healthy runs. Citation targets now collapse to stable source IDs in the human section while full URLs remain in Sources.
+17. Direct script-harness stages lost repository imports when the caller supplied a dependency-only `PYTHONPATH`. The strict runner now prepends the repository root and the default 31-stage gate executes every intended harness successfully.
 
 ## Required gates before foundation can be called reliable
 

@@ -96,13 +96,16 @@ def _numbers_supported(claim: str, source_text: str) -> Optional[bool]:
 
 
 def _direction(text: str) -> str:
-    up = bool(_UP_RE.search(text or ""))
-    down = bool(_DOWN_RE.search(text or ""))
-    if up and not down:
-        return "up"
-    if down and not up:
-        return "down"
-    return ""
+    # Academic claims often name a predictor with a comparative adjective and
+    # state the outcome later: "Higher urban density *reduces* car travel".
+    # Treating the presence of both words as ambiguous hid the direct conflict
+    # with "Higher urban density *increases* car travel".  The last explicit
+    # directional cue is the predicate nearest the claimed outcome.
+    cues = [(match.start(), "up") for match in _UP_RE.finditer(text or "")]
+    cues.extend((match.start(), "down") for match in _DOWN_RE.finditer(text or ""))
+    if not cues:
+        return ""
+    return max(cues, key=lambda item: item[0])[1]
 
 
 def _obvious_semantic_conflict(claim: str, source_text: str) -> bool:
@@ -171,12 +174,11 @@ def _relevance_state(pack: EvidencePack, source: SourceRecord, source_text: str)
         return True
     if score > 0:
         return None
-    if pack.question:
-        semantic_q = similarity(pack.question, source_text)
-        if semantic_q >= 0.22:
-            return True
-        if semantic_q >= 0.12:
-            return None
+    # A zero score is not permission to recompute a friendlier answer from a
+    # keyword-heavy title.  RelevanceEngine already considered the full source;
+    # overriding its explicit failure allowed an off-topic snippet with a
+    # generic on-topic title to pass B and then C-E.  Missing/unscored evidence
+    # also fails closed here: claim verification may never invent a PASS.
     return False
 
 

@@ -57,7 +57,7 @@ def _has_full_text_cite(line: str, pack: Optional[EvidencePack]) -> bool:
 
 def _ae_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[Optional[bool], str]:
     """Cumulative same-source A-E result; None means context unavailable."""
-    if pack is None or not str(getattr(pack, "question", "") or "").strip():
+    if pack is None:
         return None, "claim-level A-E context available nahi tha"
     try:
         from .evidence_verification import EvidenceVerifier

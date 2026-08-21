@@ -41,6 +41,7 @@ def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     assert env["TERABOX_CLIENT_SECRET"] == ""
     assert env["INFINITY_ADMIN_TOKEN"] == ""
     assert env["INFINITY_OFFLINE_TEST"] == "true"
+    assert env["PYTHONPATH"].split(gate.os.pathsep)[0] == str(gate.REPO_ROOT)
 
 
 def test_default_stage_plan_contains_real_release_gates():
@@ -93,6 +94,8 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_admin_guard.py",
         "tests/test_job_access.py",
         "tests/test_job_routes_access.py",
+        "tests/test_network_safety.py",
+        "tests/test_unverified_semantics.py",
         "tests/test_foundation_gate_runner.py",
     ):
         assert required in focused_command

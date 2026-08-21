@@ -892,7 +892,16 @@ class DeepResearchEngine:
             verification["hypothesis_plan"] = passes["hypothesis_plan"]
 
         # 9. grading + coverage
-        evidence_level = self.evidence.grade_evidence(pack, claims)
+        # Pack-level counts alone must never print VERIFIED/STRONG when the
+        # answer's actual conclusion claims failed A-E.  Both final reports are
+        # passed only here; the earlier pre-reasoning grade intentionally remains
+        # a source-pack diagnostic for hypothesis planning.
+        evidence_level = self.evidence.grade_evidence(
+            pack,
+            claims,
+            label_report=label_report,
+            claim_checks=claim_checks,
+        )
         coverage = pack.coverage_report()
         coverage["evidence_table"] = self.evidence.evidence_table(claims)
         coverage["independence"] = self.evidence.independence_report(pack)

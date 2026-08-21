@@ -16,7 +16,8 @@ import os
 from typing import Dict, List, Optional
 
 from ..models import SourceRecord, SourceType
-from .base import BaseConnector, READ_TIMEOUT, ConnectorSkipped, http_get
+from .base import (BaseConnector, ConnectorHTTPError, ConnectorSkipped,
+                   READ_TIMEOUT, http_get)
 
 
 class TavilyConnector(BaseConnector):
@@ -50,7 +51,13 @@ class TavilyConnector(BaseConnector):
             response = client.search(query=query, max_results=max_results,
                                      timeout=READ_TIMEOUT)
         except TypeError:
-            response = client.search(query=query, max_results=max_results)
+            # Purane SDK ka unbounded fallback poore process ko latka sakta hai.
+            # Discovery budget thread ka result chhod sakta hai, running socket
+            # ko force-stop nahi kar sakta. Mandatory timeout support na ho to
+            # fail closed; user newer free client install kar sakta hai.
+            raise ConnectorHTTPError(
+                "Tavily client timeout support available nahi hai; unsafe unbounded call roki gayi"
+            ) from None
         out: List[SourceRecord] = []
         for r in response.get("results", []) or []:
             out.append(SourceRecord(
@@ -108,7 +115,9 @@ class DuckDuckGoConnector(BaseConnector):
         try:
             session = DDGS(timeout=READ_TIMEOUT)
         except TypeError:
-            session = DDGS()
+            raise ConnectorHTTPError(
+                "DuckDuckGo client timeout support available nahi hai; unsafe unbounded call roki gayi"
+            ) from None
 
         out: List[SourceRecord] = []
         with session as ddgs:

@@ -103,6 +103,8 @@ FOCUSED_PYTEST = (
     "tests/test_presentation_guard.py",
     "tests/test_integrated_facades.py",
     "tests/test_claim_label_accounting.py",
+    "tests/test_unverified_semantics.py",
+    "tests/test_network_safety.py",
     "tests/test_foundation_gate_runner.py",
 )
 
@@ -137,6 +139,15 @@ def _tail(text: str, lines: int = 80) -> list[str]:
 def _safe_env() -> dict[str, str]:
     """Return an explicitly offline/₹0 environment for the release gate."""
     env = dict(os.environ)
+    # Direct ``python tests/test_*.py`` harnesses put ``tests/`` (not the repo
+    # root) first on sys.path. Always make production packages importable while
+    # preserving any caller-supplied dependency target directory.
+    repo_path = str(REPO_ROOT)
+    inherited_paths = [
+        item for item in str(env.get("PYTHONPATH", "") or "").split(os.pathsep)
+        if item and item != repo_path
+    ]
+    env["PYTHONPATH"] = os.pathsep.join([repo_path, *inherited_paths])
     env.update(
         {
             "ZERO_COST_ONLY": "true",
