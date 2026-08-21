@@ -39,8 +39,6 @@ class StoragePolicy:
 
     @classmethod
     def from_env(cls) -> "StoragePolicy":
-        # 50 GB is a conservative default workspace ceiling; it is configurable
-        # and, importantly, does not trigger destructive cleanup by itself.
         max_gb = _float_env("INFINITY_MAX_LOCAL_GB", 50.0, minimum=1.0, maximum=500.0)
         min_free_gb = _float_env("INFINITY_MIN_FREE_GB", 5.0, minimum=1.0, maximum=100.0)
         return cls(int(max_gb * _GB), int(min_free_gb * _GB))
@@ -126,7 +124,7 @@ def cleanup_verified_archives(
 
     Security rules:
     - file must still exist;
-    - manifest must say it is safe to delete;
+    - the exact provider/path-aware archive record must be verified;
     - local path must be inside configured Infinity storage root;
     - symlinks are never deleted through this cleanup path.
     """
@@ -140,12 +138,13 @@ def cleanup_verified_archives(
         if reclaimed >= target:
             break
         digest = str(item.get("sha256") or "")
+        archive_ref = str(item.get("archive_id") or digest)
         path = str(item.get("local_path") or "")
-        if not digest or not path:
+        if not archive_ref or not path:
             continue
         if item.get("local_deleted") is True:
             continue
-        if not manifest.safe_to_delete_local(digest):
+        if not manifest.safe_to_delete_local(archive_ref):
             skipped.append({"path": path, "reason": "not_verified"})
             continue
         if not _inside_root(path, root):
@@ -160,7 +159,7 @@ def cleanup_verified_archives(
 
         size = os.path.getsize(path)
         os.remove(path)
-        manifest.mark_local_deleted(digest)
+        manifest.mark_local_deleted(archive_ref)
         reclaimed += size
         deleted.append(path)
 
