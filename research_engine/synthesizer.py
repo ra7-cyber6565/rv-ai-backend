@@ -169,15 +169,28 @@ class FinalSynthesizer(_LegacyFinalSynthesizer):
             blocks.append("\n".join(lines))
         return "\n\n".join(blocks)
 
+    @staticmethod
+    def _repair_incomplete_honesty(report: str) -> str:
+        """Add a truthful opening warning only when A-L check J says it is missing."""
+        marker = "## Seedha jawab"
+        pos = (report or "").find(marker)
+        if pos < 0:
+            return report
+        insert = pos + len(marker)
+        warning = (
+            "\n\n**Important:** Ye research run complete nahi hua. Neeche diya gaya result "
+            "preliminary hai, fully verified final conclusion nahi. Jo passes/sources "
+            "complete nahi hue unka reason technical audit mein neeche diya gaya hai."
+        )
+        return report[:insert] + warning + report[insert:]
+
     def assemble(self, *args, **kwargs) -> str:
-        """Assemble normally, then run the user's A-L presentation gate."""
+        """Assemble normally, then run and enforce the user's A-L presentation gate."""
         report = super().assemble(*args, **kwargs)
         pack = kwargs.get("pack")
         if pack is None and len(args) > 1:
             pack = args[1]
         if pack is None:
-            # Defensive compatibility: if a future caller breaks the contract,
-            # return the legacy report rather than inventing missing run state.
             self.last_presentation_check = {
                 "passed": False,
                 "failed": ["presentation_guard_missing_evidence_pack"],
@@ -199,5 +212,22 @@ class FinalSynthesizer(_LegacyFinalSynthesizer):
             hypotheses=hypotheses or [],
             status=status or {},
         )
+        first_repairs = list(audit.repairs)
+
+        # User requirement J: if an incomplete run is not clearly disclosed,
+        # rewrite the opening before returning rather than merely recording FAIL.
+        if audit.checks.get("J_incomplete_run_not_called_verified") is False:
+            guarded = self._repair_incomplete_honesty(guarded)
+            guarded, audit = self.presentation_guard.enforce(
+                guarded,
+                pack=pack,
+                hypotheses=hypotheses or [],
+                status=status or {},
+            )
+            audit.repairs = first_repairs + [
+                "incomplete-run warning inserted into Seedha jawab"
+            ] + [r for r in audit.repairs if r not in first_repairs]
+            audit.failed = [name for name, value in audit.checks.items() if value is False]
+
         self.last_presentation_check = audit.to_dict()
         return guarded
