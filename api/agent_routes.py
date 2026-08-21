@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
 from research_engine.agent_manager import manager
@@ -8,6 +8,7 @@ from research_engine.depth import (BOOL_FIELDS, depth_limits,
                                     get_depth_config, quota_note)
 from utils.admin_guard import require_admin
 from utils.progress_tracker import get_progress
+from utils.project_guard import require_project_access
 from utils.reasoning_status import reasoning_status
 
 router = APIRouter()
@@ -55,8 +56,12 @@ def _custom(request: DeepResearchRequest) -> Optional[Dict]:
 
 
 @router.post("/deep-research")
-def deep_research(request: DeepResearchRequest):
-    """Deep multi-step research with bounded CUSTOM controls."""
+def deep_research(
+    request: DeepResearchRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Deep research inside a server-issued private project namespace."""
+    require_project_access(request.project_id, x_project_token)
     return manager.research(
         question=request.question,
         project_id=request.project_id,
@@ -110,8 +115,12 @@ def _safe_research_chat_fallback(request: ChatRequest) -> Dict:
 
 
 @router.post("/chat")
-def chat(request: ChatRequest):
-    """QUICK chat with zero-cost provider failover and evidence fallback."""
+def chat(
+    request: ChatRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """QUICK chat isolated to a server-issued project capability."""
+    require_project_access(request.project_id, x_project_token)
     from research_engine.chat import quick_chat
 
     result = quick_chat(request.message, request.history)
