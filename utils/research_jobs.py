@@ -14,7 +14,9 @@ Important honesty rules:
   large, with that fact disclosed in job metadata;
 - persistence failure does not rewrite a successfully completed research run as
   a fake model/research failure. It remains available in memory for the current
-  process and reports that durability was not achieved.
+  process and reports that durability was not achieved;
+- the JSON job ledger is single-writer. A cross-process OS lock fails closed if
+  a second Python worker tries to own the same durable store.
 """
 from __future__ import annotations
 
@@ -31,6 +33,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+from utils.process_lock import ExclusiveProcessFileLock, ProcessLockError
 from utils.storage_paths import configured_root, ensure_layout
 from utils.storage_quota import assert_capacity
 
@@ -41,6 +44,13 @@ def _positive_int(name: str, default: int, maximum: int) -> int:
     except (TypeError, ValueError):
         value = default
     return max(1, min(maximum, value))
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
 MAX_WORKERS = _positive_int("RESEARCH_JOB_WORKERS", 1, 2)
@@ -206,7 +216,6 @@ def _bounded_result(result: Dict[str, Any], max_bytes: int) -> tuple[bytes, int,
     if len(candidate) <= max_bytes:
         return candidate, original_size, True
 
-    # Extremely small configured caps still receive an honest durable marker.
     emergency = {
         "_storage_compacted": True,
         "_original_serialized_bytes": original_size,
@@ -265,6 +274,7 @@ class ResearchJobRunner:
         store_path: str | None = None,
         persist: bool = True,
         max_result_bytes: int = MAX_RESULT_BYTES,
+        enforce_process_lock: bool | None = None,
     ):
         self.max_jobs = max(1, max_jobs)
         self.max_result_bytes = max(1024, int(max_result_bytes))
@@ -278,10 +288,36 @@ class ResearchJobRunner:
         self._persist_enabled = bool(persist)
         self._store_path = os.path.abspath(store_path or default_job_store_path()) if persist else ""
         self._result_dir = os.path.join(os.path.dirname(self._store_path), "results") if persist else ""
+        self._process_lock: ExclusiveProcessFileLock | None = None
+        should_lock = _bool_env("RESEARCH_JOB_PROCESS_LOCK", True) if enforce_process_lock is None else bool(enforce_process_lock)
         if self._persist_enabled:
             Path(self._store_path).parent.mkdir(parents=True, exist_ok=True)
             Path(self._result_dir).mkdir(parents=True, exist_ok=True)
-            self._load_persisted()
+            if should_lock:
+                guard = ExclusiveProcessFileLock(self._store_path + ".process.lock")
+                try:
+                    guard.acquire()
+                except ProcessLockError as exc:
+                    self._executor.shutdown(wait=False, cancel_futures=True)
+                    raise RuntimeError(
+                        "Durable research job store already another Python process use kar raha hai. "
+                        "JSON corruption se bachne ke liye multiple backend workers blocked hain; single worker use karein."
+                    ) from exc
+                self._process_lock = guard
+            try:
+                self._load_persisted()
+            except Exception:
+                self.close(wait=False)
+                raise
+
+    def close(self, *, wait: bool = True) -> None:
+        """Release worker threads and the single-writer process lock."""
+        try:
+            self._executor.shutdown(wait=wait, cancel_futures=not wait)
+        finally:
+            if self._process_lock is not None:
+                self._process_lock.release()
+                self._process_lock = None
 
     def _inside_configured_root(self, path: str) -> bool:
         root, explicit = configured_root()
@@ -328,8 +364,6 @@ class ResearchJobRunner:
             "Large result durable storage ke liye compact kiya gaya; final/report/audit fields ko priority di gayi."
             if compacted else ""
         )
-        # Keep one source of truth after persistence and release potentially huge
-        # in-memory retrieval payloads. get(..., include_result=True) loads lazily.
         job.result = None
 
     def _load_result_locked(self, job: Job) -> Optional[Dict[str, Any]]:
@@ -344,7 +378,7 @@ class ResearchJobRunner:
             if isinstance(data, dict):
                 return data
             return {"result": data}
-        except Exception as exc:  # noqa: BLE001 - corrupt/missing durable result must be honest
+        except Exception as exc:  # noqa: BLE001
             job.durable = False
             job.storage_warning = "Persisted research result read nahi ho saka; file missing/corrupt ho sakti hai."
             return {
@@ -382,8 +416,6 @@ class ResearchJobRunner:
                     job.finished_at = time.time()
                     job.durable = True
                 elif job.status == "completed" and job.result is not None and not job.result_file:
-                    # Migrate the old inline-result format into the bounded gzip
-                    # format on first startup after this upgrade.
                     try:
                         self._persist_result_locked(job)
                     except Exception as exc:  # noqa: BLE001
@@ -393,8 +425,6 @@ class ResearchJobRunner:
             self._prune_locked()
             self._persist_locked()
         except Exception:
-            # Corrupt job history must never stop the research service from
-            # starting. Preserve the bad file for inspection and start clean.
             try:
                 broken = f"{self._store_path}.corrupt-{int(time.time())}"
                 os.replace(self._store_path, broken)
@@ -411,8 +441,6 @@ class ResearchJobRunner:
             rows = []
             for job in sorted(self._jobs.values(), key=lambda j: j.created_at):
                 row = asdict(job)
-                # Never put a completed research payload back into the metadata
-                # ledger. Large results belong in bounded gzip files.
                 if job.status == "completed":
                     row["result"] = None
                 rows.append(row)
@@ -447,8 +475,6 @@ class ResearchJobRunner:
         with self._lock:
             self._prune_locked()
             self._jobs[job_id] = job
-            # Submission should fail before starting expensive work if even the
-            # tiny durable job ledger cannot be written.
             self._persist_locked()
             future = self._executor.submit(self._execute, job_id, custom or {}, run)
             self._futures[job_id] = future
@@ -477,7 +503,7 @@ class ResearchJobRunner:
                 custom=custom or None,
                 job_id=job.job_id,
             )
-        except Exception as exc:  # noqa: BLE001 - job boundary must capture failures
+        except Exception as exc:  # noqa: BLE001
             with self._lock:
                 job.status = "failed"
                 job.error = _safe_error(exc)
@@ -487,7 +513,6 @@ class ResearchJobRunner:
                     self._persist_locked()
                 except Exception:
                     pass
-            with self._lock:
                 self._futures.pop(job_id, None)
             return
 
@@ -499,7 +524,7 @@ class ResearchJobRunner:
             if self._persist_enabled:
                 try:
                     self._persist_result_locked(job)
-                except Exception as exc:  # noqa: BLE001 - completed work remains valid in memory
+                except Exception as exc:  # noqa: BLE001
                     job.durable = False
                     job.storage_warning = (
                         "Research complete hua, lekin durable result save nahi ho saka: "
@@ -523,7 +548,6 @@ class ResearchJobRunner:
             data = job.public()
             if include_result and job.status == "completed":
                 data["result"] = self._load_result_locked(job)
-                # _load_result_locked may discover a missing/corrupt file.
                 data["result_durable"] = job.durable
                 data["storage_warning"] = job.storage_warning
             return data
