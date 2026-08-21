@@ -3,7 +3,13 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from utils.request_guard import Limit, SlidingWindowLimiter, client_key, limit_for
+from utils.request_guard import (
+    Limit,
+    SlidingWindowLimiter,
+    bucket_for,
+    client_key,
+    limit_for,
+)
 
 
 def test_sliding_window_blocks_after_limit_and_returns_retry_after():
@@ -44,8 +50,6 @@ def test_global_cleanup_releases_expired_idle_buckets():
     limiter = SlidingWindowLimiter(max_buckets=100, cleanup_interval_seconds=1)
     limit = Limit(requests=1, window_seconds=10)
     assert limiter.check("old", "research", limit, now=0.0)[0] is True
-    # Global cleanup uses the longest configured policy window (1 hour), so
-    # advance beyond that to prove old client keys are removed entirely.
     assert limiter.check("new", "research", limit, now=4000.0)[0] is True
     assert limiter.stats()["active_buckets"] == 1
 
@@ -58,8 +62,31 @@ def test_stats_never_expose_client_keys():
     assert set(stats) == {"active_buckets", "max_buckets", "capacity_rejections"}
 
 
-def test_get_requests_are_not_limited():
+def test_collection_get_is_not_limited_but_job_polling_is():
     assert limit_for("GET", "/api/v1/research-jobs") is None
+    for path in (
+        "/api/v1/research-jobs/abc123",
+        "/api/v1/research-jobs/abc123/progress",
+        "/api/v1/research-jobs/abc123/result",
+    ):
+        limit = limit_for("GET", path)
+        assert limit is not None
+        assert limit.window_seconds == 60
+
+
+def test_dynamic_job_urls_share_one_normalized_bucket():
+    paths = (
+        "/api/v1/research-jobs/job-one",
+        "/api/v1/research-jobs/job-two/progress",
+        "/api/v1/research-jobs/job-three/result",
+    )
+    buckets = {bucket_for("GET", path) for path in paths}
+    assert buckets == {"/api/v1/research-jobs/{job}/poll"}
+
+
+def test_non_job_paths_keep_original_bucket():
+    assert bucket_for("POST", "/api/v1/chat") == "/api/v1/chat"
+    assert bucket_for("GET", "/health") == "/health"
 
 
 def test_unknown_post_endpoint_is_not_limited():
