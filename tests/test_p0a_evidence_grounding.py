@@ -1,6 +1,11 @@
 """P0-A regression: evidence-first critical claims must be same-source and non-vacuous."""
 from __future__ import annotations
 
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from research_engine import claim_verification as CV
 from research_engine import final_quality_gate as FQ
 from research_engine.models import EvidencePack, Passage, SourceRecord, SourceType
