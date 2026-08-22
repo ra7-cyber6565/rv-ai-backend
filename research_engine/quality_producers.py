@@ -518,6 +518,7 @@ def _evidence_graph_complete(vdict: Optional[Dict], cited: Optional[List[str]]
 TRISTATE_FIELDS: tuple = (
     "directly_relevant_sources", "sources_supporting_critical_claims",
     "average_relevance", "critical_claim_spans_complete",
+    "critical_claims_same_source_ae_passed", "claim_verification_achievement",
     "evidence_graph_complete", "counter_search_performed", "recovery_used",
     "progress_snapshot_preserved", "numeric_confidence_calibrated",
     "access_depth_mismatch_count", "unsupported_critical_claims",
@@ -651,6 +652,12 @@ def quality_context(pack=None, answer_text: str = "", verification=None,
         "unsupported_critical_claims": (vdict or {}).get("unsupported_critical_claims"),
         "unverifiable_critical_claims": (vdict or {}).get("unverifiable_critical_claims"),
         "critical_claims": (vdict or {}).get("critical_claims"),
+        "critical_claims_same_source_ae_passed":
+            (vdict or {}).get("critical_claims_same_source_ae_passed"),
+        "claim_verification_achievement":
+            (vdict or {}).get("claim_verification_achievement"),
+        "critical_claim_supporting_source_ids":
+            (vdict or {}).get("sources_supporting_critical_claims"),
         "critical_claim_spans_complete":
             (vdict or {}).get("critical_claim_spans_complete"),
         "critical_claim_evidence_spans": (vdict or {}).get("critical_claim_spans"),
