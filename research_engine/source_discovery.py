@@ -41,6 +41,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 from .connectors import (BaseConnector, BookConnector, DatasetConnector,
                          PaperConnector, PatentDiscoveryConnector, WebConnector)
 from .models import SourceRecord
+from .network_safety import public_error
 
 
 class SourceDiscovery:
@@ -86,6 +87,23 @@ class SourceDiscovery:
             # sirf EK task — andar sequential fallback chain hai
             tasks.append(("web_chain", self._web_chain(primary, max_web)))
 
+            # Official archives are an extra, explicitly bounded lane for CIA
+            # Reading Room/NARA/FBI Vault/GovInfo questions.  They still use the
+            # same safe web connector and URL boundary; site-specific queries do
+            # not scrape private endpoints or bypass access controls.  Keeping
+            # them as separate tasks means the ordinary web query is not lost.
+            seen_archive_queries = set()
+            for archive_query in list(plan.get("official_archive_queries", []))[:3]:
+                clean = str(archive_query or "").strip()
+                key = clean.casefold()
+                if not clean or key in seen_archive_queries:
+                    continue
+                seen_archive_queries.add(key)
+                tasks.append((
+                    "official_archive_web",
+                    self._web_chain(clean, max(1, min(2, max_web))),
+                ))
+
         for name in plan.get("papers", []):
             connector = self.papers.by_name(name)
             if connector:
@@ -93,11 +111,23 @@ class SourceDiscovery:
                     tasks.append((connector.name,
                                   self._single(connector, q, max_per_connector)))
 
+        book_queries = []
+        seen_book_queries = set()
+        for candidate in list(plan.get("book_queries", []))[:2] or [primary]:
+            clean = str(candidate or "").strip()
+            key = clean.casefold()
+            if not clean or key in seen_book_queries:
+                continue
+            seen_book_queries.add(key)
+            book_queries.append(clean)
+
         for name in plan.get("books", []):
             connector = self.books.by_name(name)
             if connector:
-                tasks.append((connector.name,
-                              self._single(connector, primary, max_per_connector)))
+                for book_query in book_queries:
+                    tasks.append((connector.name,
+                                  self._single(connector, book_query,
+                                               max_per_connector)))
 
         # Datasets (Spec Section 2 + 11) — books ki tarah PRIMARY query par hi
         # chalte hain, taaki discovery budget safe rahe. Ye raw data locate karte
@@ -163,7 +193,7 @@ class SourceDiscovery:
                         result = future.result()
                     except Exception as exc:
                         log.append({"connector": label, "count": 0, "reason": "error",
-                                    "error": f"{type(exc).__name__}: {exc}"})
+                                    "error": public_error(exc)})
                         continue
                     for record in result.get("records", []):
                         key = (record.url or "").strip().rstrip("/").lower()

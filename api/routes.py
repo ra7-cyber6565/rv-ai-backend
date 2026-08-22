@@ -1,105 +1,88 @@
 """
 RAG routes — upload aur ask.
 
-BADLAV (Spec Section 4/5 ka missing wiring):
-    Pehle sirf /upload-pdf tha, jo seedha rag.pipeline.ingest_pdf par jaata tha.
-    Uska matlab tha:
-        * scanned PDF upload karo → chup-chaap 0 useful chunks (OCR kahin
-          connected nahi tha)
-        * .docx / .txt / .vtt / .srt upload karne ka koi rasta hi nahi tha
-        * processing/ ke chaaron module bane pade the par unhe koi call nahi
-          karta tha
+Uploads use bounded streaming + cleanup and all public error responses are kept
+human-readable. Raw local paths/library exception text stay inside the backend;
+capability endpoints explain optional dependencies separately.
 
-    Ab upload DocumentProcessor ke through jaata hai, isliye OCR fallback,
-    docx, plain text, HTML aur timestamped transcripts sach mein kaam karte hain.
+Every endpoint that reads/writes a project namespace requires the server-issued
+``X-Project-Token`` capability. A caller can still create its own anonymous
+session for ₹0, but cannot poison or query another session merely by guessing a
+project id.
 """
 import os
-import shutil
-import tempfile
-from typing import Optional
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form
-from pydantic import BaseModel
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Header
+from pydantic import BaseModel, Field
 
-from rag.pipeline import ask_question
 from research_engine.vector_search import VectorSearch
-from research_engine.agent_manager import manager  # ✅ ADD: Deep research engine
+from research_engine.agent_manager import manager
+from utils.project_guard import require_project_access
+from utils.upload_safety import cleanup_upload_path, save_upload_stream
 
 router = APIRouter()
 
-# Kaunse formats andar aa sakte hain (DocumentProcessor inhe handle karta hai)
 SUPPORTED = (".pdf", ".docx", ".txt", ".md", ".markdown", ".text",
              ".html", ".htm", ".vtt", ".srt")
-
-# Upload size cap — bina cap ke ek badi file server ki memory kha sakti hai
-MAX_UPLOAD_BYTES = 60 * 1024 * 1024      # 60 MB
-# Audio/podcast files documents se badi hoti hain — inke liye alag, bada cap
-MAX_AUDIO_BYTES = 200 * 1024 * 1024      # 200 MB
-# Local STT ye audio/video formats leta hai
+MAX_UPLOAD_BYTES = 60 * 1024 * 1024
+MAX_AUDIO_BYTES = 200 * 1024 * 1024
 AUDIO_SUPPORTED = (".mp3", ".wav", ".m4a", ".ogg", ".flac", ".aac", ".wma",
                    ".mp4", ".mov", ".mkv", ".webm", ".m4b", ".opus")
+_MAX_QUESTION_CHARS = 20_000
+_MAX_PROJECT_ID_CHARS = 80
+_MAX_VIDEO_REF_CHARS = 2048
+_MAX_TITLE_CHARS = 300
 
 
 class QuestionRequest(BaseModel):
-    question: str
-    project_id: str = "default"
+    question: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
 
 
 class YouTubeRequest(BaseModel):
-    video: str                            # URL ya sirf video id
-    project_id: str = "default"
-    title: str = ""
+    video: str = Field(..., min_length=1, max_length=_MAX_VIDEO_REF_CHARS)
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
+    title: str = Field(default="", max_length=_MAX_TITLE_CHARS)
 
 
-def _save_upload(file: UploadFile, content: bytes) -> str:
-    """Bytes ko temp file mein likho, extension bachaate hue."""
-    extension = os.path.splitext(file.filename or "")[1].lower() or ".bin"
-    directory = tempfile.mkdtemp(prefix="infinity_upload_")
-    path = os.path.join(directory, f"upload{extension}")
-    with open(path, "wb") as handle:
-        handle.write(content)
-    return path
-
-
-async def _read_upload(file: UploadFile, max_bytes: int = MAX_UPLOAD_BYTES) -> bytes:
-    content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="File khaali hai.")
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File {max_bytes // (1024 * 1024)}MB se badi hai.")
-    return content
+def _safe_notes(value) -> list[str]:
+    """Return short human processing notes without raw exception/path dumps."""
+    out: list[str] = []
+    for item in list(value or [])[:8]:
+        text = " ".join(str(item or "").split())[:300]
+        low = text.lower()
+        if not text:
+            continue
+        if any(marker in low for marker in (
+            "traceback", "exception", "errno", "c:\\", "/tmp/", "/home/",
+            "resourceexhausted", "protobuf", "api_key",
+        )):
+            continue
+        out.append(text)
+    return out
 
 
 def _ingest(file_path: str, filename: str, project_id: str, use_ocr: bool) -> dict:
     result = VectorSearch().ingest_file(file_path, project_id,
                                        use_ocr=use_ocr, filename=filename)
     if not result["ok"]:
-        # 422: file mili par usme se kaam ka text nahi nikla — ye user ko
-        # saaf pata hona chahiye, chup-chaap "success" nahi bolna
         raise HTTPException(status_code=422, detail={
-            "message": f"'{filename}' se text nahi nikala ja saka.",
-            "error": result.get("error", ""),
-            "notes": result.get("notes", []),
+            "message": f"'{filename}' se usable text store nahi ho saka.",
+            "notes": _safe_notes(result.get("notes")),
+            "hint": "Processing capabilities endpoint se PDF/OCR/document support check kar sakte hain.",
         })
     return result
 
 
 @router.post("/upload-audio")
-async def upload_audio(file: UploadFile = File(...),
-                      project_id: str = Form("default"),
-                      language: str = Form(None)):
-    """
-    Audio/video file upload karo — automatic speech-to-text.
-
-    Supported: mp3, wav, m4a, ogg, flac, mp4, mov, etc.
-
-    Requires: openai-whisper (optional dependency)
-    Install: pip install openai-whisper
-
-    Agar installed nahi hai, to 422 error milega with instructions.
-    """
+async def upload_audio(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    language: str | None = Form(None, max_length=32),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Audio/video upload -> local speech-to-text -> timestamped vector chunks."""
+    require_project_access(project_id, x_project_token)
     filename = file.filename or "audio"
     extension = os.path.splitext(filename)[1].lower()
 
@@ -110,28 +93,22 @@ async def upload_audio(file: UploadFile = File(...),
                    f"Supported: {', '.join(AUDIO_SUPPORTED)}"
         )
 
-    content = await _read_upload(file, MAX_AUDIO_BYTES)
-    file_path = _save_upload(file, content)
-
+    file_path = await save_upload_stream(file, max_bytes=MAX_AUDIO_BYTES)
+    result = None
     try:
         from research_engine.memory.speech_to_text import transcribe_to_vtt
 
-        # Generate VTT transcript
         result = transcribe_to_vtt(file_path, language=language or None)
-
         if not result["ok"]:
             raise HTTPException(
                 status_code=422,
                 detail={
-                    "message": "Speech-to-text failed",
-                    "error": result["error"],
-                    "hint": "Make sure openai-whisper is installed: pip install openai-whisper"
+                    "message": "Speech-to-text complete nahi ho saka.",
+                    "hint": "Processing capabilities check karein; local speech-to-text optional dependency hai.",
                 }
             )
 
-        # Ingest the generated VTT file
         vtt_result = _ingest(result["vtt_path"], f"{filename}.vtt", project_id, use_ocr=False)
-
         return {
             "message": "Audio transcript successfully processed",
             "filename": filename,
@@ -139,28 +116,26 @@ async def upload_audio(file: UploadFile = File(...),
             "language": result.get("language", "unknown"),
             "project_id": project_id,
         }
-
     finally:
-        # Cleanup
         try:
-            os.remove(file_path)
-            if result.get("vtt_path"):
-                os.remove(result["vtt_path"])
+            if result and result.get("vtt_path"):
+                vtt_path = os.path.abspath(result["vtt_path"])
+                if os.path.exists(vtt_path):
+                    os.remove(vtt_path)
         except Exception:
             pass
+        cleanup_upload_path(file_path)
 
 
 @router.post("/upload-document")
-async def upload_document(file: UploadFile = File(...),
-                          project_id: str = Form("default"),
-                          use_ocr: bool = Form(True)):
-    """
-    Koi bhi supported document upload karo: pdf, docx, txt, md, html, vtt, srt.
-
-    PDF ke scanned pages ke liye OCR automatically try hota hai (agar
-    pytesseract installed ho). Response mein honest notes aate hain — kitne
-    pages se text mila, kitne scanned the, OCR chala ya nahi.
-    """
+async def upload_document(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    use_ocr: bool = Form(True),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """pdf/docx/txt/md/html/vtt/srt ko isolated project mein ingest karo."""
+    require_project_access(project_id, x_project_token)
     filename = file.filename or "upload"
     extension = os.path.splitext(filename)[1].lower()
     if extension not in SUPPORTED:
@@ -169,64 +144,54 @@ async def upload_document(file: UploadFile = File(...),
             detail=f"'{extension or 'unknown'}' supported nahi hai. "
                    f"Supported: {', '.join(SUPPORTED)}")
 
-    content = await _read_upload(file)
-    path = _save_upload(file, content)
+    path = await save_upload_stream(file, max_bytes=MAX_UPLOAD_BYTES)
     try:
         result = _ingest(path, filename, project_id, use_ocr)
     finally:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        cleanup_upload_path(path)
 
     return {
         "message": f"'{filename}' process ho gayi",
         "kind": result["kind"],
         "chunks": result["chunks"],
         "chars_extracted": result["chars"],
-        "notes": result["notes"],
+        "notes": _safe_notes(result.get("notes")),
     }
 
 
 @router.post("/upload-pdf")
-async def upload_pdf(file: UploadFile = File(...),
-                     project_id: str = Form("default")):
-    """
-    Purana endpoint (backward compatible response shape).
-
-    Ab ye bhi DocumentProcessor se jaata hai, isliye scanned PDF par OCR
-    fallback milta hai — pehle aisa nahi tha.
-    """
+async def upload_pdf(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Backward-compatible PDF endpoint, protected by project capability."""
+    require_project_access(project_id, x_project_token)
     filename = file.filename or "upload.pdf"
     if not filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400,
                             detail="Sirf PDF files allowed hain. Dusre formats ke "
                                    "liye /upload-document use karein.")
-    content = await _read_upload(file)
-    path = _save_upload(file, content)
+    path = await save_upload_stream(file, max_bytes=MAX_UPLOAD_BYTES)
     try:
         result = _ingest(path, filename, project_id, use_ocr=True)
     finally:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        cleanup_upload_path(path)
 
     return {
         "message": f"✅ '{filename}' successfully processed",
         "chunks": result["chunks"],
-        "notes": result["notes"],
+        "notes": _safe_notes(result.get("notes")),
     }
 
 
 @router.post("/ingest-youtube")
-async def ingest_youtube(request: YouTubeRequest):
-    """
-    YouTube ke PUBLIC captions ko timestamped chunks bana kar store karo
-    (Spec Section 5 — video/audio pipeline).
-
-    Ye default OFF hai. Chalane ke liye backend/.env mein:
-        ALLOW_YT_TRANSCRIPT=true
-    aur `pip install youtube-transcript-api`.
-
-    Honesty: ye audio ka transcription nahi karta — sirf wahi captions leta hai
-    jo video par publicly maujood hain. Platform ToS ka faisla user ka hai,
-    isliye flag deliberately default se band hai.
-    """
+async def ingest_youtube(
+    request: YouTubeRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Public YouTube captions ko private project ke timestamped chunks banao."""
+    require_project_access(request.project_id, x_project_token)
     from research_engine.processing import TranscriptProcessor
 
     raw = (request.video or "").strip()
@@ -236,19 +201,25 @@ async def ingest_youtube(request: YouTubeRequest):
             video_id = raw.split(marker, 1)[1]
             break
     video_id = video_id.split("&")[0].split("?")[0].strip("/")
-    if not video_id:
+    if not video_id or len(video_id) > 64 or not all(ch.isalnum() or ch in "_-" for ch in video_id):
         raise HTTPException(status_code=400, detail="Video id/URL samajh nahi aaya.")
 
     processor = TranscriptProcessor()
     captions = processor.youtube_captions(video_id)
     if not captions.get("ok"):
-        raise HTTPException(status_code=422, detail=captions.get("error", "captions nahi mile"))
+        raise HTTPException(
+            status_code=422,
+            detail="Public captions available/process nahi ho sake. Processing capabilities check karein.",
+        )
 
     name = request.title.strip() or f"youtube_{video_id}"
     chunks = processor.chunk(captions["cues"], name)
     stored = VectorSearch().ingest_chunks(chunks, name, request.project_id)
     if not stored["ok"]:
-        raise HTTPException(status_code=500, detail=stored.get("error", "store fail"))
+        raise HTTPException(
+            status_code=500,
+            detail="Transcript vector store me save nahi ho saka; local storage/capabilities check karein.",
+        )
 
     return {
         "message": f"'{name}' ke captions store ho gaye",
@@ -261,24 +232,15 @@ async def ingest_youtube(request: YouTubeRequest):
 
 
 @router.post("/transcribe-audio")
-async def transcribe_audio(file: UploadFile = File(...),
-                           project_id: str = Form("default"),
-                           title: str = Form(""),
-                           lang: str = Form("")):
-    """
-    Local audio/video file ko LOCALLY transcribe karo (Spec Section 5) aur
-    timestamped chunks bana kar store karo — citation "12:30" ke saath aati hai.
-
-    HONESTY:
-        * Ye LOCAL + FREE hai (koi API key/quota nahi), par bhaari hai — isliye
-          faster-whisper/openai-whisper optional install hai. Na ho to endpoint
-          501 ke saath saaf install hint deta hai (chup-chaap fail nahi hota).
-        * Transcript MACHINE KA BEST GUESS hai, verbatim sach nahi. Har chunk
-          '(auto-transcribed)' mark hota hai taaki citation insaani transcript
-          jaisa na dikhe.
-        * Kisi platform se download/bypass NAHI karta — user apni file deta hai.
-          Caption file (.vtt/.srt) available ho to /upload-document behtar hai.
-    """
+async def transcribe_audio(
+    file: UploadFile = File(...),
+    project_id: str = Form("default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS),
+    title: str = Form("", max_length=_MAX_TITLE_CHARS),
+    lang: str = Form("", max_length=32),
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """User-provided local audio/video ko locally transcribe + ingest karo."""
+    require_project_access(project_id, x_project_token)
     from research_engine.processing import SpeechToTextProcessor
 
     filename = file.filename or "audio"
@@ -292,30 +254,31 @@ async def transcribe_audio(file: UploadFile = File(...),
     stt = SpeechToTextProcessor()
     status = stt.available()
     if not status.get("ok"):
-        # 501: feature install nahi hai — user ko saaf pata ho, jhooth nahi
         raise HTTPException(status_code=501, detail={
             "message": "Local speech-to-text install nahi hai.",
-            "reason": status.get("reason", ""),
+            "hint": "Processing capabilities endpoint par available local backend check karein.",
         })
 
-    content = await _read_upload(file, MAX_AUDIO_BYTES)
-    path = _save_upload(file, content)
+    path = await save_upload_stream(file, max_bytes=MAX_AUDIO_BYTES)
     try:
         result = stt.process_file(path, lang=(lang.strip() or None))
     finally:
-        shutil.rmtree(os.path.dirname(path), ignore_errors=True)
+        cleanup_upload_path(path)
 
     if not result.get("ok"):
         raise HTTPException(status_code=422, detail={
             "message": f"'{filename}' transcribe nahi hui.",
-            "error": result.get("error", ""),
+            "hint": "Audio format/quality aur local speech-to-text capability check karein.",
         })
 
     name = title.strip() or filename
     stored = VectorSearch().ingest_chunks(result["chunks"], result["source"],
                                           project_id)
     if not stored["ok"]:
-        raise HTTPException(status_code=500, detail=stored.get("error", "store fail"))
+        raise HTTPException(
+            status_code=500,
+            detail="Transcript local vector store me save nahi ho saka.",
+        )
 
     return {
         "message": f"'{name}' locally transcribe hoke store ho gayi",
@@ -329,10 +292,7 @@ async def transcribe_audio(file: UploadFile = File(...),
 
 @router.get("/processing-capabilities")
 def processing_capabilities():
-    """
-    Spec Section 18 ki honesty: jo cheez install nahi hai, wo saaf dikhni
-    chahiye — chup-chaap degrade nahi hona chahiye.
-    """
+    """Optional processing capability readiness; no provider generation call."""
     from research_engine.processing import OCRProcessor, PDFProcessor, SpeechToTextProcessor
 
     ocr = OCRProcessor().available()
@@ -353,9 +313,8 @@ def processing_capabilities():
         },
         "pdf_ocr_for_scanned_pages": {
             "available": bool(ocr.get("ok")),
-            "detail": ocr,
-            "needs": "pytesseract + pillow + system Tesseract binary "
-                     "(requirements-optional.txt)",
+            "detail": {"ok": bool(ocr.get("ok")), "backend": str(ocr.get("backend") or "")},
+            "needs": "pytesseract + pillow + system Tesseract binary (requirements-optional.txt)",
         },
         "docx": {"available": _has("docx"), "needs": "python-docx"},
         "transcripts_vtt_srt": {"available": True, "needs": "kuch nahi — built-in"},
@@ -369,39 +328,27 @@ def processing_capabilities():
             "enabled": os.getenv("ALLOW_FULLTEXT_FETCH", "true").lower()
                        not in ("false", "0", "no", "off"),
             "note": "arXiv / Internet Archive / Europe PMC OA / Wikipedia / open PDFs "
-                    "se full text laata hai. Paywalled publishers deliberately "
-                    "blocked hain — bypass nahi kiya jaata.",
+                    "se full text laata hai. Paywalled publishers deliberately blocked hain.",
         },
         "audio_video_transcription": {
             "available": bool(stt.get("ok")),
-            "backend": stt.get("backend", ""),
-            "detail": stt,
-            "needs": "faster-whisper (halka) YA openai-whisper "
-                     "(requirements-optional.txt) — dono FREE + local, koi API "
-                     "key/quota nahi. Pehli baar model weights download honge.",
-            "note": "Local audio/video file ka speech-to-text. Ye MACHINE ka best "
-                    "guess hai (verbatim sach nahi) aur har chunk "
-                    "'(auto-transcribed)' mark hota hai. Platform se download ya "
-                    "bypass NAHI karta — user apni audio file deta hai. Caption "
-                    "files (.vtt/.srt) ho to wo behtar hain (transcripts_vtt_srt).",
+            "backend": str(stt.get("backend") or ""),
+            "needs": "faster-whisper YA openai-whisper (FREE + local).",
+            "note": "Local file ka machine transcription; platform download/bypass nahi karta.",
         },
     }
 
 
 @router.post("/ask")
-async def ask(request: QuestionRequest):
-    """
-    Sawal poocho — AI source/page number ke saath jawab dega (single call).
-
-    ✅ FIX: Ab ye proper deep research engine use karta hai!
-    - Web + Papers + Books + Datasets search
-    - QUICK mode (1 Gemini call, ~5 sources)
-    - Real external sources, not just uploaded PDFs
-    """
-    # Use proper deep research engine with QUICK mode
+async def ask(
+    request: QuestionRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """QUICK source-based research inside the caller's private project."""
+    require_project_access(request.project_id, x_project_token)
     return manager.research(
         question=request.question,
         project_id=request.project_id,
-        depth_mode="QUICK",  # Fast single-call mode
+        depth_mode="QUICK",
         job_id=request.project_id,
     )

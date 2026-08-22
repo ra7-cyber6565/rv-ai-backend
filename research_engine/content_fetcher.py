@@ -47,6 +47,15 @@ from urllib.parse import urlparse, quote
 
 from .connectors.base import SLOW_TIMEOUT
 from .models import EvidencePack, Passage, SourceRecord
+from .network_safety import (
+    NetworkSafetyError,
+    declared_length,
+    public_error,
+    read_bounded_response,
+    require_content_type,
+    safe_get_with_redirects,
+    validate_public_http_url,
+)
 from .quality_signals import (
     coi_from_full_text,
     funding_from_full_text,
@@ -180,6 +189,12 @@ class ContentFetcher:
         url = (source.url or "").strip()
         if not url.startswith(("http://", "https://")):
             return {"ok": False, "reason": "URL nahi hai (sirf metadata mila)"}
+        try:
+            # DNS/network yahan nahi chalta; private literals, localhost-style
+            # names, credentials and unsafe ports still fail before routing.
+            validate_public_http_url(url, resolve_dns=False)
+        except NetworkSafetyError:
+            return {"ok": False, "reason": "unsafe/private network URL blocked"}
 
         host = _host(url)
         path = urlparse(url).path or ""
@@ -250,12 +265,27 @@ class ContentFetcher:
 
     # ── Europe PMC OA lookup (PubMed ID → PMCID, sirf agar OA ho) ────────────
     def _europepmc_lookup(self, pmid: str) -> Dict:
+        resp = None
         try:
             requests = self._requests()
             api = ("https://www.ebi.ac.uk/europepmc/webservices/rest/search"
                    f"?query=EXT_ID:{quote(pmid)}%20AND%20SRC:MED"
                    "&resultType=core&format=json&pageSize=1")
-            resp = requests.get(api, headers={"User-Agent": _UA}, timeout=_TIMEOUT)
+            resp, _final_url = safe_get_with_redirects(
+                requests,
+                api,
+                headers={"User-Agent": _UA},
+                timeout=_TIMEOUT,
+                stream=True,
+                allowed_hosts={"www.ebi.ac.uk", "ebi.ac.uk"},
+                resolve_dns=False,
+                max_redirects=2,
+            )
+            status = int(getattr(resp, "status_code", 200) or 200)
+            if status >= 400:
+                return {"ok": False, "reason": f"Europe PMC lookup HTTP {status}"}
+            require_content_type(resp, "json")
+            read_bounded_response(resp, 1024 * 1024)
             data = resp.json()
             hits = (data.get("resultList") or {}).get("result") or []
             if not hits:
@@ -274,7 +304,13 @@ class ContentFetcher:
                             f"{pmcid}/fullTextXML"),
                     "reason": f"Europe PMC OA full text ({pmcid})"}
         except Exception as exc:
-            return {"ok": False, "reason": f"Europe PMC lookup fail: {type(exc).__name__}"}
+            return {"ok": False, "reason": f"Europe PMC lookup fail: {public_error(exc)}"}
+        finally:
+            try:
+                if resp is not None:
+                    resp.close()
+            except Exception:
+                pass
 
     # ── download ─────────────────────────────────────────────────────────────
     def _download(self, url: str, kind: str, directory: str) -> Dict:
@@ -290,17 +326,26 @@ class ContentFetcher:
         out = {"ok": False, "path": "", "error": "", "bytes": 0, "large": False}
         try:
             requests = self._requests()
-        except Exception as exc:
-            out["error"] = f"requests library nahi hai: {exc}"
+        except Exception:
+            out["error"] = "HTTP client available nahi hai"
             return out
 
         try:
-            resp = requests.get(url, headers={"User-Agent": _UA}, timeout=_TIMEOUT,
-                                stream=True, allow_redirects=True)
+            resp, final_url = safe_get_with_redirects(
+                requests,
+                url,
+                headers={"User-Agent": _UA},
+                timeout=_TIMEOUT,
+                stream=True,
+                # Full-text URLs came from untrusted discovery results: resolve
+                # every original/redirect host and reject any non-global answer.
+                resolve_dns=True,
+            )
         except Exception as exc:
-            out["error"] = f"{type(exc).__name__}: {str(exc)[:120]}"
+            out["error"] = public_error(exc)
             return out
 
+        path = ""
         try:
             if resp.status_code == 403:
                 out["error"] = "403 — server ne access nahi diya (restricted content)"
@@ -313,9 +358,14 @@ class ContentFetcher:
                 return out
 
             # Redirect ne kisi blocked publisher par pahuncha diya? Wahin ruko.
-            final_url = str(getattr(resp, "url", url) or url)
             if _is_blocked(final_url):
                 out["error"] = f"redirect {_host(final_url)} par gaya — {_BLOCK_REASON}"
+                return out
+
+            try:
+                require_content_type(resp, kind)
+            except NetworkSafetyError as exc:
+                out["error"] = public_error(exc)
                 return out
 
             extension = {"pdf": ".pdf", "txt": ".txt", "html": ".html",
@@ -324,6 +374,12 @@ class ContentFetcher:
 
             size = 0
             hard_cap = _hard_cap_bytes()
+            stated = declared_length(resp)
+            if stated is not None and stated > hard_cap:
+                out["error"] = (
+                    f"file {hard_cap // (1024 * 1024)}MB (MAX_FETCH_MB) se "
+                    f"bhi badi hai — download roka gaya")
+                return out
             with open(path, "wb") as handle:
                 for chunk in resp.iter_content(chunk_size=64 * 1024):
                     if not chunk:
@@ -335,14 +391,48 @@ class ContentFetcher:
                         out["error"] = (
                             f"file {hard_cap // (1024 * 1024)}MB (MAX_FETCH_MB) se "
                             f"bhi badi hai — download roka gaya")
-                        handle.close()
+                        try:
+                            os.unlink(path)
+                        except OSError:
+                            pass
                         return out
                     handle.write(chunk)
+
+            # Content-Type can be absent or occasionally generic.  A PDF must
+            # still carry the PDF magic bytes; HTML/JSON/text must not be a
+            # binary/NUL-filled payload masquerading as research text.
+            try:
+                with open(path, "rb") as check_handle:
+                    prefix = check_handle.read(64)
+            except OSError:
+                prefix = b""
+            if kind == "pdf" and not prefix.startswith(b"%PDF-"):
+                out["error"] = "downloaded file valid PDF nahi thi"
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                return out
+            if kind in {"txt", "html", "wikipedia"} and b"\x00" in prefix:
+                out["error"] = "downloaded response text document nahi thi"
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
+                return out
 
             out.update({"ok": size > 0, "path": path, "bytes": size,
                         "large": size > _LARGE_BYTES})
             if not size:
                 out["error"] = "khaali response mila"
+            return out
+        except Exception as exc:
+            out["error"] = public_error(exc)
+            if path:
+                try:
+                    os.unlink(path)
+                except OSError:
+                    pass
             return out
         finally:
             try:
@@ -504,7 +594,7 @@ class ContentFetcher:
                           "signals": self.signals_from_text(text)})
             return entry
         except Exception as exc:      # kabhi pipeline na todo
-            entry["reason"] = f"unexpected: {type(exc).__name__}: {str(exc)[:120]}"
+            entry["reason"] = f"unexpected fetch failure: {public_error(exc)}"
             return entry
         finally:
             shutil.rmtree(directory, ignore_errors=True)

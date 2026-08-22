@@ -9,8 +9,12 @@ services:
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
+      - key: ZERO_COST_ONLY
+        value: "true"
       - key: GEMINI_API_KEY
         sync: false
-      - key: OPENAI_API_KEY
+      # Set to true only after confirming the Google project/key has no paid
+      # billing/spend path. ZERO_COST_ONLY intentionally fails closed otherwise.
+      - key: GEMINI_ZERO_COST_CONFIRMED
         sync: false
     healthCheckPath: /health

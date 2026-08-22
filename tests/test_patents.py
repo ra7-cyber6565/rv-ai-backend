@@ -53,6 +53,7 @@ from research_engine.patents import (DEPTH_ABSTRACT, DEPTH_CLAIMS,  # noqa: E402
 from research_engine.planner import ResearchPlanner  # noqa: E402
 from research_engine.relevance import RelevanceEngine  # noqa: E402
 from research_engine.source_discovery import SourceDiscovery  # noqa: E402
+from research_engine.synthesizer import FinalSynthesizer  # noqa: E402
 
 PASS = 0
 FAIL = 0
@@ -586,6 +587,16 @@ def main() -> int:
           patent_only.patent_family_count() == 1,
           str(patent_only.patent_family_count()))
 
+    patent_sources_text = FinalSynthesizer()._sources_section(deep_pack)
+    check("patent claims ka raw technical label user ko nahi dikhaya",
+          "PATENT CLAIMS REVIEWED" in patent_sources_text
+          and "Kitna padha gaya: claims." not in patent_sources_text,
+          patent_sources_text[-500:])
+    check("patent source scientific proof se alag explain hua",
+          "legal dawe" in patent_sources_text
+          and "scientific result nahi" in patent_sources_text,
+          patent_sources_text[-500:])
+
     cov = deep_pack.coverage_report()
     check("coverage report mein patent ke saare khaane",
           all(k in cov for k in ("patent_sources", "patent_families",
@@ -593,6 +604,10 @@ def main() -> int:
                                  "patent_note")), str(sorted(cov.keys())))
     check("coverage ki ginti sach", cov["patent_sources"] == 1
           and cov["patent_families"] == 1 and cov["science_sources"] == 1)
+    access_text = FinalSynthesizer._access_block(cov, deep_pack)
+    check("access summary claims-depth source ko total mein ginta hai",
+          "patent ke claims process hue" in access_text and "kul 2 sources" in access_text,
+          access_text)
     no_patent_cov = _pack([_paper("S1", "Garnet separator study", LONG_ABSTRACT,
                                   "nature.com")]).coverage_report()
     check("patent-mukt pack mein bhi khaane maujood, par khaali",

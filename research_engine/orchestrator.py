@@ -28,6 +28,7 @@ import re
 from typing import Dict, List, Optional
 
 from .citation import CitationEngine
+from .advanced_discovery import ScientificDiscoveryEngine
 from .claim_labels import downgrade as downgrade_labels
 from .claim_labels import merge_reports as merge_label_reports
 from .claim_verification import enforce_strict_labels
@@ -48,6 +49,7 @@ from .research_memory import ResearchMemory
 from .run_status import INCOMPLETE, evaluate as evaluate_status
 from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
+from .specialist_domains import build_evidence_lane_report
 from .synthesizer import FinalSynthesizer
 from .vector_search import VectorSearch
 from .verification import VerificationEngine
@@ -67,6 +69,7 @@ class DeepResearchEngine:
         self.hypotheses = HypothesisEngine()
         self.verifier = VerificationEngine()
         self.synthesizer = FinalSynthesizer()
+        self.scientific_discovery = ScientificDiscoveryEngine(self.planner)
         self.vectors = VectorSearch()
         self.graph = KnowledgeGraphAdapter(enabled=enable_kg)
         self.memory = ResearchMemory(self.project_id) if enable_memory else None
@@ -782,6 +785,21 @@ class DeepResearchEngine:
                 "abstract/snippet level par hai. Wajah: "
                 + (reading.get("entries", [{}])[0].get("reason", "unknown"))[:120])
 
+        # Specialist topics get a deterministic, structured evidence boundary
+        # before any model reasoning.  This does not upgrade source quality; it
+        # only prevents official records, traditions, allegations and empirical
+        # findings from being blended into one truth bucket.
+        specialist_report = build_evidence_lane_report(question, plan, pack)
+        if specialist_report.get("active"):
+            self._track(job_id, "SPECIALIST_ANALYSIS",
+                        "official/traditional/scientific/claim lanes alag ki ja rahi hain")
+        if specialist_report.get("unknown_terms"):
+            warnings.append(
+                "Ek term ka meaning reliably resolve nahi hua ("
+                + ", ".join(specialist_report["unknown_terms"])
+                + ") — app ne uska matlab invent nahi kiya."
+            )
+
         # 4. contradictions (local, free)
         self._track(job_id, "EVIDENCE_ANALYSIS", "contradiction + independence check")
         contradiction_objects = self.contradictions.detect(pack)
@@ -991,7 +1009,46 @@ class DeepResearchEngine:
             verification["hypothesis_plan"] = passes["hypothesis_plan"]
 
         # 9. grading + coverage
-        evidence_level = self.evidence.grade_evidence(pack, claims)
+        # Pack-level counts alone must never print VERIFIED/STRONG when the
+        # answer's actual conclusion claims failed A-E.  Both final reports are
+        # passed only here; the earlier pre-reasoning grade intentionally remains
+        # a source-pack diagnostic for hypothesis planning.
+        evidence_level = self.evidence.grade_evidence(
+            pack,
+            claims,
+            label_report=label_report,
+            claim_checks=claim_checks,
+        )
+
+        # Advanced Scientific Discovery Engine.  This is a deterministic
+        # assessment of the evidence/hypotheses already produced above: no new
+        # provider/network call and no arbitrary code execution.  It stays a
+        # structured API field so the human-first answer is not cluttered.
+        remembered_hypotheses = (
+            self.memory.known_hypotheses(question, limit=12)
+            if self.memory else []
+        )
+        try:
+            discovery_analysis = self.scientific_discovery.analyze(
+                question=question,
+                plan=plan,
+                pack=pack,
+                hypotheses=passes["hypotheses"],
+                contradictions=contradiction_dicts,
+                verification=verification,
+                remembered_hypotheses=remembered_hypotheses,
+            )
+        except Exception as exc:
+            # Research answer must survive an auxiliary assessment failure, but
+            # the failure is explicit and never promoted to a successful gate.
+            discovery_analysis = {
+                "schema_version": "1.0",
+                "status": "ASSESSMENT_ERROR",
+                "reason": "advanced discovery assessment poora nahi ho paaya",
+                "human_review_required": True,
+            }
+            technical_errors.append(
+                f"advanced discovery assessment: {type(exc).__name__}")
         coverage = pack.coverage_report()
         coverage["evidence_table"] = self.evidence.evidence_table(claims)
         coverage["independence"] = self.evidence.independence_report(pack)
@@ -1021,6 +1078,7 @@ class DeepResearchEngine:
                 for e in reading.get("entries", [])
             ],
         }
+        coverage["specialist_research"] = specialist_report
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -1131,6 +1189,7 @@ class DeepResearchEngine:
             api_accounting=passes.get("api_accounting") or {},
             claim_checks=claim_checks,
             hypothesis_plan=passes.get("hypothesis_plan") or {},
+            specialist_report=specialist_report,
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -1146,6 +1205,7 @@ class DeepResearchEngine:
                 summary=(passes["analysis"] or "")[:400])
             if passes["hypotheses"]:
                 self.memory.remember_hypotheses(question, passes["hypotheses"])
+            self.memory.remember_discovery(question, discovery_analysis)
             self.memory.remember_urls(discovered["urls"])
             # Dead ends bhi yaad rakho (Spec Section 16). Ye sirf ek note hai,
             # block nahi — agli baar prompt mein dikh jaata hai ki is topic par
@@ -1177,6 +1237,8 @@ class DeepResearchEngine:
             coverage=coverage,
             requested_ledger=ledger,
             label_report=label_report,
+            discovery=discovery_analysis,
+            specialist_research=specialist_report,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

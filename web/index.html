@@ -2,605 +2,149 @@
 <html lang="hi">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RV</title>
-<meta name="description" content="RV — turant baat-cheet, aur chaaho to sources ke saath deep research.">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Infinity Research AI</title>
+<meta name="description" content="Simple chat aur source-based deep research.">
 <style>
-:root{
-  color-scheme: light;
-  --bg:#ffffff;
-  --bg-soft:#f7f7f8;
-  --user-bubble:#f0f4f9;
-  --ink:#1f2328;
-  --muted:#6b7280;
-  --line:#e7e8ec;
-  --brand:#10a37f;
-  --brand-ink:#0d8a6c;
-  --danger:#b0452c;
-  --font:"Inter", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --maxw:760px;
-}
-*{box-sizing:border-box}
-html,body{height:100%;margin:0}
-body{
-  background:var(--bg); color:var(--ink);
-  font-family:var(--font); font-size:16px; line-height:1.6;
-  -webkit-font-smoothing:antialiased;
-  display:flex; flex-direction:column; height:100vh;
-}
-/* ---------- header ---------- */
-header{
-  flex:0 0 auto; border-bottom:1px solid var(--line);
-  display:flex; align-items:center; gap:14px;
-  padding:10px 16px; background:var(--bg); position:sticky; top:0; z-index:10;
-}
-.brand{display:flex; align-items:center; gap:10px; font-weight:700; font-size:18px}
-.brand .dot{
-  width:28px; height:28px; border-radius:8px; background:var(--brand);
-  color:#fff; display:grid; place-items:center; font-size:14px; font-weight:700;
-}
-.modes{display:flex; gap:4px; background:var(--bg-soft); padding:4px; border-radius:10px; margin-left:auto}
-.modes button{
-  border:0; background:transparent; color:var(--muted); cursor:pointer;
-  font:inherit; font-weight:600; font-size:13px; padding:6px 14px; border-radius:8px;
-}
-.modes button.on{background:#fff; color:var(--ink); box-shadow:0 1px 3px rgba(0,0,0,.08)}
-.mode-hint{font-size:12px; color:var(--muted); padding:0 16px 8px; text-align:center}
-
-/* ---------- chat scroll area ---------- */
-#scroll{flex:1 1 auto; overflow-y:auto; scroll-behavior:smooth}
-#thread{max-width:var(--maxw); margin:0 auto; padding:24px 16px 8px}
-
-/* welcome */
-.welcome{text-align:center; margin:12vh auto 0; max-width:520px; color:var(--ink)}
-.welcome .big{width:56px;height:56px;border-radius:16px;background:var(--brand);color:#fff;
-  display:grid;place-items:center;font-size:26px;font-weight:700;margin:0 auto 18px}
-.welcome h1{font-size:26px; margin:0 0 8px}
-.welcome p{color:var(--muted); margin:0 0 24px}
-.chips{display:flex; flex-wrap:wrap; gap:10px; justify-content:center}
-.chip{border:1px solid var(--line); background:var(--bg-soft); border-radius:12px;
-  padding:10px 14px; cursor:pointer; font-size:14px; color:var(--ink); text-align:left; max-width:240px}
-.chip:hover{border-color:var(--brand)}
-
-/* message rows */
-.msg{display:flex; gap:14px; padding:14px 0}
-.msg .av{flex:0 0 30px; width:30px; height:30px; border-radius:8px; display:grid; place-items:center;
-  font-size:12px; font-weight:700; margin-top:2px}
-.msg.user .av{background:var(--user-bubble); color:var(--brand-ink)}
-.msg.rv .av{background:var(--brand); color:#fff}
-.msg .body{flex:1 1 auto; min-width:0}
-.msg .who{font-weight:600; font-size:13px; margin-bottom:2px}
-.msg .txt{white-space:pre-wrap; word-wrap:break-word}
-.msg .txt p{margin:0 0 10px}
-.msg .txt p:last-child{margin-bottom:0}
-
-/* thinking dots */
-.thinking{display:inline-flex; gap:5px; align-items:center; height:22px}
-.thinking span{width:7px;height:7px;border-radius:50%;background:var(--muted);opacity:.4;
-  animation:blink 1.4s infinite both}
-.thinking span:nth-child(2){animation-delay:.2s}
-.thinking span:nth-child(3){animation-delay:.4s}
-@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:.9}}
-
-/* error note (friendly, not scary) */
-.note{background:#fdf6ee; border:1px solid #f0d9b8; color:#8a5a1a; border-radius:10px;
-  padding:10px 12px; font-size:14px; margin-top:6px}
-.note .why{display:block; margin-top:4px; font-size:12.5px; opacity:.85}
-.rebtn{margin-top:8px; border:1px solid var(--line); background:#fff; color:var(--ink);
-  font:inherit; font-size:13px; font-weight:600; padding:7px 14px; border-radius:9px; cursor:pointer}
-.rebtn:hover{border-color:var(--brand); color:var(--brand-ink)}
-.rebtn:disabled{opacity:.5; cursor:default}
-
-/* progress panel (deep/max) */
-.progress{border:1px solid var(--line); border-radius:12px; padding:12px 14px; margin-top:6px; background:var(--bg-soft)}
-.progress .stage{font-weight:600; font-size:14px; display:flex; align-items:center; gap:8px}
-.progress .bar{height:6px; background:#e3e6ea; border-radius:99px; overflow:hidden; margin:10px 0 4px}
-.progress .fill{height:100%; background:var(--brand); width:0; transition:width .4s ease}
-.progress .log{font-size:12px; color:var(--muted); margin-top:6px; max-height:80px; overflow-y:auto; white-space:pre-wrap}
-
-/* sources */
-.sources{margin-top:14px}
-.sources h4{font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); margin:0 0 8px}
-.src{border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin-bottom:8px}
-.src a{color:var(--brand-ink); text-decoration:none; font-weight:600; font-size:14px}
-.src a:hover{text-decoration:underline}
-.src .meta{font-size:12px; color:var(--muted); margin-top:2px}
-
-/* ---------- composer ---------- */
-footer{flex:0 0 auto; padding:8px 16px 16px; background:linear-gradient(transparent, var(--bg) 24px)}
-.composer{max-width:var(--maxw); margin:0 auto; border:1px solid var(--line); border-radius:16px;
-  padding:8px 8px 8px 16px; display:flex; align-items:flex-end; gap:8px; box-shadow:0 2px 10px rgba(0,0,0,.04)}
-.composer:focus-within{border-color:var(--brand)}
-.composer textarea{flex:1 1 auto; border:0; outline:0; resize:none; font:inherit; font-size:16px;
-  line-height:1.5; max-height:180px; background:transparent; color:var(--ink); padding:6px 0}
-.send{flex:0 0 auto; width:36px; height:36px; border-radius:10px; border:0; cursor:pointer;
-  background:var(--brand); color:#fff; font-size:18px; display:grid; place-items:center}
-.send:disabled{background:#cbd5d0; cursor:default}
-.foot-note{max-width:var(--maxw); margin:8px auto 0; text-align:center; font-size:11px; color:var(--muted)}
+:root{color-scheme:light;--bg:#fff;--soft:#f7f7f8;--ink:#202123;--muted:#6b7280;--line:#e5e7eb;--brand:#10a37f;--warn:#fff7e8;--warnink:#845b14;--max:820px;font-family:Inter,system-ui,-apple-system,"Segoe UI",sans-serif}
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{background:var(--bg);color:var(--ink);display:flex;flex-direction:column}
+header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 16px;gap:12px;flex:0 0 auto}.brand{font-weight:750;display:flex;align-items:center;gap:9px}.logo{width:30px;height:30px;border-radius:9px;background:var(--brand);color:white;display:grid;place-items:center;font-size:13px}.modes{margin-left:auto;background:var(--soft);border-radius:10px;padding:4px;display:flex;gap:3px}.modes button{border:0;background:transparent;padding:7px 13px;border-radius:8px;font-weight:650;color:var(--muted);cursor:pointer}.modes button.on{background:white;color:var(--ink);box-shadow:0 1px 3px #0001}
+.hint{font-size:12px;color:var(--muted);text-align:center;padding:6px 12px;border-bottom:1px solid #f1f1f1;flex:0 0 auto}
+#scroll{flex:1;overflow:auto}#thread{max-width:var(--max);margin:auto;padding:24px 16px 120px}.welcome{text-align:center;max-width:590px;margin:11vh auto}.welcome h1{font-size:29px;margin:0 0 10px}.welcome p{color:var(--muted);margin:0}.chips{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px}.chip{border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:10px 13px;cursor:pointer;font-size:14px}.chip:hover{border-color:var(--brand)}
+.msg{display:flex;gap:12px;padding:15px 0}.av{width:30px;height:30px;flex:0 0 30px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:750}.user .av{background:#eef2f7}.rv .av{background:var(--brand);color:#fff}.body{min-width:0;flex:1}.txt{line-height:1.68;overflow-wrap:anywhere;white-space:normal}.txt p{margin:0 0 11px}.txt p:last-child{margin-bottom:0}
+.thinking{display:inline-flex;gap:5px}.thinking i{width:7px;height:7px;border-radius:50%;background:#8b8b8b;animation:p 1.25s infinite}.thinking i:nth-child(2){animation-delay:.18s}.thinking i:nth-child(3){animation-delay:.36s}@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
+.progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.process{margin-top:14px;border:1px solid var(--line);border-radius:11px;background:var(--soft);padding:10px 12px}.process summary{cursor:pointer;font-weight:650}.process .meta{margin-top:7px}.process .log{margin-top:8px;max-height:180px}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
+footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
+@media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
 <body>
-
 <header>
-  <div class="brand"><span class="dot">RV</span> RV</div>
-  <div class="modes" id="modes">
-    <button data-mode="QUICK" class="on">Chat</button>
+  <div class="brand"><span class="logo">IR</span><span>Infinity Research AI</span></div>
+  <div class="modes">
+    <button class="on" data-mode="QUICK">Chat</button>
     <button data-mode="DEEP">Deep</button>
     <button data-mode="MAXIMUM">Max</button>
+    <button data-mode="MARATHON">Marathon</button>
   </div>
 </header>
-<div class="mode-hint" id="modeHint">Chat — turant seedha jawab.</div>
-
-<div id="scroll">
-  <div id="thread">
-    <div class="welcome" id="welcome">
-      <div class="big">RV</div>
-      <h1>Main RV hoon 🙂</h1>
-      <p>Kuch bhi poocho — main aapki hi bhasha mein jawab dunga. Gehri, source-wale jawab ke liye upar <b>Deep</b> ya <b>Max</b> chuno.</p>
-      <div class="chips">
-        <div class="chip" data-q="Tum kaun ho?">Tum kaun ho?</div>
-        <div class="chip" data-q="Aaj mera mann thoda udaas hai, baat karoge?">Mann udaas hai, baat karoge?</div>
-        <div class="chip" data-q="Explain black holes simply">Explain black holes simply</div>
-        <div class="chip" data-q="Ek chhoti si productivity tip do">Ek productivity tip do</div>
-      </div>
+<div class="hint" id="hint">Chat — turant seedha jawab.</div>
+<div id="scroll"><main id="thread">
+  <section class="welcome" id="welcome">
+    <h1>Kya research karni hai?</h1>
+    <p>Normal baat ke liye Chat. Sources aur cross-check ke liye Deep/Max; books, archives aur specialist lanes ke liye Marathon.</p>
+    <div class="chips">
+      <button class="chip" data-q="Explain black holes simply">Black holes simple words mein</button>
+      <button class="chip" data-q="Room-temperature superconductors ka future evidence ke saath research karo">Superconductors research</button>
+      <button class="chip" data-q="AI bias real world decisions ko kaise affect karta hai?">AI bias research</button>
     </div>
-  </div>
-</div>
-
+  </section>
+</main></div>
 <footer>
-  <div class="composer">
-    <textarea id="input" rows="1" placeholder="RV se kuch poocho…" autofocus></textarea>
-    <button class="send" id="send" title="Bhejo">↑</button>
-  </div>
-  <div class="foot-note">RV galti kar sakta hai — zaroori baatein khud bhi jaanch lena.</div>
+  <div class="composer"><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
+  <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
 </footer>
-
 <script>
 "use strict";
-
-// Same-origin: website aur API ek hi server se aate hain, isliye koi URL config nahi.
-const API = "";
-const IS_FILE = location.protocol === "file:";
-
-const MODE_HINTS = {
-  QUICK:   "Chat — turant seedha jawab.",
-  DEEP:    "Deep — kuch sources padh kar, hawaale ke saath jawab (thoda time lagega).",
-  MAXIMUM: "Max — poori research: kai sources, cross-check, aur hawaale (sabse zyada time)."
-};
-
-let mode = "QUICK";
-const history = [];              // {role:'user'|'rv', content:''}
-let busy = false;
-const PROJECT_ID = "web-" + Math.random().toString(36).slice(2, 9);
-
-const $ = (s) => document.querySelector(s);
-const thread = $("#thread"), scroll = $("#scroll"), welcome = $("#welcome");
-const input = $("#input"), sendBtn = $("#send");
-
-// "tum kaun ho" jaise sawaal — bina server ke, turant local jawab.
-// Log "kaun" ko kaun/kon/koun/kaun sab tarah likhte hain, isliye spelling par
-// sakhti nahi — warna "tum kon ho" jaisa aam sawaal miss ho jaata hai.
-const ID_RE = /(k[ao]u?n\s*h[oy]|tum\s*k[ao]u?n|aap\s*k[ao]u?n|who\s*(are|r)\s*(you|u)|tumhara\s*naam|tumhaara\s*naam|your\s*name|naam\s*kya)/i;
-
-function esc(s){ return (s||"").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
-function toHTML(s){
-  // plain text ko paragraphs mein todo (double newline = naya para)
-  return esc(s).split(/\n{2,}/).map(p => "<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");
+const API="", IS_FILE=location.protocol==="file:";
+const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
+const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
+const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — multilingual books + official archives + alag evidence lanes. Background mein lamba chal sakta hai."};
+let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
+const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
+function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
+function htmlText(s){return esc(s).split(/\n{2,}/).map(p=>"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");}
+function safeHttpUrl(raw){const text=String(raw??"").trim();if(!text)return "";try{const u=new URL(text,location.origin);return (u.protocol==="http:"||u.protocol==="https:")?u.href:"";}catch(_){return "";}}
+function down(){scroll.scrollTop=scroll.scrollHeight;}
+function row(role){const w=$("#welcome");if(w)w.remove();const el=document.createElement("div");el.className="msg "+role;el.innerHTML='<div class="av">'+(role==="user"?"You":"IR")+'</div><div class="body"><div class="txt"></div></div>';thread.appendChild(el);down();return el.querySelector(".txt");}
+function thinking(el){el.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';}
+function answer(el,text){el.innerHTML=htmlText(text);down();}
+function note(el,text){const n=document.createElement("div");n.className="note";n.textContent=text;el.appendChild(n);}
+function friendly(el,text){answer(el,IS_FILE?"Ye page file se khula hai. Backend server ke URL se page kholo, tab research chalegi.":(text||"Request safely complete nahi hui."));}
+function clientFailure(status,data,area="Request",aborted=false){
+  const code=Number(status||0),retryWait=Number(data?.retry_after_seconds||0),wait=retryWait>0?Math.max(1,Math.min(3600,retryWait)):0;
+  if(aborted)return area+" ka safe wait-time khatam ho gaya. Question input mein wapas rakh diya hai; background research ya retry use karo.";
+  if(code===429)return wait?area+" limit abhi busy hai. "+wait+" second baad retry karo.":area+" limit abhi busy hai; thoda ruk kar retry karo.";
+  if(code===503)return "Backend ka private session/research layer ready nahi hai. Backend configuration aur writable data root check karna hoga.";
+  if(code===401||code===403||code===404)return "Private session valid nahi rahi. Page refresh karke question dobara bhejo.";
+  if(code>=500)return "Backend ne "+area.toLowerCase()+" complete nahi ki. Question input mein wapas rakh diya hai; backend health check ke baad retry karo.";
+  if(!code)return "Backend tak network connection nahi ban paaya. Question input mein wapas rakh diya hai; backend chal raha ho to retry karo.";
+  return area+" complete nahi hui (HTTP "+code+"). Question input mein wapas rakh diya hai.";
 }
-function scrollDown(){ scroll.scrollTop = scroll.scrollHeight; }
-
-// ---------- rendering ----------
-function addRow(role){
-  if (welcome) welcome.remove();
-  const row = document.createElement("div");
-  row.className = "msg " + (role === "user" ? "user" : "rv");
-  row.innerHTML =
-    '<div class="av">' + (role === "user" ? "आप" : "RV") + '</div>' +
-    '<div class="body"><div class="txt"></div></div>';
-  thread.appendChild(row);
-  scrollDown();
-  return row.querySelector(".txt");
-}
-
-function showThinking(txt){
-  txt.innerHTML = '<div class="thinking"><span></span><span></span><span></span></div>';
-  scrollDown();
-}
-
-function setAnswer(txt, answer){
-  txt.innerHTML = toHTML(answer);
-  scrollDown();
-}
-
-function showNote(txt, message, why){
-  const div = document.createElement("div");
-  div.className = "note";
-  div.textContent = message;
-  if(why){
-    const sm = document.createElement("span");
-    sm.className = "why";
-    sm.textContent = why;
-    div.appendChild(sm);
-  }
-  txt.appendChild(div);
-  scrollDown();
-  return div;
-}
-
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
-// ---------- network ----------
-// PEHLE KI DIKKAT: har fetch seedha `await (await fetch(...)).json()` tha, aur
-// koi bhi gadbad — server slow, 502 gateway, khaali body, HTML error page —
-// exception ban kar EK hi line "server se baat nahi ho paayi" dikhati thi.
-// Isse do nuksaan hote the: (1) asli wajah kabhi pata nahi chalti thi, aur
-// (2) DEEP/MAX ka jawab jo server par BAN CHUKA hota tha wo bhi kho jaata tha.
-//
-// Ab: koi bhi HTTP call kabhi throw nahi karti, status alag-alag padha jaata
-// hai, aur research ka jawab kho jaane par history se wapas laaya jaata hai.
-async function readBody(r){
-  const raw = await r.text();
-  let data = null;
-  try{ data = raw ? JSON.parse(raw) : null; }catch(e){ data = null; }
-  return { ok: r.ok, status: r.status, data, raw };
-}
-
-async function postJSON(path, body, timeoutMs){
-  const ctrl = ("AbortController" in window) ? new AbortController() : null;
-  let timer = null;
-  if(ctrl && timeoutMs) timer = setTimeout(() => ctrl.abort(), timeoutMs);
+function restoreQuestion(message){if(!input.value.trim()){input.value=message;resize();}}
+function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+async function jsonFetch(url,opts={},timeoutMs=0){
+  const ctrl=("AbortController" in window)?new AbortController():null;let timer=null;
+  if(ctrl&&timeoutMs>0)timer=setTimeout(()=>ctrl.abort(),timeoutMs);
   try{
-    const r = await fetch(API + path, {
-      method:"POST",
-      headers:{"Content-Type":"application/json"},
-      body: JSON.stringify(body),
-      cache:"no-store",
-      signal: ctrl ? ctrl.signal : undefined
-    });
-    return await readBody(r);
-  }catch(e){
-    return { ok:false, status:0, data:null, raw:"",
-             aborted: !!(e && e.name === "AbortError") };
-  }finally{
-    if(timer) clearTimeout(timer);
+    const request={...opts,cache:"no-store",signal:ctrl?ctrl.signal:undefined};
+    const r=await fetch(url,request);const raw=await r.text();let data={};
+    try{data=raw?JSON.parse(raw):{};}catch(_){data={};}
+    return {r,data,aborted:false};
+  }catch(e){return {r:{ok:false,status:0},data:{},aborted:!!(e&&e.name==="AbortError")};}
+  finally{if(timer)clearTimeout(timer);}
+}
+
+function resetProjectSession(){PROJECT.id="";PROJECT.token="";sessionPromise=null;}
+async function ensureSession(){
+  if(PROJECT.id&&PROJECT.token)return PROJECT;
+  if(sessionPromise)return sessionPromise;
+  sessionPromise=(async()=>{
+    const {r,data}=await jsonFetch(API+"/api/v1/session",{method:"POST"});
+    if(!r.ok||!data.project_id||!data.project_access_token)throw new Error("private session unavailable");
+    PROJECT.id=data.project_id;PROJECT.token=data.project_access_token;
+    return PROJECT;
+  })();
+  try{return await sessionPromise;}catch(e){sessionPromise=null;throw e;}
+}
+function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}
+async function projectPost(url,makePayload,timeoutMs=0){
+  // A backend redeploy may rotate an ephemeral project-signing file while this
+  // tab still has the old in-memory capability. One 404 refresh is safe; never
+  // loop forever and never put either capability in a URL.
+  for(let attempt=0;attempt<2;attempt++){
+    await ensureSession();
+    const payload=makePayload(PROJECT.id);
+    const out=await jsonFetch(API+url,{method:"POST",headers:projectHeaders(),body:JSON.stringify(payload)},timeoutMs);
+    if(out.r.status!==404||attempt===1)return out;
+    resetProjectSession();
   }
+  throw new Error("project session recovery failed");
 }
 
-async function getJSON(path){
-  try{
-    return await readBody(await fetch(API + path, { cache:"no-store" }));
-  }catch(e){
-    return { ok:false, status:0, data:null, raw:"" };
+async function runChat(message,el){thinking(el);try{let out={r:{ok:false,status:0},data:{},aborted:false};for(let attempt=0;attempt<2;attempt++){out=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}),55000);if(out.r.ok||![0,502,503,504].includes(Number(out.r.status||0))||attempt===1)break;await sleep(1500);}const {r,data}=out;if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat",out.aborted));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
+
+function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
+function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
+
+async function runResearch(question,el,requestedMode=mode){const ui=progressPanel(el);let jobId="",jobToken="";try{
+  const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
+  if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
+  jobId=start.data.job_id;jobToken=start.data.job_access_token;
+  const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
+  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMs=6*60*1000;let lastChange=Date.now(),lastSignature="";
+  while(true){
+    const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
+    if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
+    const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
+    if(prog.r.ok){const p=prog.data.progress||{};paintProgress(ui,p);const signature=[status.data.status,p.current_stage,p.stages_done,Array.isArray(p.log)?p.log.length:0].join("|");if(signature!==lastSignature){lastSignature=signature;lastChange=Date.now();}}
+    if(status.data.status==="completed")break;
+    if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
+    if(Date.now()>hardDeadline){friendly(el,"Research browser ki wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
+    if(Date.now()-lastChange>stallMs){friendly(el,"Research progress 6 minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.");restoreQuestion(question);return false;}
+    await sleep(1200);
   }
-}
+  const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
+  if(!res.r.ok){friendly(el,clientFailure(res.r.status,res.data,"Research result"));restoreQuestion(question);return false;}renderResearch(el,res.data);return true;
+}catch(e){friendly(el,clientFailure(0,{},"Research"));restoreQuestion(question);return false;}}
 
-// Status ko insaani bhaasha mein. Raw server error text kabhi nahi dikhta —
-// sirf itna ki user ko samajh aaye ki dikkat kahan hai.
-function reasonLine(res){
-  if(!res) return "";
-  if(res.aborted) return "Wajah: jawab aane mein bahut zyada time lag gaya (connection ka time khatam).";
-  if(res.status === 0) return "Wajah: connection beech mein toot gaya (internet ya server neend mein).";
-  if(res.status === 429) return "Wajah: aaj ka free API quota bhar gaya lagta hai (429).";
-  if(res.status === 502 || res.status === 503 || res.status === 504)
-    return "Wajah: server jawab bana raha tha, par gateway ne connection kaat diya (" + res.status + ").";
-  if(res.status >= 500) return "Wajah: server ki taraf dikkat aayi (" + res.status + ").";
-  if(res.status === 404) return "Wajah: API ka rasta nahi mila (404) — server purana build chala raha ho sakta hai.";
-  if(res.status >= 400) return "Wajah: request theek se nahi pahunchi (" + res.status + ").";
-  if(!res.data) return "Wajah: server ne jawab bheja par wo padha nahi ja saka.";
-  return "";
-}
+function appendResearchProcess(el,p){if(!p||p.available!==true)return;const details=document.createElement("details");details.className="process";const summary=document.createElement("summary");summary.textContent="Research process — "+Number(p.stages_done||0)+"/"+Number(p.stages_total||STAGES.length)+" stages";details.appendChild(summary);const meta=document.createElement("div");meta.className="meta";meta.textContent=Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text • "+Number(p.evidence_conflicts_found||0)+" conflicts checked";details.appendChild(meta);if(Array.isArray(p.log)&&p.log.length){const log=document.createElement("div");log.className="log";log.textContent=p.log.map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");details.appendChild(log);}el.appendChild(details);}
+function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});appendResearchProcess(el,data?.research_progress);const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),href=safeHttpUrl(s.url),url=href?esc(href):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
 
-function answerFrom(data){
-  if(!data) return "";
-  const a = data.answer || data.message || data.detail || "";
-  return (typeof a === "string") ? a.trim() : "";
-}
-
-// "Phir bhejo" — user ko sawaal dobara type nahi karna padta.
-function retryButton(txt, again){
-  const b = document.createElement("button");
-  b.className = "rebtn";
-  b.type = "button";
-  b.textContent = "Phir bhejo";
-  b.addEventListener("click", async () => {
-    if(busy) return;
-    b.disabled = true;
-    busy = true; sendBtn.disabled = true;
-    txt.innerHTML = "";
-    try{ await again(); }
-    finally{ busy = false; sendBtn.disabled = false; input.focus(); }
-  });
-  txt.appendChild(b);
-  scrollDown();
-  return b;
-}
-
-// ---------- QUICK chat ----------
-async function runChat(message, txt){
-  showThinking(txt);
-  const payload = { message, history, project_id: PROJECT_ID };
-  let res = await postJSON("/api/v1/chat", payload, 120000);
-
-  // Ek transient hichki (connection toota / 5xx / timeout) par khud ek baar
-  // dobara koshish — user ko kuch karna hi na pade.
-  if(!(res.ok && answerFrom(res.data)) &&
-     (res.status === 0 || res.aborted || res.status >= 500)){
-    await sleep(1500);
-    showThinking(txt);
-    res = await postJSON("/api/v1/chat", payload, 120000);
-  }
-
-  const answer = res.ok ? answerFrom(res.data) : "";
-  if(answer){
-    setAnswer(txt, answer);
-    history.push({ role:"rv", content: answer });
-    return;
-  }
-  friendlyError(txt, res, () => runChat(message, txt));
-}
-
-// samne wale ko dara dene wale "Failed to fetch" ki jagah pyaari baat —
-// par ab uske saath ASLI wajah bhi likhi hoti hai aur ek retry button bhi.
-function friendlyError(txt, res, again){
-  txt.innerHTML = "";
-  if(IS_FILE){
-    setAnswer(txt, "Lagta hai aapne page ko file se seedha khola hai. RV tab chalega jab ye server URL se khule (jaise aapka Railway link). Us link par kholo, phir baat karte hain 🙂");
-    return;
-  }
-  setAnswer(txt, "Abhi server se baat nahi ho paayi. Thodi der baad phir bhejo — main yahin hoon 🙂");
-  showNote(txt, "Aapka sawaal kahin nahi gaya — neeche wale button se wahi sawaal dobara ja sakta hai.",
-           reasonLine(res));
-  if(typeof again === "function") retryButton(txt, again);
-}
-
-// ---------- DEEP / MAX research ----------
-const STAGE_LABEL = {
-  QUEUED:"Line mein…", PLANNING:"Sawaal samajh raha hoon", DISCOVERING:"Sources dhoondh raha hoon",
-  PROCESSING:"Documents padh raha hoon", READING:"Full text padh raha hoon",
-  EVIDENCE_ANALYSIS:"Saboot jaanch raha hoon", SPECIALIST_ANALYSIS:"Alag-alag angle se soch raha hoon",
-  CRITIQUE:"Khud ko cross-check kar raha hoon", HYPOTHESIS:"Nayi soch bana raha hoon",
-  SYNTHESIS:"Jawab likh raha hoon", SAFETY_CHECK:"Aakhri jaanch", COMPLETE:"Ho gaya"
-};
-const TOTAL_STAGES = 12;
-
-// Server par jo research POORI ho chuki hai, uska jawab `/history/{id}` mein
-// bach jaata hai (agent_manager use yaad rakhta hai). Isliye HTTP connection
-// toot jaane par bhi jawab kho nahi jaata — wahi wapas uthaya jaata hai.
-async function matchingAnswers(question){
-  const res = await getJSON("/api/v1/history/" + encodeURIComponent(PROJECT_ID));
-  const list = (res.data && Array.isArray(res.data.history)) ? res.data.history : [];
-  const want = (question || "").trim();
-  return list.filter(h => h && String(h.question || "").trim() === want
-                            && String(h.answer || "").trim());
-}
-
-// Connection toot gaya — par server abhi bhi kaam kar raha ho sakta hai.
-// Yahan sirf INTEZAAR hota hai: koi nayi request nahi jaati (quota safe),
-// bas progress dekhi jaati hai aur history se jawab uthane ki koshish hoti hai.
-//
-// Intezaar ka niyam: jab tak progress AAGE badh rahi hai, hum rukte hain (MAX
-// mode sach mein 20+ minute le sakta hai). Chhodte sirf teen soorat mein hain —
-// job hi na mile, progress bilkul jam jaaye, ya 30 minute nikal jaayein.
-async function recoverAnswer(question, baseline, onStatus){
-  const HARD_DEADLINE = Date.now() + 30 * 60 * 1000;
-  const STALL_MS = 6 * 60 * 1000;      // itni der kuch na hile to jam maana
-  let notFound = 0, lastSeen = "", lastChange = Date.now();
-  while(Date.now() < HARD_DEADLINE){
-    const found = await matchingAnswers(question);
-    if(found.length > baseline) return found[found.length - 1];
-
-    const prog = await getJSON("/api/v1/progress/" + encodeURIComponent(PROJECT_ID));
-    const p = prog.data || {};
-    if(p.error){
-      // Job hi nahi mila — server restart ho gaya ya research shuru hi nahi hui.
-      // Do baar dekh kar chhod dete hain (khaali intezaar ka koi fayda nahi).
-      if(++notFound >= 2) return null;
-    }else{
-      notFound = 0;
-      const mark = String(p.current_stage || "") + ":" + (Number(p.stages_done) || 0)
-                 + ":" + (Array.isArray(p.log) ? p.log.length : 0);
-      if(mark !== lastSeen){ lastSeen = mark; lastChange = Date.now(); }
-      else if(Date.now() - lastChange > STALL_MS) return null;
-
-      if(typeof onStatus === "function"){
-        onStatus(STAGE_LABEL[p.current_stage] || p.current_stage || "",
-                 Number(p.stages_done) || 0, p.log);
-      }
-      if(p.current_stage === "COMPLETE"){
-        // COMPLETE ke baad history likhne mein ek pal lagta hai — thoda ruk
-        // kar aakhri baar dekho, phir haath khada karo.
-        await sleep(2500);
-        const late = await matchingAnswers(question);
-        if(late.length > baseline) return late[late.length - 1];
-        return null;
-      }
-    }
-    await sleep(3000);
-  }
-  return null;
-}
-
-// Progress ka log — ek hi jagah se likha jaata hai, taaki normal chalna aur
-// recovery dono ek jaise dikhein.
-function renderLog(logEl, log){
-  if(!logEl || !Array.isArray(log) || !log.length) return;
-  logEl.textContent = log.slice(-3)
-    .map(l => "• " + (STAGE_LABEL[l.stage] || l.stage) + (l.note ? " — " + l.note : ""))
-    .join("\n");
-}
-
-async function runResearch(question, txt){
-  // progress panel
-  txt.innerHTML =
-    '<div class="progress"><div class="stage"><span class="thinking"><span></span><span></span><span></span></span> <span class="stg">Shuru kar raha hoon…</span></div>' +
-    '<div class="bar"><div class="fill"></div></div>' +
-    '<div class="log"></div></div>';
-  const stg = txt.querySelector(".stg"), fill = txt.querySelector(".fill"), logEl = txt.querySelector(".log");
-  scrollDown();
-
-  // Ye sawaal is page par pehle kitni baar poora hua — taaki recovery purana
-  // jawab uthake naya na dikha de.
-  const baseline = (await matchingAnswers(question)).length;
-
-  let done = false;
-  async function poll(){
-    while(!done){
-      const prog = await getJSON("/api/v1/progress/" + encodeURIComponent(PROJECT_ID));
-      if(done) return;              // recovery ne control le liya — aage mat likho
-      const p = prog.data;
-      if(p && p.current_stage){
-        stg.textContent = STAGE_LABEL[p.current_stage] || p.current_stage;
-        fill.style.width = Math.round((p.stages_done/TOTAL_STAGES)*100) + "%";
-        renderLog(logEl, p.log);
-        scrollDown();
-      }
-      await sleep(1200);
-    }
-  }
-  poll();
-
-  // Deep/Max ko sach mein lamba time lagta hai — 20 minute ka budget, phir bhi
-  // connection toota to neeche recovery hai.
-  const res = await postJSON("/api/v1/deep-research",
-    { question, project_id: PROJECT_ID, depth_mode: mode }, 20 * 60 * 1000);
-
-  // POST khatam ho gaya (safal ho ya nahi) — purana poller ABHI band karo.
-  // INTEL KI REPORT (2026-08-21): recovery ke waqt status "aata tha phir hat
-  // jaata tha". Wajah: `done` recovery ke BAAD set hota tha, isliye purana
-  // poll() aur recovery ka onStatus dono usi `.stg` line par likhte rehte the —
-  // ek "(connection toota tha…)" likhta, doosra 1.2 second baad usse mita deta.
-  // Ab ek waqt par sirf EK hi likhne wala hota hai.
-  done = true;
-
-  if(res.ok && answerFrom(res.data)){
-    renderResearch(txt, res.data);
-    return;
-  }
-
-  // Jawab HTTP par kho gaya. Ab bina naya kaam karwaye, server ka apna nateeja
-  // wapas laane ki koshish.
-  stg.textContent = "Connection toot gaya — jawab server se wapas la raha hoon…";
-  const saved = await recoverAnswer(question, baseline, (label, stagesDone, log) => {
-    stg.textContent = (label ? label + " " : "") + "(connection toota tha, jawab wapas laa raha hoon…)";
-    fill.style.width = Math.round((stagesDone/TOTAL_STAGES)*100) + "%";
-    renderLog(logEl, log);
-    scrollDown();
-  });
-
-  if(saved){
-    renderResearch(txt, {
-      answer: saved.answer,
-      evidence_level: saved.evidence_level || "",
-      sources: []
-    });
-    showNote(txt,
-      "Beech mein connection toot gaya tha, par research server par poori ho "
-      + "gayi thi — jawab wahin se wapas laaya gaya hai.",
-      (saved.source_count
-        ? "Is jawab ke peeche " + saved.source_count + " source the; unki poori "
-          + "clickable list is recovery mein nahi aati (wo sirf seedhe jawab ke "
-          + "saath aati hai). Chahe to wahi sawaal dobara bhej dena."
-        : "") );
-    return;
-  }
-
-  friendlyError(txt, res, () => runResearch(question, txt));
-}
-
-function renderResearch(txt, data){
-  const answer = (data && data.answer) ? data.answer : "Is baar jawab nahi ban paaya. Ek baar phir poochho?";
-  txt.innerHTML = toHTML(answer);
-  history.push({ role:"rv", content: answer });
-
-  const sources = (data && Array.isArray(data.sources)) ? data.sources : [];
-  if(sources.length){
-    const wrap = document.createElement("div");
-    wrap.className = "sources";
-    let html = "<h4>Sources (" + sources.length + ")</h4>";
-    sources.slice(0, 12).forEach(s => {
-      const title = esc(s.title || s.url || "Source");
-      const url = s.url ? esc(s.url) : "";
-      const who = s.authors && s.authors.length ? esc(s.authors.slice(0,3).join(", ")) : "";
-      html += '<div class="src">' +
-        (url ? '<a href="'+url+'" target="_blank" rel="noopener">'+title+'</a>' : '<span>'+title+'</span>') +
-        (who ? '<div class="meta">'+who+'</div>' : '') + '</div>';
-    });
-    wrap.innerHTML = html;
-    txt.appendChild(wrap);
-  }
-  if(data && data.evidence_level){
-    const div = document.createElement("div");
-    div.className = "note";
-    div.textContent = "Saboot ka star: " + data.evidence_level;
-    txt.appendChild(div);
-  }
-  scrollDown();
-}
-
-// ---------- send flow ----------
-async function send(){
-  const message = input.value.trim();
-  if(!message || busy) return;
-  busy = true; sendBtn.disabled = true;
-  input.value = ""; autosize();
-
-  // user ka message dikhao
-  const uTxt = addRow("user");
-  uTxt.textContent = message;
-  history.push({ role:"user", content: message });
-
-  // "tum kaun ho" — turant local jawab, server ki zaroorat nahi
-  if(ID_RE.test(message)){
-    const txt = addRow("rv");
-    const ans = "Main RV hoon 🙂 Aapki madad ke liye yahin hoon. Kya jaanna chahoge?";
-    setAnswer(txt, ans);
-    history.push({ role:"rv", content: ans });
-    busy = false; sendBtn.disabled = false; input.focus();
-    return;
-  }
-
-  const txt = addRow("rv");
-  if(mode === "QUICK") await runChat(message, txt);
-  else await runResearch(message, txt);
-
-  busy = false; sendBtn.disabled = false; input.focus();
-}
-
-// ---------- UI wiring ----------
-function autosize(){
-  input.style.height = "auto";
-  input.style.height = Math.min(input.scrollHeight, 180) + "px";
-}
-input.addEventListener("input", autosize);
-input.addEventListener("keydown", (e) => {
-  if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); send(); }
-});
-sendBtn.addEventListener("click", send);
-
-document.querySelectorAll(".modes button").forEach(b => {
-  b.addEventListener("click", () => {
-    document.querySelectorAll(".modes button").forEach(x => x.classList.remove("on"));
-    b.classList.add("on");
-    mode = b.dataset.mode;
-    $("#modeHint").textContent = MODE_HINTS[mode];
-  });
-});
-
-// welcome chips
-document.addEventListener("click", (e) => {
-  const chip = e.target.closest(".chip");
-  if(chip){ input.value = chip.dataset.q; autosize(); send(); }
-});
-
-// file:// warning upfront
-if(IS_FILE){
-  const t = addRow("rv");
-  setAnswer(t, "Namaste! Ek baat — abhi ye page file se khula hai, isliye main server se baat nahi kar paunga. Apna live link (Railway URL) kholo, phir main poori tarah kaam karunga 🙂");
-}
-
+async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");const completed=mode==="QUICK"?await runChat(message,r):await runResearch(message,r);if(!completed&&history.length&&history[history.length-1]?.role==="user")history.pop();busy=false;send.disabled=false;input.focus();}
+function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);
+document.querySelectorAll(".modes button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.mode;$("#hint").textContent=HINT[mode];}));document.addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){input.value=c.dataset.q;resize();submit();}});
+if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");}
 input.focus();
 </script>
 </body>

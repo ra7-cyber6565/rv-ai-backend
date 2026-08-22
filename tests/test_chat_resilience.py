@@ -1,42 +1,21 @@
-"""
-Chat/LLM resilience test — "Abhi server se baat nahi ho paayi" wale bug ke liye.
+"""Offline regression for bounded model calls and private browser recovery."""
+from __future__ import annotations
 
-INTEL KI REPORT (2026-08-21): website par sawaal bhejne ke baad aakhir mein
-"Abhi server se baat nahi ho paayi. Thodi der baad phir bhejo" aa jaata tha.
-
-Asli wajah do thi, dono yahan test hoti hain:
-
-  1. SERVER SIDE — `generate_content()` par koi timeout hi nahi tha. Google ka
-     SDK default mein anaadi kaal tak intezaar kar sakta hai, to ek latki hui
-     call poori HTTP request ko rok kar rakhti thi aur beech mein browser/gateway
-     connection kaat deta tha. Ab har call ki hadd hai (`gemini_model.generate`)
-     aur QUICK chat ka poora wall-clock budget bhi (`chat.TOTAL_BUDGET_SECONDS`).
-
-  2. BROWSER SIDE — `web/index.html` ka har fetch `await (await fetch()).json()`
-     tha, isliye koi bhi gadbad (502, khaali body, timeout) EK hi line ban jaati
-     thi, aur DEEP/MAX ka jawab — jo server par ban CHUKA hota tha — kho jaata
-     tha. Ab status alag-alag padha jaata hai aur jawab `/history` se wapas
-     laaya jaata hai.
-
-Chalane ka tareeka (poora offline — network nahi, API key nahi):
-    python3 tests/test_chat_resilience.py
-"""
+import inspect
 import os
-import sys
+from pathlib import Path
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from research_engine import chat as chat_mod
+from research_engine import gemini_model
 
-from research_engine import chat as chat_mod                    # noqa: E402
-from research_engine import gemini_model                        # noqa: E402
 
+ROOT = Path(__file__).resolve().parents[1]
+WEB_PAGE = ROOT / "web" / "index.html"
 PASS = 0
 FAIL = 0
 
-WEB_PAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                        "web", "index.html")
 
-
-def check(name, condition, extra=""):
+def check(name: str, condition: object, extra: str = "") -> None:
     global PASS, FAIL
     if condition:
         PASS += 1
@@ -46,16 +25,13 @@ def check(name, condition, extra=""):
         print(f"  [FAIL] {name}" + (f" — {extra}" if extra else ""))
 
 
-# ── nakli model / SDK ────────────────────────────────────────────────────────
 class _Resp:
-    def __init__(self, text):
+    def __init__(self, text: str):
         self.text = text
 
 
 class _NewSdkModel:
-    """Naya SDK — `request_options` leta hai (aur yaad rakhta hai)."""
-
-    def __init__(self, text="jawab", boom=None):
+    def __init__(self, text: str = "jawab", boom: Exception | None = None):
         self.text = text
         self.boom = boom
         self.seen = []
@@ -68,9 +44,7 @@ class _NewSdkModel:
 
 
 class _OldSdkModel:
-    """Purana SDK / nakli test model — sirf prompt leta hai."""
-
-    def __init__(self, text="jawab"):
+    def __init__(self, text: str = "jawab"):
         self.text = text
         self.calls = 0
 
@@ -79,229 +53,103 @@ class _OldSdkModel:
         return _Resp(self.text)
 
 
-class _Genai:
-    """`genai.GenerativeModel(name)` ka sabse chhota roop."""
-
-    def __init__(self, factory):
-        self.factory = factory
-        self.built = []
-
-    def GenerativeModel(self, name):            # noqa: N802 - SDK ka naam
-        self.built.append(name)
-        return self.factory(name)
-
-
-def main():
-    global PASS, FAIL
-
-    print("\n[1] gemini_model.generate — call par waqt ki hadd lagti hai")
-    model = _NewSdkModel("theek hai")
-    resp = gemini_model.generate(model, "hello")
-    check("jawab wahi aata hai", getattr(resp, "text", "") == "theek hai")
-    check("prompt waise hi jaata hai", model.seen[0]["prompt"] == "hello")
-    opts = model.seen[0]["request_options"] or {}
-    check("request_options mein timeout gaya", "timeout" in opts, str(opts))
-    check("timeout ek positive number hai",
-          isinstance(opts.get("timeout"), int) and opts["timeout"] > 0, str(opts))
+def _model_timeout_checks() -> None:
+    print("\n[1] shared Gemini call boundary")
+    model = _NewSdkModel("theek")
+    result = gemini_model.generate(model, "hello")
+    check("jawab unchanged", result.text == "theek")
+    options = model.seen[0]["request_options"] or {}
+    check("request_options timeout present", isinstance(options.get("timeout"), int))
     gemini_model.generate(model, "hello", timeout=33)
-    check("caller ka timeout izzat paata hai",
-          (model.seen[1]["request_options"] or {}).get("timeout") == 33)
+    check("caller timeout respected", model.seen[1]["request_options"]["timeout"] == 33)
 
-    print("\n[2] purana SDK / nakli model — call phir bhi chalti hai")
-    old = _OldSdkModel("purana bhi chala")
-    resp = gemini_model.generate(old, "hi")
-    check("bina request_options wala model bhi jawab deta hai",
-          getattr(resp, "text", "") == "purana bhi chala")
-    check("usko exactly ek baar call kiya", old.calls == 1, str(old.calls))
+    old = _OldSdkModel("legacy")
+    check("legacy SDK still works", gemini_model.generate(old, "hi").text == "legacy")
+    check("legacy call not duplicated", old.calls == 1)
 
-    class _KwargsModel:
-        def __init__(self):
-            self.seen = None
-
-        def generate_content(self, prompt, **kwargs):
-            self.seen = kwargs
-            return _Resp("kwargs")
-
-    kw = _KwargsModel()
-    gemini_model.generate(kw, "hi")
-    check("**kwargs wala model bhi timeout paata hai",
-          "timeout" in ((kw.seen or {}).get("request_options") or {}))
-
-    print("\n[3] model ki asli galti chhupti nahi hai")
     boom = _NewSdkModel(boom=RuntimeError("429 quota"))
     raised = ""
     try:
         gemini_model.generate(boom, "hi")
-    except Exception as exc:            # noqa: BLE001
-        raised = f"{type(exc).__name__}: {exc}"
-    check("quota/429 wala error upar jaata hai (nigla nahi jaata)",
-          "429 quota" in raised, raised)
-
-    bad_kwarg = _NewSdkModel(boom=TypeError("kuch aur hi galat hai"))
-    raised = ""
-    try:
-        gemini_model.generate(bad_kwarg, "hi")
-    except TypeError as exc:
+    except RuntimeError as exc:
         raised = str(exc)
-    check("request_options se alag TypeError bhi chhupta nahi",
-          "kuch aur hi galat hai" in raised, raised)
+    check("provider error reaches resilient router", raised == "429 quota")
 
-    print("\n[4] call_timeout — hadd ke andar hi rehta hai")
-    original_env = os.environ.get("GEMINI_CALL_TIMEOUT")
+    original = os.environ.get("GEMINI_CALL_TIMEOUT")
     try:
-        os.environ.pop("GEMINI_CALL_TIMEOUT", None)
-        default = gemini_model.call_timeout()
-        check("default timeout 10..600 ke beech", 10 <= default <= 600, str(default))
         os.environ["GEMINI_CALL_TIMEOUT"] = "1"
-        check("bahut chhoti value clamp hoti hai (10)",
-              gemini_model.call_timeout() == 10)
+        check("timeout lower bound", gemini_model.call_timeout() == 10)
         os.environ["GEMINI_CALL_TIMEOUT"] = "99999"
-        check("bahut badi value clamp hoti hai (600)",
-              gemini_model.call_timeout() == 600)
-        os.environ["GEMINI_CALL_TIMEOUT"] = "bakwaas"
-        check("kachra value par crash nahi, default milta hai",
-              10 <= gemini_model.call_timeout() <= 600)
-        os.environ["GEMINI_CALL_TIMEOUT"] = "60"
-        check("theek value waise hi chalti hai",
-              gemini_model.call_timeout() == 60)
+        check("timeout upper bound", gemini_model.call_timeout() == 600)
+        os.environ["GEMINI_CALL_TIMEOUT"] = "invalid"
+        check("invalid timeout falls back", 10 <= gemini_model.call_timeout() <= 600)
     finally:
-        if original_env is None:
+        if original is None:
             os.environ.pop("GEMINI_CALL_TIMEOUT", None)
         else:
-            os.environ["GEMINI_CALL_TIMEOUT"] = original_env
+            os.environ["GEMINI_CALL_TIMEOUT"] = original
 
-    print("\n[5] QUICK chat — safal jawab bandhe hue waqt ke saath")
-    saved_candidates = chat_mod.candidates
-    saved_budget = chat_mod.TOTAL_BUDGET_SECONDS
-    saved_call = chat_mod.CALL_TIMEOUT_SECONDS
-    try:
-        made = {}
 
-        def factory(name):
-            made[name] = made.get(name) or _NewSdkModel(f"jawab from {name}")
-            return made[name]
+def _provider_boundary_checks() -> None:
+    print("\n[2] QUICK chat keeps shared provider routing")
+    source = inspect.getsource(chat_mod)
+    check("resilient reasoning facade used", "ResilientReasoning" in source)
+    for forbidden in ("google.generativeai", "KeyPool(", "candidates(genai)",
+                      "GenerativeModel("):
+        check(f"no direct provider path: {forbidden}",
+              forbidden not in source, forbidden)
 
-        chat_mod.candidates = lambda genai: ["m-one", "m-two", "m-three", "m-four", "m-five"]
-        genai = _Genai(factory)
-        out = chat_mod._one_key_try(genai, "sawaal")
-        check("pehle model ka jawab hi le liya", out["text"] == "jawab from m-one",
-              out["text"])
-        check("sirf ek model try hua", out["tried"] == ["m-one"], str(out["tried"]))
-        check("key ko galat nahi thehraya", out["key_dead"] is False)
-        opts = made["m-one"].seen[0]["request_options"] or {}
-        check("chat ki call par bhi timeout laga", "timeout" in opts, str(opts))
-        check("chat ka timeout CALL_TIMEOUT_SECONDS se zyada nahi",
-              opts.get("timeout", 10 ** 9) <= chat_mod.CALL_TIMEOUT_SECONDS,
-              str(opts))
 
-        print("\n[6] budget khatam hote hi ruk jaata hai (browser ka wait bachta hai)")
-        chat_mod.TOTAL_BUDGET_SECONDS = 0
+def _browser_checks() -> None:
+    print("\n[3] browser recovery and persistent progress")
+    page = WEB_PAGE.read_text(encoding="utf-8")
+    code = "\n".join(
+        line for line in page.splitlines()
+        if not line.strip().startswith("//")
+    )
 
-        def slow_factory(name):
-            return _NewSdkModel(boom=RuntimeError("dheema model"))
+    check("one centralized fetch implementation",
+          code.count("fetch(") == 1, str(code.count("fetch(")))
+    check("response body parsed safely", "await r.text()" in page and ".json()" not in code)
+    check("network calls are no-store", 'cache:"no-store"' in page)
+    check("browser timeout is bounded", "AbortController" in page and "ctrl.abort()" in page)
+    check("transient QUICK retry exists", "await sleep(1500)" in page)
+    check("HTTP failures are distinguished",
+          "clientFailure(" in page and "code===429" in page and "code===503" in page)
+    failure = page.split("function clientFailure(")[1].split("function restoreQuestion")[0]
+    check("raw response body is never rendered", ".raw" not in failure)
 
-        genai = _Genai(slow_factory)
-        out = chat_mod._one_key_try(genai, "sawaal")
-        check("budget 0 par sirf ek koshish hui", len(out["tried"]) == 1,
-              str(out["tried"]))
-        check("phir bhi crash nahi — dict hi laut kar aaya",
-              isinstance(out, dict) and out["text"] == "")
-        check("aakhri galti yaad rakhi gayi", out["exc"] is not None)
-        check("budget khatam hone ko key ki galti nahi maana",
-              out["key_dead"] is False)
+    check("server-issued project capability preserved",
+          "/api/v1/session" in page and "X-Project-Token" in page)
+    check("durable job capability preserved",
+          "X-Research-Job-Token" in page and "/api/v1/research-jobs/" in page)
+    check("insecure public history recovery not introduced",
+          "/api/v1/history/" not in page)
 
-        print("\n[7] chaar model ki purani hadd waise hi kaayam hai")
-        chat_mod.TOTAL_BUDGET_SECONDS = 9999
-        genai = _Genai(slow_factory)
-        out = chat_mod._one_key_try(genai, "sawaal")
-        check("zyada se zyada 4 model try hote hain", len(out["tried"]) == 4,
-              str(out["tried"]))
+    check(
+        "default 30-minute and Marathon 60-minute deadlines present",
+        'requestedMode==="MARATHON"?60:30' in page
+        and "*60*1000" in page,
+    )
+    check("stalled progress guard present", "6*60*1000" in page and "lastChange" in page)
+    check("single live progress writer", code.count("paintProgress(ui,p);") == 1)
 
-        print("\n[8] quota par backup key ka rasta khulta hai (jaisa pehle tha)")
+    check("completed research process remains visible",
+          "appendResearchProcess" in page and "data?.research_progress" in page)
+    check("process fields rendered with textContent",
+          'summary.textContent=' in page and 'log.textContent=' in page)
+    check("source URL scheme guard preserved", "function safeHttpUrl(" in page)
+    check("external links hardened",
+          'rel="noopener noreferrer nofollow"' in page)
 
-        def quota_factory(name):
-            return _NewSdkModel(boom=RuntimeError("429 RESOURCE_EXHAUSTED quota"))
 
-        genai = _Genai(quota_factory)
-        out = chat_mod._one_key_try(genai, "sawaal")
-        check("quota par key_dead=True", out["key_dead"] is True)
-        check("quota par aage ke model par waqt barbaad nahi kiya",
-              len(out["tried"]) == 1, str(out["tried"]))
-    finally:
-        chat_mod.candidates = saved_candidates
-        chat_mod.TOTAL_BUDGET_SECONDS = saved_budget
-        chat_mod.CALL_TIMEOUT_SECONDS = saved_call
-
-    print("\n[9] chat ke budget/timeout sach mein bandhe hue hain")
-    check("CALL_TIMEOUT_SECONDS 10..300", 10 <= chat_mod.CALL_TIMEOUT_SECONDS <= 300,
-          str(chat_mod.CALL_TIMEOUT_SECONDS))
-    check("TOTAL_BUDGET_SECONDS 20..600",
-          20 <= chat_mod.TOTAL_BUDGET_SECONDS <= 600,
-          str(chat_mod.TOTAL_BUDGET_SECONDS))
-    check("ek call ka timeout poore budget se bada nahi",
-          chat_mod.CALL_TIMEOUT_SECONDS <= chat_mod.TOTAL_BUDGET_SECONDS)
-
-    print("\n[10] website — error par asli wajah + jawab ki recovery")
-    page = ""
-    try:
-        with open(WEB_PAGE, encoding="utf-8") as handle:
-            page = handle.read()
-    except OSError as exc:
-        check("web/index.html padhi ja saki", False, str(exc))
-    if page:
-        # comment ki lines hata do — purane pattern ka zikr comment mein hai
-        # (wahan wo samjhane ke liye likha hai, chalne wale code mein nahi).
-        code = "\n".join(line for line in page.splitlines()
-                         if not line.strip().startswith("//"))
-        check("har fetch ek jagah se jaati hai (postJSON/getJSON)",
-              "async function postJSON(" in page and "async function getJSON(" in page)
-        check("chalne wale code mein seedha `.json()` kahin nahi",
-              ".json()" not in code)
-        check("poore page mein sirf do fetch call hain (postJSON + getJSON)",
-              code.count("fetch(") == 2, str(code.count("fetch(")))
-        check("HTTP status insaani bhaasha mein padha jaata hai",
-              "function reasonLine(" in page and "504" in page and "429" in page)
-        check("kho gaya jawab history se wapas aata hai",
-              "/api/v1/history/" in page and "function recoverAnswer(" in page)
-        check("recovery purana jawab nahi uthati (baseline)",
-              "baseline" in page and "matchingAnswers(" in page)
-        check("recovery nayi research trigger nahi karti (sirf GET)",
-              "postJSON(\"/api/v1/deep-research\"" in page
-              and page.count("postJSON(\"/api/v1/deep-research\"") == 1)
-        check("user ko dobara type nahi karna padta (retry button)",
-              "function retryButton(" in page and "Phir bhejo" in page)
-        check("QUICK chat ek transient hichki par khud dobara koshish karta hai",
-              "await sleep(1500)" in page)
-        check("pyaari line hataayi nahi gayi (sirf uske saath sach juda)",
-              "Abhi server se baat nahi ho paayi" in page)
-        check("recovered jawab ke saath imaandaar note jaata hai",
-              "research server par poori ho" in page)
-        check("file:// wali samjhaish waise hi hai",
-              "file se seedha khola hai" in page)
-        check("raw server error text page par nahi dikhta",
-              "res.raw" not in page.split("function reasonLine(")[-1][:1200])
-
-        # INTEL KI DOOSRI REPORT: recovery ke waqt status "aata tha phir hat
-        # jaata tha" — kyunki purana progress poller aur recovery dono ek hi
-        # `.stg` line par likh rahe the. Ek waqt par sirf EK likhne wala ho.
-        check("progress poller POST ke turant baad band hota hai",
-              code.count("done = true;") == 1
-              and 0 < code.index("done = true;")
-                    < code.index("await recoverAnswer(question"),
-              f"count={code.count('done = true;')}")
-        check("poller apni aakhri likhai bhi rok deta hai",
-              "if(done) return;" in code)
-        check("status aur log dono ek hi jagah se bante hain (renderLog)",
-              "function renderLog(logEl, log){" in code
-              and "renderLog(logEl, p.log);" in code
-              and "renderLog(logEl, log);" in code)
-        check("recovery ke waqt log khaali nahi kiya jaata",
-              'logEl.textContent = ""' not in code)
-        check("MAX mode ke liye intezaar kaafi lamba hai (30 min)",
-              "HARD_DEADLINE" in code and "30 * 60 * 1000" in code)
-        check("progress jam jaaye to bekaar intezaar nahi (stall guard)",
-              "STALL_MS" in code and "lastChange" in code)
-
+def main() -> int:
+    global PASS, FAIL
+    PASS = 0
+    FAIL = 0
+    _model_timeout_checks()
+    _provider_boundary_checks()
+    _browser_checks()
     print(f"\n{PASS} passed, {FAIL} failed")
     return 1 if FAIL else 0
 

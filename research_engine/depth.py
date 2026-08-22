@@ -1,7 +1,7 @@
 """
 Research Depth Modes — Spec Section 13
 
-QUICK / DEEP / MAXIMUM / CUSTOM.
+QUICK / DEEP / MAXIMUM / MARATHON / CUSTOM.
 
 IMPORTANT (Spec Section 13): "Maximum" ka matlab unlimited internet NAHI hai.
 Gemini free tier ~20 requests/din hai, isliye har mode ka call budget yahan
@@ -29,11 +29,9 @@ class DepthConfig:
     # (QUICK ka wada "turant jawab" hai, aur patent APIs slow + fair-use limited
     # hain).
     #
-    # JAAN-BOOJH KAR `BOOL_FIELDS` mein NAHI hai: BOOL_FIELDS ka har naam
-    # api/agent_routes.py ke request model mein bhi hona zaroori hai (test ise
-    # check karta hai), aur wo file is batch ke ownership rule ke hisaab se
-    # ChatGPT ki hai. Isliye CUSTOM mode se ise abhi toggle nahi kiya ja sakta —
-    # ye known limitation report mein likhi gayi hai, na ki chupchaap chhodi gayi.
+    # CUSTOM mode mein bhi explicit on/off kiya ja sakta hai. Request schemas aur
+    # BOOL_FIELDS ek hi naam expose karte hain, isliye documented switch aur
+    # runtime config alag nahi ho sakte.
     use_patents: bool = True
     use_red_team: bool = True
     chars_per_source: int = 1200
@@ -80,7 +78,22 @@ MAXIMUM = DepthConfig(
     chars_per_source=1500, max_fulltext=6, discovery_seconds=150,
 )
 
-_PRESETS = {"QUICK": QUICK, "DEEP": DEEP, "MAXIMUM": MAXIMUM}
+MARATHON = DepthConfig(
+    # Durable background-only specialist mode.  It deliberately stays inside
+    # the same hard CUSTOM rails: "long" is not "unlimited", and four model
+    # calls still respect the zero-cost policy/fallback router.
+    name="MARATHON", gemini_calls=4, max_sources=32, max_per_connector=5,
+    max_rounds=4, use_papers=True, use_books=True, use_datasets=True,
+    use_patents=True, use_red_team=True, chars_per_source=2200,
+    max_fulltext=12, discovery_seconds=300,
+)
+
+_PRESETS = {
+    "QUICK": QUICK,
+    "DEEP": DEEP,
+    "MAXIMUM": MAXIMUM,
+    "MARATHON": MARATHON,
+}
 
 # Safety rails — CUSTOM mode mein user in limits se aage nahi ja sakta
 _LIMITS = {
@@ -105,7 +118,9 @@ def _clamp(field: str, value: int) -> int:
 # CUSTOM mode mein user kaun-kaun se numbers bhej sakta hai — API isi list se
 # apna request model aur /depth-modes ka disclosure banata hai. Hand-typed copy
 # rakhne par doc aur asli clamp alag ho jaate the, yaani disclosure jhooth.
-BOOL_FIELDS = ("use_papers", "use_books", "use_datasets", "use_red_team")
+BOOL_FIELDS = (
+    "use_papers", "use_books", "use_datasets", "use_patents", "use_red_team",
+)
 
 
 def depth_limits() -> Dict[str, tuple]:

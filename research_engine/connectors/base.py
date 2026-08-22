@@ -51,6 +51,13 @@ import unicodedata
 from typing import Dict, List, Optional, Tuple, Union
 
 from ..models import SourceRecord, SourceType
+from ..network_safety import (
+    NetworkSafetyError,
+    public_error,
+    read_bounded_response,
+    require_content_type,
+    safe_get_with_redirects,
+)
 
 USER_AGENT = "InfinityResearchAI/1.0 (educational research project)"
 HEADERS = {"User-Agent": USER_AGENT}
@@ -79,6 +86,39 @@ RETRIES = _env_int("CONNECTOR_RETRIES", 1, floor=0)   # kul attempts = RETRIES +
 _BACKOFF_SECONDS = 1.5
 # Server "Retry-After: 3600" bhej sakta hai — utna rukna pipeline ko maar dega
 _MAX_SLEEP_SECONDS = 8.0
+
+# Discovery never fetches a URL supplied by a search result.  Every endpoint is
+# selected by connector code and must stay on this exact-host allowlist.  This
+# makes the shared helper fail closed if a future connector accidentally passes
+# through a user/source-controlled URL.
+DISCOVERY_ALLOWED_HOSTS = frozenset({
+    "api.crossref.org",
+    "api.data.gov.in",
+    "api.openalex.org",
+    "api.semanticscholar.org",
+    "archive.org",
+    "catalog.data.gov",
+    "data.gov",
+    "datacatalogapi.worldbank.org",
+    "doaj.org",
+    "en.wikipedia.org",
+    "eutils.ncbi.nlm.nih.gov",
+    "export.arxiv.org",
+    "ghoapi.azureedge.net",
+    "huggingface.co",
+    "openlibrary.org",
+    "www.googleapis.com",
+    "zenodo.org",
+})
+
+
+def _max_response_bytes() -> int:
+    """Bound decompressed discovery payloads (default 16 MiB, max 64 MiB)."""
+    try:
+        mb = float(os.getenv("CONNECTOR_MAX_RESPONSE_MB", "16").strip() or 16)
+    except Exception:
+        mb = 16.0
+    return int(min(64.0, max(1.0, mb)) * 1024 * 1024)
 
 
 # ── honest failure types ─────────────────────────────────────────────────────
@@ -163,8 +203,18 @@ def http_get(url: str,
     last_error: Optional[Exception] = None
     for attempt in range(attempts):
         try:
-            resp = requests.get(url, params=params, headers=request_headers,
-                                timeout=timeout or DEFAULT_TIMEOUT)
+            resp, _final_url = safe_get_with_redirects(
+                requests,
+                url,
+                params=params,
+                headers=request_headers,
+                timeout=timeout or DEFAULT_TIMEOUT,
+                stream=True,
+                allowed_hosts=DISCOVERY_ALLOWED_HOSTS,
+                # Exact code-owned host allowlisting is the SSRF boundary for
+                # discovery.  Full-text URLs use DNS/IP validation separately.
+                resolve_dns=False,
+            )
         except Exception as exc:
             # Timeout / DNS / connection reset — slow server ko ek mauka aur do
             last_error = exc
@@ -178,18 +228,39 @@ def http_get(url: str,
             if attempt + 1 < attempts:
                 # Server bata sakta hai kitna rukna hai — usko suno, par cap ke saath
                 time.sleep(_retry_sleep(resp, attempt))
+                try:
+                    resp.close()
+                except Exception:
+                    pass
                 continue
+            try:
+                resp.close()
+            except Exception:
+                pass
             raise RateLimited(
                 f"HTTP {status} — is API ne rate limit lagayi (search chali hi nahi). "
                 f"Ye 'result nahi mila' se alag baat hai."
             )
         if status == 403:
+            try:
+                resp.close()
+            except Exception:
+                pass
             raise AccessBlocked(
                 f"HTTP 403 — server ne access nahi diya (quota/country restriction ho "
                 f"sakti hai)."
             )
         if status >= 400:
+            try:
+                resp.close()
+            except Exception:
+                pass
             raise ConnectorHTTPError(f"HTTP {status}", status=status)
+        try:
+            require_content_type(resp, "discovery")
+            read_bounded_response(resp, _max_response_bytes())
+        except NetworkSafetyError as exc:
+            raise ConnectorHTTPError(public_error(exc)) from None
         return resp
 
     # yahan pahunchna nahi chahiye, par defensive
@@ -398,8 +469,13 @@ class BaseConnector:
         except AccessBlocked as exc:
             records, error = [], f"access blocked: {exc}"
             skipped_reason = "blocked"
+        except ConnectorHTTPError as exc:
+            # HTTP status/type/size messages are generated locally.  Never add
+            # a raw response body or requests exception string here.
+            records, error = [], f"connector HTTP error: {exc}"
+            skipped_reason = "error"
         except Exception as exc:  # connector kabhi pipeline ko na girae
-            records, error = [], f"{type(exc).__name__}: {exc}"
+            records, error = [], public_error(exc)
             skipped_reason = "error"
             if "timeout" in type(exc).__name__.lower():
                 error += (" — ye source free hai par slow; CONNECTOR_READ_TIMEOUT "

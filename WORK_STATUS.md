@@ -1,150 +1,215 @@
-# WORK_STATUS — do agent, ek repo (Claude + ChatGPT)
+# Infinity Research AI — Master Work Status
 
-Niyam (intel ka instruction, 2026-08-20):
+This file is the coordination source of truth for multi-agent work.
 
-1. **Naya task shuru karne se PEHLE ye file padho.** Jo task/file doosre agent
-   ke naam par hai, use edit mat karo.
-2. Ek hi file par dono agent ek saath kaam nahi karenge.
-3. Batch complete hone par: commit + push, phir commit SHA + changed files +
-   test results report karo.
-4. **₹0 hard rule** — koi paid API/model/service add ya enable nahi. Sirf
-   free / open-source / free-tier. Koi chhupa hua paid fallback nahi.
-5. Test offline chalte hain: `python3 test_research_engine.py` aur
-   `python3 tests/test_*.py` (na pytest, na network, na API key).
+## Hard rules
 
-Owner column: `Claude` = is session ka agent, `ChatGPT` = doosra agent,
-`intel` = jo sirf intel ke computer/Railway se ho sakta hai.
+- ₹0 only. No paid API/model/service, no silent paid fallback, no surprise billing.
+- Secrets stay out of GitHub and Android APK. Backend env/private secret store only.
+- Do not bypass paywalls/copyright/access controls.
+- Human-first answer: easy Hinglish explanation first; sources/access depth/audit/errors later.
+- Fact / Evidence / Inference / Hypothesis / Speculation / Unknown must remain distinct.
+- `ESTABLISHED`/strong-fact language requires strong evidence and appropriate access depth.
+- Foundation first; advanced discovery features begin only after the foundation gates really pass.
+- Claude and ChatGPT must not edit the same ACTIVE task/files at the same time.
 
-## Current batch — 17-point superconductivity bug report (Owner: Claude)
+## Architecture target
+
+Question -> Research Planner -> domain identification -> query expansion -> multi-source discovery -> retrieval -> document/media processing -> evidence extraction -> relevance/source-quality/contradiction checks -> multi-angle reasoning -> hypothesis generation -> criticism/falsification -> verification/math/simulation where possible -> synthesis -> human-first answer -> technical audit.
+
+Storage target: GitHub = code/version history; laptop D: = bounded fast runtime/working storage; Google Drive = temporary optional archive; TeraBox = optional later archive only after official zero-cost API approval. Remote upload must be verified before any local deletion.
+
+## ChatGPT scope — do not shrink
+
+ChatGPT owns final integration/reliability, independent audit of Claude work, evidence correctness at the system boundary, ₹0/provider safety, large-file/storage lifecycle, async durability, security, integrated regression and final architecture review. After foundation passes, ChatGPT also owns the Advanced Scientific Discovery Engine work listed below.
+
+## Active foundation status
+
+| Task | Owner | Status | Notes |
+|---|---|---|---|
+| Marathon multilingual specialist research | ChatGPT | PUSHED IN PR #7 / FULL FOUNDATION CI PASS | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented on `chatgpt-marathon-multilingual`. GitHub Actions run 32547266529 passed: 420 focused pytest, 648 full pytest, 593/593 core, cross-domain 633/633, superconductivity 146/146, and architecture/provider/source-boundary/compile gates. CI also exposed and ChatGPT fixed the invalid job-level `runner.temp` context plus the stale 30-minute-only browser assertion. Live zero-cost verification remains a separate honest release gate. |
+| Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
+| Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |
+| Full-text + large PDF handling | Claude + ChatGPT audit | DONE / VERIFY | Claude removed 4MB blind skip; ChatGPT added honest access wording and whole-document sparse sampling so huge PDFs are not first-N biased |
+| Evidence Verification A-E | Claude + ChatGPT integration audit | DONE / VERIFY | Latest Claude strict claim-verification code is merged into integration branch; ChatGPT system-boundary A-E/fail-closed tests remain in release gate |
+| Consensus/contradiction correctness | Claude | DONE / VERIFY | Consensus gate present; integrated regression/live benchmark still required |
+| Gemini multi-key quota backup | Claude + ChatGPT audit | INTEGRATED / VERIFY | Claude key-pool/local fallback files integrated; ChatGPT closed backup-key ₹0 confirmation bypass and backup-only router/status mismatch |
+| Model quota/fallback honesty | Claude + ChatGPT | DONE / VERIFY | Same-model retry vs model/provider/key switch accounting is separated; strict failure/error taxonomy is integrated |
+| Multi-provider ₹0 reasoning fallback | ChatGPT | DONE / VERIFY | confirmed Gemini (primary/backup keys) -> confirmed Groq free -> OpenRouter free-only -> localhost Ollama; hard failures are skipped for remainder of run |
+| Deterministic no-model evidence fallback | Claude + ChatGPT integration | DONE / VERIFY | If every model provider is unavailable, retrieved evidence/local deterministic reasoning can still produce a conservative result instead of blank output |
+| QUICK chat quota resilience | ChatGPT | DONE / VERIFY | Removed direct Gemini-only chat path; trivial small-talk uses 0 API calls; model failure automatically falls back to QUICK evidence research |
+| Legacy RAG provider bypass | ChatGPT | FIXED / VERIFY | `rag/pipeline.py` no longer imports/calls Gemini directly; it uses resilient router + conservative document extract fallback |
+| Provider-bypass release audit | ChatGPT | DONE / VERIFY | Static audit fails release if production code outside approved adapters directly calls Gemini/Groq/OpenRouter/Ollama generation surfaces |
+| Raw provider-error redaction | ChatGPT | HARDENED / VERIFY | Integrated reasoning returns normalized model/provider failure kinds; raw SDK/HTTP/protobuf bodies are excluded from public errors/technical details |
+| Discovery/full-text network boundary | ChatGPT | HARDENED / OFFLINE VERIFIED | Shared URL guard blocks private/local/reserved targets, credentials, unsafe ports and redirect pivots; connector/fetch responses enforce content-type and compressed/decompressed byte bounds |
+| Human-first presentation contract | ChatGPT audit | DONE / VERIFY | Deterministic presentation guard + A-L tests; sources/audit last; raw technical junk kept out of main explanation |
+| Release-state honesty | ChatGPT | DONE / VERIFY | API cannot become `Production Ready` through an env flag; release stays `foundation_verification_pending` until reviewed proof exists |
+| Public operational metadata privacy | ChatGPT | HARDENED / VERIFY | project/history/global-job-list routes are fail-closed behind backend-only admin token; public storage health no longer exposes absolute filesystem paths/raw OS errors |
+| Static architecture wiring audit | ChatGPT | DONE / VERIFY | Release gate checks end-to-end production wiring, ₹0 chain, storage/security invariants and premature release claims |
+| Superconductivity benchmark V2 | Claude + ChatGPT | OFFLINE 146/146 / LIVE RETEST PENDING | Strict offline gate is green; live zero-cost rerun is still a separate required gate |
+| Central D-drive runtime routing | ChatGPT | DONE / VERIFY | Heavy runtime/cache/vector/temp/research data routes under configured root; explicit root failure is fail-closed |
+| Streaming upload safety | ChatGPT | DONE / VERIFY | Bounded streaming, early stop, partial cleanup, storage reservation |
+| ₹0 startup guard | ChatGPT | HARDENED / VERIFY | Paid-key paths blocked; every Gemini primary/backup/list credential is subject to one explicit zero-cost confirmation; Groq confirmed-only; OpenRouter free-only; remote Ollama blocked |
+| Request abuse/rate guard | ChatGPT | DONE / VERIFY | Expensive POST endpoints protected without trusting spoofable proxy headers by default |
+| Strict browser CORS | ChatGPT | DONE / VERIFY | Wildcard rejected; exact origins only |
+| Cloud archive manifest + retry | ChatGPT | DONE / VERIFY | pending -> uploaded_unverified -> verified, durable retry/backoff, local retention |
+| Provider-neutral cloud storage | ChatGPT | DONE foundation | Official provider adapters can plug in without core research rewrite |
+| Google Drive temporary archive | ChatGPT | PROVIDER SETUP PENDING | Optional official rclone/OAuth route; not a research-engine dependency |
+| Async Deep/Maximum research jobs | ChatGPT | DONE / VERIFY | Bounded concurrency, immediate job id, durable lifecycle |
+| Job result compaction / size cap | ChatGPT | DONE / VERIFY | Separate gzip result files, configurable per-result cap, deterministic compaction |
+| Multi-process job safety | ChatGPT | DONE / VERIFY | Single-writer OS process lock fails closed instead of risking JSON corruption |
+| Storage quota / cleanup safety | ChatGPT | DONE / VERIFY | Bounded local workspace; only cloud-verified copies eligible for cleanup |
+| Runtime data Git hygiene | ChatGPT | DONE / VERIFY | Tracked `knowledge_graph.json`, `knowledge_store.json`, `error_log.txt` and generated `research_memory/*.json` removed from integration branch; ignored for future runs |
+| TeraBox official adapter | ChatGPT | OPTIONAL / BLOCKED | Wait only for official credentials + confirmed zero-cost terms; app development does not wait |
+| Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY/RECOVERY DESIGN | No homemade/insecure crypto and no unrecoverable-key design |
+| Secondary compact metadata backup | ChatGPT | PLANNED | Only after a genuinely free private destination is selected |
+| Patents connector | Claude + ChatGPT integration | DONE / OFFLINE VERIFIED | Official ₹0 EPO Linked Data plus optional official USPTO ODP key; family dedup, relevance traps, legal-status honesty and patent-vs-science separation are release-gated |
+| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 post-merge strict gate: 405 focused pytest, 633 full pytest, 593 core checks, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
+| Final architecture/integration audit | ChatGPT | OFFLINE PASS / LIVE GATE PENDING | Static architecture and provider/source-boundary audits pass; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
+| Advanced Scientific Discovery Engine | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED | Structured discovery field includes all 16 planned layers; arbitrary code, automatic real experiments, global-novelty claims and success-probability claims are fail-closed |
+| Live ₹0 release runner | ChatGPT | CODE COMPLETE / CREDENTIALS PENDING | No-call preflight is default; real run requires `--execute`, explicit D-root and a currently usable confirmed/free model layer; receipt contains no answer/source text/credentials |
+
+## Latest independent offline validation — 2026-08-21
+
+- Strict default `scripts/run_foundation_gate.py` execution: **PASS across every enforced stage**.
+- Focused release pytest: **405 passed**.
+- Full `pytest -q tests`: **633 passed**; the strict gate also executed the separate 593-check core regression harness.
+- Ordered core regression: **593 passed, 0 failed**.
+- Cross-domain adversarial benchmark: **633 passed, 0 failed** across eight domains.
+- Superconductivity Benchmark V2: **146 passed, 0 failed**.
+- Provider-bypass audit, architecture audit and source-boundary audit: **PASS**.
+- This is offline/₹0 verification only. The live zero-cost benchmark and deployment/runtime checks remain required before production sign-off.
+
+## Marathon multilingual specialist batch — 2026-08-22
+
+- Added a bounded `MARATHON` background mode: 4 reasoning calls, 32 ranked sources,
+  4 rounds, 12 legally accessible full-text attempts and 300s discovery budget per round.
+- Added exact specialist profiles for mind/cognition, Jung/depth psychology,
+  metaphysics, esoteric/occult/Hermetic history, declassified records,
+  Freemasonry/secret societies, conspiracy claims and measured-vs-symbolic frequency.
+- Fixed raw-substring classification: `physics` no longer fires inside
+  `metaphysics`, `science` no longer turns `occult sciences` into ordinary
+  science, and scientific domain routing now comes explicitly from the strict
+  domain detector instead of accidental `ai` substring matches.
+- Added separate official-document, empirical, historical, traditional,
+  interpretation, allegation, app-original-hypothesis and unknown lanes.
+- Added bounded CIA Reading Room/NARA/FBI Vault/GovInfo site queries for relevant
+  questions. Official-document provenance is explicitly not treated as truth proof.
+- Added original-preserving Hindi/Hinglish multilingual search planning and an
+  honest `translation_required` state for unresolved languages; no paywall,
+  copyright or access-control bypass.
+- Added a visible evidence-lane section before the existing system-owned
+  `Humari Hypotheses` section plus structured `specialist_research` API data.
+- Local dependency-light checks: **15/15 specialist**, **593/593 core**,
+  **633/633 cross-domain**, **146/146 superconductivity**; architecture,
+  provider-bypass, source-boundary, compile and web-JS syntax checks pass.
+- The current scratch Python lacks `pytest`/FastAPI runtime dependencies, so the
+  complete collected pytest suite is not being falsely reported as run; CI or a
+  dependency-equipped runtime remains the mandatory final collected-test gate.
+
+## Current independent audit findings fixed
+
+1. Claude's huge-PDF solution was bounded-memory but could bias scanning toward the first N pages. Added deterministic opening + interior + ending sparse sampling and honest partial-reading metadata.
+2. QUICK chat directly called Gemini, so Gemini quota could kill normal chat even when fallback logic existed. QUICK now uses the shared zero-cost resilient router, then QUICK evidence research.
+3. Legacy `rag/pipeline.py` directly called Gemini and bypassed the router. It now routes through the resilient facade and has a document-only last resort.
+4. `/chat/diag` spent a real Gemini generation just to diagnose Gemini. It is now zero-generation by default; optional discovery is confirmation-gated and still does no generation.
+5. API release readiness could be promoted through an environment variable. Release state is now hard fail-closed in reviewed code until proof exists.
+6. Generated runtime/test state was tracked despite `.gitignore`. Removed and protected by regression.
+7. Public `/api`/`/health` exposed absolute runtime filesystem paths and raw OS errors. Public storage status now exposes aggregate capacity/readiness only.
+8. Server-side history, project metadata/deletion and global research-job listing were publicly enumerable. These operator surfaces now require a strong backend-only admin token and fail closed as 404 when disabled.
+9. The release gate's old “all tests” loop ran pytest files as plain Python, meaning many assertions never executed. A real full `pytest -q tests` stage is now mandatory; direct script mode is used only for explicit `__main__` harnesses.
+10. Claude's new Gemini backup-key pool initially created a zero-cost policy gap: backup/list keys could exist while the startup guard checked only `GEMINI_API_KEY`. The guard now covers every supported backup/list variable.
+11. Backup-only Gemini config was recognized by the key pool but not by provider-router/status readiness. All three now share the same credential definition and confirmation rule.
+12. Provider/Gemini “technical details” could still carry raw HTTP/protobuf/provider payload into a user-visible audit footer. Integrated production reasoning now emits normalized failure kinds only.
+13. Discovery connectors and full-text fetches trusted redirects/hosts too broadly and did not share one decompressed-size/content-type boundary. Added one network-safety layer with DNS/IP validation, per-hop redirect checks, exact discovery allowlists, byte caps and sanitized failures.
+14. `[UNVERIFIED]` collapsed into speculative claim semantics and source-count grading could still print a top evidence label after a failed claim-level A-E check. Added a distinct internal state with backward-compatible serialization and made final grading consume label/A-E reports.
+15. The cross-domain benchmark fake model still parsed the pre-hardening evidence prompt, hiding label/contradiction coverage after the source-data guard changed. Updated the benchmark parser to consume both legacy and hardened prompt grammars and kept the 633/633 gate mandatory.
+16. Presentation cleanup treated clickable `[S#]` citations as raw diagnostic URLs and generated a developer-only block on healthy runs. Citation targets now collapse to stable source IDs in the human section while full URLs remain in Sources.
+17. Direct script-harness stages lost repository imports when the caller supplied a dependency-only `PYTHONPATH`. The strict runner now prepends the repository root and the default 31-stage gate executes every intended harness successfully.
+18. The advanced-discovery roadmap existed only as an aspirational checklist. Added one deterministic, network-free production layer covering all 16 planned stages and wired its bounded result into every research response without extra model calls.
+19. Final live verification had no safe one-command boundary. Added a no-call-by-default runner that refuses unconfirmed/non-free model configuration, requires an explicit runtime root and writes only a non-secret summary receipt after an explicitly requested live run.
+20. QUICK chat ran its evidence fallback synchronously for up to the 45-second discovery budget, so a proxy/browser timeout could repeatedly replace ongoing work with one generic server-error sentence. Model failure now promotes to the capability-protected durable QUICK job path, while transport/session failures show bounded actionable reasons and preserve the question for retry.
+
+## Required gates before foundation can be called reliable
+
+1. Off-domain source rejection across multiple domains, including false-positive/false-negative cases.
+2. Full-text/abstract/snippet/metadata labels accurate; partial huge-PDF coverage honestly distinguished.
+3. No false `ESTABLISHED` and no citation-ID-only verification.
+4. Claim-level A-E gate enforced: citation + relevance + support + depth + quality.
+5. No false consensus; opposition search and reasoning completeness requirements respected.
+6. Gemini/free-provider quota failure automatically tries only permitted/confirmed backups; a failed provider does not kill the whole app.
+7. Every Gemini backup/list credential obeys the same zero-cost confirmation rule; no backup-only bypass.
+8. If every model provider is unavailable, deterministic retrieved-evidence fallback returns a conservative non-blank result where evidence exists.
+9. Raw provider/protobuf/HTTP traces never leak into main explanation, chat response or public technical audit.
+10. No production API/RAG/chat route may bypass the resilient provider router; provider-bypass audit must pass.
+11. Huge PDF processing is bounded-memory AND whole-document sampled when not every page can be inspected.
+12. Upload cap stops reading early and cleans partial files.
+13. Explicit D-root unavailable/unwritable => fail closed; no silent C: spill.
+14. Public health/status does not expose absolute local paths, raw OS errors or secrets.
+15. Cloud upload failure/mismatch => local copy preserved; deletion only after verified remote state.
+16. Durable job status/result lifecycle, compaction and interrupted restart state all pass.
+17. Process lock prevents multiple backend workers from corrupting durable job JSON.
+18. Request guard blocks abuse; proxy headers are trusted only when explicitly configured.
+19. Server-side history/project/global-job enumeration is not public without backend admin authorization.
+20. Generated runtime/error/research-memory state stays out of Git source tree.
+21. Full offline regression suite actually executes green on the integrated branch, including full pytest collection.
+22. Offline architecture audit and Superconductivity Benchmark V2 execute green after integration.
+23. Live zero-cost benchmark reruns after integration and passes relevance/full-text/hypothesis/error-honesty expectations.
+24. Final end-to-end path matches the blueprint: discover -> fetch -> process -> evidence -> reason -> criticize -> hypothesize -> verify -> synthesize -> cite/audit.
+
+## Advanced Scientific Discovery Engine — CODE COMPLETE / LIVE VALIDATION PENDING
+
+The deterministic production layer is wired into every research result under
+the backward-compatible top-level `discovery` field. It consumes the already
+retrieved evidence, hypotheses and verification report; it makes no additional
+provider/network call and never upgrades an idea to a proven fact.
+
+- [x] Problem Decomposer — planner sub-questions + domain branches
+- [x] Evidence Graph — explicit source/support/challenge edges only
+- [x] Physical-Limits Engine — existing verification physics/unit boundary reused
+- [x] Hypothesis Generator 2.0 — structured six-field/testability contract reused
+- [x] Novelty Checker — checked-evidence/project-memory screening; never global novelty
+- [x] Hypothesis Tournament — test-priority score, explicitly not truth probability
+- [x] Falsification Engine — measurable prediction/test/reject-condition completeness
+- [x] Simulation / Code Executor — bounded numeric AST only; no arbitrary Python/import/files/network/subprocess
+- [x] Virtual Experiment Designer — design-only; real execution always human-approved
+- [x] Recursive Research Loop — maximum two proposed extra iterations; never auto-network
+- [x] Confidence Calibration — evidence/access/verification caps; no success probability
+- [x] Weakest-Link Analysis — minimum evidence/verification/falsifiability factor
+- [x] Alternative-Path Generator — competing-explanation-first plans, no invented claim
+- [x] TRL / Reality Ladder — literature-only assessment hard-capped at level 3
+- [x] Discovery Memory — compact bounded checkpoint, legacy-memory compatible
+- [x] Domain-Specific Validation Layer — per-domain requirements and no real-world auto-approval
+## Local deployment actions
 
 | Task | Owner | Status | Files | Commit |
 |---|---|---|---|---|
-| §2/§5 relevance: semantic + domain-aware + hard rejection | Claude | done | `research_engine/relevance.py`, `research_engine/semantic.py`, `research_engine/domain.py` | (is batch mein) |
-| §3 domain-aware connector routing | Claude | done | `research_engine/domain.py`, `research_engine/planner.py` | (is batch mein) |
-| §4 structured query expansion + deterministic fallback planner | Claude | done | `research_engine/query_builder.py`, `research_engine/planner.py` | (is batch mein) |
-| §6 content-based source type classification | Claude | done | `research_engine/source_kind.py`, `research_engine/connectors/paper_connector.py` | (is batch mein) |
-| §7/§8 model fallback: error taxonomy + dynamic model discovery | Claude | done | `research_engine/model_errors.py`, `research_engine/gemini_reasoning.py`, `research_engine/gemini_model.py`, `tests/test_gemini_retry.py` | (is batch mein) |
-| §1/§9/§10 RESEARCH INCOMPLETE status, no raw errors, no empty sections | Claude | done | `research_engine/run_status.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `research_engine/models.py`, `tests/test_pipeline_offline.py`, `tests/test_answer_structure.py`, `test_research_engine.py` | (is batch mein) |
-| §11 consensus gate (6 preconditions) | Claude | done | `research_engine/consensus_gate.py`, `contradiction.py`, `synthesizer.py`, `orchestrator.py`, `models.py`, `evidence.py`, `relevance.py`, `planner.py`, `tests/test_consensus_gate.py` | (is batch mein) |
-| §12 chunked/streaming large-PDF reading | Claude | done | `research_engine/content_fetcher.py`, `research_engine/processing/pdf_chunker.py` (naya), `research_engine/processing/pdf_processor.py`, `research_engine/processing/document_processor.py`, `research_engine/models.py`, `tests/test_pdf_chunking.py` (naya) | (is batch mein) |
-| §13 verification checks A–E (citation/relevance/entailment/depth/quality) | Claude | done | `research_engine/claim_verification.py` (naya), `claim_labels.py`, `citation.py`, `synthesizer.py`, `orchestrator.py`, `tests/test_claim_verification.py` (naya) | (agle batch mein) |
-| §14 audit denominators + honest API accounting | Claude | done | `research_engine/gemini_reasoning.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_audit_accounting.py` (naya), `tests/test_gemini_retry.py`, `test_research_engine.py` | (is batch mein) |
-| §15 search rounds LLM ke bina bhi chalein | Claude | done | `research_engine/orchestrator.py`, `research_engine/planner.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
-| §16 automated tests A–I + full regression | Claude | A–I done (regression green) | `tests/test_gemini_retry.py`, `tests/test_pipeline_offline.py`, `tests/test_consensus_gate.py`, `tests/test_relevance_domain.py`, `tests/test_pdf_chunking.py` | (is batch mein) |
-| §17 nine-part report back | Claude | pending | — | — |
+| Feature-branch push | ChatGPT | available through connected GitHub workflow | — | — |
+| Railway mein confirmed-free model key + live MAXIMUM test | User/local setup | pending | Railway Variables | — |
+| Android `RetrofitClient.kt` ka `BASE_URL` Railway URL par | User/local setup | optional | `InfinityResearchAI/.../RetrofitClient.kt` | — |
+| Real full pytest | ChatGPT | PASS — 633/633 on final post-merge tree | — | — |
+| USPTO ODP free key (optional) → Railway `USPTO_ODP_API_KEY` | User/local setup | optional | Railway Variables | — |
+| Railway timeout knob (optional): `GEMINI_CALL_TIMEOUT` | User/local setup | optional | Railway Variables | — |
 
-## Naya batch — 15-point "Research Quality Hardening + Benchmark V2" (Owner: Claude)
+The live runner is also code-complete: `RUN_LIVE_ZERO_COST_GATE.bat` performs a
+no-call preflight by default and requires `--execute` plus an explicitly
+confirmed/free model layer for the real benchmark. Its receipt excludes answer,
+prompt, sources/URLs and credentials.
 
-| Task | Owner | Status | Files | Commit |
-|---|---|---|---|---|
-| point 3 domain-aware query planning (alag search intents per sub-domain) | Claude | done | `research_engine/planner.py`, `research_engine/query_builder.py`, `research_engine/domain.py` | (pichhle batch mein) |
-| point 7 verification A–E enforce | Claude | done | `research_engine/claim_verification.py`, `research_engine/claim_labels.py`, `research_engine/synthesizer.py`, `tests/test_claim_verification.py` | (pichhle batch mein) |
-| point 10/11 hypothesis quality + evidence gate | Claude | done | `research_engine/hypothesis.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_hypothesis_quality.py` (naya) | (is batch mein) |
-| point 12 maths/physics sanity checks | Claude | done | `research_engine/physics_checks.py` (naya), `research_engine/verification.py`, `research_engine/orchestrator.py`, `research_engine/synthesizer.py`, `tests/test_physics_sanity.py` (naya) | (is batch mein) |
-| §15 / point 9 search round crash-safety (ek round gire to run zinda) | Claude | done | `research_engine/orchestrator.py`, `tests/test_search_rounds.py` (naya) | (is batch mein) |
-| point 14 baaki regression tests (relevance, false consensus, raw-error leak, quota, incomplete) | Claude | done | `tests/test_relevance_domain.py`, `tests/test_evidence_honesty.py`, `tests/test_consensus_gate.py`, `tests/test_pipeline_offline.py`, `tests/test_search_rounds.py`, `tests/test_hypothesis_quality.py`, `tests/test_requested_deliverables.py`, `tests/test_audit_accounting.py` (naya) | (is batch mein) |
-| point 1 superconductivity Benchmark V2 (offline runner, 10-point scorecard, 146 checks) | Claude | done | `tests/benchmark_superconductivity.py` (naya) | (is batch mein) |
-| point 12 fix: "250-288 K" range ko negative temperature samajhna band | Claude | done | `research_engine/physics_checks.py` | (is batch mein) |
-| point 13 fix: ledger ki wajah do-teen baar repeat hona band | Claude | done | `research_engine/requested.py` | (is batch mein) |
-| point 14 §14 audit denominators + honest API accounting | Claude | done | `research_engine/gemini_reasoning.py`, `research_engine/synthesizer.py`, `research_engine/orchestrator.py`, `tests/test_audit_accounting.py` (naya) | (is batch mein) |
+Every generated hypothesis must eventually carry support, counter-evidence, assumptions, unknowns, falsification criteria, required experiment/simulation, expected impact and calibrated confidence. Never invent arbitrary 90–95% real-world success claims.
 
-Benchmark V2 chalane ka tareeka: `python3 tests/benchmark_superconductivity.py`
-(poora offline — koi network, koi API key, koi paisa). Wahi superconductivity
-sawal fixed fixtures par chalta hai aur 10 cheezein pakadta hai: junk source
-rejection, ranking, imaandaar read-level labels, raw 429/protobuf leak, honest
-status, consensus gate (support-only run par "Consensus evaluate nahi kiya ja
-saka"), unit-conversion/comparison sanity, 3 poori hypotheses vs LLM-dead plan,
-report ka kram (insaan pehle, audit aakhir) aur determinism (do run ka jawab
-shabd-ba-shabd same).
+## UI/product requirements remembered
 
-## Naya batch — §8 "Quota-proof backup: app kabhi na ruke" (Owner: Claude)
+- Modes: Quick / Deep / Maximum / Marathon / Custom.
+- Real progress/stages, not fake percentages.
+- Sources: uploaded docs + legally/publicly accessible papers, books, reports, patents, datasets, webpages and video/audio transcripts.
+- Easy teacher-like Hinglish first; technical source/audit layer afterward.
+- Main answer must not be cluttered by raw logs/DOIs/errors.
+- Android stays a thin client; provider secrets stay backend-side.
 
-intel ki shikayat (2026-08-21): *"gimini ko call krte h to quta khatam ho jaata h
-... app ruke nhi, app me koi eror na aaye ... iska quta khatam ho gya, ye kaam
-nhi kiya, iss wajah se jawab thoda week rah gya ... 100% pura app working."*
+## Coordination rule
 
-Asli root cause do the:
-1. Free tier ki deewar `GenerateRequestsPerDayPerProject` hai — us halat mein us
-   KEY ke saare model ek saath band ho jaate the, aur model rotation (§7) kuch
-   nahi kar paati thi.
-2. Quota marne par orchestrator `extractive_summary()` chalata tha, jo SIRF
-   `## Seedha jawab` bharta tha — baaki teen insaani section ("Research se kya
-   pata chala?", "Ye kyun hota hai?", "Kya abhi unknown hai?") "kaunse hisse
-   nahi ban paaye" list mein chale jaate the. Yahi "jawab week rah gya" tha.
-
-| Task | Owner | Status | Files | Commit |
-|---|---|---|---|---|
-| backup FREE key rotation (per-project quota ka ₹0 ilaaj) | Claude | done | `research_engine/key_pool.py` (naya), `research_engine/gemini_model.py`, `research_engine/gemini_reasoning.py`, `.env.example` | (is batch mein) |
-| offline deterministic reasoning — quota marne par bhi saare section bharein | Claude | done | `research_engine/local_reasoning.py` (naya), `research_engine/orchestrator.py` | (is batch mein) |
-| QUICK chat ka dead-end khatam (key rotation + offline backup) | Claude | done | `research_engine/chat.py`, `research_engine/local_reasoning.py` | (is batch mein) |
-| §8 offline test suite (98 checks) | Claude | done | `tests/test_quota_backup.py` (naya), `test_research_engine.py` (1 expectation) | (is batch mein) |
-| §8b `/chat/diag` mein `key_setup` — "key daali par backup nahi laga" ka seedha jawab | Claude | done | `research_engine/key_pool.py` (`describe`, `fingerprint`), `research_engine/gemini_model.py`, `tests/test_quota_backup.py` (122 checks) | (is batch mein) |
-
-Kaise chalta hai (teen parat, sab ₹0):
-
-1. **Model rotation** (§7, pehle se) — ek model ka quota mare to agla model.
-2. **Key rotation** (naya) — is key ke SAB model mar jaayein (daily quota / auth)
-   to `GEMINI_API_KEY_2..9` / `GEMINI_API_KEYS` se agli FREE key par shift. Nayi
-   key par model-memory (`_cache`/`_seen`/`_dead`) aur run ke `blocked`/`stopped`
-   saaf ho jaate hain, kyunki wo faisle purani key ke the.
-3. **Offline reasoning** (naya) — saari key mar jaayein to `local_reasoning.compose()`
-   engine ke apne padhe hue sources se poora sectioned jawab banata hai:
-   deterministic (wahi pack → shabd-ba-shabd wahi jawab), har line par `[S#]`,
-   label kabhi `[ESTABLISHED]` nahi (sirf `[SOURCE-REPORTED]` / `[INFERENCE]`).
-
-Do niyam jaan-boojh kar pakke rakhe gaye:
-
-- **Key badalna "retry" NAHI hai.** §14 ka hisaab isse alag ginta hai. Nayi
-  identity: `actual_http_attempts == (1 + key_switches) + same_model_retries +
-  model_switches`. Ek hi key wale setup mein `key_switches = 0`, yaani purana
-  formula jaisa ka waisa (purane test bina badle pass hote hain).
-- **Key ki VALUE kabhi bahar nahi jaati.** `note`/`usage_note`/`api_accounting`/
-  `diagnose` — sab jagah sirf `"free key #2"` jaisa label.
-- **STATUS nahi badla.** Reasoning pass sach mein nahi chala, to report ab bhi
-  imaandaari se `RESEARCH INCOMPLETE` kehti hai (`reasoning_done`/`failures`/
-  `run_status` ka ek shabd nahi chhua). Farak sirf itna hai ki koi section khaali
-  nahi rehta.
-
-Verify (sab offline): `python3 tests/test_quota_backup.py` → 122/0.
-Dead-run probe: quota poori mari hui MAXIMUM run ab 20,164 char ka jawab deti hai,
-saari 11 heading maujood, "Kaunse hisse nahi ban paaye" block gaayab, aur status
-phir bhi `RESEARCH INCOMPLETE`.
-
-§8b (intel ne live check kiya, 2026-08-21): `GEMINI_API_KEY_2` Railway mein daalne
-par bhi `/api/v1/chat/diag` `keys_available: 1` dikha raha tha. Wajah andaaze se
-nahi, ab endpoint khud batata hai — `diagnose()["key_setup"]` mein
-`names_present` (kaunse env NAAM sach mein dikhe), `unique_keys`,
-`duplicates_dropped` aur har unique key ka 8-hex `fingerprint` (sha256 ka prefix,
-ulta nahi ho sakta) aata hai. Sabse aam wajah: dono variable mein WAHI EK key —
-`load_keys()` duplicate hata deta hai, kyunki quota project par lagta hai, naam
-par nahi. Key ki value yahan bhi kahin nahi jaati.
-
-## intel ke haath ka kaam
-| Task | Owner | Status | Files | Commit |
-|---|---|---|---|---|
-| `git push` (sandbox GitHub tak nahi pahunch sakta) | intel | recurring | — | — |
-| Railway mein naya `GEMINI_API_KEY` + live MAXIMUM test | intel | pending | Railway Variables | — |
-| Android `RetrofitClient.kt` ka `BASE_URL` Railway URL par | intel | optional | `InfinityResearchAI/.../RetrofitClient.kt` | — |
-| `pytest -q tests/ test_research_engine.py` ka naya total (196 expected) | intel | pending | — | — |
-| USPTO ODP free key (optional) → Railway `USPTO_ODP_API_KEY` | intel | optional | Railway Variables | — |
-| Railway par timeout knobs (optional, default theek hain): `GEMINI_CALL_TIMEOUT`, `GEMINI_CHAT_TIMEOUT`, `GEMINI_CHAT_BUDGET` | intel | optional | Railway Variables | — |
-
-## ChatGPT ke liye (is batch ke baad)
-
-| Task | Owner | Status | Files | Commit |
-|---|---|---|---|---|
-| GitHub se is batch ka review + superconductivity benchmark retest | ChatGPT | waiting for push | (read-only review) | — |
-
-## Queue — 17-point batch ke BAAD (abhi koi haath nahi lagayega)
-
-intel ka apna instruction: *"DO NOT ADD NEW BIG FEATURES YET — fix these before
-we add any advanced Scientific Discovery Engine features."* Isliye ye rows
-`blocked` hain, owner khali hai — batch push aur ChatGPT review ke baad intel
-tay karega kaun uthayega.
-
-| Task | Owner | Status | Files | Commit |
-|---|---|---|---|---|
-| Knowledge graph mein cross-field relationships (advanced) | — (tay nahi) | blocked — 17-point batch ke baad | `research_engine/knowledge_graph.py`, `research_engine/knowledge_graph_improved.py`, `knowledge/graph.py` | — |
+Before starting a task, check this file. Do not edit files another agent currently owns as ACTIVE. After each major batch, commit/push and refresh this status. A reported test count from another agent is evidence of progress, not independent proof; final sign-off requires ChatGPT's independent integrated gate plus live benchmark.
 
 Jo pehle se maujood hai (nayi shuruaat nahi karni padegi): `knowledge_graph_improved.py`
 mein `extract_entities_improved`, `extract_relationships_improved`,
@@ -392,16 +457,13 @@ asli ginti intel ke Windows se aayegi.
   mein jaati hain aur audit block wahi note pehle se chhapta hai
   (`api_accounting()` dict mein `keys_available` / `key_switches` /
   `active_key` / `keys_note` bhi maujood hain, jab ChatGPT chaahe use kar le).
-- **~~Patents connector nahi hai~~ — 2026-08-21 ko ho gaya**, par teen cheezein
-  jaan-boojh kar khuli hain:
-  - **CUSTOM mode se `use_patents` toggle nahi hota.** `depth.py` mein flag
-    maujood hai (QUICK=False, DEEP/MAXIMUM=True), par CUSTOM ka payload parsing
-    `api/agent_routes.py` mein hai — wo file ChatGPT ki hai, isliye chhui nahi.
-    CUSTOM abhi apne base depth ka default use karta hai.
-  - **`synthesizer.py` patent ke `"claims"` ko raw hi render karta hai.** Uske
-    liye us file ka block badalna padta (ChatGPT-owned) — rok diya. Info gaayab
-    nahi: read depth `patent_meta` + `coverage_report()["patent_read_levels"]`
-    mein hai, aur prior-art line engine ke notes mein pehle se jaati hai.
+- **~~Patents connector nahi hai~~ — 2026-08-21 ko ho gaya.** CUSTOM mode ka
+  `use_patents` switch bhi ab synchronous aur durable-job dono request schemas
+  se runtime config tak wired hai. Source presentation mein `claims` ka raw
+  label hata kar ab **PATENT CLAIMS REVIEWED** + explicit “legal claim, science
+  proof nahi” disclosure aata hai, aur access-depth total mein claims-level
+  patents bhi gine jaate hain. Ek limitation abhi honest disclosure mein rehti
+  hai:
   - **`family_id` sirf EPO deta hai.** USPTO ODP wale record ka `family_id`
     jaan-boojh kar `""` rehta hai (ODP is endpoint par bharosemand family id
     nahi deta) — us case mein family key priority-date + title slug se banti

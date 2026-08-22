@@ -9,29 +9,54 @@ Package layout:
     source_discovery.py       SourceDiscovery (Spec 2)
     dedup.py                  DeduplicationEngine (Spec 6,7)
     relevance.py              RelevanceEngine (Spec 6)
-    processing/               DocumentProcessor / PDFProcessor / OCRProcessor /
-                              TranscriptProcessor (Spec 4,5)
-    content_fetcher.py        ContentFetcher — legally-free full text laata hai
-                              aur processing/ ko pipeline se jodta hai (Spec 3,4,5)
-    vector_search.py          VectorSearch (Spec 4,6)
+    processing/               Document/PDF/OCR/Transcript processing
+    content_fetcher.py        legally-free full-text retrieval + processing
     evidence.py               EvidenceEngine (Spec 7)
     citation.py               CitationEngine (Spec 7,14)
     contradiction.py          ContradictionEngine (Spec 8)
     gemini_reasoning.py       GeminiReasoning (Spec 9)
-    critic.py                 Critic (Spec 9 Pass 4/6)
+    reasoning_router.py       quota-resilient ₹0 provider fallback base
+    reasoning_router_integrated.py
+                              provider fallback + latest pass accounting facade
+    source_prompt_guard.py    untrusted source-data / prompt-injection boundary
+    critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
-    knowledge_graph.py        KnowledgeGraph adapter (Spec 16)
-    research_memory.py        ResearchMemory (Spec 16)
-    synthesizer.py            FinalSynthesizer (Spec 14)
-    orchestrator.py           DeepResearchEngine — poora pipeline
-    agent_manager.py          AgentManager — per-project engines
+    research_memory.py        ResearchMemory
+    synthesizer.py            FinalSynthesizer
+    orchestrator.py           DeepResearchEngine
 
-NOTE: heavy modules (chromadb / sentence-transformers / google-generativeai)
-lazily import hote hain, taaki `import research_engine` sasta rahe aur pure
-logic offline test ho sake.
+Heavy modules lazily import so ``import research_engine`` remains cheap. A tiny
+pure-Python domain ambiguity guard is installed immediately because every later
+planner/relevance/connector caller must share the same domain decision.
+
+The reasoning router is also installed at package-import time, but performs NO
+network call then. It simply replaces the exported ``GeminiReasoning`` class
+with a backwards-compatible subclass. With no configured fallback provider it
+behaves exactly like Claude's Gemini implementation; with a confirmed/free
+fallback configured it can finish the same logical pass through Groq,
+OpenRouter-free or local Ollama instead of returning a quota error. The
+integrated facade preserves Claude's latest pass-level/API accounting even when
+a fallback provider completes a pass after Gemini fails.
+
+Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
+EvidencePack rendering in a strict evidence-only boundary, quotes every source
+line, neutralizes instruction-like source text without deleting research
+content, strips hidden bidi/control characters, and bounds hostile metadata.
 """
 from __future__ import annotations
+
+# Install before planner/relevance/connectors bind domain.detect. This module is
+# pure Python and has no heavy dependency/network side effect.
+from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
+
+# Preserve Claude's Gemini implementation as the primary, but let every normal
+# import (including orchestrator's direct module import) see the resilient
+# subclass. reasoning_router captures the original class before this assignment;
+# the integrated facade then adds the latest pass-log/accounting compatibility.
+from . import gemini_reasoning as _gemini_reasoning
+from .reasoning_router_integrated import ResilientReasoning as _ResilientReasoning
+_gemini_reasoning.GeminiReasoning = _ResilientReasoning
 
 from .models import (
     Claim,
@@ -43,26 +68,27 @@ from .models import (
     SourceType,
     label_to_claim_type,
 )
+# Every normal package import receives the same source-data trust boundary.
+# Installation is deterministic and performs no network/model call.
+from .source_prompt_guard import install as _install_source_prompt_guard
+_install_source_prompt_guard()
+
 from .depth import DepthConfig, get_depth_config, quota_note
 
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
     "DepthConfig", "get_depth_config", "quota_note",
-    # lazy — har naam _LAZY mein bhi hona chahiye, warna
-    # `from research_engine import *` AttributeError deta hai.
-    # ("agent_manager" pehle yahan tha par _LAZY mein nahi — wo bug tha;
-    #  singleton ka asli naam "manager" hai.)
     "CitationEngine", "EvidenceEngine", "ContradictionEngine",
     "RelevanceEngine", "DeduplicationEngine", "ResearchPlanner",
     "SourceDiscovery", "DeepResearchEngine", "AgentManager", "manager",
     "VerificationEngine", "HypothesisEngine", "ResearchMemory",
+    "ScientificDiscoveryEngine", "SafeNumericExecutor",
     "FinalSynthesizer", "GeminiReasoning", "Critic", "VectorSearch",
     "KnowledgeGraphAdapter", "DocumentProcessor", "PDFProcessor",
     "OCRProcessor", "TranscriptProcessor", "ContentFetcher",
 ]
 
-# PEP 562 — heavy cheezein tabhi load karo jab maangi jayen
 _LAZY = {
     "CitationEngine": ".citation",
     "EvidenceEngine": ".evidence",
@@ -74,6 +100,8 @@ _LAZY = {
     "VerificationEngine": ".verification",
     "HypothesisEngine": ".hypothesis",
     "ResearchMemory": ".research_memory",
+    "ScientificDiscoveryEngine": ".advanced_discovery",
+    "SafeNumericExecutor": ".advanced_discovery",
     "FinalSynthesizer": ".synthesizer",
     "GeminiReasoning": ".gemini_reasoning",
     "Critic": ".critic",
@@ -86,7 +114,6 @@ _LAZY = {
     "ContentFetcher": ".content_fetcher",
     "DeepResearchEngine": ".orchestrator",
     "AgentManager": ".agent_manager",
-    # ready-to-use singleton (routes isse import karti hain)
     "manager": ".agent_manager",
 }
 

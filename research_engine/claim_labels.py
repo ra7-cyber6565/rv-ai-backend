@@ -1,27 +1,12 @@
-"""
-Claim label honesty — "[ESTABLISHED]" sirf tab jab full text padha gaya ho.
+"""Claim-label honesty gate.
 
-Kyun ye file bani (2026-08-20, live MAXIMUM run ke baad):
-Us report mein ek CACC claim par `[ESTABLISHED]` label tha, aur usi report ke
-neeche likha tha "0/14 full-text fetch successful". Yaani label ne kaha "ye
-established fact hai", par system ne us paper ka ek shabd bhi poora nahi padha
-tha — sirf abstract/snippet dekha tha. Ye chhupa hua jhooth hai, aur intel ka
-rule saaf hai:
+Compatibility + production rule:
+- default helper behaviour remains depth/citation-only for old tests/callers;
+- the production orchestrator passes ``check_entailment=True``;
+- in that strict path, full-text access alone is NOT enough: the same cited
+  source must pass citation + relevance + support + depth + quality (A-E).
 
-    Snippet/abstract-only evidence  →  SOURCE-REPORTED   (source ye keh raha hai)
-    Full text + claim verification →  ESTABLISHED        (humne khud dekha)
-
-Ye module do cheezein deta hai:
-  1. `LABEL_RULE_PROMPT` — Gemini ko yahi rule pehle se bata dena (behtar hai ki
-     wo galti hi na kare).
-  2. `downgrade(text, pack)` — DETERMINISTIC safety net. Model bhool jaaye, to
-     yahan har `[ESTABLISHED]` line ke [S#] ka asli `reading_level()` dekha
-     jaata hai aur label khud-ba-khud neeche kar diya jaata hai. Ye Gemini par
-     bharosa nahi karta — regex + pack ke asli numbers par chalta hai, isliye
-     quota khatam hone par bhi kaam karta hai.
-
-Kuch upgrade NAHI hota: agar model ne khud `[SOURCE-REPORTED]` likha hai to use
-`[ESTABLISHED]` banane ka koi raasta nahi hai. Honesty ek taraf hi jhukti hai.
+No label is ever upgraded here.
 """
 from __future__ import annotations
 
@@ -34,20 +19,16 @@ ESTABLISHED = "ESTABLISHED"
 SOURCE_REPORTED = "SOURCE-REPORTED"
 UNVERIFIED = "UNVERIFIED"
 
-# "[ESTABLISHED]" / "[ESTABLISHED FACT]" / "[FACT]" / "[STRONG EVIDENCE]" —
-# ye chaar hi labels "humne verify kiya" ka dava karte hain, isliye inhi par
-# gate lagta hai. [EVIDENCE]/[INFERENCE]/[HYPOTHESIS] pehle se hi honest hain.
 _STRONG_LABEL_RE = re.compile(
     r"\[\s*(ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE)\s*\]",
-    re.IGNORECASE)
+    re.IGNORECASE,
+)
 _SID_RE = re.compile(r"\[\s*S\s*(\d{1,3})[^\]]*\]", re.IGNORECASE)
 _NO_SOURCE_RE = re.compile(r"\[\s*NO[\s\-]?SOURCE\s*\]", re.IGNORECASE)
-
 _FULL = "full_text"
 
 
 def _cited_ids(line: str) -> List[str]:
-    """Line ke andar ke [S#] ids — "[S1][S4]" aur "[S1, S4]" dono chalte hain."""
     out: List[str] = []
     for num in _SID_RE.findall(line or ""):
         sid = f"S{int(num)}"
@@ -56,44 +37,65 @@ def _cited_ids(line: str) -> List[str]:
     return out
 
 
-def line_verdict(line: str, pack: Optional[EvidencePack],
-                 check_entailment: bool = False) -> Tuple[str, str]:
-    """
-    Ek line ke liye faisla: (naya_label, wajah).
+def _records(line: str, pack: Optional[EvidencePack]) -> List:
+    if pack is None:
+        return []
+    rows = [pack.by_id(sid) for sid in _cited_ids(line)]
+    return [row for row in rows if row is not None]
 
-    - koi valid [S#] nahi → UNVERIFIED (source ke bina "established" impossible)
-    - kam se kam ek cited source ka reading_level() == "full_text" → ESTABLISHED
-    - warna → SOURCE-REPORTED
 
-    `check_entailment=True` (§13 / point 7) ek EXTRA sharti gate laga deta hai:
-    full text padha gaya ho, par us text mein claim ka support hi na dikhe, to
-    label phir bhi ESTABLISHED nahi rehta. Ye OPT-IN hai kyunki entailment ek
-    deterministic proxy hai (claim_verification.check_c) — pipeline jaan-boojh
-    kar isse on karta hai, aur jahan support check HO HI NA SAKE wahan gate chup
-    rehta hai (sirf saaf FAIL par girata hai).
+def _has_full_text_cite(line: str, pack: Optional[EvidencePack]) -> bool:
+    """Whether a non-patent cited source can enter the strict A-E gate."""
+    for record in _records(line, pack):
+        try:
+            if not getattr(record, "is_patent", False) and record.reading_level() == _FULL:
+                return True
+        except Exception:  # pragma: no cover - defensive
+            continue
+    return False
 
-    PATENT KA GATE (₹0 patent batch, point 4):
-    Patent ka poora text padh lena bhi ESTABLISHED ka haq nahi deta. Patent ke
-    claims LEGAL dawe hote hain — grant ka matlab "examiner ko novel/non-obvious
-    laga", "experiment se saabit ho gaya" NAHI. Isliye patent source ESTABLISHED
-    ki ginti se BAHAR hai: agar line par sirf patent(s) cite hain to label
-    SOURCE-REPORTED rehta hai, chahe read depth full_text ho. Line par koi
-    non-patent source full text ke saath ho to wo apne bal par ESTABLISHED de
-    sakta hai (patent uske saath extra context ban jaata hai).
+
+def _ae_verdict(line: str, pack: Optional[EvidencePack]) -> Tuple[Optional[bool], str]:
+    """Cumulative same-source A-E result; None means context unavailable."""
+    if pack is None:
+        return None, "claim-level A-E context available nahi tha"
+    try:
+        from .evidence_verification import EvidenceVerifier
+        report = EvidenceVerifier().verify(line, pack)
+    except Exception as exc:  # strong labels fail closed
+        return False, f"claim-level A-E verification run nahi ho saki ({type(exc).__name__})"
+    if not report.items:
+        return False, "labelled factual claim A-E verifier ne parse nahi ki"
+    item = report.items[0]
+    if item.verdict == "verified_against_available_evidence":
+        return True, (
+            "same cited source ne citation+relevance+support+depth+quality A-E gate pass kiya"
+        )
+    return False, item.note or "claim-level A-E gate pass nahi hua"
+
+
+def line_verdict(
+    line: str,
+    pack: Optional[EvidencePack],
+    check_entailment: bool = False,
+) -> Tuple[str, str]:
+    """Return the strongest label allowed by depth, A-E, and patent rules.
+
+    Patent claims are legal assertions rather than experimental proof. A
+    patent-only line therefore stays SOURCE-REPORTED even when its claims or
+    description were read. In the production strict path, a non-patent source
+    must independently pass the cumulative same-source A-E verification gate.
     """
     ids = _cited_ids(line)
-    if pack is not None:
-        records = [pack.by_id(sid) for sid in ids]
-        records = [r for r in records if r is not None]
-    else:
-        records = []
+    records = _records(line, pack)
 
     if not records:
         if _NO_SOURCE_RE.search(line or ""):
             return UNVERIFIED, "is line par koi source nahi hai ([NO-SOURCE])"
         if ids:
-            return UNVERIFIED, ("cite kiye gaye " + ", ".join(ids)
-                                + " evidence pack mein nahi mile")
+            return UNVERIFIED, (
+                "cite kiye gaye " + ", ".join(ids) + " evidence pack mein nahi mile"
+            )
         return UNVERIFIED, "is line par koi [S#] citation nahi hai"
 
     levels = {}
@@ -101,62 +103,60 @@ def line_verdict(line: str, pack: Optional[EvidencePack],
     for record in records:
         try:
             level = record.reading_level()
-        except Exception:                      # noqa: BLE001 — kabhi crash na kare
+        except Exception:  # pragma: no cover
             level = "metadata"
         levels[record.source_id] = level
         if getattr(record, "is_patent", False):
             patent_ids.append(record.source_id)
 
-    # patent full-text bhi ESTABLISHED nahi de sakta (docstring dekho)
+    # Patent full text can provide prior-art context, never scientific proof.
     full = [sid for sid, level in levels.items()
             if level == _FULL and sid not in patent_ids]
-    if full:
-        if check_entailment and _entailment_blocked(line, pack):
+    if not full:
+        patent_full = [sid for sid in patent_ids if levels.get(sid) == _FULL]
+        if patent_full and len(patent_ids) == len(levels):
             return SOURCE_REPORTED, (
-                f"full text to padha gaya ({', '.join(full)}), par us text mein "
-                f"is claim ka support nahi dikha")
+                f"is line ka evidence sirf patent(s) hai ({', '.join(patent_full)}) — "
+                "patent ke claims LEGAL dawe hain, experiment ka proof nahi")
+        detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
+        if patent_ids:
+            detail += f" (patent: {', '.join(patent_ids)} — legal dawa, proof nahi)"
+        return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
+
+    if not check_entailment:
         return ESTABLISHED, f"full text padha gaya: {', '.join(full)}"
 
-    patent_full = [sid for sid in patent_ids if levels.get(sid) == _FULL]
-    if patent_full and len(patent_ids) == len(levels):
-        return SOURCE_REPORTED, (
-            f"is line ka evidence sirf patent(s) hai ({', '.join(patent_full)}) — "
-            f"patent ke claims LEGAL dawe hain, experiment ka proof nahi, isliye "
-            f"ESTABLISHED nahi ban sakta")
-    detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
-    if patent_ids:
-        detail += f" (patent: {', '.join(patent_ids)} — legal dawa, proof nahi)"
-    return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
+    verified, why = _ae_verdict(line, pack)
+    if verified is True:
+        return ESTABLISHED, why
+    if verified is None:
+        # Strict check requested but context missing: strong label ko pass mat
+        # karo. Unknown verification is not PASS.
+        return UNVERIFIED, why
+    return UNVERIFIED, f"full text access tha, lekin {why}"
 
 
-def _entailment_blocked(line: str, pack: Optional[EvidencePack]) -> bool:
-    """claim_verification ka gate — import lazy, aur fail hone par chup (False)."""
-    try:
-        from .claim_verification import entailment_blocked
-        return bool(entailment_blocked(line, pack))
-    except Exception:                          # pragma: no cover - defensive
-        return False
-
-
-def downgrade(text: str, pack: Optional[EvidencePack] = None,
-              check_entailment: bool = False) -> Tuple[str, Dict]:
-    """
-    Answer text mein har "verified" dave ka label asli read-level se match karao.
-
-    Returns `(naya_text, report)`. Report mein:
-        checked          — kitni lines par strong label tha
-        downgraded       — kitni neeche ki gayi
-        to_source_reported / to_unverified — ginti
-        entailment_blocked — kitni lines full text ke BAAVJOOD giri (support hi
-                             nahi mila) — sirf `check_entailment=True` par
-        details          — max 8 chhoti lines (user ko dikhane ke liye)
-        note             — ek line ka human-readable summary ("" agar sab theek)
-    Text kabhi nahi kaata jaata — sirf label badalta hai, taaki content na khoye.
-    """
+def downgrade(
+    text: str,
+    pack: Optional[EvidencePack] = None,
+    check_entailment: bool = False,
+) -> Tuple[str, Dict]:
+    """Strong user-facing labels ko deterministic evidence state se match karao."""
     body = text or ""
-    report: Dict = {"checked": 0, "downgraded": 0, "to_source_reported": 0,
-                    "to_unverified": 0, "entailment_blocked": 0,
-                    "details": [], "note": ""}
+    report: Dict = {
+        "checked": 0,
+        "downgraded": 0,
+        "to_source_reported": 0,
+        "to_unverified": 0,
+        "a_e_checked": 0,
+        "a_e_failed": 0,
+        # Compatibility name used by Claude's older tests. It now means a
+        # full-text strong label was blocked by the stricter A-E gate; an
+        # abstract/snippet depth downgrade is NOT counted here.
+        "entailment_blocked": 0,
+        "details": [],
+        "note": "",
+    }
     if not body.strip():
         return body, report
 
@@ -165,11 +165,24 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None,
         if not _STRONG_LABEL_RE.search(raw):
             out_lines.append(raw)
             continue
+
         report["checked"] += 1
+        ae_attempted = bool(check_entailment and _has_full_text_cite(raw, pack))
         verdict, why = line_verdict(raw, pack, check_entailment=check_entailment)
+
+        # A-E is a separate stage from access-depth gating. Do not report an
+        # abstract/snippet downgrade as "A-E checked and failed" when the A-E
+        # verifier was never actually reached.
+        if ae_attempted:
+            report["a_e_checked"] += 1
+            if verdict != ESTABLISHED:
+                report["a_e_failed"] += 1
+                report["entailment_blocked"] += 1
+
         if verdict == ESTABLISHED:
             out_lines.append(raw)
             continue
+
         new_line = _STRONG_LABEL_RE.sub(f"[{verdict}]", raw)
         out_lines.append(new_line)
         report["downgraded"] += 1
@@ -177,8 +190,6 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None,
             report["to_source_reported"] += 1
         else:
             report["to_unverified"] += 1
-        if "support nahi dikha" in why:
-            report["entailment_blocked"] += 1
         if len(report["details"]) < 8:
             snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_line).strip()
             report["details"].append(f"{snippet[:150]} — {why}")
@@ -189,92 +200,111 @@ def downgrade(text: str, pack: Optional[EvidencePack] = None,
             bits.append(f"{report['to_source_reported']} claim SOURCE-REPORTED")
         if report["to_unverified"]:
             bits.append(f"{report['to_unverified']} claim UNVERIFIED")
+        strict_reason = (
+            "full text hone ke baad bhi same cited source par claim-level A-E support "
+            "nahi mila"
+            if report["a_e_failed"]
+            else "source access depth strong label ke liye enough nahi thi"
+        )
         report["note"] = (
-            f"{report['downgraded']}/{report['checked']} 'established' dave "
-            f"neeche kiye gaye (" + ", ".join(bits) + ") — kyunki un sources ka "
-            f"poora text nahi padha gaya, sirf abstract/snippet mila.")
-        if report["entailment_blocked"]:
-            report["note"] += (
-                f" Inme {report['entailment_blocked']} jagah poora text to padha "
-                f"gaya tha, par us text mein claim ka support nahi mila.")
+            f"{report['downgraded']}/{report['checked']} strong dave neeche kiye gaye "
+            f"(" + ", ".join(bits) + f") — {strict_reason}."
+        )
     return "\n".join(out_lines), report
 
 
 def merge_reports(strict: Optional[Dict], depth: Optional[Dict]) -> Dict:
-    """
-    Label gate DO pass ka hai — dono ka hisaab ek jagah.
+    """Merge the two sequential label gates without losing A-E accounting.
 
-    Kyun zaroori hai (cross-domain benchmark, 2026-08-21): pehle strict pass
-    (`claim_verification.enforce_strict_labels`) chalta hai, jo "poora text
-    padha par support nahi mila" wali line ko `[UNVERIFIED]` kar deta hai.
-    Uske BAAD depth pass (`downgrade()`) chalta hai — aur use us line par koi
-    strong label milta hi nahi, kyunki wo pehle hi gir chuki hai. Nateeja:
-    answer mein downgrade saaf dikhta tha, par machine-readable
-    `label_report` `checked: 0, downgraded: 0` bolta tha. Yaani engine ne kaam
-    kiya lekin apna hisaab kam karke bataya — audit ke liye ye jhooth hai.
+    ``enforce_strict_labels`` runs first. A line it turns into UNVERIFIED no
+    longer contains a strong label when ``downgrade`` runs, so simply returning
+    the second report under-counts real work. Claude's cross-domain benchmark
+    caught that audit bug. This integration keeps that fix while preserving the
+    stricter A-E counters introduced on this branch.
 
-    Isliye ab dono pass ka total milta hai. `strict_unverified` alag se rehta
-    hai taaki pata rahe ki kaunsa pass ne giraya.
+    The merge is deliberately conservative: strict downgrades are added once;
+    checked is the maximum (same original answer, sequential passes), details are
+    deduplicated, and A-E counters remain those of the depth/A-E pass rather than
+    being invented from the older strict entailment proxy.
     """
-    depth = dict(depth or {})
     strict = dict(strict or {})
+    depth = dict(depth or {})
     out: Dict = {
-        "checked": 0, "downgraded": 0, "to_source_reported": 0,
-        "to_unverified": 0, "entailment_blocked": 0, "strict_unverified": 0,
-        "details": [], "note": "",
+        "checked": int(depth.get("checked") or 0),
+        "downgraded": int(depth.get("downgraded") or 0),
+        "to_source_reported": int(depth.get("to_source_reported") or 0),
+        "to_unverified": int(depth.get("to_unverified") or 0),
+        "a_e_checked": int(depth.get("a_e_checked") or 0),
+        "a_e_failed": int(depth.get("a_e_failed") or 0),
+        "entailment_blocked": int(depth.get("entailment_blocked") or 0),
+        "strict_unverified": 0,
+        "details": list(depth.get("details") or []),
+        "note": str(depth.get("note") or "").strip(),
     }
-    out.update({k: v for k, v in depth.items() if k in out})
-    s_checked = int(strict.get("checked") or 0)
-    s_unver = int(strict.get("to_unverified") or 0)
-    # Strict pass pehle chala tha, isliye usne jitni lines dekhi wo depth pass
-    # ki ginti se kam nahi ho sakti — total wahi jo zyada hai.
-    out["checked"] = max(int(out.get("checked") or 0), s_checked)
-    out["downgraded"] = int(out.get("downgraded") or 0) + s_unver
-    out["to_unverified"] = int(out.get("to_unverified") or 0) + s_unver
-    out["strict_unverified"] = s_unver
-    details = list(out.get("details") or [])
-    for line in (strict.get("details") or []):
-        if len(details) >= 8:
+
+    strict_checked = int(strict.get("checked") or 0)
+    strict_unverified = int(strict.get("to_unverified") or 0)
+    out["checked"] = max(out["checked"], strict_checked)
+    out["downgraded"] += strict_unverified
+    out["to_unverified"] += strict_unverified
+    out["strict_unverified"] = strict_unverified
+
+    seen = set(out["details"])
+    for line in strict.get("details") or []:
+        detail = f"{line} — poora text mila par strict support check fail hua"
+        if detail in seen:
+            continue
+        if len(out["details"]) >= 8:
             break
-        details.append(f"{line} — poora text mila par claim ka support nahi")
-    out["details"] = details
-    notes = [n for n in (strict.get("note"), depth.get("note")) if n]
+        out["details"].append(detail)
+        seen.add(detail)
+
+    notes: List[str] = []
+    for value in (strict.get("note"), depth.get("note")):
+        clean = str(value or "").strip()
+        if clean and clean not in notes:
+            notes.append(clean)
     out["note"] = " ".join(notes)
     return out
 
 
 def human_note(report: Optional[Dict]) -> str:
-    """
-    Audit section ke liye normal bhasha wali line (raw log nahi).
-
-    intel ka rule: user ko "[FAIL] label gate" nahi dikhna chahiye — use ye
-    dikhna chahiye ki iska matlab kya hai.
-    """
+    """Audit section ke liye normal bhasha, raw PASS/FAIL log nahi."""
     r = report or {}
     checked = int(r.get("checked") or 0)
     if not checked:
-        return ("Answer mein 'established fact' type ka koi strong dava nahi tha, "
-                "isliye yahan kuch downgrade karne ki zaroorat nahi padi.")
+        return (
+            "Answer mein 'established fact' type ka koi strong dava nahi tha, "
+            "isliye yahan kuch downgrade karne ki zaroorat nahi padi."
+        )
     down = int(r.get("downgraded") or 0)
     if not down:
-        return (f"{checked} strong dave check kiye gaye aur sabke peeche kam se kam "
-                f"ek aisa source tha jiska poora text padha gaya — isliye inhe "
-                f"'established' rehne diya gaya.")
-    return (f"{down} jagah label neeche karna pada. Matlab simple hai: wahan par "
-            f"baat 'source ye keh raha hai' (SOURCE-REPORTED) ke level par hai, "
-            f"'humne khud poora paper padh kar confirm kiya' (ESTABLISHED) ke "
-            f"level par nahi. Jahan poora text mila, wahan label waisa hi raha.")
+        if int(r.get("a_e_checked") or 0):
+            return (
+                f"{checked} strong dave check kiye gaye; required full-text access ke "
+                "saath claim-level citation, relevance, support, depth aur source-quality "
+                "gate bhi pass hua, isliye ESTABLISHED label reh saka."
+            )
+        return (
+            f"{checked} strong dave depth-level check mein theek the. Claim-level A-E "
+            "strict mode is helper call mein apply nahi hua tha."
+        )
+    return (
+        f"{down} jagah ESTABLISHED strong label neeche karna pada. Jahan sirf "
+        "abstract/snippet support hai wahan SOURCE-REPORTED hota hai; aur jahan "
+        "strong claim ko same cited source par A-E support prove nahi hua wahan "
+        "UNVERIFIED rakha jaata hai. Sirf full text khulna enough nahi hai."
+    )
 
 
-# ── prompt block ─────────────────────────────────────────────────────────────
-LABEL_RULE_PROMPT = """# LABEL RULE (intel ka rule — todne par label khud neeche kar diya jayega)
-- `[ESTABLISHED]` sirf us baat par jiska POORA TEXT padha gaya hai (source list
-  mein us source par "read: full_text" likha hoga) aur claim wahan se seedha
-  verify hota hai.
-- Agar sirf abstract/snippet/metadata mila hai, to label `[SOURCE-REPORTED]`
-  likho — matlab "source ye report karta hai", "ye confirmed fact hai" nahi.
-- Kisi bhi source se support na ho to `[NO-SOURCE]` + `[INFERENCE]` ya
-  `[HYPOTHESIS]`.
-- Ye guess ka kaam nahi hai: source block mein har source ka read level diya
-  gaya hai, wahi dekho.
+LABEL_RULE_PROMPT = """# LABEL RULE (strict evidence honesty)
+- `[ESTABLISHED]` / `[FACT]` / `[STRONG EVIDENCE]` sirf tab likho jab source
+  block mein required `full_text` access ho AUR claim usi cited evidence se
+  citation + relevance + support + depth + quality checks pass kar sake.
+- Full text khul jaana apne aap claim ko verify nahi karta.
+- Agar sirf abstract/snippet/metadata mila hai, `[SOURCE-REPORTED]` likho —
+  matlab source ye report karta hai, confirmed fact nahi.
+- Kisi source se support na ho to `[NO-SOURCE]` + `[INFERENCE]`, `[HYPOTHESIS]`
+  ya `[UNVERIFIED]` use karo.
+- Labels kabhi confidence decoration nahi hain; evidence state ka sach hain.
 """

@@ -1,262 +1,227 @@
 """
-Fast conversational chat — "QUICK" ka asli matlab.
+Fast conversational chat — QUICK mode without a single-provider quota trap.
 
-Deep-research engine (papers/books/datasets, connectors, chromadb, embeddings)
-bhaari hai aur free server par slow/risky. Aam baat-cheet ke liye uski zaroorat
-nahi. Ye module SIRF Gemini ko seedha call karta hai — koi torch, koi chromadb,
-koi network connector nahi — isliye ye turant jawab deta hai aur crash-proof hai.
+The old implementation called Gemini directly. That meant QUICK chat could stop
+working as soon as Gemini quota/auth/model availability failed, even though the
+research engine already had safer fallback logic. QUICK now uses the same ₹0
+reasoning chain as deep research:
 
-Do cheezein spec/user ke hisaab se yahan zaroori hain:
-    1. LANGUAGE MIRROR — jis bhasha/script mein user likhe, ussi mein jawab.
-       (Hindi -> Hindi, English -> English, Hinglish -> Hinglish.)
-    2. EMOTION MIRROR — user ke mood ke hisaab se tone. Dukhi ho to narmi,
-       excited ho to gth same energy. ChatGPT jaisi insaani vibe.
+    confirmed Gemini -> confirmed Groq free -> OpenRouter free-only ->
+    local Ollama -> route-level research/evidence fallback.
+
+Trivial greetings/thanks/identity are answered deterministically first. Besides
+being instant, this intentionally spends zero hosted-model quota on messages that
+do not need a model.
+
+No raw provider exception/API key is returned to the client.
 """
 from __future__ import annotations
 
 import os
-import time
+import re
 from typing import Dict, List, Optional
-
-from .gemini_model import (candidates, configure, friendly_error, generate,
-                           reset_for_new_key)
-from .key_pool import KeyPool
 from .local_language import normalize
-from .local_reasoning import quick_answer as offline_quick
+from .reasoning_router_integrated import ResilientReasoning
+from utils.reasoning_status import reasoning_status
 
-# Sirf reference ke liye — asli naam runtime par Google se poochh kar chunte hain
-# (dekho gemini_model.resolve). Hard-coded naam hi "InvalidArgument" ki wajah tha.
 MODEL_NAME = os.getenv("GEMINI_MODEL", "gemini-flash-latest")
-
-
-def _seconds(env_name: str, default: int, lo: int, hi: int) -> int:
-    try:
-        value = int(os.getenv(env_name, "") or default)
-    except (TypeError, ValueError):
-        value = default
-    return max(lo, min(value, hi))
-
-
-# QUICK chat ki do haddein (dono env se badli ja sakti hain):
-#   CALL_TIMEOUT   — ek Gemini call zyada se zyada itni der latak sakti hai
-#   TOTAL_BUDGET   — saare model milakar itne second se aage nahi jaana
-# Ye "feature kaatna" nahi hai — model list, key rotation, offline parat, sab
-# waise hi hain. Sirf intezaar ki hadd hai, taaki HTTP connection zinda rahe.
-CALL_TIMEOUT_SECONDS = _seconds("GEMINI_CHAT_TIMEOUT", 45, 10, 300)
-TOTAL_BUDGET_SECONDS = _seconds("GEMINI_CHAT_BUDGET", 100, 20, 600)
+_MAX_MESSAGE_CHARS = 20_000
+_MAX_HISTORY_CHARS = 18_000
 
 _SYSTEM = """Tum "RV" ho — ek dost jaisa, samajhdaar AI assistant.
 
 # Pehchaan
 - Agar koi poochhe "tum kaun ho / who are you / tumhara naam", to seedha bolo
-  ki tum RV ho. Kisi company ya model ka naam mat lo. Chhota, garmjoshi bhara
-  jawab: jaise "Main RV hoon 🙂".
+  ki tum RV ho. Kisi company ya model ka naam mat lo.
 
-# Bhasha (bahut zaroori)
-- Jis bhasha aur script mein user ne likha hai, THEEK ussi mein jawab do.
-  - User Hindi (Devanagari) mein -> tum bhi Hindi (Devanagari) mein.
-  - User English mein -> tum English mein.
-  - User Hinglish (Roman Hindi) mein -> tum bhi Hinglish (Roman) mein.
-- Apni marzi se bhasha mat badlo.
+# Bhasha
+- Jis bhasha/script mein user likhe, ussi mein jawab do: Hindi -> Hindi,
+  English -> English, Hinglish -> Hinglish.
+- User ki spelling par comment/correction mat karo; matlab samajh kar jawab do.
 
-# Local likhne ka andaaz samajhna (bahut zaroori)
-- Asli log shuddh spelling nahi likhte. Tumhe waise hi samajh jaana hai jaise
-  ek dost samajh jaata hai. Kabhi ye mat kaho ki "samajh nahi aaya" sirf
-  spelling ki wajah se.
-- Vowel gire hue shabd kholo: smjna=samajhna, nhi=nahi, jldi=jaldi, krke=karke,
-  kon/koun=kaun, kyu=kyun, kese=kaise, bnao=banao, bht=bahut, psnd=pasand,
-  h=hai, hu=hoon, mtlb=matlab, kch=kuch, btao=batao, pta=pata, thik=theek.
-- Angrezi jo kaan se likhi ho, wo pehchaano: lagvej/legvej=language,
-  opsion=option, reserch=research, maxiume=maximum, quek=quick,
-  deshbord=dashboard, emosion=emotion, personlty=personality, wbsite=website.
-- Ek hi vaakya mein Hindi+English mile ho to normal hai — aage badho.
-- Regional bol-chaal (Bhojpuri, Haryanvi, Marwari, Punjabi, Marathi, Bangla,
-  Tamil-mixed, jo bhi) aaye to ussi lehje mein, ussi apnepan se jawab do.
-- User ki spelling KABHI theek mat karo, uspar comment mat karo, aur grammar ka
-  lecture mat do. Tum khud saaf-suthra likho — bas.
-- Agar do matlab ban rahe hon, to jo zyada mumkin hai wahi maan kar jawab do.
-  Bilkul hi samajh na aaye tabhi chhota sa poochho — ek hi line mein.
+# Mood
+- Udaas/pareshaan -> narmi aur useful madad.
+- Khush/excited -> matching energy.
+- Gussa/frustrated -> shaant, seedha, bina bahaanon ke.
+- Casual -> natural dostana tone.
 
-# Mood match karo (bahut zaroori)
-- User ke shabdon se uska mood padho aur ussi hisaab se baat karo:
-  - Udaas / pareshaan / dukhi -> pehle narmi aur hamdardi dikhao, phir madad.
-  - Khush / excited -> ussi energy aur josh ke saath.
-  - Gussa / frustrated -> shaant, seedhi, bina bahaanon ke madad.
-  - Casual / masti -> halka-phulka, dostana.
-- Insaan jaisi vibe rakho — robotic ya ratti-rataayi nahi.
-
-# Jawab kaisa ho
-- Saaf, simple aur samajhne mein aasaan. Zaroorat na ho to lambe-chaude lecture
-  mat do. ChatGPT jaise natural baat-cheet.
-- Zaroori ho tabhi points/steps use karo, warna normal baat-cheet.
-- Emoji tabhi jab mood match kare — zabardasti nahi.
-- Jhooth mat bolo. Agar kisi cheez ka pakka jawab poori tarah pakka nahi, to
-  imaandaari se bolo, aur agar wo gehri research maangta hai to user ko batao ki
-  wo "Deep" ya "Max" mode se poochh sakte hain jahan tum sources padhkar jawab
-  dete ho.
-
-# Badi cheez ko chhoti bhasha mein samjhana (yahi asli kaam hai)
-- Pehle ek-do line ka SEEDHA jawab do. "Ye ek complex topic hai" jaisi bhoomika
-  se shuru mat karo.
-- Bhaari shabd pehli baar aaye to usi vaakya mein uska aam matlab bracket mein
-  likho: "insulin resistance (jab body insulin ki sunna band kar deti hai)".
-- Chhote vaakya. Ek vaakya = ek baat.
-- Ek roz-marra ka example ya tulna do — rasoi, paisa, traffic, mobile ki battery
-  jaisa. Par example topic se sach mein milta ho, banawati nahi.
-- Aankda dete waqt uska matlab bhi: "30% kam" ke saath "yaani 10 mein se 3".
-- Bhaari-bharkam lines ("bahu-aayami", "it is important to note that") mat likho.
-  Shabd hatane se matlab na badle to hata do.
+# Jawab
+- Pehli line se kaam ki baat; zaroorat na ho to lecture nahi.
+- Jargon ka aam matlab saath samjhao.
+- Jhooth, fake certainty aur invented source mat do.
+- Agar sawal current/deep evidence maangta ho aur is chat pass ke paas sources
+  nahi hain, to general knowledge ko verified research mat bolo.
 """
 
 
 def _history_block(history: Optional[List[Dict]]) -> str:
     if not history:
         return ""
-    lines = []
-    for turn in history[-8:]:
+    lines: List[str] = []
+    used = 0
+    # Recent turns matter most. Build from newest backwards, then restore order.
+    selected: List[str] = []
+    for turn in reversed(history[-12:]):
+        if not isinstance(turn, dict):
+            continue
         role = (turn.get("role") or "").lower()
-        text = (turn.get("content") or turn.get("text") or "").strip()
+        text = str(turn.get("content") or turn.get("text") or "").strip()
         if not text:
             continue
         who = "User" if role in ("user", "human") else "RV"
-        lines.append(f"{who}: {text}")
+        row = f"{who}: {text}"
+        if used + len(row) > _MAX_HISTORY_CHARS:
+            break
+        selected.append(row)
+        used += len(row)
+    lines.extend(reversed(selected))
     return "\n".join(lines)
 
 
 def _build_prompt(message: str, history: Optional[List[Dict]]) -> str:
     convo = _history_block(history)
     convo_block = f"\n# Ab tak ki baat-cheet\n{convo}\n" if convo else ""
-
-    # Shorthand khula hua roop ek extra hint ke taur par. Isse mangled likhai
-    # (jaise "lokal lagvej bhi smjna chahiye") pakki tarah samajh mein aati hai.
-    # User ka asli message hi asli hai — hint sirf madad ke liye hai.
     opened = normalize(message)
     hint = ""
     if opened.strip().lower() != message.strip().lower():
-        hint = (f"\n# (Andar ka hint — shorthand khola hua, sirf samajhne ke liye)\n"
-                f"{opened}\n")
-
+        hint = ("\n# Andar ka shorthand hint — sirf samajhne ke liye\n"
+                f"{opened[:4000]}\n")
     return (f"{_SYSTEM}\n{convo_block}\n# User ka naya message\n{message}\n{hint}"
-            f"\n# RV ka jawab")
+            "\n# RV ka jawab")
 
 
-def _one_key_try(genai, prompt: str) -> Dict:
-    """
-    EK key par jawab lene ki koshish. Lautata hai:
-        {"text": str, "tried": [...], "exc": Exception|None, "key_dead": bool}
+def _style(message: str) -> str:
+    text = message or ""
+    if re.search(r"[\u0900-\u097F]", text):
+        return "hi"
+    low = text.lower()
+    roman_hindi = ("bhai", "kya", "kaise", "kyu", "kyun", "nhi", "nahi",
+                   "bta", "bata", "mera", "mujhe", "haan", "ha ", "theek")
+    return "hinglish" if any(token in low for token in roman_hindi) else "en"
 
-    `key_dead=True` ka matlab: is KEY ki hadd thi (quota/auth), model ki galti
-    nahi — yaani doosri free key try karna sach mein kaam ka hai.
+def _smalltalk(message: str) -> str:
+    """Zero-model answers for trivial conversation; empty means not small-talk."""
+    low = " ".join((message or "").lower().strip().split())
+    plain = re.sub(r"[^\w\u0900-\u097F ]+", "", low).strip()
+    style = _style(message)
 
-    TIME KA HISAAB (2026-08-21): QUICK chat interactive hai — user screen ke
-    saamne baitha hai. Pehle ek latki hui call yahan anaadi kaal tak ruk sakti
-    thi, aur 4 model × latakna = browser/gateway ka connection kat jaana. Ab
-    do haddein hain: har call ka apna timeout (`CALL_TIMEOUT`) aur poori koshish
-    ka wall-clock budget (`TOTAL_BUDGET`). Budget khatam hote hi hum ruk jaate
-    hain — par khaali haath nahi lautte: upar wali offline parat phir bhi jawab
-    deti hai. Koi model ya feature band nahi hota.
-    """
-    deadline = time.monotonic() + TOTAL_BUDGET_SECONDS
-    tried: List[str] = []
-    last_exc: Optional[Exception] = None
-    key_dead = False
-    for name in candidates(genai):
-        if tried and time.monotonic() >= deadline:
-            last_exc = last_exc or TimeoutError(
-                f"chat ka {TOTAL_BUDGET_SECONDS}s budget khatam ho gaya")
-            break
-        tried.append(name)
-        try:
-            # Bandhe hue time ke saath — ek latki hui call poori chat ko rok kar
-            # nahi rakh sakti (isi wajah se website par "server se baat nahi ho
-            # paayi" aata tha).
-            remaining = int(max(10, min(CALL_TIMEOUT_SECONDS,
-                                        deadline - time.monotonic())))
-            resp = generate(genai.GenerativeModel(name), prompt,
-                            timeout=remaining)
-            text = (getattr(resp, "text", "") or "").strip()
-            if text:
-                return {"text": text, "tried": tried, "exc": None,
-                        "key_dead": False, "model": name}
-            last_exc = RuntimeError("khaali jawab")
-        except Exception as exc:  # noqa: BLE001 — agla model try karo
-            last_exc = exc
-            low = str(exc).lower()
-            # key hi galat hai ya quota khatam — is key par aage try karna bekaar
-            if ("api key not valid" in low or "api_key_invalid" in low
-                    or "quota" in low or "429" in low
-                    or "resource_exhausted" in low or "permission" in low):
-                key_dead = True
-                break
-        if len(tried) >= 4:           # bahut der tak mat lagao
-            break
-    return {"text": "", "tried": tried, "exc": last_exc, "key_dead": key_dead,
-            "model": ""}
+    identity = ("who are you", "what are you", "tum kaun", "aap kaun", "naam kya",
+                "तुम कौन", "आप कौन", "नाम क्या")
+    if any(x in low for x in identity):
+        if style == "hi":
+            return "मैं RV हूँ 🙂 बताओ, किस चीज़ में मदद चाहिए?"
+        if style == "en":
+            return "I'm RV 🙂 What can I help you with?"
+        return "Main RV hoon 🙂 Batao, kis cheez mein help chahiye?"
+
+    greetings = {
+        "hi", "hello", "hey", "hii", "hiii", "hello bhai", "hi bhai", "hey bhai",
+        "namaste", "नमस्ते", "हेलो", "हाय",
+    }
+    if plain in greetings:
+        if style == "hi":
+            return "नमस्ते 🙂 बताओ, क्या करना है?"
+        if style == "en":
+            return "Hey 🙂 What do you want to work on?"
+        return "Haan bhai 🙂 batao, kya karna hai?"
+
+    thanks = ("thanks", "thank you", "thx", "shukriya", "dhanyavad", "धन्यवाद", "शुक्रिया")
+    if any(plain == x or plain.startswith(x + " ") for x in thanks):
+        if style == "hi":
+            return "बिलकुल 🙂"
+        if style == "en":
+            return "Anytime 🙂"
+        return "Bilkul bhai 🙂"
+
+    wellbeing = ("how are you", "kaise ho", "kese ho", "कैसे हो")
+    if any(x in low for x in wellbeing) and len(low) < 80:
+        if style == "hi":
+            return "मैं बढ़िया हूँ 🙂 बताओ, आज क्या करना है?"
+        if style == "en":
+            return "Doing well 🙂 What are we working on today?"
+        return "Badhiya bhai 🙂 batao, aaj kya kaam karna hai?"
+    return ""
+
+
+def _safe_accounting(brain: ResilientReasoning) -> Dict:
+    try:
+        acc = dict(brain.api_accounting())
+    except Exception:
+        return {}
+    # Keep diagnostics useful but compact. No keys/tokens are present in this
+    # schema; technical provider exception text is deliberately not returned.
+    allowed = (
+        "logical_reasoning_calls", "passes_requested", "passes_with_output",
+        "actual_http_attempts", "same_model_retries", "model_switches",
+        "provider_fallbacks", "blocked_models", "blocked_providers",
+    )
+    return {key: acc[key] for key in allowed if key in acc}
 
 
 def quick_chat(message: str, history: Optional[List[Dict]] = None) -> Dict:
-    """
-    Ek Gemini call, seedha jawab. Kabhi crash nahi karta — aur ab kabhi DEAD-END
-    bhi nahi karta.
+    """Fast chat through the resilient ₹0 model chain.
 
-    Teen parat (₹0, sab free):
-      1. pehli free key par Gemini (jaisa pehle tha)
-      2. quota/auth marne par BACKUP free key par shift (key_pool)
-      3. saari key mar jaayein to engine ka apna offline jawab — free sources
-         (Wikipedia/DuckDuckGo) padh kar. Yahan bhi "Failed" jaisa kuch nahi.
+    `fallback_required=True` means no model layer could produce text. The API
+    route then hands the same user message to QUICK research, which can still
+    retrieve evidence and use the deterministic evidence reasoner. This is a
+    graceful capability fallback, not an exception path.
     """
     message = (message or "").strip()
     if not message:
-        return {"answer": "Kuch likho to sahi 🙂", "mode": "QUICK", "ok": True}
+        return {"answer": "Kuch likho to sahi 🙂", "mode": "QUICK", "ok": True,
+                "degraded": False}
+    if len(message) > _MAX_MESSAGE_CHARS:
+        return {
+            "answer": ("Message bahut bada hai. Isse document ke roop mein upload karo ya "
+                       "Deep/Maximum research mein bhejo, taaki content chup-chaap truncate na ho."),
+            "mode": "QUICK", "ok": True, "degraded": True,
+            "fallback_required": False, "reason": "message_too_large_for_quick_chat",
+        }
 
-    keys = KeyPool()
-    if not keys.has_key():
-        # key hi nahi hai — phir bhi jawab dena hai, error page nahi dikhana
-        out = offline_quick(message, cause="no-key")
-        out["reason"] = ("Server par GEMINI_API_KEY set nahi hai "
-                         "(Railway → Variables).")
-        return out
+    # Don't burn any hosted quota on greetings/thanks/identity.
+    local = _smalltalk(message)
+    if local:
+        return {
+            "answer": local, "mode": "QUICK", "ok": True, "degraded": False,
+            "reasoning_layer": "deterministic_smalltalk", "api_attempts": 0,
+        }
+
+    status = reasoning_status()
+    if int(status.get("model_layers_configured", 0) or 0) <= 0:
+        return {
+            "answer": "",
+            "mode": "QUICK",
+            "ok": False,
+            "degraded": True,
+            "fallback_required": True,
+            "reason": "no_model_layer_configured",
+        }
+
+    brain = ResilientReasoning(budget=1, model_name=MODEL_NAME)
     try:
-        import google.generativeai as genai  # lazy: import sasta rahe
-        prompt = _build_prompt(message, history)
+        text = brain.generate(_build_prompt(message, history), "quick_chat")
+    except Exception:
+        # Never leak SDK/provider exception to UI. QUICK research fallback below
+        # remains available even if an unexpected provider adapter error occurs.
+        text = ""
 
-        tried: List[str] = []
-        last_exc: Optional[Exception] = None
-        switches = 0
-        while True:
-            configure(genai, keys.active())
-            # Pehle wo model jo Google ki asli list se chuna gaya; agar wo bhi
-            # mana kar de to jo baaki available the. Isse "InvalidArgument" par
-            # baat khatam nahi hoti — jawab phir bhi aata hai.
-            res = _one_key_try(genai, prompt)
-            tried.extend(n for n in res["tried"] if n not in tried)
-            last_exc = res["exc"] or last_exc
-            if res["text"]:
-                answer = {"answer": res["text"], "mode": "QUICK", "ok": True,
-                          "model": res["model"]}
-                if switches:
-                    # sirf ginti aur label — key ki value kabhi nahi
-                    answer["key_switches"] = switches
-                    answer["key_used"] = keys.label()
-                return answer
-            if not res["key_dead"] or not keys.has_backup():
-                break
-            keys.advance("quota/auth")
-            switches += 1
-            reset_for_new_key()      # nayi key par model-memory saaf
-        # Gemini se kuch nahi mila — ab bhi user ko jawab milega (offline parat)
-        out = offline_quick(message)
-        out["models_tried"] = tried
-        out["key_switches"] = switches
-        out["keys_available"] = keys.count
-        if last_exc is not None:
-            # raw text sirf debug field mein — user ko dikhne wale answer mein nahi
-            out["detail"] = f"{type(last_exc).__name__}: {last_exc}"
-            out["reason"] = friendly_error(last_exc)
-        return out
-    except Exception as exc:  # noqa: BLE001 — kabhi crash nahi karna
-        out = offline_quick(message)
-        out["detail"] = f"{type(exc).__name__}: {exc}"
-        out["reason"] = friendly_error(exc)
-        return out
+    if text.strip():
+        accounting = _safe_accounting(brain)
+        return {
+            "answer": text.strip(),
+            "mode": "QUICK",
+            "ok": True,
+            "degraded": bool(accounting.get("provider_fallbacks")),
+            "fallback_required": False,
+            "reasoning_accounting": accounting,
+        }
 
+    return {
+        "answer": "",
+        "mode": "QUICK",
+        "ok": False,
+        "degraded": True,
+        "fallback_required": True,
+        "reason": "all_configured_model_layers_unavailable",
+        "reasoning_accounting": _safe_accounting(brain),
+    }

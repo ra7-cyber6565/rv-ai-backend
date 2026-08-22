@@ -2046,7 +2046,7 @@ def _check_connector_contracts():
             fake_requests.get = lambda *a, **k: _Resp(status=status)
             raised = None
             try:
-                cbase.http_get("http://x", retries=0)
+                cbase.http_get("https://api.openalex.org/works", retries=0)
             except Exception as exc:
                 raised = exc
             check(f"HTTP {status} -> {expected.__name__} (chup-chaap 0 results nahi)",
@@ -2064,7 +2064,7 @@ def _check_connector_contracts():
         fake_requests.get = _always_timeout
         raised = None
         try:
-            cbase.http_get("http://x", retries=1)
+            cbase.http_get("https://api.openalex.org/works", retries=1)
         except Exception as exc:
             raised = exc
         check("timeout par ek retry hoti hai (slow server ko dusra mauka)",
@@ -2092,7 +2092,7 @@ def _check_connector_contracts():
                 fake_requests.get = (
                     lambda *a, _h=header, **k: _Resp(status=429, headers=_h))
                 try:
-                    cbase.http_get("http://x", retries=1)
+                    cbase.http_get("https://api.openalex.org/works", retries=1)
                 except cbase.RateLimited:
                     pass
                 check(f"I9: {why}", clk["slept"] == [expected], str(clk["slept"]))
@@ -3120,7 +3120,7 @@ def _check_live_round2_fixes():
                 get=lambda *a, **k: fake_resp)
             raised = None
             try:
-                cbase.http_get("https://example.test/x", retries=0)
+                cbase.http_get("https://api.openalex.org/works", retries=0)
             except cbase.ConnectorHTTPError as exc:
                 raised = exc
             check("base.http_get 400 ko status ke saath raise karta hai (wiring)",
@@ -3130,7 +3130,7 @@ def _check_live_round2_fixes():
             fake_resp.status_code = 429
             rl = None
             try:
-                cbase.http_get("https://example.test/x", retries=0)
+                cbase.http_get("https://api.openalex.org/works", retries=0)
             except cbase.RateLimited as exc:
                 rl = exc
             check("base.http_get 429 ko RateLimited banata hai (0 result nahi)",
@@ -3513,26 +3513,11 @@ def main() -> int:
 
 
 def test_research_engine_all_checks_pass():
-    """
-    pytest ke liye ek hi entry point (2026-08-21).
+    """Let pytest execute the same ordered 593-check harness as script mode.
 
-    Pehle is file ke saare stage function `test_` se shuru hote the, isliye
-    pytest unhe alag-alag test samajh kar khud chalata tha. Uska nateeja:
-
-      * `test_contradictions(pack)`, `test_verification(pack)`,
-        `test_synthesizer(pack, ...)` — inhe agle stage ka data chahiye tha,
-        par pytest ne unhe FIXTURE naam samajh liya → "fixture 'pack' not
-        found", 3 ERROR (intel ke Windows run mein aaj yahi dikha).
-      * `test_evidence_and_citations` / `test_critic_and_hypothesis` value
-        return karte the → PytestReturnNotNoneWarning, jo future pytest mein
-        error ban jaata hai.
-      * Baaki stage bina kram ke, main() ke bahar chal rahe the — yaani jo
-        cheez CI (`python test_research_engine.py`) chalati hai aur jo pytest
-        chalata tha, wo ek jaisi nahi thi.
-
-    Isliye saare stage ka naam `_check_*` kar diya gaya (sirf naam badla,
-    andar ka ek bhi check nahi) aur pytest ab wahi `main()` chalata hai jo CI
-    chalati hai — same kram, same 593 check, ek hi nateeja.
+    The stage helpers intentionally use ``_check_*`` names: several depend on
+    values returned by earlier stages, so collecting them as independent pytest
+    tests creates fake fixture errors and PytestReturnNotNone warnings.
     """
     assert main() == 0
 

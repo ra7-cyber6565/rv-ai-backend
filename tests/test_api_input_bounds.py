@@ -1,0 +1,74 @@
+"""Offline schema tests for bounded public JSON inputs."""
+from __future__ import annotations
+
+import pytest
+from pydantic import ValidationError
+
+from api.agent_routes import ChatRequest, DeepResearchRequest, _custom as agent_custom
+from api.job_routes import ResearchJobRequest, _custom as job_custom
+from api.routes import QuestionRequest, YouTubeRequest
+
+
+@pytest.mark.parametrize(
+    "factory,field",
+    [
+        (lambda text: ChatRequest(message=text), "message"),
+        (lambda text: DeepResearchRequest(question=text), "question"),
+        (lambda text: ResearchJobRequest(question=text), "question"),
+        (lambda text: QuestionRequest(question=text), "question"),
+    ],
+)
+def test_public_question_like_fields_reject_over_20k(factory, field):
+    ok = factory("x" * 20_000)
+    assert getattr(ok, field) == "x" * 20_000
+    with pytest.raises(ValidationError):
+        factory("x" * 20_001)
+
+
+@pytest.mark.parametrize(
+    "factory",
+    [
+        lambda project: ChatRequest(message="hi", project_id=project),
+        lambda project: DeepResearchRequest(question="why", project_id=project),
+        lambda project: ResearchJobRequest(question="why", project_id=project),
+        lambda project: QuestionRequest(question="why", project_id=project),
+        lambda project: YouTubeRequest(video="abc123", project_id=project),
+    ],
+)
+def test_public_project_ids_are_bounded(factory):
+    assert len(factory("p" * 80).project_id) == 80
+    with pytest.raises(ValidationError):
+        factory("p" * 81)
+
+
+def test_empty_questions_are_rejected_before_engine_call():
+    with pytest.raises(ValidationError):
+        ChatRequest(message="")
+    with pytest.raises(ValidationError):
+        DeepResearchRequest(question="")
+    with pytest.raises(ValidationError):
+        ResearchJobRequest(question="")
+    with pytest.raises(ValidationError):
+        QuestionRequest(question="")
+
+
+def test_youtube_reference_and_title_are_bounded():
+    assert len(YouTubeRequest(video="v" * 2048).video) == 2048
+    with pytest.raises(ValidationError):
+        YouTubeRequest(video="v" * 2049)
+
+    assert len(YouTubeRequest(video="abc123", title="t" * 300).title) == 300
+    with pytest.raises(ValidationError):
+        YouTubeRequest(video="abc123", title="t" * 301)
+
+
+def test_custom_patent_switch_reaches_both_research_entrypoints():
+    direct = DeepResearchRequest(
+        question="prior art", depth_mode="CUSTOM", use_patents=False,
+    )
+    durable = ResearchJobRequest(
+        question="prior art", depth_mode="CUSTOM", use_patents=False,
+    )
+
+    assert agent_custom(direct)["use_patents"] is False
+    assert job_custom(durable)["use_patents"] is False

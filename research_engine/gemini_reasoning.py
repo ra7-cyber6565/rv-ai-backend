@@ -544,8 +544,10 @@ class GeminiReasoning:
         # aate hain — planner ne `requests` daala hoga. Na ho to ye khaali string
         # ban jaata hai, isliye purane callers bhi chalte rehte hain.
         from .requested import prompt_block
+        from .specialist_domains import prompt_block as specialist_prompt_block
 
         extras = prompt_block(plan.get("requests") if isinstance(plan, dict) else None)
+        specialist_rules = specialist_prompt_block(plan if isinstance(plan, dict) else {})
         # PATENT RULE sirf tab jaata hai jab pack mein sach mein patent ho —
         # warna har normal sawaal ke prompt mein bekaar tokens jaate.
         patent_rules = ""
@@ -571,6 +573,7 @@ RETRIEVED SOURCES (sirf inhi ka istemal karo):
 
 {LABEL_RULE_PROMPT}
 {patent_rules}
+{specialist_rules}
 
 {style}
 

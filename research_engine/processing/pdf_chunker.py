@@ -1,31 +1,13 @@
 """
-§12 — badi PDF ko "unusable" nahi hone dena.
+§12 — badi PDF ko unusable na hone dena.
 
-PEHLE KYA GALAT THA (live failure, superconductivity test #3):
-    content_fetcher ek hi line par PDF chhod deta tha —
+Large documents are processed page-by-page with bounded memory. When the PDF is
+larger than the scan budget, candidate pages come from ``pdf_sampling`` so the
+budget spans beginning + middle + end instead of only the first N pages. This
+module then scores those inspected pages by relevance and keeps only bounded,
+citation-ready evidence chunks.
 
-        if size > _MAX_BYTES:      # 4 MB
-            return {"error": "file 4MB se badi hai — skip (memory safety)"}
-
-    Yaani 20 MB ka review, 100 MB ki thesis, ya scanned book ka koi bhi page
-    kabhi padha hi nahi jaata tha. Bug report ka jumla: "A 20 MB or 100 MB
-    scientific document should not automatically become unusable."
-
-AB KYA HOTA HAI:
-    Byte-size par faisla nahi hota. Document PAGE-BY-PAGE stream hota hai:
-
-        PDF → (ek waqt mein ek page) → halka relevance filter →
-        sirf sabse kaam ke pages rakho → unhi ko process karo
-
-    Memory safety khatam nahi hui, sirf uska naap badal gaya: ab limit
-    "kitne bytes download hue" nahi, "kitne pages ek saath yaad rakhe" hai
-    (`max_keep_pages`, `max_keep_chars`, `per_page_chars`). Isliye 100 MB ki
-    file bhi utni hi RAM leti hai jitni 2 MB ki.
-
-Ye module JAAN-BOOJH KAR pure-Python hai — koi PyMuPDF, koi network. Pages ek
-iterable ke roop mein aate hain (production mein PDFProcessor.iter_pages ka
-generator, test mein seedha list). Isi wajah se §16 ka TEST I bina PDF library
-ke bhi chalta hai.
+Everything here remains deterministic/offline and consumes no model/API quota.
 """
 from __future__ import annotations
 
@@ -33,36 +15,28 @@ import heapq
 from dataclasses import dataclass, field
 from typing import Dict, Iterable, List
 
-# ── budget (page/chunk based, byte based NAHI) ────────────────────────────────
-DEFAULT_HEAD_PAGES = 3          # shuruaati pages (abstract/intro) ko bonus
-DEFAULT_MAX_PAGES_SCANNED = 800  # itne pages tak stream karenge (safety)
-DEFAULT_MAX_KEEP_PAGES = 30      # ek waqt mein itne hi pages memory mein
-DEFAULT_MAX_KEEP_CHARS = 200_000  # kul itna text aage bhejenge
-DEFAULT_PER_PAGE_CHARS = 6_000   # ek page se itna hi (monster page se bachav)
+from .pdf_sampling import spread_page_indices
 
-# Itne se kam text wala page = image-only / khaali (scan). Ye PDFProcessor ke
-# _MIN_CHARS_PER_PAGE se milta hai — dono jagah ek hi soch honi chahiye.
+DEFAULT_HEAD_PAGES = 3
+DEFAULT_TAIL_PAGES = 3
+DEFAULT_MAX_PAGES_SCANNED = 800
+DEFAULT_MAX_KEEP_PAGES = 30
+DEFAULT_MAX_KEEP_CHARS = 200_000
+DEFAULT_PER_PAGE_CHARS = 6_000
+
 SCANNED_PAGE_CHARS = 40
-# Head page ko itna bonus, taaki abstract/intro relevance kam hone par bhi bache.
 _HEAD_BONUS = 1.0
 
 
 def page_score(text: str, question: str) -> float:
-    """
-    Ek page kitna kaam ka hai — 0..1. Halka aur deterministic.
-
-    semantic.similarity wahi weighted+bigram scoring hai jo §2/§5 ke relevance
-    engine mein chalti hai, isliye "kaam ka page" ki definition poore system
-    mein ek jaisi rehti hai. Agar wo import kisi wajah se na mile to plain word
-    overlap par gir jaate hain — filter kabhi band nahi hota.
-    """
+    """Ek page kitna kaam ka hai — 0..1, deterministic and zero-cost."""
     body = str(text or "").strip()
     if not body:
         return 0.0
     try:
         from .. import semantic
         return float(semantic.similarity(question or "", body))
-    except Exception:      # pragma: no cover - defensive
+    except Exception:  # pragma: no cover - defensive fallback
         import re
         q = {w for w in re.findall(r"[a-z]{4,}", (question or "").lower())}
         if not q:
@@ -71,9 +45,25 @@ def page_score(text: str, question: str) -> float:
         return round(len(q & t) / len(q), 4)
 
 
+def sample_page_indices(
+    page_count: int,
+    max_pages: int,
+    *,
+    head_pages: int = DEFAULT_HEAD_PAGES,
+    tail_pages: int = DEFAULT_TAIL_PAGES,
+) -> List[int]:
+    """Compatibility wrapper around the canonical whole-document sampler."""
+    return spread_page_indices(
+        page_count,
+        max_pages,
+        head_pages=head_pages,
+        tail_pages=tail_pages,
+    )
+
+
 @dataclass
 class PageSelection:
-    """Kitna padha, kitna chhoda, aur kyun — sab likha hua."""
+    """Kitna inspect kiya, kitna rakha, aur kis coverage policy se — sab track."""
     chunks: List[Dict] = field(default_factory=list)
     pages_total: int = 0
     pages_scanned: int = 0
@@ -83,6 +73,7 @@ class PageSelection:
     stopped_early: bool = False
     dropped_for_budget: int = 0
     file_name: str = ""
+    sampling_mode: str = "sequential"
 
     @property
     def ok(self) -> bool:
@@ -91,28 +82,54 @@ class PageSelection:
     def text(self) -> str:
         return "\n\n".join(
             f"{c.get('header') or ''}\n{c.get('text') or ''}".strip()
-            for c in self.chunks)
+            for c in self.chunks
+        )
 
     def note(self) -> str:
         if not self.pages_scanned:
-            return "PDF se ek bhi page padha nahi ja saka."
+            return "PDF se ek bhi page padha nahi / inspect nahi kiya ja saka."
         total = self.pages_total or self.pages_scanned
-        pages = ", ".join(str(c.get("page")) for c in self.chunks[:8]
-                          if c.get("page"))
-        bits = [f"badi PDF page-by-page padhi gayi: {self.pages_scanned}/{total} "
-                f"pages scan hue, sawaal se sabse milte-julte {self.pages_kept} "
-                f"pages rakhe gaye"]
+        pages = ", ".join(
+            str(c.get("page")) for c in self.chunks[:8] if c.get("page")
+        )
+
+        if self.sampling_mode == "whole_document_sparse":
+            bits = [
+                f"badi PDF ko whole-document sparse sampling se padha gaya: "
+                f"{self.pages_scanned}/{total} pages inspect hue (sirf starting pages "
+                f"nahi — beginning, beech aur end tak spread sample), aur sawaal se "
+                f"sabse milte-julte {self.pages_kept} pages rakhe gaye"
+            ]
+        else:
+            bits = [
+                f"badi PDF page-by-page padhi gayi: {self.pages_scanned}/{total} "
+                f"pages inspect hue, sawaal se sabse milte-julte {self.pages_kept} "
+                f"pages rakhe gaye"
+            ]
+
         if pages:
             bits.append(f"chune gaye pages: p.{pages}")
         if self.image_only_pages:
-            bits.append(f"{len(self.image_only_pages)} pages image-only (scanned) "
-                        f"the — unka content OCR ke bina use nahi hua")
+            bits.append(
+                f"inspect kiye sample mein {len(self.image_only_pages)} pages image-only "
+                f"(scanned) the — unka content OCR ke bina use nahi hua"
+            )
         if self.dropped_for_budget:
-            bits.append(f"{self.dropped_for_budget} kam-relevant pages budget ke "
-                        f"bahar rahe (poora document nahi bheja gaya)")
+            bits.append(
+                f"{self.dropped_for_budget} kam-relevant inspected pages final context "
+                f"budget ke bahar rahe"
+            )
         if self.stopped_early:
-            bits.append(f"safety limit par ruke — {total} mein se pehle "
-                        f"{self.pages_scanned} pages hi dekhe")
+            if self.sampling_mode == "whole_document_sparse":
+                bits.append(
+                    f"safety budget ki wajah se har page inspect nahi hua; poore "
+                    f"{total}-page document mein spread sample use hua, first-N-only nahi"
+                )
+            else:
+                bits.append(
+                    f"safety limit par ruke — {total} mein se pehle "
+                    f"{self.pages_scanned} pages hi inspect hue"
+                )
         return "; ".join(bits)
 
     def to_dict(self) -> Dict:
@@ -125,6 +142,7 @@ class PageSelection:
             "stopped_early": self.stopped_early,
             "dropped_for_budget": self.dropped_for_budget,
             "selected_pages": [c.get("page") for c in self.chunks],
+            "sampling_mode": self.sampling_mode,
             "note": self.note(),
         }
 
@@ -141,20 +159,15 @@ def select_pages(
     max_keep_chars: int = DEFAULT_MAX_KEEP_CHARS,
     per_page_chars: int = DEFAULT_PER_PAGE_CHARS,
     min_score: float = 0.0,
+    sampling_mode: str = "sequential",
 ) -> PageSelection:
-    """
-    Pages ka stream lo, sirf kaam ke pages rakho.
-
-    `pages` kuch bhi ho sakta hai jo `{"page": int, "text": str}` deta ho —
-    generator (production) ya list (test). Poora document kabhi ek saath memory
-    mein nahi aata: hum bas `max_keep_pages` ka ek chhota heap rakhte hain.
-
-    Kram ka faisla soch kar liya gaya hai: chunna RELEVANCE se hota hai, par
-    aakhir mein pages PAGE NUMBER ke kram mein aate hain — kyunki citation
-    "p.12" ke baad "p.4" padhna insaan ke liye bekaar hai.
-    """
-    sel = PageSelection(pages_total=int(pages_total or 0), file_name=file_name or "")
-    heap: List = []          # (score, page_no, text) — sabse kamzor upar
+    """Stream candidate pages and keep only the strongest bounded evidence."""
+    sel = PageSelection(
+        pages_total=int(pages_total or 0),
+        file_name=file_name or "",
+        sampling_mode=sampling_mode or "sequential",
+    )
+    heap: List = []
     seq = 0
 
     for raw in pages or []:
@@ -169,7 +182,6 @@ def select_pages(
             sel.pages_total = page_no
 
         if len(text) < SCANNED_PAGE_CHARS:
-            # khaali ya image-only — ye page "padha" nahi gina jaata
             sel.image_only_pages.append(page_no)
             continue
 
@@ -178,20 +190,25 @@ def select_pages(
 
         score = page_score(text, question)
         if seq <= max(0, head_pages):
-            score += _HEAD_BONUS      # abstract/intro mein thesis hoti hai
+            score += _HEAD_BONUS
         elif score <= min_score:
             sel.dropped_for_budget += 1
             continue
 
         heapq.heappush(heap, (round(score, 4), page_no, text))
         if len(heap) > max(1, max_keep_pages):
-            heapq.heappop(heap)      # sabse kam relevant page bahar
+            heapq.heappop(heap)
             sel.dropped_for_budget += 1
 
     if not sel.pages_total:
         sel.pages_total = sel.pages_scanned
 
-    # char budget: pehle sabse relevant pages, phir padhne ka kram
+    if (
+        sel.sampling_mode == "whole_document_sparse"
+        and sel.pages_total > sel.pages_scanned
+    ):
+        sel.stopped_early = True
+
     ranked = sorted(heap, key=lambda row: (-row[0], row[1]))
     kept: List = []
     used = 0
@@ -207,43 +224,54 @@ def select_pages(
 
     kept.sort(key=lambda row: row[1])
     name = sel.file_name or "document.pdf"
-    sel.chunks = [{"locator": f"p.{page_no}", "page": page_no, "text": text,
-                   "score": score,
-                   "header": f"[Source: {name}, Page {page_no}]"}
-                  for score, page_no, text in kept]
+    sel.chunks = [
+        {
+            "locator": f"p.{page_no}",
+            "page": page_no,
+            "text": text,
+            "score": score,
+            "header": f"[Source: {name}, Page {page_no}]",
+        }
+        for score, page_no, text in kept
+    ]
     sel.pages_kept = len(sel.chunks)
     sel.chars_kept = used
     return sel
 
 
-def is_large(size_bytes: int = 0, page_count: int = 0,
-             large_bytes: int = 4 * 1024 * 1024,
-             large_pages: int = 60) -> bool:
-    """
-    "Badi PDF" ka faisla — size YA page count, jo pehle chhoo jaye.
-
-    Note: ye "skip karo" ka faisla NAHI hai (wo bug tha). Ye sirf "streaming
-    page-by-page path lo" ka faisla hai.
-    """
-    return bool((size_bytes and size_bytes > large_bytes)
-                or (page_count and page_count > large_pages))
+def is_large(
+    size_bytes: int = 0,
+    page_count: int = 0,
+    large_bytes: int = 4 * 1024 * 1024,
+    large_pages: int = 60,
+) -> bool:
+    """Large means use bounded streaming; it never means reject the document."""
+    return bool(
+        (size_bytes and size_bytes > large_bytes)
+        or (page_count and page_count > large_pages)
+    )
 
 
 def budget_for(size_bytes: int = 0, page_count: int = 0) -> Dict:
-    """
-    Document jitna bada, utna sakht page budget — RAM constant rehti hai.
-
-    Free tier par yahi farak hai "100 MB thesis padhi ja sakti hai" aur
-    "process OOM se mar gaya" ke beech.
-    """
+    """Larger documents get tighter retained-context limits, never zero budget."""
     mb = float(size_bytes or 0) / (1024 * 1024)
     if page_count > 2000 or mb > 60:
-        return {"max_keep_pages": 12, "max_keep_chars": 90_000,
-                "per_page_chars": 4_000, "max_pages_scanned": 2_500}
+        return {
+            "max_keep_pages": 12,
+            "max_keep_chars": 90_000,
+            "per_page_chars": 4_000,
+            "max_pages_scanned": 2_500,
+        }
     if page_count > 400 or mb > 20:
-        return {"max_keep_pages": 18, "max_keep_chars": 140_000,
-                "per_page_chars": 5_000, "max_pages_scanned": 1_500}
-    return {"max_keep_pages": DEFAULT_MAX_KEEP_PAGES,
-            "max_keep_chars": DEFAULT_MAX_KEEP_CHARS,
-            "per_page_chars": DEFAULT_PER_PAGE_CHARS,
-            "max_pages_scanned": DEFAULT_MAX_PAGES_SCANNED}
+        return {
+            "max_keep_pages": 18,
+            "max_keep_chars": 140_000,
+            "per_page_chars": 5_000,
+            "max_pages_scanned": 1_500,
+        }
+    return {
+        "max_keep_pages": DEFAULT_MAX_KEEP_PAGES,
+        "max_keep_chars": DEFAULT_MAX_KEEP_CHARS,
+        "per_page_chars": DEFAULT_PER_PAGE_CHARS,
+        "max_pages_scanned": DEFAULT_MAX_PAGES_SCANNED,
+    }

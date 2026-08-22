@@ -634,11 +634,3 @@ class PatentDiscoveryConnector:
             records.extend(result["records"])
             log.append({k: v for k, v in result.items() if k != "records"})
         return {"records": records, "log": log}
-
-
-
-
-
-
-
-

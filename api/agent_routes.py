@@ -1,49 +1,52 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, Header
+from pydantic import BaseModel, Field
 
 from research_engine.agent_manager import manager
 from research_engine.depth import (BOOL_FIELDS, depth_limits,
                                     get_depth_config, quota_note)
+from utils.admin_guard import require_admin
 from utils.progress_tracker import get_progress
+from utils.project_guard import require_project_access
+from utils.reasoning_status import reasoning_status
 
 router = APIRouter()
 
+# Public JSON endpoints must not accept arbitrarily large single strings. Large
+# source material belongs in the streaming upload path; a question/message stays
+# bounded so one request cannot consume unbounded memory or prompt budget.
+_MAX_QUESTION_CHARS = 20_000
+_MAX_PROJECT_ID_CHARS = 80
+
 
 class ChatRequest(BaseModel):
-    # QUICK mode = seedhi, turant baat-cheet. Koi deep research nahi.
-    message: str
-    history: Optional[List[Dict]] = None   # [{role, content}, ...] — pichhli baat
-    project_id: str = "default"            # UI compatibility ke liye (yahan use nahi)
+    # QUICK mode = seedhi, turant baat-cheet. Koi deep research nahi unless every
+    # configured chat model is unavailable; then the route automatically falls
+    # back to QUICK evidence research instead of returning a quota/server error.
+    message: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
+    history: Optional[List[Dict]] = None
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
 
 
 class DeepResearchRequest(BaseModel):
-    question: str
-    project_id: str = "default"
-    depth_mode: str = "DEEP"          # QUICK | DEEP | MAXIMUM | CUSTOM
-    # CUSTOM ke liye (Spec Section 13 — "user khud source count / depth / TIME
-    # tay kar sake"). QUICK/DEEP/MAXIMUM mein ye ignore hote hain.
-    #
-    # Pehle sirf teen fields yahan thi (max_sources / max_rounds / gemini_calls),
-    # jabki depth.py ke andar saat knobs clamp hote the — yaani "time" aur
-    # "full text kitna padhna hai" API se pahunche hi nahi ja sakte the. Spec
-    # ka CUSTOM mode utna hi tha jitna request model expose karta hai, isliye
-    # baaki knobs bhi yahan hain.
+    question: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
+    project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
+    depth_mode: str = Field(default="DEEP", min_length=1, max_length=16)  # QUICK | DEEP | MAXIMUM | MARATHON | CUSTOM
     max_sources: Optional[int] = None
     max_rounds: Optional[int] = None
     gemini_calls: Optional[int] = None
     max_per_connector: Optional[int] = None
     chars_per_source: Optional[int] = None
-    max_fulltext: Optional[int] = None          # 0 = koi full-text download nahi
-    discovery_seconds: Optional[int] = None     # ek round ki search ka time budget
+    max_fulltext: Optional[int] = None
+    discovery_seconds: Optional[int] = None
     use_papers: Optional[bool] = None
     use_books: Optional[bool] = None
-    use_datasets: Optional[bool] = None         # Spec §2 + §11 — public datasets
+    use_datasets: Optional[bool] = None
+    use_patents: Optional[bool] = None
     use_red_team: Optional[bool] = None
 
 
-# jo keys CUSTOM mode mein aage bheji jaati hain (depth.py inhe clamp karta hai)
 _CUSTOM_FIELDS = tuple(depth_limits()) + BOOL_FIELDS
 
 
@@ -54,24 +57,12 @@ def _custom(request: DeepResearchRequest) -> Optional[Dict]:
 
 
 @router.post("/deep-research")
-def deep_research(request: DeepResearchRequest):
-    """
-    Deep multi-step research.
-
-    depth_mode:
-        QUICK    1 Gemini call,  ~5 sources,  1 round
-        DEEP     2 Gemini calls, ~10 sources, 2 rounds  (default)
-        MAXIMUM  3 Gemini calls, ~18 sources, 3 rounds
-        CUSTOM   apne numbers bhejo — max_sources, max_rounds, gemini_calls,
-                 max_per_connector, chars_per_source, max_fulltext,
-                 discovery_seconds, use_papers, use_books, use_datasets,
-                 use_red_team
-                 (sab safe limits mein clamp hote hain; /depth-modes par
-                 har limit likhi hai)
-
-    Document retrieval aur external discovery DONO hamesha chalti hain —
-    PDF upload hone par internet/academic search band nahi hoti.
-    """
+def deep_research(
+    request: DeepResearchRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """Deep research inside a server-issued private project namespace."""
+    require_project_access(request.project_id, x_project_token)
     return manager.research(
         question=request.question,
         project_id=request.project_id,
@@ -81,78 +72,108 @@ def deep_research(request: DeepResearchRequest):
     )
 
 
+def _async_research_chat_fallback(reason: object = "") -> Dict:
+    """Tell capable clients to recover through the durable QUICK job route.
+
+    Running evidence research synchronously inside ``/chat`` used the QUICK
+    discovery budget (up to 45 seconds) and could cross a hosting/proxy request
+    timeout.  The browser then replaced the still-running work with the same
+    generic "server se baat nahi" line on every attempt.  Research jobs already
+    provide bounded concurrency, progress, capability protection and durable
+    results, so the client should use that path instead of duplicating it here.
+
+    The response is also useful to older clients: it contains a human-readable
+    action and no provider exception.  ``reason`` is reduced to a small enum so
+    raw SDK/server text can never cross this boundary.
+    """
+    allowed = {
+        "no_model_layer_configured",
+        "all_configured_model_layers_unavailable",
+    }
+    safe_reason = str(reason or "").strip()
+    if safe_reason not in allowed:
+        safe_reason = "model_layer_unavailable"
+    return {
+        "answer": (
+            "Chat model se jawab nahi mila, isliye source-based QUICK research "
+            "background job mein chalani hogi. Official web app ise automatically "
+            "start karegi aur yahin progress dikhayegi."
+        ),
+        "mode": "QUICK",
+        "ok": True,
+        "degraded": True,
+        "fallback_required": True,
+        "start_research_job": True,
+        "research_depth_mode": "QUICK",
+        "chat_fallback": "async_quick_evidence_research",
+        "reason": safe_reason,
+        "evidence_level": "PENDING",
+        "sources": [],
+    }
+
+
 @router.post("/chat")
-def chat(request: ChatRequest):
-    """
-    QUICK chat — seedha, turant jawab. ChatGPT jaisi baat-cheet.
-
-    Ye deep-research engine ko HAATH tak nahi lagata: na chromadb, na torch,
-    na koi network connector. Sirf ek Gemini call. Isliye:
-      - turant jawab (koi bhaari model boot-time par load nahi hota)
-      - free server par OOM/crash nahi hota
-      - language mirror (Hindi/English/Hinglish jaisa user likhe)
-      - mood/emotion mirror (ChatGPT jaisi insaani vibe)
-
-    Gehri research chahiye to /deep-research (DEEP/MAXIMUM) use hota hai.
-    """
-    # lazy import: chat ka module bhi tabhi load ho jab pehli baar chat aaye
+def chat(
+    request: ChatRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token"),
+):
+    """QUICK chat isolated to a server-issued project capability."""
+    require_project_access(request.project_id, x_project_token)
     from research_engine.chat import quick_chat
-    return quick_chat(request.message, request.history)
+
+    result = quick_chat(request.message, request.history)
+    if not result.get("fallback_required"):
+        return result
+    return _async_research_chat_fallback(result.get("reason"))
 
 
 @router.get("/chat/diag")
 def chat_diag():
-    """
-    Gemini setup ki sachchi report — key hai ya nahi, kaunse model available
-    hain, kaunsa chuna gaya, aur ek chhota test call chala ya nahi.
-
-    Kyun: pehle error par sirf "InvalidArgument" dikhta tha, jisse pata hi nahi
-    chalta tha ki galti key mein hai ya model ke naam mein. Ye endpoint kholo,
-    jawab mein saaf likha hoga.
-    """
-    from research_engine.gemini_model import diagnose
-    return diagnose()
+    """Read-only, zero-call reasoning readiness report."""
+    return reasoning_status()
 
 
 @router.get("/depth-modes")
 def depth_modes():
     """Har mode ka honest quota/limit disclosure (Spec Section 13 + 18)."""
     modes = {}
-    for name in ("QUICK", "DEEP", "MAXIMUM"):
+    for name in ("QUICK", "DEEP", "MAXIMUM", "MARATHON"):
         config = get_depth_config(name)
         modes[name] = {**config.to_dict(), "note": quota_note(config)}
     modes["CUSTOM"] = {
-        # limits code se hi padhte hain — warna doc aur asli clamp alag ho
-        # jaate hain aur disclosure jhooth ban jaata hai
         "limits": {field: {"min": lo, "max": hi}
                    for field, (lo, hi) in depth_limits().items()},
         "flags": list(BOOL_FIELDS),
         "note": "Ye fields bhejo; values safe limits ke andar clamp ho jaati "
                 "hain, taaki free quota ek hi sawal mein khatam na ho. "
                 "discovery_seconds ek ROUND ki search ka wall-clock budget hai "
-                "(Gemini quota nahi, sirf time/bandwidth). max_fulltext=0 "
+                "(reasoning quota nahi, sirf time/bandwidth). max_fulltext=0 "
                 "matlab koi full-text download nahi, sirf abstract/snippet. "
-                "red team ke liye gemini_calls>=2 chahiye — kam hone par wo "
-                "apne aap band ho jaata hai (chup-chaap nahi, report mein "
-                "likha jaata hai).",
+                "red team ke liye reasoning budget >=2 chahiye — kam hone par wo "
+                "apne aap band ho jaata hai aur report mein disclose hota hai.",
     }
     return modes
 
 
 @router.get("/progress/{project_id}")
-def get_research_progress(project_id: str):
-    """Research progress dekho — stages, sources discovered, log"""
+def get_research_progress(project_id: str, _admin: None = Depends(require_admin)):
+    """Legacy project-id progress feed is server-side metadata, so admin-only.
+
+    The public web app uses the random job-id capability endpoint instead. Keeping
+    this legacy project-id feed public would let callers probe predictable IDs such
+    as `default` and read another run's stage/log metadata.
+    """
     return get_progress(project_id)
 
 
 @router.get("/history/{project_id}")
-def get_history(project_id: str):
-    """Research history dekho"""
+def get_history(project_id: str, _admin: None = Depends(require_admin)):
+    """Server-side research history (admin-only; never public by project id)."""
     return {"history": manager.history(project_id)}
 
 
 @router.delete("/history/{project_id}")
-def clear_history(project_id: str):
-    """History clear karo"""
+def clear_history(project_id: str, _admin: None = Depends(require_admin)):
+    """Server-side history clear karo (admin-only)."""
     removed = manager.clear_history(project_id)
     return {"message": "History clear ho gayi", "removed": removed}

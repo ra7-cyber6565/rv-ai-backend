@@ -1,6 +1,5 @@
 import fitz  # PyMuPDF
 import chromadb
-import google.generativeai as genai
 from dotenv import load_dotenv
 import os
 import re
@@ -8,52 +7,64 @@ import re
 load_dotenv()
 
 # ── LAZY LOADING (crash-proof boot) ──────────────────────────────────────────
-# Pehle yahan module import hote hi SentenceTransformer('all-MiniLM-L6-v2') load
-# ho jaata tha. Iska matlab: app start hote hi torch + model (~300MB+) memory
-# mein aa jaate the — free-tier server par ye slow boot ya OOM crash karta tha,
-# aur agar sentence-transformers install na ho to poora app hi crash.
-#
-# Ab ye teeno cheezein "lazy" hain: sirf pehli baar zaroorat padne par load
-# hoti hain (jab PDF upload/query ho). Isse app turant boot hota hai, /health
-# kaam karta hai, aur deep-research (jise embeddings ki zaroorat nahi) bina
-# torch ke chalta hai.
 _embedding_model = None
 _client = None
-_gemini = None
 
 
 def get_embedding_model():
     global _embedding_model
     if _embedding_model is None:
         from sentence_transformers import SentenceTransformer
-        _embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+        cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
+        _embedding_model = SentenceTransformer(
+            "all-MiniLM-L6-v2",
+            cache_folder=cache_folder,
+        )
     return _embedding_model
 
 
 def get_client():
     global _client
     if _client is None:
-        _client = chromadb.PersistentClient(path="./chroma_db")
+        db_path = os.getenv("CHROMA_DB_DIR", "./chroma_db")
+        os.makedirs(db_path, exist_ok=True)
+        _client = chromadb.PersistentClient(path=db_path)
     return _client
 
 
-def get_gemini():
-    global _gemini
-    if _gemini is None:
-        from research_engine.gemini_model import resolve
+def _reason(prompt: str) -> tuple[str, dict]:
+    """One logical reasoning pass through the same ₹0-safe provider router.
 
-        genai.configure(api_key=os.getenv("GEMINI_API_KEY", ""))
-        # Model ka naam Google ki asli list se — hard-coded naam kai keys par
-        # InvalidArgument/NotFound deta hai.
-        _gemini = genai.GenerativeModel(resolve(genai))
-    return _gemini
+    This replaces the legacy `google.generativeai` direct call. A RAG caller can
+    no longer bypass Gemini zero-cost confirmation/provider fallback policy.
+    Raw provider exceptions never leave this helper.
+    """
+    from research_engine.reasoning_router_integrated import ResilientReasoning
 
+    brain = ResilientReasoning(budget=1, model_name=os.getenv(
+        "GEMINI_MODEL", "gemini-flash-latest"
+    ))
+    try:
+        text = brain.generate(prompt, "rag_answer")
+    except Exception:
+        text = ""
+    try:
+        accounting = brain.api_accounting()
+    except Exception:
+        accounting = {}
+    safe = {
+        key: accounting.get(key)
+        for key in (
+            "logical_reasoning_calls", "passes_with_output", "actual_http_attempts",
+            "same_model_retries", "model_switches", "provider_fallbacks",
+        )
+        if key in accounting
+    }
+    return str(text or "").strip(), safe
 
 
 def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
-    """
-    PDF को chunks में तोड़ो और ChromaDB में store करो
-    """
+    """PDF ko chunks mein todo aur ChromaDB mein store karo."""
     doc = fitz.open(stream=pdf_bytes, filetype="pdf")
     chunks, metadatas, ids = [], [], []
 
@@ -69,79 +80,121 @@ def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
                 metadatas.append({"source": filename, "page": page_num + 1})
                 ids.append(chunk_id)
 
+    if not chunks:
+        return {"chunks": 0}
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
     embeddings = get_embedding_model().encode(chunks).tolist()
     collection.add(
         documents=chunks,
         embeddings=embeddings,
         metadatas=metadatas,
-        ids=ids
+        ids=ids,
     )
     return {"chunks": len(chunks)}
 
 
-def ask_question(question: str, project_id: str) -> dict:
+def _short_extract(text: str, words: int = 36) -> str:
+    clean = " ".join(str(text or "").split())
+    parts = clean.split()
+    clipped = " ".join(parts[:words])
+    return clipped + ("…" if len(parts) > words else "")
+
+
+def _document_only_answer(context_rows: list[tuple[str, dict]]) -> str:
+    """No-model fallback using only retrieved document chunks.
+
+    This is intentionally extractive/conservative. It never fabricates a general
+    knowledge answer when all model providers are unavailable.
     """
-    सवाल पूछो — relevant chunks ढूंढो — Gemini से जवाब लो
+    if not context_rows:
+        return ""
+    lines = [
+        "Reasoning model available nahi tha, lekin uploaded documents se ye relevant "
+        "hisse mile. Inhe final synthesis nahi, evidence extract samjhein:"
+    ]
+    for doc, meta in context_rows[:4]:
+        source = (meta or {}).get("source", "unknown")
+        page = (meta or {}).get("page", "?")
+        lines.append(f"- {_short_extract(doc)} [Source: {source}, Page {page}]")
+    return "\n".join(lines)
+
+
+def ask_question(question: str, project_id: str) -> dict:
+    """Legacy document-Q&A helper, now quota-resilient and fail-closed.
+
+    Normal public `/api/v1/ask` already uses the full research manager. This
+    helper remains for backwards compatibility but no longer calls Gemini
+    directly or exposes raw SDK exceptions.
     """
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
 
     q_embedding = get_embedding_model().encode([question]).tolist()
     results = collection.query(query_embeddings=q_embedding, n_results=5)
+    documents = (results.get("documents") or [[]])[0] or []
+    metadatas = (results.get("metadatas") or [[]])[0] or []
 
-    if not results["documents"][0]:
-        # Koi document nahi mila -> General Knowledge se jawab do
-        fallback_prompt = f"""Tum ek research assistant ho. Tumhare paas is sawal ke liye koi document/PDF nahi hai.
-Apne general knowledge se jawab do, lekin:
-1. Saaf batao ki ye jawab documents se nahi, tumhare general knowledge se hai
-2. Agar tumhe confidence kam hai, to wo bhi batao
-3. Anuman ko fact ki tarah pesh mat karo
+    if not documents:
+        prompt = f"""Tum ek helpful assistant ho. Is sawal ke liye uploaded document context nahi mila.
+General knowledge use kar sakte ho, lekin unverified/current baat ko pakka fact mat bolo.
+Agar reliable answer nahi ban raha to saaf bolo.
 
-Sawal: {question}
-
-Jawab:"""
-        fallback_response = get_gemini().generate_content(fallback_prompt)
+Sawal: {question}\n\nJawab:"""
+        text, accounting = _reason(prompt)
+        if text:
+            return {
+                "answer": text,
+                "sources": [],
+                "evidence_level": "⚠️ General knowledge (uploaded documents se nahi)",
+                "reasoning_accounting": accounting,
+                "degraded": bool(accounting.get("provider_fallbacks")),
+            }
         return {
-            "answer": fallback_response.text,
+            "answer": (
+                "Is project ke uploaded documents mein is sawal ka relevant context nahi "
+                "mila aur koi configured reasoning model bhi is pass mein available nahi "
+                "tha. Guess ko fact ki tarah dene ke bajay answer UNKNOWN rakha gaya."
+            ),
             "sources": [],
-            "evidence_level": "⚠️ General Knowledge (documents se nahi)"
+            "evidence_level": "UNKNOWN",
+            "reasoning_accounting": accounting,
+            "degraded": True,
         }
+
     context_parts = []
     sources = []
-    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
+    rows: list[tuple[str, dict]] = []
+    for doc, meta in zip(documents, metadatas):
         meta = meta or {}
         source_name = meta.get("source", "unknown")
         page = meta.get("page", "?")
         context_parts.append(f"[Source: {source_name}, Page {page}]\n{doc}")
+        rows.append((doc, meta))
         entry = {"file": source_name, "page": page}
         if entry not in sources:
             sources.append(entry)
 
     context = "\n\n".join(context_parts)
+    prompt = f"""Tum ek research assistant ho. Sirf neeche diye uploaded-document context ke base par jawab do.
+Har important baat ke saath source/page do. Document mein jawab nahi ho to saaf bolo.
 
-    prompt = f"""तुम एक research assistant हो। नीचे दिए गए documents के आधार पर सवाल का जवाब दो।
-हर बात के साथ source और page number ज़रूर बताओ।
-अगर जवाब documents में नहीं है तो साफ़ बोलो।
+Documents:\n{context}\n\nSawal: {question}\n\nJawab:"""
 
-Documents:
-{context}
-
-सवाल: {question}
-
-जवाब (source + page number के साथ):"""
-
-    response = get_gemini().generate_content(prompt)
+    text, accounting = _reason(prompt)
+    if not text:
+        text = _document_only_answer(rows)
 
     return {
-        "answer": response.text,
+        "answer": text or "Available document text se reliable answer establish nahi hua.",
         "sources": sources,
-        "evidence_level": "✅ Document-based"
+        "evidence_level": "✅ Document-based" if accounting.get("passes_with_output") else "⚠️ Document extract only",
+        "reasoning_accounting": accounting,
+        "degraded": not bool(accounting.get("passes_with_output")),
     }
 
 
 def split_text(text: str, chunk_size: int = 500) -> list:
-    """Text ko chhote chunks mein todo"""
-    sentences = re.split(r'(?<=[।.!?]) +', text)
+    """Text ko chhote chunks mein todo."""
+    sentences = re.split(r"(?<=[।.!?]) +", text)
     chunks, current = [], ""
     for sentence in sentences:
         if len(current) + len(sentence) <= chunk_size:
@@ -156,23 +209,19 @@ def split_text(text: str, chunk_size: int = 500) -> list:
 
 
 def get_context_only(question: str, project_id: str, n_results: int = 8) -> dict:
-    """
-    Sirf relevant documents dhoondo, Gemini ko call NAHI karo (free operation)
-    """
+    """Sirf relevant documents dhoondo, koi reasoning provider call NAHI."""
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
     q_embedding = get_embedding_model().encode([question]).tolist()
     results = collection.query(query_embeddings=q_embedding, n_results=n_results)
 
-    if not results["documents"][0]:
+    documents = (results.get("documents") or [[]])[0] or []
+    metadatas = (results.get("metadatas") or [[]])[0] or []
+    if not documents:
         return {"context": "", "sources": []}
 
     context_parts = []
     sources = []
-    for doc, meta in zip(results["documents"][0], results["metadatas"][0]):
-        # .get() jaan-boojh kar: metadata ab do jagah se aata hai — purana
-        # ingest_pdf ({"source","page"}) aur naya ingest_chunks (jahan "page"
-        # mein timestamp jaisa locator ho sakta hai). Direct meta['page'] karne
-        # se ek missing key poori retrieval gira deti thi.
+    for doc, meta in zip(documents, metadatas):
         meta = meta or {}
         source_name = meta.get("source", "unknown")
         page = meta.get("page", "?")

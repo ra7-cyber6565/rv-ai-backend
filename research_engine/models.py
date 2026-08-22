@@ -70,6 +70,10 @@ class ClaimType(str, Enum):
     INFERENCE = "INFERENCE"
     HYPOTHESIS = "HYPOTHESIS"
     SPECULATION = "SPECULATION"
+    # "Source support abhi prove nahi hua" ek evidence state hai, invented
+    # guess nahi.  Ise SPECULATION map karna semantic bug tha: downstream audit
+    # unsupported factual claims ko creative hypotheses ke saath mila deta tha.
+    UNVERIFIED = "UNVERIFIED"
     UNKNOWN = "UNKNOWN"
 
 
@@ -90,7 +94,7 @@ _LABEL_TO_CLAIM = {
     "INFERENCE": ClaimType.INFERENCE,
     "HYPOTHESIS": ClaimType.HYPOTHESIS,
     "SPECULATION": ClaimType.SPECULATION,
-    "UNVERIFIED": ClaimType.SPECULATION,
+    "UNVERIFIED": ClaimType.UNVERIFIED,
     "UNKNOWN": ClaimType.UNKNOWN,
 }
 
@@ -381,12 +385,24 @@ class Claim:
         return len(self.source_ids) > 0
 
     def to_dict(self) -> Dict:
-        return {
+        # Older Android/API consumers already understand UNKNOWN but may reject
+        # an enum value added after their build.  Keep the legacy field inside
+        # the old vocabulary while exposing the precise new state separately.
+        # New code should prefer ``claim_state`` when present.
+        serialized = (
+            ClaimType.UNKNOWN.value
+            if self.claim_type == ClaimType.UNVERIFIED
+            else self.claim_type.value
+        )
+        payload = {
             "text": self.text,
-            "claim_type": self.claim_type.value,
+            "claim_type": serialized,
             "source_ids": self.source_ids,
             "grounded": self.is_grounded,
         }
+        if self.claim_type == ClaimType.UNVERIFIED:
+            payload["claim_state"] = ClaimType.UNVERIFIED.value
+        return payload
 
 
 # ── EvidencePack ─────────────────────────────────────────────────────────────
@@ -851,6 +867,13 @@ class ResearchResult:
     # frontend ko dobara text parse karna padta.
     requested_ledger: Dict = field(default_factory=dict)
     label_report: Dict = field(default_factory=dict)
+    # Advanced scientific-discovery assessment.  Structured and optional so
+    # older Android clients that ignore unknown fields remain compatible.
+    discovery: Dict = field(default_factory=dict)
+    # Specialist evidence lanes keep empirical science, official/declassified
+    # records, historical/traditional texts, allegations and app-original
+    # hypotheses machine-readably separate.  Optional for old clients.
+    specialist_research: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

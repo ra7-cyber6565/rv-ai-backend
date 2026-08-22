@@ -1,40 +1,26 @@
 """
 Gemini model chunna — guess ki jagah, server se poochh kar.
 
-Dikkat jo aayi thi: code mein model ka naam hard-code tha ("gemini-flash-latest").
-Agar wo naam is API key / is SDK version ke liye maujood na ho, to Google
-`InvalidArgument`/`NotFound` (400/404) bhejta hai aur user ko sirf
-"Ek dikkat aa gayi (InvalidArgument)" dikhta hai — jo bekaar hai.
+Normal REASONING request ke andar hum Google se model list discover kar sakte
+hain, phir usable naam cache karte hain. Diagnostics alag hai: diagnostics ko
+khud quota/network burn nahi karna chahiye, isliye `diagnose()` default se
+**zero-network / zero-generation-call** hai. Explicit `active_discovery=True`
+par sirf model-list discovery chal sakti hai, wo bhi ZERO_COST_ONLY mein tabhi
+jab Gemini project(s) ko explicitly no-paid-spend confirm kiya gaya ho.
+Diagnostic kabhi `generate_content("Say OK")` nahi karta.
 
-Ab hum Google se ek baar poochhte hain ki "kaunse model available hain",
-usmein se sabse behtar flash model chunte hain, aur naam yaad rakh lete hain.
-Naam kabhi badal jaaye to code badalne ki zaroorat nahi — apne aap chal jaayega.
+§7: dynamic discovery + dead-model memory.
+§8: free backup key par shift hone par model/dead-name cache reset hota hai.
 
-§7 (2026-08-20 ki live failure ke baad) do cheezein add hui hain:
-
-  1. DYNAMIC DISCOVERY PEHLE, GUESS BAAD MEIN — `list_models()` se aaya naam
-     hamesha jeetta hai. Neeche jo `FALLBACKS` hain wo sirf tab use hote hain
-     jab list_models hi na chale (network/key issue). Isliye is list mein
-     purani generation ke naam (1.5-flash, pro-latest) rakhna nuksaan tha:
-     wo naam 404 dete the aur system unhe baar-baar try karta rehta tha.
-
-  2. DEAD-MODEL MEMORY (negative cache) — jo naam ek baar 404/"not supported"
-     de chuka, wo poore process ke liye chhod diya jaata hai (`mark_dead`).
-     Pehle `candidates()` usi mare hue naam ko har pass mein dobara offer
-     karta tha, jisse ek hi galti 3 pass × 3 retry = 9 bekaar HTTP call
-     ban jaati thi.
-
-₹0 rule: yahan sirf free-tier Gemini model hi aate hain, koi paid service nahi.
+₹0 rule: actual Gemini use se pehle startup zero-cost guard har primary/backup
+credential ko confirmation policy ke neeche rakhta hai. Ye module billing oracle
+hone ka daawa nahi karta aur guard ko bypass nahi karta.
 """
 from __future__ import annotations
 
 import os
 from typing import Dict, List, Optional
 
-# LAST RESORT ONLY — agar `list_models()` hi fail ho jaaye (network/key), tab
-# inhe try karte hain. Sirf current generation ke naam, kyunki mare hue naam
-# rakhne se system 404 par waqt barbaad karta hai. Asli source of truth Google
-# ki `list_models()` hai, ye list nahi.
 FALLBACKS: tuple = (
     "gemini-flash-latest",
     "gemini-2.5-flash",
@@ -42,7 +28,6 @@ FALLBACKS: tuple = (
     "gemini-2.0-flash",
 )
 
-# jo naam pehle pasand hain (substring match, order matters)
 _PREFER = (
     "gemini-flash-latest",
     "gemini-2.5-flash",
@@ -51,20 +36,20 @@ _PREFER = (
 )
 
 _cache: Optional[str] = None
-_seen: List[str] = []          # jo model asli list mein mile the (yaad rakhe)
-# naam -> wajah. Ye process-wide hai: 404 ka matlab hai naam hi galat hai,
-# aur wo agle request mein bhi galat hi rahega.
+_seen: List[str] = []
 _dead: Dict[str, str] = {}
+_TRUTHY = {"1", "true", "yes", "on"}
+
+
+def _truthy(value: object) -> bool:
+    return str(value or "").strip().lower() in _TRUTHY
 
 
 def _clean(name: str) -> str:
-    """`models/gemini-2.0-flash` -> `gemini-2.0-flash`."""
     return name.split("/", 1)[1] if name.startswith("models/") else name
 
 
-# ── dead-model memory (§7) ───────────────────────────────────────────────────
 def mark_dead(name: str, reason: str = "model_not_found") -> None:
-    """Is naam ko poore process ke liye chhod do (sirf permanent errors par)."""
     if name:
         _dead.setdefault(_clean(name), reason or "model_not_found")
 
@@ -74,27 +59,15 @@ def is_dead(name: str) -> bool:
 
 
 def dead_models() -> Dict[str, str]:
-    """Audit/diag ke liye — kaun kis wajah se chhoda gaya."""
     return dict(_dead)
 
 
 def forget_dead() -> None:
-    """Sirf test/diag ke liye — memory saaf karo."""
     _dead.clear()
 
 
-# ── key badalne par memory saaf (§8 backup keys) ─────────────────────────────
 def reset_for_new_key() -> None:
-    """
-    Jab hum doosri free key par shift karte hain to purani key ki model-memory
-    bekaar ho jaati hai: "kaunse model available hain" har key/project ke liye
-    ALAG hota hai, aur 404 bhi key-specific hota hai.
-
-    Isliye naye key par: chuna hua model, dekhi hui list, aur mare hue naam —
-    teeno bhula do. Warna nayi key par bhi wahi purana 404 dohraaya jaayega.
-
-    (Yahan koi key value nahi aati — sirf memory clear hoti hai.)
-    """
+    """Backup key switch ke baad key-specific model/dead-name memory clear karo."""
     global _cache, _seen
     _cache = None
     _seen = []
@@ -102,10 +75,7 @@ def reset_for_new_key() -> None:
 
 
 def configure(genai, key: str) -> bool:
-    """
-    SDK ko di hui key par set karo. `key` sirf yahan use hoti hai — na log hoti
-    hai, na return hoti hai. Khaali key par False (caller ko pata chal jaaye).
-    """
+    """SDK ko key do without logging/returning the credential value."""
     if not key:
         return False
     genai.configure(api_key=key)
@@ -164,7 +134,6 @@ def generate(model, prompt, timeout: Optional[int] = None):
 
 
 def available_models(genai) -> List[str]:
-    """Jo model is key ke liye generateContent support karte hain."""
     out: List[str] = []
     for m in genai.list_models():
         methods = getattr(m, "supported_generation_methods", []) or []
@@ -174,7 +143,6 @@ def available_models(genai) -> List[str]:
         if not name:
             continue
         low = name.lower()
-        # image/audio/embedding/tts wale kaam ke nahi
         if any(bad in low for bad in ("embedding", "aqa", "image", "vision",
                                       "tts", "audio", "live")):
             continue
@@ -188,21 +156,13 @@ def _pick(names: List[str]) -> Optional[str]:
         for n in names:
             if want in n.lower():
                 return n
-    for n in names:                      # koi bhi flash
+    for n in names:
         if "flash" in n.lower():
             return n
     return names[0] if names else None
 
 
 def resolve(genai, force: bool = False) -> str:
-    """
-    Kaam karne wala model name lautata hai. Ek hi baar list_models chalta hai,
-    phir yaad rakh liya jaata hai.
-
-    GEMINI_MODEL env set ho aur wo asli list mein ho to wahi izzat paata hai —
-    par agar wo naam mar chuka hai (404 de chuka hai), to uski izzat khatam:
-    env ki galti se poora research nahi rukna chahiye (§7).
-    """
     global _cache, _seen
     if _cache and not force and not is_dead(_cache):
         return _cache
@@ -212,7 +172,7 @@ def resolve(genai, force: bool = False) -> str:
         wanted = ""
     try:
         names = available_models(genai)
-    except Exception:                    # noqa: BLE001 — list na mile to guess
+    except Exception:
         names = []
     _seen = names
 
@@ -229,103 +189,96 @@ def resolve(genai, force: bool = False) -> str:
 
 
 def candidates(genai) -> List[str]:
-    """
-    Try karne ka order: pehle chuna hua model, phir jo model is key ke liye
-    SACH MEIN available the, phir aakhir mein andaaze wale fallback naam.
-
-    Kyun: agar pehla model mana kar de to agla try wo hona chahiye jo asli list
-    mein tha — na ki koi hard-coded naam jo maujood hi nahi.
-
-    §7: jo naam pehle 404 de chuka hai wo is list mein AATA HI NAHI. Aur agar
-    yaad rakhi hui list poori mar chuki ho, to ek baar Google se dobara
-    poochhte hain (naam badal gaye ho sakte hain).
-    """
     first = resolve(genai)
     order = [first] if not is_dead(first) else []
     for name in _alive(_seen) + _alive(list(FALLBACKS)):
         if name not in order:
             order.append(name)
     if not order:
-        # sab naam mar chuke — ho sakta hai Google ne naam badal diye hon.
-        # Ek dobara discovery, warna khaali haath.
         try:
             fresh = _alive(available_models(genai))
-        except Exception:                # noqa: BLE001
+        except Exception:
             fresh = []
         order = fresh
     return order
 
 
 def friendly_error(exc: Exception) -> str:
-    """
-    Google ki technical error ko insaani Hinglish mein badlo — user ko
-    "InvalidArgument" se kuch samajh nahi aata, isliye asli wajah batao.
-    """
+    """Raw provider/protobuf details ke bina coarse user-safe reason."""
     text = str(exc).lower()
     if "api key not valid" in text or "api_key_invalid" in text:
-        return ("Meri GEMINI_API_KEY galat lag rahi hai. Railway → Variables "
-                "mein naya key daalo (aistudio.google.com/apikey se), phir "
-                "redeploy. 🙂")
+        return "Gemini key valid nahi lag rahi; app doosra configured free fallback try karega."
     if "quota" in text or "429" in text or "resource_exhausted" in text:
-        return ("Thodi der ke liye free limit khatam ho gayi 😅 ek-do minute "
-                "baad phir poochho.")
+        return "Gemini free limit available nahi hai; app doosra free/local fallback try karega."
     if "not found" in text or "is not supported" in text or "404" in text:
-        return ("Model ka naam is key ke liye kaam nahi kar raha. Railway → "
-                "Variables mein GEMINI_MODEL hata do (ya `gemini-2.0-flash` "
-                "daalo), phir redeploy.")
+        return "Configured Gemini model available nahi hai; app doosra model/provider try karega."
     if "permission" in text or "403" in text:
-        return ("Key ke paas is model ki permission nahi hai. AI Studio se naya "
-                "key banao aur Railway mein daalo.")
+        return "Gemini permission available nahi hai; app doosra configured fallback try karega."
     if "location" in text or "user location is not supported" in text:
-        return "Is region se Gemini block hai. Thodi der baad ya doosre key se try karo."
-    return "Ek chhoti dikkat aa gayi. Thodi der baad phir try karo — main yahin hoon 🙂"
+        return "Gemini is region mein available nahi hai; app doosra configured fallback try karega."
+    return "Primary reasoning provider available nahi hua; fallback chain continue hogi."
 
 
-def diagnose() -> Dict:
+def diagnose(active_discovery: bool = False) -> Dict:
+    """Non-secret Gemini readiness diagnostic with zero generation calls.
+
+    Default call makes zero network calls. Active discovery may make exactly one
+    model-list request, never a text-generation request, and is blocked in
+    ZERO_COST_ONLY until all configured Gemini keys/projects are explicitly
+    confirmed no-paid-spend.
     """
-    Sach-sach report: key hai ya nahi, kaunse model dikh rahe hain, kaunsa
-    chuna gaya, aur ek chhota test call chala ya nahi. /api/v1/chat/diag isko
-    use karta hai, taaki andaaza lagane ki zaroorat na pade.
-    """
-    report: Dict = {"key_present": False, "key_length": 0, "sdk_version": "",
-                    "models_found": [], "chosen_model": "", "test_call": "",
-                    "dead_models": dead_models(), "error": "",
-                    "keys_available": 0, "keys": [], "key_setup": {}}
-    # §8 — kitni FREE key mili hain (sirf ginti aur label; value kabhi nahi)
     try:
-        from .key_pool import KeyPool, describe
+        from .key_pool import KeyPool
         pool = KeyPool()
-        report["keys_available"] = pool.count
-        report["keys"] = pool.labels()
-        # "variable daal diya par backup chal nahi raha" ka seedha jawab:
-        # kaunse NAAM dikhe, kitni duplicate thi, aur key alag hai ya wahi ek.
-        # `key_setup` mein bhi kabhi key ki value nahi jaati — sirf naam, ginti
-        # aur ek ulta-na-ho-sakne-wala 8-hex nishaan.
-        report["key_setup"] = describe()
-    except Exception:                    # noqa: BLE001
-        pass
-    key = os.getenv("GEMINI_API_KEY", "")
-    report["key_present"] = bool(key)
-    report["key_length"] = len(key)
-    if not key:
-        report["error"] = "GEMINI_API_KEY set nahi hai (Railway → Variables)."
+    except Exception:
+        pool = None
+
+    key_count = pool.count if pool is not None else 0
+    key = pool.active() if pool is not None else str(os.getenv("GEMINI_API_KEY", "") or "").strip()
+    zero_cost = _truthy(os.getenv("ZERO_COST_ONLY", "true"))
+    confirmed = _truthy(os.getenv("GEMINI_ZERO_COST_CONFIRMED", ""))
+    wanted = str(os.getenv("GEMINI_MODEL", "") or "").strip()
+    report: Dict = {
+        "key_present": bool(key_count or key),
+        "keys_available": key_count or (1 if key else 0),
+        "keys": pool.labels() if pool is not None else (["free key #1"] if key else []),
+        "zero_cost_only": zero_cost,
+        "zero_cost_confirmed": confirmed,
+        "active_discovery_requested": bool(active_discovery),
+        "network_calls": 0,
+        "generation_calls": 0,
+        "models_found": [],
+        "chosen_model": wanted or (_cache or ""),
+        "dead_models": dead_models(),
+        "status": "not_configured" if not key else "configured_not_probed",
+        "error": "",
+    }
+    if not active_discovery:
         return report
+    if not key:
+        report["status"] = "not_configured"
+        report["error"] = "Gemini key set nahi hai."
+        return report
+    if zero_cost and not confirmed:
+        report["status"] = "blocked_by_zero_cost_policy"
+        report["error"] = (
+            "ZERO_COST_ONLY mein active Gemini discovery blocked hai jab tak "
+            "GEMINI_ZERO_COST_CONFIRMED=true na ho."
+        )
+        return report
+
     try:
         import google.generativeai as genai
-        report["sdk_version"] = getattr(genai, "__version__", "unknown")
-        genai.configure(api_key=key)
-        try:
-            report["models_found"] = available_models(genai)[:25]
-        except Exception as exc:  # noqa: BLE001
-            report["error"] = f"list_models failed: {type(exc).__name__}: {exc}"
-        name = resolve(genai, force=True)
-        report["chosen_model"] = name
-        try:
-            resp = generate(genai.GenerativeModel(name), "Say OK", timeout=30)
-            report["test_call"] = (getattr(resp, "text", "") or "")[:80] or "(khaali jawab)"
-        except Exception as exc:  # noqa: BLE001
-            report["test_call"] = f"FAILED: {type(exc).__name__}: {exc}"
-    except Exception as exc:  # noqa: BLE001
-        report["error"] = f"{type(exc).__name__}: {exc}"
+        configure(genai, key)
+        report["network_calls"] = 1
+        names = available_models(genai)
+        report["models_found"] = names[:25]
+        report["chosen_model"] = _pick(names) or wanted or next(
+            (n for n in FALLBACKS if not is_dead(n)), FALLBACKS[0]
+        )
+        report["status"] = "model_list_discovered"
+    except Exception as exc:
+        report["status"] = "discovery_failed"
+        report["error"] = friendly_error(exc)
     report["dead_models"] = dead_models()
     return report
