@@ -178,6 +178,28 @@ def _zero_cost_chain() -> AuditCheck:
     )
 
 
+def _foundation_workflow_safe() -> AuditCheck:
+    """Catch expressions that GitHub rejects before any CI job can start."""
+    text = _read(".github/workflows/foundation-tests.yml")
+    required = (
+        "ubuntu-latest",
+        "scripts/run_foundation_gate.py",
+        "chatgpt-marathon-multilingual",
+        "INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data",
+    )
+    missing = [needle for needle in required if needle not in text]
+    invalid_job_env = "INFINITY_DATA_ROOT: ${{ runner." in text
+    return AuditCheck(
+        name="ci:foundation-workflow-valid-contexts",
+        passed=bool(text) and not missing and not invalid_job_env,
+        detail=(
+            "foundation workflow has a valid Linux temp root and branch trigger"
+            if text and not missing and not invalid_job_env
+            else f"missing={missing}; invalid_runner_context={invalid_job_env}"
+        ),
+    )
+
+
 def _fallback_wired() -> AuditCheck:
     init = _read("research_engine/__init__.py")
     synth = _read("research_engine/synthesizer.py")
@@ -564,11 +586,7 @@ def run_audit() -> AuditReport:
         _storage_fail_closed(),
         _no_wildcard_cors(),
         _obvious_secret_scan(),
-        _contains(
-            ".github/workflows/foundation-tests.yml",
-            "ubuntu-latest",
-            "scripts/run_foundation_gate.py",
-        ),
+        _foundation_workflow_safe(),
         _contains(
             "scripts/run_foundation_gate.py",
             "architecture_audit",

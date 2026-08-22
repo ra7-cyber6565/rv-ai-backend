@@ -22,7 +22,8 @@ jobs:
     env:
       ZERO_COST_ONLY: "true"
       RATE_LIMIT_ENABLED: "true"
-      INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-data
+      # `runner` context is not valid in jobs.<job_id>.env; this job is Linux-only.
+      INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data
       GEMINI_API_KEY: ""
       GEMINI_ZERO_COST_CONFIRMED: "false"
       CLOUD_ARCHIVE_PROVIDER: "none"
