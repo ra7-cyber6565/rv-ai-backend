@@ -19,11 +19,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import gemini_model, gemini_reasoning  # noqa: E402
 from research_engine.gemini_reasoning import (  # noqa: E402
-    GeminiReasoning, QuotaExhausted, _classify,
+    GeminiReasoning, QuotaExhausted, _classify, _compact_prompt,
 )
 from research_engine.model_errors import (  # noqa: E402
-    AUTH, DAILY_QUOTA, MODEL_NOT_FOUND, RATE_LIMIT, SERVER, UNKNOWN,
-    classify_text,
+    AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, MODEL_NOT_FOUND,
+    RATE_LIMIT, SERVER, UNKNOWN, classify_text,
 )
 
 # Test ko sona nahi hai — backoff 0 kar dete hain (asli value production ki hai).
@@ -42,9 +42,11 @@ class _FakeModel:
         self.name = name
         self.script = list(script)
         self.calls = 0
+        self.prompts = []
 
-    def generate_content(self, prompt):          # noqa: ARG002
+    def generate_content(self, prompt):
         self.calls += 1
+        self.prompts.append(prompt)
         item = self.script.pop(0) if self.script else "OK late"
         if isinstance(item, Exception):
             raise item
@@ -102,6 +104,12 @@ def test_error_kinds_are_distinguished():
     assert _classify(_daily()) == DAILY_QUOTA
     assert _classify(RuntimeError("503 Service Unavailable")) == SERVER
     assert _classify(RuntimeError("404 models/x is not found")) == MODEL_NOT_FOUND
+    assert _classify(RuntimeError(
+        "InvalidArgument: input token count exceeds the maximum context length"
+    )) == INPUT_TOO_LARGE
+    assert _classify(RuntimeError(
+        "InvalidArgument: 400 Request contains an invalid argument"
+    )) == INVALID_REQUEST
     assert _classify(RuntimeError("PermissionDenied: 403 permission denied")) == AUTH
     assert _classify(RuntimeError("ValueError: kuch aur")) == UNKNOWN
 
@@ -151,6 +159,66 @@ def test_model_not_found_does_not_retry_same_model():
                     "model-b": ["theek hai"]})
     assert brain.generate("prompt", "analysis") == "theek hai"
     assert brain.fakes["model-a"].calls == 1, brain.fakes["model-a"].calls
+
+
+def _large_evidence_prompt() -> str:
+    block_a = (
+        "[S1] SOURCE DESCRIPTOR (quoted data):\nDATA> Paper A\n"
+        "Title: DATA> A\nRead: DATA> full_text\nExcerpt: DATA> " + ("a" * 7000)
+    )
+    block_b = (
+        "[S2] SOURCE DESCRIPTOR (quoted data):\nDATA> Paper B\n"
+        "Title: DATA> B\nRead: DATA> abstract\nExcerpt: DATA> " + ("b" * 7000)
+    )
+    return (
+        "SAWAL: preserve this question\nUNTRUSTED SOURCE DATA — EVIDENCE ONLY.\n"
+        "BEGIN_UNTRUSTED_SOURCES\n\n" + block_a + "\n\n" + block_b
+        + "\n\nEND_UNTRUSTED_SOURCES\nFINAL RULES MUST SURVIVE"
+    )
+
+
+def test_input_limit_compacts_once_and_recovers_same_working_model():
+    too_large = RuntimeError(
+        "InvalidArgument: 400 input token count exceeds maximum context length"
+    )
+    brain = _brain({"model-a": [too_large, "compact jawab"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "compact jawab"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 2
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    for required in (
+        "SAWAL: preserve this question", "[S1]", "[S2]",
+        "END_UNTRUSTED_SOURCES", "FINAL RULES MUST SURVIVE",
+    ):
+        assert required in fake.prompts[1], (required, fake.prompts[1])
+    assert brain.prompt_compactions == 1
+    assert brain.same_model_retries == 1
+    assert brain.blocked == {}, "working model ko dead/block nahi karna"
+    assert not gemini_model.is_dead("model-a")
+    acc = brain.api_accounting()
+    assert acc["prompt_compactions"] == 1
+    assert acc["prompt_attempts"][0]["compacted"] is False
+    assert acc["prompt_attempts"][1]["compacted"] is True
+    assert INPUT_TOO_LARGE in acc["failure_kinds"]
+    assert brain.failure_kind() == "", "successful compact retry public failure nahi"
+
+
+def test_generic_invalid_argument_is_not_mislabeled_or_retried_blindly():
+    invalid = RuntimeError("InvalidArgument: 400 Request contains an invalid argument")
+    brain = _brain({"model-a": [invalid, "same model must not retry"],
+                    "model-b": ["fallback jawab"]})
+    assert brain.generate("prompt", "analysis") == "fallback jawab"
+    assert brain.fakes["model-a"].calls == 1
+    assert brain.blocked == {}
+    assert not gemini_model.is_dead("model-a")
+    assert INVALID_REQUEST in brain.api_accounting()["failure_kinds"]
+
+
+def test_compactor_does_not_touch_a_prompt_that_is_already_under_target():
+    prompt = "SAWAL: short\nFINAL RULES"
+    assert _compact_prompt(prompt, max_chars=8000) == prompt
 
 
 def test_empty_response_counts_as_failure():
