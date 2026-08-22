@@ -261,6 +261,25 @@ def test_everything_fails_returns_empty_but_records_safe_reason():
         assert raw not in joined
 
 
+def test_fallback_404_cannot_mask_unknown_primary_failure():
+    primary = RuntimeError("primary provider returned an unclassified response")
+    missing = RuntimeError("404 models/model-b is not found")
+    brain = _brain({
+        "model-a": [primary, primary, primary],
+        "model-b": [missing],
+    })
+    assert brain.generate("prompt", "analysis") == ""
+    assert brain.failure_kind() == UNKNOWN
+    assert brain.ledger.primary_kind() == UNKNOWN
+    assert brain.ledger.worst_kind() == MODEL_NOT_FOUND
+    acc = brain.api_accounting()
+    assert acc["primary_failure_kind"] == UNKNOWN
+    assert [row["kind"] for row in acc["failure_events"]] == [
+        UNKNOWN, UNKNOWN, UNKNOWN, MODEL_NOT_FOUND,
+    ]
+    assert all("detail" not in row for row in acc["failure_events"])
+
+
 def test_budget_exhausted_raises_quota_exhausted():
     brain = _brain({"model-a": ["ek", "do"]}, budget=1)
     assert brain.generate("prompt", "analysis") == "ek"
