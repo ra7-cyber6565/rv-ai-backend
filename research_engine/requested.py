@@ -215,6 +215,18 @@ def parse_requests(question: str) -> Dict:
         "wants_second_order": wants_chain,
         "chain_steps": steps,
         "wants_red_team": _any(_RED_TEAM_RES, text),
+        # §4 ki baaki saat demands + naam se maange gaye targets. Ye keys ADD
+        # hui hain, koi purani key badli nahi — purane caller waise hi chalte
+        # hain.
+        "wants_units": _any(_UNIT_RES, text),
+        "wants_comparison": _any(_COMPARE_RES, text),
+        "comparison_dimensions": comparison_dimensions(text),
+        "wants_experiment_design": _any(_EXPERIMENT_RES, text),
+        "wants_falsification": _any(_FALSIFY_RES, text),
+        "wants_confidence": _any(_CONFIDENCE_RES, text),
+        "wants_readiness": _any(_READINESS_RES, text),
+        "wants_source_depth": _any(_SOURCE_DEPTH_RES, text),
+        "named_targets": named_targets(text),
     }
 
 
@@ -292,6 +304,141 @@ _COUNTER_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
     r"disagree\w*", r"refut\w+", r"disconfirm\w+",
 ))
 
+# ─────────────────────────────────────────────────────────────────────────────
+# §4 ki poori parser-list. Pehle ismein saat cheezein PARSE hi nahi hoti thi —
+# units, comparison dimensions, experiment design, falsification, confidence,
+# readiness/validation level aur source depth. Nateeja: user in saat mein se
+# kuch maange to contract mein uska naam bhi nahi aata tha, yaani wo demand
+# CHUP-CHAAP fail ho sakti thi — jo is poori file ka ulta hai.
+#
+# Sab regex jaan-boojh kar KANJOOS hain: shak ho to False. Jhoothi "ye cheez
+# maangi gayi thi par nahi mili" warning bhi ek jhooth hai.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# 1. Units — "units ke saath", "SI units", "unit likho"
+_UNIT_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"\bunits?\b", r"\bSI\s+unit", r"इकाई", r"मात्रक",
+    r"\bdimensional\s+analysis\b",
+))
+
+# 2. Comparison dimensions — "X vs Y", "compare karo", "in dimensions par tulna"
+_COMPARE_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"\bcompar\w+", r"\bversus\b", r"\bvs\.?\b", r"\btulna\b", r"तुलना",
+    r"difference[s]?\s+between", r"\bfarak\b", r"फर्क",
+    r"\bbetter\s+than\b", r"kaun\s+(?:behtar|zyada|acha)",
+    r"side[\s\-]by[\s\-]side",
+))
+# "in dimensions par compare karo: cost, speed, safety" — list stop-phrase ke
+# BAAD aati hai. Isliye stop-phrase dhoondh kar uske aage ki list padhte hain.
+_COMPARE_DIM_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"(?:compare|comparison|tulna|तुलना)[^:\n।]{0,40}?[:—-]\s*([^.\n।]{4,160})",
+    # "compare EV vs petrol on cost, emissions and range" — colon ke bina bhi
+    # list aati hai, "on/par/ke hisaab se" ke baad.
+    r"(?:compare|comparison|tulna|तुलना)[^.\n।]{0,60}?\b(?:on|par|pe|"
+    r"ke\s+hisaab\s+se|के\s*आधार\s*पर)\s+([^.\n।]{4,160})",
+    r"(?:in|is|inn|niche\s+di\s+gayi)?\s*(?:dimensions?|parameters?|"
+    r"criteria|axes|pehluon|पहलुओं|मापदंड)\s*(?:par|pe|on|ke\s*hisaab\s*se|"
+    r"के\s*आधार\s*पर)?\s*[:—-]?\s*([^.\n।]{4,160})",
+    # "EV vs petrol cars ko cost, emissions and range par compare karo" —
+    # list VERB SE PEHLE. Capture mein object ka hissa bhi aa jaata hai
+    # ("EV vs petrol cars ko cost"), isliye `_DIM_PREFIX_RE` use kaat deta hai.
+    r"([^.\n।:]{4,160}?)\s*(?:par|pe|ke\s+hisaab\s+se|के\s*आधार\s*पर)\s+"
+    r"(?:compare|comparison|tulna|तुलना)",
+    # "tulna cost aur side effects ke hisaab se karo" — verb pehle, list beech
+    # mein, "ke hisaab se" aakhir mein.
+    r"(?:compare|comparison|tulna|तुलना)\s+([^.\n।:]{4,160}?)\s*"
+    r"(?:ke\s+hisaab\s+se|के\s*आधार\s*पर|\bpar\b|\bpe\b)",
+))
+
+# "EV vs petrol cars ko cost" me se sirf "cost" chahiye. Ye markers batate hain
+# ki jis cheez ki tulna ho rahi hai wo khatam ho gayi aur pehlu shuru hue.
+# `.*` (greedy) jaan-boojh kar: AAKHRI marker ke baad ka hissa hi pehlu hai.
+_DIM_PREFIX_RE = re.compile(
+    r"^.*(?:\bko\b|\bmein\b|\bbetween\b|\bvs\.?\b|\bversus\b|\bka\b|\bki\b)\s+",
+    re.IGNORECASE)
+
+# Doosri taraf ka kachra: "systematics par tulna karo" me se sirf "systematics"
+# chahiye. Ye tab hota hai jab list ke BAAD verb aata hai ("— evidence strength
+# aur systematics par tulna karo"). Sirf aakhir se kaatte hain, beech se nahi.
+_DIM_SUFFIX_RE = re.compile(
+    r"\s*(?:\b(?:par|pe|on|ke\s+hisaab\s+se|के\s*आधार\s*पर)\b\s*)?"
+    r"(?:compare|comparison|tulna|तुलना)\b.*$", re.IGNORECASE)
+# "cost dikhao" / "systematics likho" — sirf command verb aakhir mein ho to hate.
+_DIM_VERB_TAIL_RE = re.compile(
+    r"\s+(?:karo|karna|kijiye|banao|banana|do|dijiye|dikhao|likho|batao|"
+    r"chahiye|karke\s+dikhao)\s*$", re.IGNORECASE)
+
+
+def _strip_dim_edges(part: str) -> str:
+    """Ek pehlu ke aage-peeche ka verb/object kachra hataao."""
+    out = _DIM_PREFIX_RE.sub("", part or "")
+    out = _DIM_SUFFIX_RE.sub("", out)
+    for _ in range(2):                    # "par tulna karo" ke baad "karo" bacha ho
+        out = _DIM_VERB_TAIL_RE.sub("", out)
+    return out.strip()
+
+# 3. Experiment design — "experiment design karo", "test kaise karenge"
+_EXPERIMENT_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"experiment\w*\s*(?:design|protocol|plan|setup|banao|karo|do\b)",
+    r"(?:design|propose|likho|banao)\s+(?:an?\s+)?experiment",
+    r"test\s*(?:plan|protocol|design)", r"kaise\s+test\s+kar",
+    r"how\s+(?:would|to|can)\s+(?:you\s+|we\s+)?test",
+    r"प्रयोग\s*(?:की\s*रूपरेखा|डिज़ाइन|योजना)?", r"परीक्षण\s*योजना",
+    r"\bpre[\s\-]?registered\b", r"\bcontrol\s+group\b",
+))
+
+# 4. Falsification — "galat kaise sabit hogi", "falsifiable"
+_FALSIFY_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"falsif\w+", r"disprov\w+", r"refut\w+",
+    r"galat\s+(?:kaise\s+)?(?:sabit|prove)", r"गलत\s+साबित",
+    r"kya\s+(?:cheez|result)\s+ise\s+galat", r"khandan",
+))
+
+# 5. Confidence — "confidence kitna hai", "uncertainty do"
+_CONFIDENCE_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"\bconfidence\b", r"\bcertaint\w+", r"\buncertaint\w+",
+    r"kitna\s+(?:yakeen|bharosa|pakka)", r"कितना\s+(?:यकीन|भरोसा)",
+    r"\bconfidence\s+interval\b", r"\berror\s+bars?\b",
+    r"\bkitni\s+sambhavna\b", r"आत्मविश्वास", r"विश्वास\s*स्तर",
+))
+
+# 6. Readiness / validation level — "TRL", "kitna validated hai"
+_READINESS_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"\breadiness\b", r"\bTRL[\s\-]?\d?\b", r"technology\s+readiness",
+    r"validation\s+(?:level|status|state)", r"\bvalidated\b",
+    r"maturity\s+level", r"kitna\s+(?:tested|validate|pakka\s+hua)",
+    r"deployment\s+ready", r"प्रमाणित", r"परिपक्वता",
+))
+
+# 7. Source depth — "full text padho", "abstract se aage jao"
+_SOURCE_DEPTH_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
+    r"full[\s\-]?text", r"poora\s+(?:paper|text|document)\s*padh",
+    r"abstract\s+se\s+(?:aage|zyada)", r"\bdeep\s+read\w*",
+    r"primary\s+(?:source|literature)", r"peer[\s\-]?review\w*",
+    r"source\s+depth", r"original\s+paper", r"मूल\s*(?:शोध|पेपर)",
+    r"सिर्फ\s*abstract\s*नहीं",
+))
+
+# 8. Named datasets / missions / experiments — prompt mein naam se maange gaye
+# targets. Ye ginti isliye zaroori hai ki "Planck aur Bullet Cluster dono dekho"
+# likha ho aur report unme se ek ko chhod de, to wo kami dikhni chahiye.
+# Acronym (2+ capitals / capital+digits) aur ek chhoti known-mission list —
+# dono conservative hain, kyunki har capitalised shabd mission nahi hota.
+_ACRONYM_RE = re.compile(r"\b([A-Z][A-Z0-9]{2,12}(?:-[A-Z0-9]{1,6})?)\b")
+_ACRONYM_STOP = {
+    "AND", "THE", "FOR", "NOT", "BUT", "ALL", "ANY", "YOU", "USE", "NEW",
+    "API", "PDF", "URL", "AI", "ML", "OK", "TODO", "FAQ", "ETC", "VS",
+    "QUICK", "DEEP", "MAXIMUM", "VERIFIED", "PARTIAL", "COMPLETE",
+    "RV", "HYP", "JSON", "HTML", "CSV", "UI", "APP", "SI",
+}
+_NAMED_TARGET_RES = tuple(re.compile(p) for p in (
+    r"\b(Planck|WMAP|Gaia|JWST|Hubble|LIGO|Virgo|KAGRA|Euclid|LSST|SDSS|"
+    r"DESI|eROSITA|Fermi|Chandra|XENON\w*|LUX-?ZEPLIN|LZ|PandaX|"
+    r"Bullet Cluster|CERN|LHC|ATLAS|CMS|IceCube|Auger|ALMA|VLA|"
+    r"UK Biobank|Framingham|NHANES|ImageNet|MNIST|CIFAR|GenBank|"
+    r"Human Genome Project|ENCODE|TCGA|COMPAS)\b",
+))
+
 
 def wants_calculations(question: str) -> bool:
     """
@@ -310,6 +457,61 @@ def wants_calculations(question: str) -> bool:
 def wants_original_hypotheses(question: str) -> bool:
     """App ki KHUD ki hypothesis maangi gayi hai (paper ki hypothesis nahi)."""
     return _any(_ORIGINAL_RES, question or "")
+
+
+def comparison_dimensions(question: str, limit: int = 8) -> List[str]:
+    """
+    "cost, speed aur safety par compare karo" → ["cost", "speed", "safety"].
+
+    Kuch na mile to KHAALI list — aur khaali list ka matlab "compare maanga hi
+    nahi" nahi hota (uske liye `wants_comparison` alag hai). Do alag baatein
+    hain: "tulna maangi thi" aur "tulna ke pehlu naam se likhe the".
+    """
+    text = question or ""
+    for pattern in _COMPARE_DIM_RES:
+        m = pattern.search(text)
+        if not m:
+            continue
+        raw = m.group(1) if m.groups() else ""
+        # Pehla tukda kabhi "EV vs petrol cars ko cost" jaisa aata hai aur aakhri
+        # tukda "systematics par tulna karo" jaisa — dono taraf ka kachra
+        # `_strip_dim_edges` kaat deta hai. Ye kaam `_clean_variable` se PEHLE
+        # hona zaroori hai: wo lambe phrase ko poora hi gira deta hai.
+        parts = [_clean_variable(_strip_dim_edges(p))
+                 for p in _VAR_SPLIT_RE.split(raw)]
+        out: List[str] = []
+        for p in parts:
+            if not p or _VAR_JUNK_RE.match(p) or len(p) < 3:
+                continue
+            if p.lower() not in [x.lower() for x in out]:
+                out.append(p)
+        if len(out) >= 2:
+            return out[:limit]
+    return []
+
+
+def named_targets(question: str, limit: int = 12) -> List[str]:
+    """
+    Prompt mein NAAM se maange gaye dataset / mission / experiment.
+
+    Sirf acronym aur ek chhoti known list — "Galaxy" ya "Rotation" jaise aam
+    shabd mission nahi maane jaate. Yahan zyada pakadne se ledger nakli kami
+    dikhane lagega, isliye kanjoosi jaan-boojh kar hai.
+    """
+    text = question or ""
+    out: List[str] = []
+    for pattern in _NAMED_TARGET_RES:
+        for m in pattern.finditer(text):
+            name = m.group(1).strip()
+            if name and name.lower() not in [x.lower() for x in out]:
+                out.append(name)
+    for m in _ACRONYM_RE.finditer(text):
+        name = m.group(1).strip()
+        if name.upper() in _ACRONYM_STOP:
+            continue
+        if name.lower() not in [x.lower() for x in out]:
+            out.append(name)
+    return out[:limit]
 
 
 def quality_contract(question: str, config=None,
@@ -359,6 +561,40 @@ def quality_contract(question: str, config=None,
         # contract mein likha hai taaki koi baad mein "spec ne bola tha 3 chahiye"
         # keh kar filler na bhar de.
         "forced_hypothesis_count_allowed": False,
+        # §4 ki parser-list ka bacha hua hissa. `direct_answer_required` hamesha
+        # True hai — har sawaal ka seedha jawab banta hai; ye flag isliye likha
+        # hai ki contract padh kar hi pata chal jaaye, andaza na lagana pade.
+        "direct_answer_required": True,
+        "units_required": bool(r.get("wants_units")),
+        "comparison_required": bool(r.get("wants_comparison")),
+        "comparison_dimensions": list(r.get("comparison_dimensions") or []),
+        "experiment_design_required": (bool(r.get("wants_experiment_design"))
+                                       or original_needed),
+        "falsification_required": (bool(r.get("wants_falsification"))
+                                   or original_needed),
+        # Confidence har hypothesis card par likhna hi hai (§18), isliye app ki
+        # apni hypothesis maangi gayi ho to ye bhi apne aap zaroori ho jaati hai.
+        "confidence_required": (bool(r.get("wants_confidence"))
+                                or original_needed),
+        "readiness_required": (bool(r.get("wants_readiness"))
+                               or original_needed),
+        "source_depth_required": bool(r.get("wants_source_depth")),
+        "named_targets": list(r.get("named_targets") or []),
+        # Kaunsi cheez user ne KHUD likh kar maangi (derived nahi). Sirf inhi ko
+        # ledger mandatory ginta hai — "hypothesis maangi thi isliye confidence
+        # bhi chahiye" jaisi derived demand report mein DIKHTI hai par status
+        # nahi giraati, warna app apni hi shart par jawab ko fail kar deta.
+        "explicitly_asked": [
+            key for key, flag in (
+                ("units", r.get("wants_units")),
+                ("comparison", r.get("wants_comparison")),
+                ("experiment_design", r.get("wants_experiment_design")),
+                ("falsification", r.get("wants_falsification")),
+                ("confidence", r.get("wants_confidence")),
+                ("readiness", r.get("wants_readiness")),
+                ("source_depth", r.get("wants_source_depth")),
+            ) if flag
+        ],
         "mode": mode or "DEEP",
     }
 
@@ -542,6 +778,93 @@ def contract_ledger(contract: Optional[Dict], delivered: Optional[Dict] = None,
         add("red_team", "Red-team / self-falsification",
             "chala" if d.get("red_team") else "nahi chala", bool(d.get("red_team")))
 
+    # §4 ki baaki saat demands. Har ek ka ek hi pattern hai: contract mein
+    # maangi gayi hai ya nahi → delivered mein uska jawab hai ya nahi. Jawab na
+    # ho to ❔ ("check nahi hua"), ❌ nahi — kyunki "naapa nahi gaya" aur "nahi
+    # mila" do alag baatein hain, aur pichhli report ki sabse badi galti inhi
+    # dono ko ek karne se bani thi.
+    explicit = set(str(x) for x in (c.get("explicitly_asked") or []))
+    simple = (
+        ("units", "units_required", "units",
+         "Numbers ke saath units", "mile", "nahi mile",
+         "units maange gaye the par jawab mein number ke saath unit nahi likha"),
+        ("experiment_design", "experiment_design_required", "experiment_design",
+         "Experiment design / test plan", "bana", "poora nahi bana",
+         "test plan chalane laayak nahi hai — kis sample/dataset par, kya naapa "
+         "jayega, ya kaunsa result pass-fail maana jayega, in mein se kuch "
+         "likha hi nahi gaya"),
+        ("falsification", "falsification_required", "falsification",
+         "Falsification — kis result se ye galat ho jaayega", "likha",
+         "nahi likha",
+         "falsification maangi gayi thi par 'galat kaise sabit hoga' nahi likha"),
+        ("confidence", "confidence_required", "confidence",
+         "Confidence / uncertainty", "likha", "nahi likha",
+         "confidence maanga gaya tha par uska level nahi likha"),
+        ("readiness", "readiness_required", "readiness",
+         "Readiness / validation level", "likha", "nahi likha",
+         "readiness (kitna validate hua) maanga gaya tha par nahi likha"),
+        ("source_depth", "source_depth_required", "source_depth",
+         "Source depth — kitna gehra padha gaya", "likha", "nahi likha",
+         "source depth maangi gayi thi par padhne ki gehrai nahi likhi"),
+    )
+    for key, need_key, got_key, what, yes_word, no_word, why in simple:
+        if not c.get(need_key):
+            continue
+        got = d.get(got_key)
+        if got is None:
+            add(key, what, "check nahi hua", None,
+                "ye maanga gaya tha par iska naap hi nahi hua — isliye 'mil "
+                "gaya' nahi keh sakte", mandatory=key in explicit)
+        else:
+            add(key, what, yes_word if got else no_word, bool(got),
+                "" if got else why, mandatory=key in explicit)
+
+    # comparison — sirf haan/na nahi: prompt mein naam se likhe pehlu bhi ginte
+    # hain, taaki "cost, speed, safety par compare karo" mein se ek chhoot jaaye
+    # to wo kami dikhe.
+    if c.get("comparison_required"):
+        dims = [str(x) for x in (c.get("comparison_dimensions") or [])]
+        covered = d.get("comparison_dimensions_covered")
+        if dims:
+            if covered is None:
+                add("comparison", f"{len(dims)} pehluon par tulna",
+                    "check nahi hua", None,
+                    "tulna ke pehlu prompt mein the par jawab mein inhe khoja "
+                    "hi nahi gaya", mandatory="comparison" in explicit)
+            else:
+                have = [str(x) for x in covered]
+                missing = [x for x in dims if x not in have]
+                add("comparison", f"{len(dims)} pehluon par tulna",
+                    f"{len(have)}/{len(dims)} pehlu mile", not missing,
+                    ("in pehluon par tulna nahi hui: " + ", ".join(missing[:4]))
+                    if missing else "",
+                    mandatory="comparison" in explicit)
+        else:
+            got = d.get("comparison")
+            add("comparison", "Tulna (comparison)",
+                "check nahi hua" if got is None else
+                ("hui" if got else "nahi hui"),
+                None if got is None else bool(got),
+                "" if got else "tulna maangi gayi thi",
+                mandatory="comparison" in explicit)
+
+    # naam se maange gaye dataset / mission / experiment
+    targets = [str(x) for x in (c.get("named_targets") or [])]
+    if targets:
+        found = d.get("named_targets_found")
+        if found is None:
+            add("named_targets", f"{len(targets)} naam se maange gaye target",
+                "check nahi hua", None,
+                "prompt mein naam se maange gaye dataset/mission the par unka "
+                "milaan nahi hua")
+        else:
+            have = [str(x) for x in found]
+            missing = [x for x in targets if x not in have]
+            add("named_targets", f"{len(targets)} naam se maange gaye target",
+                f"{len(have)}/{len(targets)} par kaam hua", not missing,
+                ("in par kuch nahi mila: " + ", ".join(missing[:4]))
+                if missing else "")
+
     failed = [i for i in items if i["ok"] is False]
     unknown = [i for i in items if i["ok"] is None]
     mandatory_missing = [i for i in items
@@ -600,6 +923,185 @@ def looks_like_chain(text: str) -> bool:
     orders = len(re.findall(r"\b(?:first|second|third|1st|2nd|3rd)[\s\-]?order\b",
                             body, re.IGNORECASE))
     return orders >= 2
+
+
+# ── §4 ki saat naye demands: jawab mein sach much aayi ya nahi ───────────────
+# Ye sab MAAPA jaata hai — kisi ke keh dene par bharosa nahi kiya jaata. Jo cheez
+# naapi hi na ja sake, uski key bheji hi nahi jaati (ledger use "check nahi hua"
+# likhega, "nahi mila" nahi).
+
+# Unit ka saboot: physics wale units `physics_checks.parse_quantities` pakad leta
+# hai. Ye list uske baahar ki cheezein hai — paisa, percent, count-per-time,
+# astronomy ke units — kyunki "units chahiye" ka matlab sirf SI nahi hota.
+_EXTRA_UNIT_RE = re.compile(
+    r"(?:[₹$€£]\s*\d|\d\s*(?:%|percent\b|per\s+cent\b)|"
+    r"\d[\d.,]*\s*(?:solar\s+mass(?:es)?|M[_☉]|M_sun|sigma|σ|"
+    r"crore|lakh|billion|million|trillion|"
+    r"events?\s*/\s*(?:day|year|s)|counts?\s*/\s*(?:day|year|s)|"
+    r"pc|kpc|Mpc|Gpc|AU|ly|light[\s-]?year(?:s)?|barn|zb|yr|"
+    r"GeV|MeV|TeV|keV|eV|Hz|kHz|MHz|GHz|W|kW|MW|GW|kWh|MWh|"
+    r"mol|mmol|molar|ppm|ppb|dB|bit(?:s)?|byte(?:s)?|GB|TB)\b)",
+    re.IGNORECASE)
+
+# Confidence ka saboot: band ka naam likha ho. Sirf "confidence" shabd likh dena
+# saboot nahi — isliye level ka naam maanga jaata hai.
+_CONFIDENCE_BAND_RE = re.compile(
+    r"\b(?:VERY\s+LOW|LOW|MODERATE|MEDIUM|HIGH|VERY\s+HIGH)\b\s*"
+    r"(?:confidence|bharosa|vishwas)|"
+    r"confidence\s*(?:band|level|:)?\s*[:\-–]?\s*"
+    r"(?:VERY\s+LOW|LOW|MODERATE|MEDIUM|HIGH|VERY\s+HIGH)\b",
+    re.IGNORECASE)
+
+# Readiness = "ye cheez kitna validate ho chuki hai". Hypothesis ka status
+# (UNTESTED HYPOTHESIS) bhi readiness hi hai.
+_READINESS_TEXT_RE = re.compile(
+    r"UNTESTED\s+HYPOTHESIS|validation\s+(?:status|level|stage)|"
+    r"readiness\s+(?:level|stage)?|TRL\s*\d|"
+    r"(?:lab|field|clinical)\s+(?:test|trial)\s+(?:pending|baaki|nahi)",
+    re.IGNORECASE)
+
+# §9 ke paanch access-depth label. Inme se ek bhi jawab mein ho, to "kitna gehra
+# padha" likha gaya hai.
+_DEPTH_LABELS = ("METADATA ONLY", "SNIPPET ONLY", "ABSTRACT ONLY",
+                 "RELEVANT SECTIONS REVIEWED", "FULL TEXT ACCESSED")
+
+_COMPARE_CUE_RE = re.compile(
+    r"\bvs\.?\b|\bversus\b|\bcompared\s+(?:to|with)\b|\btulna\b|"
+    r"\bmuqabla\b|\bek\s+taraf\b.{0,80}\bdoosri\s+taraf\b|"
+    r"\bdono\s+(?:mein|ka)\b", re.IGNORECASE | re.DOTALL)
+
+_WORD_RE = re.compile(r"[A-Za-z0-9ऀ-ॿ]+")
+_TARGET_STOP = {"the", "a", "an", "of", "and", "or", "ka", "ki", "ke", "aur",
+                "data", "dataset", "mission", "survey", "experiment"}
+
+
+def _phrase_present(phrase: str, haystack: str) -> bool:
+    """
+    Phrase ke matlab-wale shabd sab maujood hain ya nahi.
+
+    Poore phrase ka exact match kaafi nahi: prompt "charging time" maangta hai
+    aur jawab "time to charge" likhta hai. Isliye har content-word alag se
+    dhoonda jaata hai (word boundary par, substring par nahi — "range" ko
+    "arrange" mein ginna galat hoga).
+    """
+    words = [w.lower() for w in _WORD_RE.findall(phrase or "")]
+    words = [w for w in words if len(w) >= 3 and w not in _TARGET_STOP]
+    if not words:
+        return False
+    low = haystack.lower()
+    for w in words:
+        if not re.search(r"(?<![a-z0-9])" + re.escape(w) + r"[a-z]{0,3}(?![a-z])",
+                         low):
+            return False
+    return True
+
+
+def _experiment_design_present(hyps: List[Dict]) -> bool:
+    """
+    Test plan "bana" kab kaha jaaye: plan ka text ho, aur §16 ke wo teen hisse
+    ho jinke bina plan chalaya hi nahi ja sakta — kis cheez par (dataset/sample),
+    kya naapa jayega, aur kaunsa result pass/fail maana jayega.
+
+    Sirf "experiment karna hoga" likh dena design nahi hai — yahi cheez pichhli
+    report mein "test plan diya gaya" ban gayi thi.
+    """
+    core = ("dataset_or_sample", "measured_variables", "success_threshold")
+    for h in hyps:
+        text = " ".join(str(h.get(k) or "") for k in ("experiment", "how_to_test"))
+        if not text.strip():
+            continue
+        missing = set(str(x) for x in (h.get("experiment_spec_missing") or []))
+        if not [k for k in core if k in missing]:
+            return True
+    return False
+
+
+def delivery_evidence(contract: Optional[Dict], answer: str,
+                      hypotheses: Optional[List[Dict]] = None,
+                      calculations: Optional[List[Dict]] = None,
+                      source_titles: Optional[List[str]] = None) -> Dict:
+    """
+    §4 ki naye ledger items ke liye `delivered` values banao — answer ke ASLI
+    text se, dave se nahi.
+
+    Sirf wahi keys return hoti hain jinka naap sach mein ho gaya. Jaise
+    experiment design / falsification hypothesis records se aate hain: agar
+    hypotheses list hi nahi bheji gayi (yaani us run mein hypothesis engine
+    chala hi nahi), to un keys ko `False` likhna jhooth hoga — key gayab rehti
+    hai aur ledger imaandaari se "check nahi hua" chhapta hai.
+    """
+    c = dict(contract or {})
+    body = str(answer or "")
+    out: Dict = {}
+    if not body.strip():
+        return out
+
+    # units — answer ke numbers par
+    try:
+        from .physics_checks import parse_quantities
+        has_units = any(getattr(q, "unit", "") for q in parse_quantities(body))
+    except Exception:
+        has_units = False
+    if not has_units:
+        has_units = bool(_EXTRA_UNIT_RE.search(body))
+    if not has_units:
+        for rec in (calculations or []):
+            # `CalculationRecord.units` ek dict hai ({"T_c": "K"}), dict-form
+            # record mein "unit" bhi ho sakta hai — dono roop chalte hain.
+            if isinstance(rec, dict):
+                unit = rec.get("units") or rec.get("unit")
+            else:
+                unit = getattr(rec, "units", None) or getattr(rec, "unit", None)
+            if unit if isinstance(unit, dict) else str(unit or "").strip():
+                has_units = True
+                break
+    out["units"] = has_units
+
+    # experiment design + falsification — hypothesis records par
+    if hypotheses is not None:
+        hyps = [h for h in hypotheses if isinstance(h, dict)]
+        out["experiment_design"] = _experiment_design_present(hyps)
+        out["falsification"] = any(
+            str(h.get("falsification_test") or "").strip()
+            or str(h.get("if_false") or "").strip()
+            or str((h.get("experiment_spec") or {}).get("falsification_condition")
+                   or "").strip()
+            for h in hyps)
+
+    # confidence — band ka naam
+    band = False
+    for h in (hypotheses or []):
+        if isinstance(h, dict) and str(h.get("confidence_band") or "").strip():
+            band = True
+            break
+    out["confidence"] = band or bool(_CONFIDENCE_BAND_RE.search(body))
+
+    # readiness — kitna validate hua
+    status = False
+    for h in (hypotheses or []):
+        if isinstance(h, dict) and str(h.get("validation_status") or "").strip():
+            status = True
+            break
+    out["readiness"] = status or bool(_READINESS_TEXT_RE.search(body))
+
+    # source depth — §9 ke paanch label
+    out["source_depth"] = any(label in body for label in _DEPTH_LABELS)
+
+    # comparison
+    dims = [str(x) for x in (c.get("comparison_dimensions") or [])]
+    if dims:
+        out["comparison_dimensions_covered"] = [d for d in dims
+                                                if _phrase_present(d, body)]
+    elif c.get("comparison_required"):
+        out["comparison"] = bool(_COMPARE_CUE_RE.search(body))
+
+    # naam se maange gaye target — answer + source titles dono mein dekho
+    targets = [str(x) for x in (c.get("named_targets") or [])]
+    if targets:
+        hay = body + "\n" + "\n".join(str(t) for t in (source_titles or []))
+        out["named_targets_found"] = [t for t in targets
+                                      if _phrase_present(t, hay)]
+    return out
 
 
 # ── prompt block (jo maanga gaya hai, wo model ko DOHRA kar batao) ────────────

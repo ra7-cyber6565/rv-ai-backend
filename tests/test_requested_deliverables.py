@@ -373,6 +373,170 @@ def test_pipeline_reports_incomplete_run_and_downgrades_labels():
     assert answer.lstrip().startswith("## Seedha jawab"), answer[:80]
 
 
+# ── §4 ki saat naye demands: naap answer ke text par hota hai ────────────────
+# Ye hissa is liye juda (2026-08-22 self-audit): contract in saat cheezon ko
+# maang raha tha, par koi bhi code unka jawab NAAP nahi raha tha — isliye ledger
+# har run mein "check nahi hua" chhapta tha. "Check nahi hua" imaandaar hai, par
+# jab naapna MUMKIN ho tab wo bas aalas hai.
+_SPEC_FULL = {
+    "dataset_or_sample": "SDSS DR17 ke 1200 dwarf galaxies",
+    "control_or_baseline": "matched luminosity control set",
+    "measured_variables": ["rotation velocity", "stellar mass"],
+    "statistical_metric": "chi-square per dof",
+    "success_threshold": "3-sigma se zyada farak",
+    "failure_threshold": "1-sigma ke andar",
+    "falsification_condition": "flat curve dono set mein same aaye",
+}
+
+
+def _hyp(spec_missing, **extra):
+    h = {"hypothesis_id": "RV-HYP-2026-001",
+         "experiment": "SDSS DR17 par matched-control comparison",
+         "how_to_test": "rotation curve fit karo",
+         "experiment_spec": dict(_SPEC_FULL),
+         "experiment_spec_missing": list(spec_missing)}
+    h.update(extra)
+    return h
+
+
+def test_units_answer_ke_number_se_pakde_jaate_hain():
+    """"Units diye gaye hain" likh dena saboot nahi — number ke saath unit chahiye."""
+    from research_engine.requested import delivery_evidence
+
+    claim_only = ("Humne saare numbers units ke saath diye hain aur SI units "
+                  "ka dhyan rakha hai.")
+    assert delivery_evidence({}, claim_only)["units"] is False, \
+        "sirf 'units diye hain' kehne par units mile nahi maana ja sakta"
+    assert delivery_evidence({}, "T_c 92 K par aata hai.")["units"] is True
+    # SI ke baahar wale bhi units hain — paisa, percent, astronomy
+    assert delivery_evidence({}, "Lagat ₹45 lakh rahegi.")["units"] is True
+    assert delivery_evidence({}, "Efficiency 23% mili.")["units"] is True
+    assert delivery_evidence({}, "Doori 8 kpc hai.")["units"] is True
+
+
+def test_adhoora_test_plan_experiment_design_nahi_ginta():
+    """
+    §16: plan "bana" tabhi jab kis sample par, kya naapa jayega, aur pass-fail
+    ka threshold — teeno hon. Warna "test plan diya gaya" dikhawa hai.
+    """
+    from research_engine.requested import delivery_evidence
+
+    full = delivery_evidence({}, "Plan neeche hai.", hypotheses=[_hyp([])])
+    assert full["experiment_design"] is True
+    for gap in ("dataset_or_sample", "measured_variables", "success_threshold"):
+        part = delivery_evidence({}, "Plan neeche hai.", hypotheses=[_hyp([gap])])
+        assert part["experiment_design"] is False, f"{gap} ke bina plan poora nahi"
+    # jo hissa core nahi hai (cost/replication) uske bina plan chal sakta hai
+    soft = delivery_evidence({}, "Plan neeche hai.",
+                             hypotheses=[_hyp(["cost_and_safety",
+                                               "replication_plan"])])
+    assert soft["experiment_design"] is True
+
+
+def test_falsification_sirf_asli_text_par_haan_kehta_hai():
+    from research_engine.requested import delivery_evidence
+
+    blank = _hyp([], falsification_test="", if_false="", experiment_spec={})
+    assert delivery_evidence({}, "kuch bhi", hypotheses=[blank])[
+        "falsification"] is False
+    said = _hyp([], falsification_test="", if_false="flat curve dikhe to galat")
+    assert delivery_evidence({}, "kuch bhi", hypotheses=[said])[
+        "falsification"] is True
+
+
+def test_hypothesis_engine_na_chale_to_key_hi_nahi_jaati():
+    """
+    Sabse zaroori niyam: naapa nahi gaya ≠ nahi mila. Hypothesis engine hi na
+    chala ho to experiment design par ❌ likhna jhooth hoga — ledger ❔ likhega.
+    """
+    from research_engine.requested import contract_ledger, delivery_evidence
+
+    d = delivery_evidence({}, "Seedha jawab: haan.")
+    assert "experiment_design" not in d and "falsification" not in d
+    contract = {"experiment_design_required": True,
+                "falsification_required": True,
+                "required_sections": [], "counter_search_required": False}
+    led = contract_ledger(contract, delivered=d)
+    rows = {i["key"]: i for i in led["items"]}
+    assert rows["experiment_design"]["ok"] is None
+    assert rows["experiment_design"]["got"] == "check nahi hua"
+    assert rows["falsification"]["unknown"] is True
+    assert any("❔" in line for line in led["lines"])
+
+
+def test_source_depth_paanch_labels_se_pakda_jaata_hai():
+    from research_engine.requested import delivery_evidence
+
+    assert delivery_evidence({}, "S3 — padhne ki gehrai: SNIPPET ONLY")[
+        "source_depth"] is True
+    assert delivery_evidence({}, "S3 ko poora padha gaya (bharosa karo).")[
+        "source_depth"] is False
+
+
+def test_tulna_ke_pehlu_alag_alag_gine_jaate_hain():
+    """"Compare kiya" kehna kaafi nahi — prompt ke har pehlu par ginti hoti hai."""
+    from research_engine.requested import (contract_ledger, delivery_evidence,
+                                           quality_contract)
+
+    contract = quality_contract(
+        "EV vs petrol cars ko cost, emissions and range par compare karo")
+    assert contract["comparison_required"] is True
+    assert contract["comparison_dimensions"] == ["cost", "emissions", "range"]
+    answer = ("EV ki cost zyada hai par emissions kam hain. Range par baat "
+              "nahi hui... yahan range shabd hai par pehlu cover hai.")
+    partial = delivery_evidence(
+        contract, "EV ki cost zyada hai, emissions kam hain.")
+    assert partial["comparison_dimensions_covered"] == ["cost", "emissions"]
+    led = contract_ledger(contract, delivered=partial)
+    row = next(i for i in led["items"] if i["key"] == "comparison")
+    assert row["got"] == "2/3 pehlu mile" and row["ok"] is False
+    assert "range" in row["why"]
+    full = delivery_evidence(contract, answer)
+    assert full["comparison_dimensions_covered"] == ["cost", "emissions", "range"]
+
+
+def test_naam_se_maange_gaye_target_source_titles_mein_bhi_dekhe_jaate_hain():
+    from research_engine.requested import delivery_evidence, quality_contract
+
+    contract = quality_contract(
+        "Bullet Cluster aur Euclid survey ke data par dark matter evidence dekho")
+    targets = contract["named_targets"]
+    assert "Bullet Cluster" in targets
+    d = delivery_evidence(contract, "Bullet Cluster ka lensing map dekha gaya.",
+                          source_titles=["Euclid Q1 weak lensing release"])
+    found = d["named_targets_found"]
+    assert "Bullet Cluster" in found
+    assert any("Euclid" in t for t in found), found
+
+
+def test_pehlu_ke_naam_mein_command_verb_nahi_ghusta():
+    """
+    "— evidence strength aur systematics par tulna karo" se pehle
+    "systematics par tulna karo" ek "pehlu" ban gaya tha. Pehlu ka naam hi
+    galat ho to ledger bhi galat cheez dhoondhta hai.
+    """
+    from research_engine.requested import (comparison_dimensions,
+                                           delivery_evidence, quality_contract)
+
+    q = ("Rotation curves vs lensing vs CMB ki ek comparison table banao — "
+         "evidence strength aur systematics par tulna karo.")
+    dims = comparison_dimensions(q)
+    assert dims == ["evidence strength", "systematics"], dims
+    for d in dims:
+        for bad in ("tulna", "compare", "karo", "banao"):
+            assert bad not in d.lower(), (d, bad)
+    contract = quality_contract(q)
+    assert contract["comparison_dimensions"] == dims
+    d = delivery_evidence(contract, "Evidence strength alag hai; systematics "
+                                    "dono taraf bade hain.")
+    assert d["comparison_dimensions_covered"] == dims
+    # Purane raaste bhi zinda: object-pehle wali list aur khaali list dono.
+    assert comparison_dimensions(
+        "EV vs petrol cars ko cost, emissions and range par compare karo") == [
+            "cost", "emissions", "range"]
+    assert comparison_dimensions("Dark matter aur MOND ki tulna karo") == []
+
+
 def _main() -> int:
     failed = 0
     for name, fn in sorted(globals().items()):

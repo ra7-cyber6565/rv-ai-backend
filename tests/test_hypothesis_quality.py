@@ -26,6 +26,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import hypothesis as HY                    # noqa: E402
 from research_engine.hypothesis import (EvidenceGate,           # noqa: E402
+                                        ExperimentStructure,
                                         Hypothesis,
                                         HypothesisEngine,
                                         evidence_gate)
@@ -240,8 +241,19 @@ def test_missing_fields_and_completeness():
     for key in ("experiment", "falsification_test", "missing_fields",
                 "is_complete"):
         check(f"to_dict mein {key} jaata hai", key in d)
-    eq("purana prediction shape nahi toota",
-       Hypothesis().to_dict()["prediction"], {"text": "", "structured": False})
+    # §16: prediction dict mein chaaron spec naam + purane `text`/`structured`
+    # dono rehte hain. Purane consumers `text` aur `structured` par chalte the,
+    # wo abhi bhi wahin hain.
+    eq("khaali prediction ka shape", Hypothesis().to_dict()["prediction"],
+       {"variables": [], "expected_outcome": "", "measurement_method": "",
+        "falsification_condition": "", "text": "", "structured": False})
+    check("§16 ke experiment naam bhi maujood hain",
+          set(ExperimentStructure.SPEC_KEYS) == {
+              "dataset_or_sample", "control_or_baseline", "measured_variables",
+              "parameter_range", "statistical_metric", "success_threshold",
+              "failure_threshold", "falsification_condition",
+              "measurement_precision", "replication_plan", "cost_and_safety"},
+          str(ExperimentStructure.SPEC_KEYS))
 
 
 def test_falsification_fallback_chain():

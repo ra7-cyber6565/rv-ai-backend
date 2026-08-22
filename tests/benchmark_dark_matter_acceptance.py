@@ -14,6 +14,11 @@ Ye benchmark un 17 failures ko ek acceptance matrix bana deta hai: DM-01 se
 DM-17. Har group ek hi live galti ka darwaaza band karta hai. Fixtures wahi
 jaal dohraate hain jo live run mein the.
 
+DM-18 (2026-08-22 self-audit) live galti nahi, apni galti hai: benchmark ka
+sawaal khud §24 ki 20 mandated cheezon mein se sirf 5 maangta tha, isliye
+"sab pass" bolna bhi adhoora sach tha. Ab prompt saari 20 maangta hai aur
+DM-18 ginti karta hai ki ek bhi item chup-chaap gayab na ho.
+
 Chalao:  PYTHONPATH=. python3 tests/benchmark_dark_matter_acceptance.py
 
 Harness (DomainCase / fake model / stub discovery) `benchmark_cross_domain`
@@ -69,6 +74,7 @@ FAILURE_IDS: Tuple[Tuple[str, str], ...] = (
     ("DM-15", "access-depth ka overclaim nahi (FULL-TEXT VERIFIED banned)"),
     ("DM-16", "retracted paper flag hua ya bahar, strong claim mein nahi"),
     ("DM-17", "audit mein 'check nahi hua' — 0 ka jhooth nahi"),
+    ("DM-18", "benchmark sawaal §24 ki saari 20 cheezein maangta hai"),
 )
 _LABELS: Dict[str, str] = dict(FAILURE_IDS)
 
@@ -188,7 +194,51 @@ DARK_MATTER = DomainCase(
 )
 
 # ── runs (₹0 stubs, har variant ek hi baar) ──────────────────────────────────
-PROMPT = QUESTION + " Kam se kam 3 nayi hypotheses banao."
+# §24 kehta hai: "Final benchmark question must cover" — aur uske baad 20 cheezon
+# ki list hai. Pehle PROMPT sirf 5 cheezein maangta tha (rotation curves,
+# lensing, CMB, Bullet Cluster, hypotheses), yani benchmark khud spec ka poora
+# darwaaza nahi khol raha tha. Ab poora prompt sab 20 maangta hai, aur neeche
+# `MANDATED_COVERAGE` un 20 ko ginne-layak bana deta hai (DM-18) — taaki koi
+# item chup-chaap prompt se gayab na ho jaye.
+PROMPT = QUESTION + (
+    " Iske saath Milky Way ke liye local dark matter density ka calculation "
+    "dikhao, big bang nucleosynthesis (BBN) aur large scale structure (LSS) ka "
+    "evidence bhi lo, dwarf galaxies ka data, direct detection experiments ke "
+    "results, primordial black hole (PBH) constraints, aur MOND ki strengths "
+    "aur limitations dono likho. Systematics alag se likho. Rotation curves vs "
+    "lensing vs CMB ki ek comparison table banao — evidence strength aur "
+    "systematics par tulna karo. Counterevidence alag section mein do. Evidence "
+    "graph bhi banao. Kam se kam 3 nayi hypotheses banao, unko alag section "
+    "mein rakho, novelty audit karo, har hypothesis ka experiment aur "
+    "falsification test likho, honest confidence do, aur sabse aakhir mein "
+    "exact source aur API accounting report do."
+)
+
+# §24 ki 20 mandated cheezein — (ID ke liye label, prompt mein dhoondhne wale
+# shabd). Ek bhi shabd na mile to DM-18 fail karega, yani benchmark khud
+# spec se peeche nahi reh sakta.
+MANDATED_COVERAGE: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+    ("rotation curves", ("rotation curve",)),
+    ("Milky Way calculation", ("milky way",)),
+    ("CMB", ("cmb",)),
+    ("BBN", ("bbn", "nucleosynthesis")),
+    ("Bullet Cluster", ("bullet cluster",)),
+    ("lensing", ("lensing",)),
+    ("dwarf galaxies", ("dwarf galax",)),
+    ("LSS", ("lss", "large scale structure")),
+    ("direct detection", ("direct detection",)),
+    ("PBH constraints", ("pbh", "primordial black hole")),
+    ("MOND strengths/limitations", ("mond",)),
+    ("systematics", ("systematic",)),
+    ("comparison table", ("comparison table", "tulna")),
+    ("counterevidence", ("counterevidence", "counter evidence")),
+    ("evidence graph", ("evidence graph",)),
+    ("hypotheses in a separate section", ("alag section",)),
+    ("novelty audit", ("novelty",)),
+    ("experiment/falsification", ("falsification",)),
+    ("honest confidence", ("confidence",)),
+    ("source/accounting report", ("accounting",)),
+)
 
 
 def rounds_live(case: DomainCase) -> Dict[int, List[Row]]:
@@ -210,6 +260,16 @@ def rounds_thin(case: DomainCase) -> Dict[int, List[Row]]:
     return {1: _pick_rows(case, "core_snip", "meta"), 2: [], 3: []}
 
 
+def rounds_weak_relevance(case: DomainCase) -> Dict[int, List[Row]]:
+    """
+    Sirf ek metadata-level review chapter — iska average relevance floor ke
+    NEECHE rehta hai. Ye `thin` se alag darwaaza hai: wahan gehraai kam hai,
+    yahan relevance hi kam hai. Dono ko ek fixture mein mila dena hi galat tha,
+    kyunki phir pata nahi chalta ki VERIFIED kis wajah se ruka.
+    """
+    return {1: _pick_rows(case, "meta"), 2: [], 3: []}
+
+
 VARIANTS = {
     "live": lambda: _run(DARK_MATTER, rounds_live(DARK_MATTER), question=PROMPT),
     "dead": lambda: _run(DARK_MATTER, rounds_live(DARK_MATTER), mood="dead",
@@ -221,6 +281,8 @@ VARIANTS = {
     "support": lambda: _run(DARK_MATTER, rounds_support_side(DARK_MATTER),
                             question=PROMPT),
     "thin": lambda: _run(DARK_MATTER, rounds_thin(DARK_MATTER), question=PROMPT),
+    "weak_rel": lambda: _run(DARK_MATTER, rounds_weak_relevance(DARK_MATTER),
+                             question=PROMPT),
 }
 
 _CACHE: Dict[str, tuple] = {}
@@ -326,7 +388,8 @@ _BARE_VERIFIED = re.compile(r"(?<!UN)VERIFIED")
 
 def check_no_verified_on_weak_evidence() -> None:
     with dm("DM-03"):
-        for variant in ("live", "dead", "thin", "support", "overclaim", "bad_math"):
+        for variant in ("live", "dead", "thin", "weak_rel", "support",
+                        "overclaim", "bad_math"):
             result = run(variant)[0]
             answer = result["answer"]
             state = dict(result.get("research_state") or {})
@@ -338,11 +401,25 @@ def check_no_verified_on_weak_evidence() -> None:
             check("%s: verified_allowed jhoot nahi bola" % variant,
                   state.get("verified_allowed") is False,
                   repr(state.get("verified_allowed")))
-        thin_ctx = _ctx(run("thin")[0])
-        avg = float(thin_ctx.get("average_relevance") or 0.0)
-        check("patla run relevance floor ke NEECHE hai (fixture sach me kamzor)",
-              avg < DIRECT_RELEVANCE_FLOOR, "avg=%.4f floor=%s" % (avg, DIRECT_RELEVANCE_FLOOR))
-        eq("kamzor run ka status PARTIAL", run("thin")[0].get("status"), "PARTIAL")
+        # Do alag darwaaze, do alag fixture — inhe mila dena hi purani galti thi:
+        #   (1) relevance floor ke NEECHE wala run  → `weak_rel` (sirf metadata)
+        #   (2) padhne ki gehraai kam wali run      → `thin` (snippet + metadata)
+        weak_ctx = _ctx(run("weak_rel")[0])
+        weak_avg = float(weak_ctx.get("average_relevance") or 0.0)
+        check("kamzor-relevance run sach mein floor ke NEECHE hai",
+              weak_avg < DIRECT_RELEVANCE_FLOOR,
+              "avg=%.4f floor=%s" % (weak_avg, DIRECT_RELEVANCE_FLOOR))
+        eq("floor ke neeche wale run ka status PARTIAL",
+           run("weak_rel")[0].get("status"), "PARTIAL")
+        thin_result = run("thin")[0]
+        thin_ctx = _ctx(thin_result)
+        check("patla run mein koi source poora padha hi nahi gaya",
+              ACCESS_FULL not in thin_result["answer"],
+              "answer mein '%s' mila" % ACCESS_FULL)
+        check("patla run ka average relevance number audit mein hai",
+              isinstance(thin_ctx.get("average_relevance"), float),
+              repr(thin_ctx.get("average_relevance")))
+        eq("kamzor run ka status PARTIAL", thin_result.get("status"), "PARTIAL")
         live_ctx = _ctx(run("live")[0])
         check("average relevance number audit ke liye maujood hai",
               isinstance(live_ctx.get("average_relevance"), float),
@@ -785,6 +862,55 @@ def check_tristate_audit() -> None:
               repr((ctx.get("no_source_claims"), ctx.get("contradictions_rejected"))))
 
 
+# ── DM-18: benchmark ka sawaal khud §24 ki poori list maangta hai ────────────
+# Self-audit (2026-08-22) mein pakdi gayi apni hi galti: PROMPT sirf 5 cheezein
+# maangta tha (rotation curves, lensing, CMB, Bullet Cluster, hypotheses),
+# jabki §24 20 cheezein mandate karta hai. Matlab benchmark "sab pass" bol kar
+# bhi spec ke 15 darwaaze khole hi nahi tha. Ye group us galti ko regression
+# bana deta hai: prompt se koi item chup-chaap gayab nahi ho sakta, aur contract
+# ko wo maang sach mein dikhni chahiye.
+SCORE_MEANING = ("100% ka matlab sirf itna hai ki is benchmark ka quality "
+                 "contract pass hua. Iska matlab ye NAHI hai ki dark matter "
+                 "ke baare mein koi scientific truth saabit ho gayi ya koi "
+                 "hypothesis experimentally prove ho gayi.")
+
+
+def check_question_covers_the_spec() -> None:
+    with dm("DM-18"):
+        eq("§24 ki mandated list poori 20 hai", len(MANDATED_COVERAGE), 20)
+        low = PROMPT.lower()
+        for label, needles in MANDATED_COVERAGE:
+            check("sawaal '%s' maangta hai" % label,
+                  any(n in low for n in needles), repr(needles))
+        # Sirf shabd hona kaafi nahi — contract mein maang dikhni chahiye.
+        contract = dict(run("live")[0].get("quality_contract") or {})
+        eq("contract ne 3 hypotheses maangi samjhi",
+           contract.get("hypotheses_requested"), 3)
+        for key in ("comparison_required", "experiment_design_required",
+                    "falsification_required", "confidence_required",
+                    "counter_search_required", "evidence_graph_required",
+                    "calculations_required", "evidence_axes_required"):
+            check("contract mein '%s' sach hai" % key,
+                  contract.get(key) is True, repr(contract.get(key)))
+        dims = [str(d) for d in (contract.get("comparison_dimensions") or [])]
+        check("comparison ke pehlu naam se nikle", len(dims) >= 2, repr(dims))
+        check("kisi pehlu mein command verb (tulna/compare/karo) nahi ghusa",
+              not [d for d in dims
+                   if re.search(r"\b(?:tulna|compare|comparison|karo|banao)\b",
+                                d, re.IGNORECASE)],
+              repr(dims))
+        targets = [str(t).upper() for t in (contract.get("named_targets") or [])]
+        for name in ("CMB", "BBN", "LSS", "PBH", "MOND", "BULLET CLUSTER"):
+            check("'%s' naam se maanga gaya target maana gaya" % name,
+                  name in targets, repr(targets))
+        # §24 ka aakhri vaakya: 100/100 = contract pass, scientific truth nahi.
+        check("score ka matlab likha hua hai (contract pass ≠ truth proved)",
+              "scientific truth" in SCORE_MEANING
+              and "NAHI" in SCORE_MEANING)
+        check("100% ko 'sach saabit ho gaya' nahi kaha gaya",
+              "saabit ho gayi ya koi" in SCORE_MEANING)
+
+
 # ── scorecard ────────────────────────────────────────────────────────────────
 CHECK_GROUPS = (
     check_offtopic_never_evidence, check_retrieved_vs_cited,
@@ -795,7 +921,7 @@ CHECK_GROUPS = (
     check_status_is_honest, check_no_raw_provider_text,
     check_no_duplicate_blocks, check_calculation_honesty,
     check_access_depth_honesty, check_retracted_is_flagged,
-    check_tristate_audit,
+    check_tristate_audit, check_question_covers_the_spec,
 )
 
 
@@ -817,6 +943,7 @@ def print_scorecard() -> None:
                  if SCORE.get(fid, [0, 0])[1] == 0 and sum(SCORE.get(fid, [0, 0])) > 0)
     print("Band ho chuke darwaaze: %d/%d" % (closed, len(FAILURE_IDS)))
     print("Total checks: %d pass, %d fail" % (PASSED, FAILED))
+    print("\nScore ka matlab: %s" % SCORE_MEANING)
     if FAILURES:
         print("\nKhuli galtiyan:")
         for failure_id, labels in FAILURES.items():
@@ -833,7 +960,8 @@ def main() -> int:
     if FAILED:
         print("\nRESULT: PARTIAL — %d check fail hue." % FAILED)
         return 1
-    print("\nRESULT: sab %d check pass — 17/17 live galtiyon ka darwaaza band." % PASSED)
+    print("\nRESULT: sab %d check pass — %d/%d live galtiyon ka darwaaza band."
+          % (PASSED, len(FAILURE_IDS), len(FAILURE_IDS)))
     return 0
 
 

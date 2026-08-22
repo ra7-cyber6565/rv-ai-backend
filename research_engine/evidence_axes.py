@@ -257,6 +257,11 @@ _GENERIC_AXES: Tuple[Axis, ...] = (
          why="§10 — support-side ke saath counter-side search compulsory hai"),
 )
 
+# Ye do axes limit ki wajah se kabhi nahi katne chahiye: counter_evidence §10 ka
+# compulsory counter-search hai, aur replication "ek group ka nateeja saboot
+# nahi" wali shart hai.
+_ALWAYS_KEEP_AXIS_IDS = ("replication", "counter_evidence")
+
 _SUPERCONDUCTIVITY_AXES: Tuple[Axis, ...] = (
     Axis("transport", "resistivity / transport measurement",
          ("zero resistance", "resistivity", "four probe", "transport measurement",
@@ -430,7 +435,21 @@ def axes_for(question: str, limit: int = 18) -> List[Axis]:
         if curated and axis.axis_id in {"mechanism", "quantitative"}:
             continue
         _add(axis)
-    return picked[:limit]
+    if len(picked) <= limit:
+        return picked
+    # `picked[:limit]` seedha kaatne se dikkat: entity axes (sawaal mein naam liye
+    # gaye mission/dataset) list mein pehle aate hain, aur jab sawaal mein 8-10
+    # instrument ke naam ho to limit wahin khatam ho jaati thi — sabse aakhir wala
+    # `counter_evidence` axis chup-chaap gir jaata tha. Us haalat mein
+    # `counter_search_done()` `None` lautata hai, yaani §10 ka counter-search axis
+    # theek un sawaalon par gayab ho jaata jinme sabse zyada naam liye gaye hain.
+    # Isliye kaatne se pehle ye axes hamesha reserve rakhe jaate hain.
+    keep_last = [axis for axis in picked
+                 if axis.axis_id in _ALWAYS_KEEP_AXIS_IDS]
+    head = [axis for axis in picked
+            if axis.axis_id not in _ALWAYS_KEEP_AXIS_IDS]
+    room = max(0, limit - len(keep_last))
+    return head[:room] + keep_last
 
 
 # ── coverage ──────────────────────────────────────────────────────────────────
@@ -584,7 +603,13 @@ def next_queries(axes: Sequence[Axis], records: Optional[Sequence[Dict]] = None,
         used = int((record or {}).get("ladder_steps_used") or 0)
         if used and (record or {}).get("status") == AXIS_COVERED:
             continue
-        step_idx = min(max(used, max(0, round_no - 1)), len(LADDER_STEPS) - 1)
+        # §5 ka ladder HAR AXIS ka apna hai: pehli koshish "exact", uske baad
+        # "synonym", phir "entity"… Pehle yahan `round_no` bhi mila diya jaata tha
+        # (`max(used, round_no - 1)`), jiska nateeja ye tha ki round 2 mein pehli
+        # baar dhoondhe gaye axis ki "exact" query hi kabhi nahi chalti thi — wo
+        # seedha "synonym" se shuru ho jaata tha. Ladder us axis ki apni koshishon
+        # se aage badhta hai, round number se nahi.
+        step_idx = min(used, len(LADDER_STEPS) - 1)
         rung = axis.ladder(base, limit=len(LADDER_STEPS))[step_idx]
         out.append({"axis_id": axis.axis_id, "label": axis.label,
                     "step": rung["step"], "name": rung["name"],
@@ -606,8 +631,10 @@ def next_queries(axes: Sequence[Axis], records: Optional[Sequence[Dict]] = None,
                                .get("ladder_steps_used") or 0)]
         if pending:
             axis = pending[0]
-            rung = axis.ladder(base, limit=len(LADDER_STEPS))[
-                min(max(0, round_no - 1), len(LADDER_STEPS) - 1)]
+            # Reserve slot par bhi ladder ka pehla rung hi chalega — is axis par
+            # ab tak ek bhi query nahi gayi hai (`pending` ki shart), isliye
+            # round number dekh kar seedha "synonym" par kood jaana galat tha.
+            rung = axis.ladder(base, limit=len(LADDER_STEPS))[0]
             out[-1] = {"axis_id": axis.axis_id, "label": axis.label,
                        "step": rung["step"], "name": rung["name"],
                        "query": rung["query"]}

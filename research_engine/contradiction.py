@@ -28,6 +28,10 @@ thi ki unke publication years alag the. Isliye ab:
     evidence ka weight tay nahi hota. Saal ka farq ab neutral context note hai.
   * Rejected findings phenke nahi jaate — `rejection_report()` mein rehte hain,
     taaki audit dekh sake ki kya-kya jaanch kar hataya gaya (jaankari na khoye).
+  * `method_difference` khaali ho sakta hai, lekin uski WAJAH ab
+    `method_comparison_status` mein likhi jaati hai (`COMPARED` /
+    `METHOD_UNKNOWN` / `SAME_LEVEL`) aur report mein dono haalat mein ek line
+    chhapti hai — line gayab ho jaana khud ek jhooth tha.
 """
 from __future__ import annotations
 
@@ -135,6 +139,26 @@ CONTRA_REJECT_WHY = {
                             "hai."),
 }
 
+# ── §11: method-comparison ke honest status codes ────────────────────────────
+# Khaali `method_difference` do bilkul alag baaton ka matlab ho sakta hai:
+#   (1) dono sources ka study design pata hi nahi chala  → COMPARE nahi hua
+#   (2) dono ka design ek hi level ka tha                → farq hi nahi tha
+# Inhe ek jaisa dikhana wahi purani galti hai (None aur False ko mila dena),
+# isliye status alag code mein rakha jaata hai.
+METHOD_CMP_COMPARED = "COMPARED"
+METHOD_CMP_UNKNOWN = "METHOD_UNKNOWN"
+METHOD_CMP_SAME_LEVEL = "SAME_LEVEL"
+METHOD_CMP_CODES = (METHOD_CMP_COMPARED, METHOD_CMP_UNKNOWN, METHOD_CMP_SAME_LEVEL)
+METHOD_CMP_WHY = {
+    METHOD_CMP_COMPARED: ("Dono sources ke method/sample ke baare mein kuch "
+                          "record mila, isliye farq neeche likha gaya hai."),
+    METHOD_CMP_UNKNOWN: ("Method ka farq dekha nahi ja saka — in dono sources ki "
+                         "study design (kaise test kiya gaya) ka record nahi mila. "
+                         "'Method same tha' likhna jhooth hota."),
+    METHOD_CMP_SAME_LEVEL: ("Dono ka study design ek hi level ka nikla, isliye "
+                            "method ke naam par koi farq nahi bacha."),
+}
+
 # Sentence tod-ne ke liye — passage nikalte waqt poora snippet nahi, sirf wahi
 # vaakya chahiye jisme daawa hai.
 _SENT_SPLIT = re.compile(r"(?<=[.!?।])\s+|\n+")
@@ -154,6 +178,13 @@ class Contradiction:
     opposing_direction: Optional[bool] = None
     evidence_spans: List[Dict] = field(default_factory=list)
     method_difference: str = ""
+    # §11 (2026-08-22 self-audit): `method_difference` bahut baar khaali rehta
+    # hai (dono sources ka study design record nahi hota). Khaali field ko chup
+    # chaap chhod dena galat tha — report se line hi gayab ho jaati thi aur padhne
+    # wale ko lagta tha ki method ka farq DEKHA gaya aur kuch nahi mila. Ab wajah
+    # alag field mein likhi jaati hai, aur report dono haalat mein ek line
+    # chhaapti hai.
+    method_comparison_status: str = ""
     context_notes: List[str] = field(default_factory=list)
     valid: bool = True
     reject_code: str = ""
@@ -164,6 +195,26 @@ class Contradiction:
         return bool(self.normalized_proposition and self.source_a_claim
                     and self.source_b_claim and self.opposing_direction is True
                     and len(self.source_ids) >= 2)
+
+    def method_status(self) -> str:
+        """
+        Method-comparison ka code — purane records (jinme status set nahi hai)
+        ke liye bhi kaam kare, isliye khaali hone par text se guess karte hain.
+        """
+        if self.method_comparison_status in METHOD_CMP_CODES:
+            return self.method_comparison_status
+        return METHOD_CMP_COMPARED if self.method_difference.strip() else METHOD_CMP_UNKNOWN
+
+    def method_line(self) -> str:
+        """
+        Report ke liye ek line — DONO haalat mein kuch kehti hai. Pehle jab
+        `method_difference` khaali hota tha to line hi gayab ho jaati thi, aur
+        padhne wale ko lagta tha ki method check ho chuka hai.
+        """
+        status = self.method_status()
+        if status == METHOD_CMP_COMPARED and self.method_difference.strip():
+            return self.method_difference.strip()
+        return METHOD_CMP_WHY.get(status, METHOD_CMP_WHY[METHOD_CMP_UNKNOWN])
 
     def to_dict(self) -> Dict:
         # `evidence_spans` mein spec ka "S1 page 4" bhi hai (`ref`) aur uske saath
@@ -181,6 +232,8 @@ class Contradiction:
             "evidence_spans": list(self.evidence_spans),
             "evidence_span_refs": [str(sp.get("ref") or "") for sp in self.evidence_spans],
             "method_difference": self.method_difference,
+            "method_comparison_status": self.method_status(),
+            "method_comparison_why": self.method_line(),
             "context_notes": list(self.context_notes),
             "schema_complete": self.schema_complete(),
             "valid": self.valid,
@@ -320,6 +373,22 @@ class ContradictionEngine:
                    f"vs {s1.source_id} ({methodology_label(m1)})")
 
         return None
+
+    def _method_comparison_status(self, s1: SourceRecord, s2: SourceRecord,
+                                  note: str = "") -> str:
+        """
+        §11 — method compare HUA ya nahi, ye alag baat hai method mein farq
+        MILA ya nahi se. Khaali note ki wajah honestly record karte hain.
+        """
+        if (note or "").strip():
+            return METHOD_CMP_COMPARED
+        m1 = (getattr(s1, "methodology", "") or "unknown")
+        m2 = (getattr(s2, "methodology", "") or "unknown")
+        if m1 == "unknown" and m2 == "unknown":
+            return METHOD_CMP_UNKNOWN
+        # Ek ya dono ka design pata hai, phir bhi note khaali — matlab dono ek
+        # hi level ke nikle (rank tie), farq hi nahi tha.
+        return METHOD_CMP_SAME_LEVEL
 
     def _sample_comparison(self, s1: SourceRecord, s2: SourceRecord) -> Optional[str]:
         """Extract sample size hints from snippet (if available)."""
@@ -527,7 +596,9 @@ class ContradictionEngine:
 
                     # §11 — method ka farq alag field hai. Pata na ho to khaali
                     # rehta hai; "method same tha" likhna jhooth hota, kyunki
-                    # humne dono ka poora method padha hi nahi.
+                    # humne dono ka poora method padha hi nahi. Lekin khaali
+                    # field ki WAJAH ab alag status field mein likhi jaati hai,
+                    # taaki report line gayab na ho.
                     method_diff = " | ".join(
                         n for n in (method_note, sample_note) if n)
                     found.append(self._validate(Contradiction(
@@ -544,6 +615,8 @@ class ContradictionEngine:
                         evidence_spans=[self._spans_for(a, claim_a),
                                         self._spans_for(b, claim_b)],
                         method_difference=method_diff,
+                        method_comparison_status=self._method_comparison_status(
+                            a, b, method_diff),
                         context_notes=([temporal_note] if temporal_note else []),
                     )))
                     continue
@@ -575,6 +648,8 @@ class ContradictionEngine:
                             evidence_spans=[self._spans_for(a, claim_a),
                                             self._spans_for(b, claim_b)],
                             method_difference=(self._methodology_comparison(a, b) or ""),
+                            method_comparison_status=self._method_comparison_status(
+                                a, b, self._methodology_comparison(a, b) or ""),
                         )))
                         continue
 

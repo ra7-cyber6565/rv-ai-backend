@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import inspect
 import os
+import re
 from pathlib import Path
 
 from research_engine import chat as chat_mod
@@ -100,6 +101,72 @@ def _provider_boundary_checks() -> None:
               forbidden not in source, forbidden)
 
 
+# §21 ke tab-rewrite ke baad UI ke helper naam badal gaye: `appendResearchProcess`
+# aur `summary.textContent=` / `log.textContent=` wala purana <details> block hata
+# kar `processHtml(data)` + escaped render aa gaya. Yahan ke do check sirf PURANE
+# NAAM dhoondh rahe the, isliye feature theek hone ke baad bhi fail ho rahe the —
+# ek naam-par-tika hua check jhoothi fail deta hai aur asli baat (escaping) prove
+# bhi nahi karta. Ab check WAJAH par hai: (1) mukammal run ka process snapshot
+# dikhta hai kya, (2) uske fields raw HTML ki tarah inject hote hain kya. Rename se
+# ye fail nahi hoga, lekin feature ya escaping hatane par pakka fail hoga.
+def _fn_body(page: str, name: str) -> str:
+    """`function name(` se agli top-level function tak ka code.
+
+    `async function` par bhi rukna zaroori hai — warna body agle function me
+    ghus jaati hai aur wahan ke URL helpers (encodeURIComponent) HTML escaping
+    ke check me jhoothi galti bana dete hain.
+    """
+    marker = "function %s(" % name
+    if marker not in page:
+        return ""
+    tail = page.split(marker, 1)[1]
+    cuts = [tail.index(m) for m in ("\nfunction ", "\nasync function ")
+            if m in tail]
+    return tail[:min(cuts)] if cuts else tail
+
+
+# `'...'+X+'...'` jaisi seedhi field interpolation. `esc(r.label)` is regex me
+# nahi aata, kyunki `+` ke turant baad `esc(` hai — yahi hum chahte hain.
+_BARE_FIELD_RE = re.compile(r"\+\s*([A-Za-z_$][\w$]*\.[\w$]+)")
+# Field ko kisi aise function me lapet dena bhi hole hai: `String(p.x)` HTML se
+# bachata nahi. Isliye concat me jo bhi call juda ho, uska naam allowlist me hona
+# chahiye — `esc` (escape karta hai), `Number` (sirf number banata hai) ya wo
+# helper jinke escaping ka test isi file me hai.
+_CONCAT_CALL_RE = re.compile(r"\+\s*([A-Za-z_$][\w$]*)\s*\(")
+_SAFE_CONCAT_CALLS = {"esc", "Number", "stageRowsHtml", "progressCounts",
+                      "stageTable", "emptyBox"}
+# Ye do value code khud set karta hai (tick/dash aur CSS class), server se nahi
+# aati — isliye inko escape kiye bina joda ja sakta hai. Neeche `_markers_are_literal`
+# is dawe ko bhi verify karta hai, warna allowlist ek chhupa hua raasta ban jaati.
+_CODE_SET_MARKERS = {"r.cls", "r.mk"}
+_MARKER_VALUE_RE = re.compile(r"\b(?:mk|cls):([^,}]+)")
+_SERVER_FIELD_RE = re.compile(r"\b(?:p|prog|snap|data|ran)\.")
+
+
+def _unescaped_process_fields(page: str) -> list:
+    """Process render path me bina escape jodi gayi server fields."""
+    bad = []
+    for name in ("processHtml", "stageRowsHtml", "progressCounts", "paintProgress"):
+        body = _fn_body(page, name)
+        if not body:
+            bad.append("%s missing" % name)
+            continue
+        for field in _BARE_FIELD_RE.findall(body):
+            if field not in _CODE_SET_MARKERS:
+                bad.append("%s: %s" % (name, field))
+        for call in _CONCAT_CALL_RE.findall(body):
+            if call not in _SAFE_CONCAT_CALLS:
+                bad.append("%s: %s(...)" % (name, call))
+    return bad
+
+
+def _markers_are_literal(page: str) -> bool:
+    """`mk`/`cls` sach me literal hain — unme server ka koi field nahi ghusta."""
+    body = _fn_body(page, "stageTable")
+    values = _MARKER_VALUE_RE.findall(body)
+    return bool(values) and not any(_SERVER_FIELD_RE.search(v) for v in values)
+
+
 def _browser_checks() -> None:
     print("\n[3] browser recovery and persistent progress")
     page = WEB_PAGE.read_text(encoding="utf-8")
@@ -135,9 +202,17 @@ def _browser_checks() -> None:
     check("single live progress writer", code.count("paintProgress(ui,p);") == 1)
 
     check("completed research process remains visible",
-          "appendResearchProcess" in page and "data?.research_progress" in page)
-    check("process fields rendered with textContent",
-          'summary.textContent=' in page and 'log.textContent=' in page)
+          "function processHtml(" in page
+          and "data.research_progress" in page
+          and "process:processHtml(data)" in page)
+    check("missing process snapshot is stated, not faked",
+          "p.available!==true" in page and "snapshot nahi aaya" in page)
+    unescaped = _unescaped_process_fields(page)
+    check("process fields are escaped before render",
+          "esc(r.label)" in page and "esc(r.note)" in page and not unescaped,
+          ", ".join(unescaped))
+    check("process markers are code-set literals, not server text",
+          _markers_are_literal(page))
     check("source URL scheme guard preserved", "function safeHttpUrl(" in page)
     check("external links hardened",
           'rel="noopener noreferrer nofollow"' in page)

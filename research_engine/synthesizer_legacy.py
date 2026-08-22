@@ -653,9 +653,15 @@ Ab jawab likho:"""
         return "\n".join(lines)
 
     # ── §13 + §14: sources ki imaandaar list ─────────────────────────────────
+    # §9 (2026-08-22): "FULL-TEXT VERIFIED" label yahan se bhi hata diya gaya.
+    # Ye file legacy hai (live path `synthesizer.py`/`synthesizer_claude.py` se
+    # chalta hai), par banned label kahin bhi pada rehna galat hai — "poora text
+    # mil gaya" aur "dava verify ho gaya" ek baat nahi hai, aur ye file kabhi
+    # dobara chali to wahi purana jhooth chhap jaayega.
     _ACCESS_WORDS = {
-        "full_text": "FULL-TEXT VERIFIED — poora text padha gaya",
-        "abstract": "ABSTRACT REVIEWED — sirf abstract (summary) padha gaya",
+        "full_text": "FULL TEXT ACCESSED — poora text padha gaya (iska matlab "
+                     "dava verify hua nahi hai)",
+        "abstract": "ABSTRACT ONLY — sirf abstract (summary) padha gaya",
         "snippet": "SNIPPET ONLY — sirf ek chhota hissa mila",
         "metadata": "METADATA ONLY — sirf title/details mile, content nahi",
     }

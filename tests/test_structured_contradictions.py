@@ -11,7 +11,9 @@ deti hai:
   * adhoora schema kabhi takraav nahi ban sakta;
   * reject hui jodi phenki nahi jaati — audit ke liye bachti hai;
   * asli takraav ke saath proposition, dono claims aur evidence spans jaate hain;
-  * saal ka farq sirf context note hai — "naya isliye sahi" kabhi nahi.
+  * saal ka farq sirf context note hai — "naya isliye sahi" kabhi nahi;
+  * method ka farq compare NAHI ho paaya, to report mein line gayab nahi hoti —
+    wajah likhi jaati hai ("dono ki study design ka record nahi mila").
 
 Poora offline aur deterministic: koi network, koi model, koi provider call.
 
@@ -32,7 +34,10 @@ from research_engine.contradiction import (CONTRA_GENERIC_CONFIDENCE,  # noqa: E
                                            CONTRA_REJECT_CODES,
                                            CONTRA_REJECT_WHY,
                                            CONTRA_TOPIC_MISMATCH,
-                                           CONTRA_YEAR_ONLY, Contradiction,
+                                           CONTRA_YEAR_ONLY,
+                                           METHOD_CMP_COMPARED,
+                                           METHOD_CMP_SAME_LEVEL,
+                                           METHOD_CMP_UNKNOWN, Contradiction,
                                            ContradictionEngine)
 from research_engine.models import EvidencePack, SourceRecord      # noqa: E402
 
@@ -200,6 +205,64 @@ def test_method_difference_is_left_empty_instead_of_claiming_same_method():
     _, found = _detect(_src("S1", _SUPPORT), _src("S2", _OPPOSE))
     assert found[0].method_difference == ""
     assert "method same" not in found[0].to_dict()["detail"].lower()
+
+
+def test_empty_method_difference_still_says_why_it_could_not_be_compared():
+    """
+    Khaali `method_difference` par report se line gayab ho jaati thi — padhne
+    wale ko lagta tha ki method dekha gaya aur farq nahi mila. Ab wajah alag
+    field mein jaati hai.
+    """
+    _, found = _detect(_src("S1", _SUPPORT), _src("S2", _OPPOSE))
+    data = found[0].to_dict()
+    assert data["method_difference"] == ""
+    assert data["method_comparison_status"] == METHOD_CMP_UNKNOWN
+    why = data["method_comparison_why"]
+    assert "record nahi mila" in why
+    # Ulta: line saaf mana karti hai ki "method same tha" kaha ja sakta hai.
+    assert "jhooth" in why.lower()
+
+
+def test_same_level_designs_are_not_reported_as_unknown():
+    a = _src("S1", _SUPPORT)
+    b = _src("S2", _OPPOSE)
+    a.methodology = "cohort"
+    b.methodology = "case_control"          # dono ka rank 3 — ek hi level
+    _, found = _detect(a, b)
+    data = found[0].to_dict()
+    assert data["method_difference"] == ""
+    assert data["method_comparison_status"] == METHOD_CMP_SAME_LEVEL
+    assert "ek hi level" in data["method_comparison_why"]
+
+
+def test_a_real_design_gap_is_reported_as_compared():
+    a = _src("S1", _SUPPORT)
+    b = _src("S2", _OPPOSE)
+    a.methodology = "meta_analysis"
+    b.methodology = "case_report"
+    _, found = _detect(a, b)
+    data = found[0].to_dict()
+    assert data["method_comparison_status"] == METHOD_CMP_COMPARED
+    assert "stronger design" in data["method_difference"]
+    assert data["method_comparison_why"] == data["method_difference"]
+
+
+def test_numeric_conflict_also_carries_a_method_status():
+    _, found = _detect(_src("S1", _NUM_A), _src("S2", _NUM_B))
+    data = found[0].to_dict()
+    assert found[0].kind == "NUMERIC"
+    assert data["method_comparison_status"] in (METHOD_CMP_UNKNOWN,
+                                                METHOD_CMP_SAME_LEVEL,
+                                                METHOD_CMP_COMPARED)
+    assert data["method_comparison_why"].strip() != ""
+
+
+def test_report_prints_a_method_line_even_when_nothing_could_be_compared():
+    from research_engine.synthesizer_claude import FinalSynthesizer
+    _, found = _detect(_src("S1", _SUPPORT), _src("S2", _OPPOSE))
+    text = FinalSynthesizer()._contradiction_section([c.to_dict() for c in found])
+    assert "_Method ka farq:_" in text
+    assert "record nahi mila" in text
 
 
 # --- numbers ka takraav ------------------------------------------------------

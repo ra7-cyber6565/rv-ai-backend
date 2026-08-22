@@ -613,6 +613,16 @@ class ExperimentStructure:
     null_result: str = ""            # galat ho to kya dikhega
     feasibility: str = ""            # aaj ke tools se ho sakta hai ya nahi
     limitations: str = ""            # is plan ki apni kamzori
+    # §16 ke baaki paanch naam. Ye plan ke "core" mein nahi hain (is_complete
+    # inhe nahi dekhta, warna aaj ke saare plan achaanak adhoore ho jaate) par
+    # spec inhe naam se maangta hai, isliye ab ye alag fields hain aur
+    # `to_spec_dict()` mein wahi naam se jaate hain. Bharte SIRF tab hain jab
+    # text mein sach mein likhe ho — placeholder kabhi nahi.
+    parameter_range: str = ""        # pehle se tay bounded range
+    statistical_metric: str = ""     # pehle se chuna hua metric (p, chi2, BF…)
+    measurement_precision: str = ""  # kitni precision chahiye
+    replication_plan: str = ""       # doosra group isko dobara kaise karega
+    cost_and_safety: str = ""        # ₹0 feasibility + risk limits
 
     _CORE = ("experiment_type", "setup", "system_or_sample",
              "measured_quantity", "expected_signal", "null_result")
@@ -633,6 +643,81 @@ class ExperimentStructure:
             "missing": self.missing,
             "is_complete": self.is_complete,
         }
+
+    # §16 ka exact naam-wala view. Kyun alag: hamare andar ke naam insaani
+    # report ke liye bane the ("kya naapa jayega"), aur spec integration ke
+    # liye tay naam maangta hai. Dono chahiye — isliye mapping yahan ek jagah
+    # likhi hai, aur jo hissa text mein nahi mila wo KHAALI jaata hai (bharke
+    # complete dikhana hi wo galti thi jise §16 rok raha hai).
+    SPEC_KEYS = ("dataset_or_sample", "control_or_baseline", "measured_variables",
+                 "parameter_range", "statistical_metric", "success_threshold",
+                 "failure_threshold", "falsification_condition",
+                 "measurement_precision", "replication_plan", "cost_and_safety")
+
+    def to_spec_dict(self, falsification: str = "") -> Dict:
+        dataset = " — ".join(p for p in (self.system_or_sample.strip(),
+                                         self.sample_size.strip()) if p)
+        if self.instrument_or_dataset.strip() and not dataset:
+            dataset = self.instrument_or_dataset.strip()
+        measured = [p.strip() for p in re.split(r",|\baur\b|\band\b",
+                                                self.measured_quantity)
+                    if len(p.strip()) >= 2]
+        # Kabhi-kabhi prose plan ek hi lambi line hota hai; use comma par todne
+        # se "variables" ki jagah aadhe vaakya aa jaate hain. Aisi haalat mein
+        # poora hissa ek hi item rehta hai — todne ka faayda tabhi jab tukde
+        # sach mein chhote naam hon.
+        if any(len(p) > 120 for p in measured):
+            measured = ([self.measured_quantity.strip()]
+                        if self.measured_quantity.strip() else [])
+        cost = " — ".join(p for p in (self.cost_and_safety.strip()
+                                      or self.feasibility.strip(),
+                                      self.limitations.strip()) if p)
+        return {
+            "dataset_or_sample": dataset,
+            "control_or_baseline": self.control.strip(),
+            "measured_variables": measured,
+            "parameter_range": self.parameter_range.strip(),
+            "statistical_metric": self.statistical_metric.strip(),
+            "success_threshold": self.expected_signal.strip(),
+            "failure_threshold": self.null_result.strip(),
+            "falsification_condition": (falsification or "").strip()
+                                       or self.null_result.strip(),
+            "measurement_precision": self.measurement_precision.strip(),
+            "replication_plan": self.replication_plan.strip(),
+            "cost_and_safety": cost,
+        }
+
+    def spec_missing(self, falsification: str = "") -> List[str]:
+        """§16 ke wo naam jo is plan mein sach much nahi aaye."""
+        spec = self.to_spec_dict(falsification)
+        return [key for key in self.SPEC_KEYS
+                if not (spec[key] if isinstance(spec[key], list)
+                        else str(spec[key]).strip())]
+
+    # §16 ke spec naam padhne wale ke liye bekaar hain ("statistical_metric"),
+    # aur sirf ledger mein "plan poora nahi bana" likh dena kaafi nahi tha:
+    # hypothesis card par experiment ki ek line chhap jaati thi jo CHALAYA JA
+    # SAKNE WALA plan lagti thi, jabki 11 mein se 7 hisse khaali the. Isliye
+    # yahan insaani naam rakhe hain aur card par saaf likha jaata hai ki plan ka
+    # kaunsa hissa likha hi nahi gaya.
+    SPEC_LABELS = {
+        "dataset_or_sample": "kis dataset/sample par (aur kitna bada)",
+        "control_or_baseline": "control ya baseline kya hoga",
+        "measured_variables": "kaunse variables naape jayenge",
+        "parameter_range": "kis range mein parameters ghumaye jayenge",
+        "statistical_metric": "kaunsa statistical metric pehle se chuna gaya",
+        "success_threshold": "pass maanne ki hadd",
+        "failure_threshold": "fail maanne ki hadd",
+        "falsification_condition": "kaunsa nateeja ise galat sabit karega",
+        "measurement_precision": "measurement ki zaroori precision",
+        "replication_plan": "doosri team se dohraane ka plan",
+        "cost_and_safety": "kharcha aur safety ki hadd",
+    }
+
+    def spec_missing_labels(self, falsification: str = "") -> List[str]:
+        """Missing spec hisse, padhne wale ki bhasha mein."""
+        return [self.SPEC_LABELS.get(k, k)
+                for k in self.spec_missing(falsification)]
 
     @property
     def missing(self) -> List[str]:
@@ -809,10 +894,29 @@ class Hypothesis:
         return len(self.prediction_text.strip()) >= 15
 
     def to_dict(self) -> Dict:
-        """Structured prediction prefer karo, fallback to text."""
-        pred = (self.prediction.to_dict()
-                if self.prediction and self.prediction.is_complete
-                else {"text": self.prediction_text, "structured": False})
+        """
+        Structured prediction prefer karo, par text bhi saath rakho.
+
+        §16 prediction ke CHAAR naam maangta hai: variables, expected_outcome,
+        measurement_method, falsification_condition. Pehle ye naam sirf tab
+        aate the jab structured parse poora ho jaata tha, warna dict sirf
+        `{text, structured}` reh jaati thi — yaani adhoore case mein spec ke
+        naam gayab. Aur ulta case bhi galat tha: structured ban jaane par asli
+        `text` gir jaata tha. Ab chaaron naam HAMESHA maujood hain (jo nahi
+        mila wo khaali), `text` bhi hamesha rehta hai, aur `structured` batata
+        hai ki chaaron fields bharose ke laayak bane ya nahi.
+        """
+        pred_struct = bool(self.prediction and self.prediction.is_complete)
+        pred_src = self.prediction or PredictionStructure()
+        pred = {
+            "variables": list(pred_src.variables),
+            "expected_outcome": pred_src.expected_outcome,
+            "measurement_method": pred_src.measurement_method,
+            "falsification_condition": (pred_src.falsification_condition
+                                        or self.falsification_test),
+            "text": self.prediction_text,
+            "structured": pred_struct,
+        }
         novelty = dict(self.novelty_record or {})
         out = {
             "status": STATUS,
@@ -857,6 +961,26 @@ class Hypothesis:
             "known_idea_hits": novelty.get("known_idea_hits", []),
             "experiment_structured": (self.experiment_struct.to_dict()
                                       if self.experiment_struct else None),
+            # §16 ka exact naam-wala experiment record (11 keys). Upar wala
+            # `experiment_structured` hamare andar ke naam rakhta hai (report
+            # usse likhi jaati hai); ye wahi plan spec ke naamon mein deta hai,
+            # aur `experiment_spec_missing` saaf batata hai ki kaunsa hissa
+            # plan mein sach mein nahi tha.
+            "experiment_spec": (
+                self.experiment_struct.to_spec_dict(self.falsification_test)
+                if self.experiment_struct else None),
+            "experiment_spec_missing": (
+                self.experiment_struct.spec_missing(self.falsification_test)
+                if self.experiment_struct else list(
+                    ExperimentStructure.SPEC_KEYS)),
+            # Wahi list padhne wale ki bhasha mein — report isse card par ek
+            # line chhaapti hai, taaki adhoora plan poora na lage.
+            "experiment_spec_missing_human": (
+                self.experiment_struct.spec_missing_labels(
+                    self.falsification_test)
+                if self.experiment_struct else
+                [ExperimentStructure.SPEC_LABELS[k]
+                 for k in ExperimentStructure.SPEC_KEYS]),
             "confidence": (self.confidence_record.to_dict()
                            if self.confidence_record else None),
             "confidence_band": (self.confidence_record.band
@@ -1146,6 +1270,19 @@ Format exactly aise:
         ("feasibility", ("feasib", "possible today", "current technology",
                          "cost", "time required")),
         ("limitations", ("limitation", "caveat", "weakness", "kamzori")),
+        # §16 ke paanch extra naam — sirf jab text mein likhe ho.
+        ("parameter_range", ("parameter range", "range of", "between",
+                             "bounded range", "scan range", "sweep")),
+        ("statistical_metric", ("statistic", "p-value", "p value", "chi2",
+                                "chi-squared", "bayes factor", "sigma",
+                                "confidence interval", "metric")),
+        ("measurement_precision", ("precision", "resolution", "accuracy",
+                                   "error bar", "uncertainty of",
+                                   "sensitivity of")),
+        ("replication_plan", ("replicat", "independent group", "second group",
+                              "reproduce", "another team")),
+        ("cost_and_safety", ("safety", "risk limit", "biosafety", "hazard",
+                             "₹0", "zero cost", "free data", "budget")),
     )
 
     # Bina label likhe bhi log naapne wali cheez ka NAAM lete hain

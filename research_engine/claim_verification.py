@@ -160,6 +160,11 @@ class ClaimCheck:
     contradicted: bool = False           # source ne ULTA kaha (result badal deta hai)
     spans: List[Dict] = field(default_factory=list)   # evidence spans
     section: str = ""                    # kis section ki line thi
+    # §8/§9 ke naam-wale label. Ye CHECK ka pass/fail nahi hain — ye batate hain
+    # "kitna padha gaya" aur "source kis darje ka hai". Dono baaton ko alag
+    # rakhna hi §9 ka poora point hai.
+    access_label: str = ""               # METADATA ONLY / ABSTRACT ONLY / ...
+    quality_label: str = ""              # primary peer-reviewed / preprint / ...
 
     def check(self, key: str) -> Optional[Check]:
         for c in self.checks:
@@ -223,6 +228,43 @@ class ClaimCheck:
     def has_spans(self) -> bool:
         return bool(self.spans)
 
+    # ── §8/§9 ke naam-wale label (check ke pass/fail se ALAG) ────────────────
+    @property
+    def entailment_label(self) -> str:
+        """
+        "Source ne is claim ko support kiya?" ka jawab spec ki bhasha mein.
+
+        `entailment` property check C ka pass/fail deti hai; ye uska matlab
+        deti hai. Dono zaroori hain — "check nahi ho saka" ko "support nahi
+        mila" mein milana wahi jhoothi ginti hai jise §8 rok raha hai.
+        """
+        if self.contradicted:
+            return CLAIM_CONTRADICTED
+        status = self.entailment
+        if status == PASS:
+            return CLAIM_SUPPORTED
+        if status == FAIL:
+            return "NOT SUPPORTED"
+        return CLAIM_UNVERIFIABLE
+
+    @property
+    def access_depth_label(self) -> str:
+        """§9 ke paanch labels mein se ek — kitna text sach mein dekha gaya."""
+        if self.access_label:
+            return self.access_label
+        for span in self.spans:
+            if span.get("source_id") == self.best_source and span.get("access_depth"):
+                return str(span["access_depth"])
+        for span in self.spans:
+            if span.get("access_depth"):
+                return str(span["access_depth"])
+        return ""
+
+    @property
+    def source_quality_label(self) -> str:
+        """Source ka darja (peer-reviewed / preprint / patent / retracted)."""
+        return self.quality_label
+
     def failed_checks(self) -> List[str]:
         return [c.key for c in self.checks if c.status == FAIL]
 
@@ -234,13 +276,26 @@ class ClaimCheck:
                 "failed": self.failed_checks(),
                 # §8 — naye field, purane wale hataye bina
                 "claim_id": self.claim_id,
+                # §8 ke exact naam. `claim`/`cited_ids` purane consumers ke liye
+                # upar waise hi pade hain; ye do spec ke naam hain aur `text`
+                # poora claim rakhta hai (kata hua nahi).
+                "text": self.text,
+                "source_ids": list(self.cited_ids),
                 "epistemic_type": self.epistemic_type,
                 "critical": bool(self.critical),
                 "section": self.section,
                 "result": self.result,
                 "result_why": CLAIM_RESULT_EXPLAIN.get(self.result, ""),
-                "entailment": self.entailment,
-                "source_quality": self.source_quality,
+                # §8/§9 — LABEL aur CHECK alag-alag keys mein. `entailment`
+                # spec ki bhasha bolta hai (SUPPORTED / NOT SUPPORTED / UNABLE
+                # TO VERIFY / CONTRADICTED) aur `entailment_check` wahi purana
+                # pass/fail rakhta hai. Dono ek hi cheez ke do jawab hain:
+                # "support mila?" aur "check chal paaya?".
+                "entailment": self.entailment_label,
+                "entailment_check": self.entailment,
+                "source_quality": self.source_quality_label,
+                "source_quality_check": self.source_quality,
+                "access_depth": self.access_depth_label,
                 "access_depth_check": self.access_depth,
                 "contradicted": bool(self.contradicted),
                 "evidence_spans": [dict(s) for s in self.spans],
@@ -318,6 +373,29 @@ def _access_depth_of(record: SourceRecord) -> str:
         return "metadata"
 
 
+def _quality_label_of(record: SourceRecord) -> str:
+    """
+    §8 ka `source_quality` — source KIS DARJE ka hai, ye batane wala label.
+
+    Ye check E ka pass/fail nahi hai (wo alag key `source_quality_check` mein
+    jaata hai). Yahan sirf imaandaar shreni likhi jaati hai, aur jahan pata
+    nahi wahan "pata nahi" likha jaata hai — "peer-reviewed" ka andaaza kabhi
+    nahi lagaya jaata.
+    """
+    if getattr(record, "retracted", None) is True:
+        return "retracted — evidence ke laayak nahi"
+    if getattr(record, "is_patent", False):
+        return "patent (legal document, scientific proof nahi)"
+    stype = getattr(record, "source_type", None)
+    kind = getattr(stype, "value", str(stype or "source"))
+    peer = getattr(record, "peer_reviewed", None)
+    if peer is True:
+        return f"primary peer-reviewed ({kind})"
+    if peer is False:
+        return f"peer-reviewed nahi ({kind})"
+    return f"peer review ka pata nahi ({kind})"
+
+
 def _best_window(claim: str, text: str, width: int = _SPAN_CHARS
                  ) -> Tuple[str, float]:
     """Source text ka wo hissa jo claim se sabse zyada milta hai."""
@@ -372,9 +450,19 @@ def evidence_spans(line: str, records: Sequence[SourceRecord],
             if not window:
                 continue
             if best is None or score > best["match"]:
+                # §8 ka `locator` khaali chhodna user ke liye bekaar hai ("kis
+                # jagah se?" ka jawab nahi milta). Jahan asli locator (page /
+                # section) pata hai wahi likhte hain; jahan nahi pata wahan
+                # IMAANDAARI se likhte hain ki tukda kahan se aaya — page number
+                # ka jhootha andaaza nahi lagate.
+                where = (locator or record.locator or "").strip()
+                if not where:
+                    where = ("full text ka padha gaya hissa (exact page ka pata "
+                             "nahi)" if kind == "passage"
+                             else "abstract/snippet (exact page ka pata nahi)")
                 best = {"source_id": record.source_id,
                         "passage": window,
-                        "locator": locator or record.locator or "",
+                        "locator": where,
                         "span_kind": kind,
                         "match": round(score, 4),
                         "access_depth": _access_depth_of(record)}
@@ -696,6 +784,19 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None,
     e = check_e(records)
     cc.checks = [a, b, c_check, d, e]
     cc.best_source = best
+    # §8/§9 ke label: jis source par faisla tika hai (warna pehla cited source)
+    # ka access-depth aur darja. Koi source hi na ho to dono khaali rehte hain —
+    # "abstract only" ka andaaza bhi nahi lagate.
+    label_src = None
+    for record in records:
+        if best and record.source_id == best:
+            label_src = record
+            break
+    if label_src is None and records:
+        label_src = records[0]
+    if label_src is not None:
+        cc.access_label = _access_depth_of(label_src)
+        cc.quality_label = _quality_label_of(label_src)
 
     if not a.ok:
         cc.verdict = UNSUPPORTED
@@ -862,6 +963,15 @@ class VerificationReport:
             out.append({"claim_id": cc.claim_id, "claim": cc.text[:220],
                         "result": cc.result, "section": cc.section,
                         "cited_ids": list(cc.cited_ids),
+                        # §8 ke naam wahi record mein saath rehte hain, taaki
+                        # integration ko dobara claim dhoondhna na pade.
+                        "text": cc.text,
+                        "source_ids": list(cc.cited_ids),
+                        "epistemic_type": cc.epistemic_type,
+                        "entailment": cc.entailment_label,
+                        "access_depth": cc.access_depth_label,
+                        "source_quality": cc.source_quality_label,
+                        "evidence_spans": [dict(s) for s in cc.spans],
                         "spans": [dict(s) for s in cc.spans],
                         "spans_present": cc.has_spans})
         return out
@@ -1000,7 +1110,8 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
         if heading:
             current_section = " ".join(heading.group(1).split())
         section_at.append(current_section)
-    for start, _, block in labelled_claim_spans(text):
+    covered: List[tuple] = []
+    for start, end, block in labelled_claim_spans(text):
         if len(block) < 25:
             continue
         labels = _LABEL_RE.findall(block)
@@ -1017,10 +1128,49 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
         cc = verify_claim(block, pack, claim_id=cid, critical=critical,
                           section=section)
         report.claims.append(cc)
+        covered.append((start, end))
         if cc.strong_label and not cc.passes_ae:
             report.overclaims.append(cc)
         if len(report.claims) >= max_claims:
             break
+    # §8 — doosra pass: "Seedha jawab" / final-conclusion section ki wo line jo
+    # source cite karti hai par LABEL bhool gayi.
+    #
+    # Kyun: pehle sirf labelled lines ginti thi, isliye jab model ne apne nateeje
+    # wali line par label nahi lagaya to poori report `critical_claims: 0` aur
+    # `sources_supporting_critical_claims: 0` bolti thi — jo padhne mein "nateeje
+    # ke peeche koi source nahi" jaisa lagta hai, jabki asli baat ye thi ki us
+    # line ka label gayab tha. Live dark-matter run ki galti bilkul yahi thi.
+    #
+    # Label ab bhi banaya nahi jaata: `epistemic_type` saaf-saaf "unlabelled"
+    # rehta hai, aur strong-label gate (overclaim) in par nahi lagta. Sirf A–E
+    # chalti hai, taaki nateeje ke peeche ka saboot record mein aa jaaye.
+    if len(report.claims) < max_claims:
+        seen_bodies = {c.text.strip().lower() for c in report.claims if c.text}
+        for idx, raw in enumerate((text or "").splitlines()):
+            section = section_at[idx] if idx < len(section_at) else ""
+            if not _CRITICAL_SECTION_RE.search(section):
+                continue
+            if _HEADING_RE.match(raw) or _LABEL_RE.search(raw):
+                continue
+            if not cited_ids(raw):
+                continue
+            body = claim_body(raw)
+            if len(body) < 40:                 # aadhi line dava nahi hoti
+                continue
+            if any(s <= idx < e for s, e in covered):
+                continue
+            # Ek hi baat "Seedha jawab" aur "final conclusion" dono mein likhi ho
+            # to wo EK dava hai — dobara ginne se counter jhootha bada dikhta.
+            if body.strip().lower() in seen_bodies:
+                continue
+            seen_bodies.add(body.strip().lower())
+            cid = f"CL{len(report.claims) + 1:03d}"
+            report.claims.append(verify_claim(raw.strip(), pack, claim_id=cid,
+                                              critical=True, section=section))
+            covered.append((idx, idx + 1))
+            if len(report.claims) >= max_claims:
+                break
     return report
 
 

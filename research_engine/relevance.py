@@ -111,6 +111,21 @@ PROP_DIMENSION_WHY = {
     "domain": "field ka faisla — ye source usi field ka hai jiska sawaal hai",
 }
 
+# §6 ki list mein DAS cheezein hain. Upar ke nau alag-alag naapi jaati hain;
+# daswi ("whether source actually tests the requested proposition") un nau se
+# banti hai par usko ek ALAG faisla ke roop mein rakha gaya hai — `tests_
+# proposition`. Isliye niche wali checklist poore das naam deti hai: audit aur
+# report isi se ginti karte hain, taaki "nau dekhe, das likha" jaisa farak
+# kabhi na dikhe. Daswi ko dimensions ki `passed/failed` list mein NAHI mila
+# rahe — wo derived hai, aur derived cheez ko naya saboot ginna do baar ginna
+# hota hai.
+PROP_VERDICT_CHECK = "tests_proposition"
+PROP_CHECKLIST = PROP_DIMENSIONS + (PROP_VERDICT_CHECK,)
+PROP_CHECK_WHY = dict(PROP_DIMENSION_WHY)
+PROP_CHECK_WHY[PROP_VERDICT_CHECK] = (
+    "aakhri faisla — ye source sawaal ki BAAT (proposition) sach mein test "
+    "karta hai ya sirf usi topic ke aas-paas ka document hai")
+
 # Structured reject codes — report/audit inhi codes se ginti karta hai, free-text
 # se nahi (free-text har baar badal jaata hai aur count karna namumkin ho jaata).
 REJECT_DOMAIN_MISMATCH = "DOMAIN_MISMATCH"
@@ -928,6 +943,10 @@ class RelevanceEngine:
                 dim_fail[dim] = dim_fail.get(dim, 0) + 1
         return {
             "dimensions": list(PROP_DIMENSIONS),
+            # Poori §6 checklist (nau dimension + daswa aakhri faisla) — report
+            # isi se "kitni cheezein dekhi gayi" likhti hai.
+            "checklist": list(PROP_CHECKLIST),
+            "checklist_why": dict(PROP_CHECK_WHY),
             "tests_proposition": yes,
             "does_not_test": no,
             "undecided": unknown,

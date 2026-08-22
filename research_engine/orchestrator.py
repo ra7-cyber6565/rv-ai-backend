@@ -52,7 +52,8 @@ from .evidence_axes import coverage_note as axis_coverage_note
 from .evidence_axes import coverage_summary
 from .evidence_axes import counter_search_done
 from .evidence_axes import next_queries as axes_next_queries
-from .requested import build_ledger, contract_ledger, looks_like_chain
+from .requested import build_ledger, contract_ledger, delivery_evidence
+from .requested import looks_like_chain
 from .requested import looks_like_math_model, quality_contract
 from .research_memory import ResearchMemory
 from .research_state import build_state as build_research_state
@@ -171,6 +172,20 @@ class DeepResearchEngine:
         axes = axes_for(question)
         axis_queries: Dict[str, List[str]] = {}
         axis_records: List[Dict] = []
+        # §5 — har round mein kitni axis queries? Pehle ye 3 par fix thi, aur
+        # dark-matter jaise sawaal par 17 mandatory axes × 3 round × 3 query ka
+        # matlab tha ki 8 axes par ek bhi query jaati hi nahi thi (report unhe
+        # imaandaari se "search hi nahi hui" kehti thi, par kami rehti thi).
+        # Ab budget axes ki ginti se banta hai: itni queries taaki available
+        # rounds mein har mandatory axis ki baari aa jaaye. Upar 8 ki chhat hai
+        # (connector budget asli constraint hai) aur QUICK mode sasta hi rehta
+        # hai. Ye sab ₹0 search connectors par chalta hai.
+        _mandatory_axes = sum(1 for a in axes if a.mandatory) or len(axes)
+        if config.max_rounds <= 1:
+            axis_budget = 3
+        else:
+            axis_budget = max(3, min(
+                8, -(-_mandatory_axes // max(1, config.max_rounds))))
 
         for round_no in range(1, config.max_rounds + 1):
             rounds_run = round_no
@@ -182,13 +197,16 @@ class DeepResearchEngine:
                 # Planner ne kuch na diya to bhi search rukni nahi chahiye —
                 # seedha sawal hi query ban jaata hai.
                 queries = [question]
-            # Har round mein 2-3 axis queries jodte hain: pehle un axes ki jo
-            # abhi cover nahi hue, aur ladder ki AGLI seedhi par (wahi query
-            # dobara nahi). Ginti jaan-boojh kar chhoti hai — connector budget
-            # bhi asli constraint hai, aur ₹0 providers par nirbharta hai.
+            # Har round mein axis queries jodte hain: pehle un axes ki jo abhi
+            # cover nahi hue, aur ladder ki AGLI seedhi par (wahi query dobara
+            # nahi). Ginti `axis_budget` se aati hai — QUICK par 3, gehre modes
+            # par utni ki saare mandatory axes ki baari aa jaaye (max 8), kyunki
+            # connector budget bhi asli constraint hai aur nirbharta ₹0
+            # providers par hai.
             axis_base = self.planner.clean_query(question)
             for rung in axes_next_queries(axes, axis_records, axis_base,
-                                          round_no=round_no, limit=3):
+                                          round_no=round_no,
+                                          limit=axis_budget):
                 query = rung["query"]
                 if query and query not in queries:
                     queries.append(query)
@@ -1115,7 +1133,25 @@ class DeepResearchEngine:
         # source relevant (B), claim entailed (C), reading depth (D), source
         # quality (E) — sab alag ginte hain, aur "verified" ka dava sirf C par
         # tikta hai. Poora module deterministic hai (₹0, koi API call nahi).
-        claim_checks = verify_claims(gemini_answer, pack).to_dict()
+        #
+        # §8 (2026-08-22): verification RAW model text par nahi, canonical
+        # heading view par chalti hai. Critical claim ka faisla section se hota
+        # hai ("Seedha jawab" / "final conclusion"), aur model apni heading khud
+        # likhta hai — isliye raw text par har critical claim non-critical ban
+        # jaati thi. Live dark-matter run mein iska nateeja tha:
+        # `critical_claim_evidence_spans: []` aur
+        # `critical_claim_spans_complete: None`, jabki usi jawab par seedha
+        # verify karne se 1 critical claim milti hai. View sirf headings ka naam
+        # badalta hai — ek shabd content nahi badalta, aur assembled answer use
+        # na karne se audit block ki lines dobara nahi ginti.
+        claim_source_text = gemini_answer
+        view = getattr(self.synthesizer, "canonical_heading_view", None)
+        if callable(view):
+            try:
+                claim_source_text = view(gemini_answer) or gemini_answer
+            except Exception:                                # noqa: BLE001
+                claim_source_text = gemini_answer
+        claim_checks = verify_claims(claim_source_text, pack).to_dict()
         if claim_checks.get("overclaims"):
             warnings.append(
                 f"{len(claim_checks['overclaims'])} claim par label evidence se "
@@ -1447,8 +1483,19 @@ class DeepResearchEngine:
             # Khaali list ka matlab "dekha, koi hisaab nahi mila" hai; `None`
             # ka matlab "dekha hi nahi gaya" — dono alag baatein hain.
             calculations=calc_records,
-            recovery_used=bool(recovered) or None,
-            progress_snapshot_preserved=None,   # ye server-side (ChatGPT-owned) hai
+            # §19 (2026-08-22 self-audit): pehle yahan `bool(recovered) or None`
+            # tha — yaani recovery na lagi ho to field `None` ho jaati thi aur
+            # audit use "check HO HI NAHI SAKA" mein gin leta tha. Wo galat tha:
+            # `_recover_extras` HAR run mein chalta hai, to "recovery lagi ya
+            # nahi" hamesha NAAPA hua sach hai. Ab `False` ka matlab "dekha,
+            # recovery ki zaroorat nahi padi" — aur ye un-run check se alag
+            # dikhta hai. Server-side recovery (job layer) baad mein isi field
+            # ko OR karke True kar sakta hai, to jhooth banne ka rasta nahi hai.
+            recovery_used=bool(recovered),
+            # Ye JAAN-BOOJH KAR `None` hai: snapshot job-server (ChatGPT-owned
+            # layer) sambhalta hai, engine ke andar uska koi record hi nahi hai.
+            # `False` likhna "dekha, snapshot nahi bacha" ka jhootha dava hoga.
+            progress_snapshot_preserved=None,
             hypotheses=passes["hypotheses"],
             contradictions=contradiction_dicts,
             contradiction_rejections=contradiction_rejections,
@@ -1464,6 +1511,18 @@ class DeepResearchEngine:
         # hai (warna block ka apna text hi dobara scan ho jaata) aur §20 state
         # block se PEHLE, taaki chaar state audit ke sabse upar hi rahein.
         answer = quality.inject_unknown_block(answer, quality_ctx)
+        # §7 — "retrieved ≠ cited ≠ support dene wale" ki ginti bhi user ke jawab
+        # mein. Ye producer (`context_block`) bana hua tha par isse production
+        # mein koi bulaata hi nahi tha — sirf tests padhte the. Live report
+        # sirf "N sources use hue" likhti thi, jo bilkul wahi galti hai jo §7
+        # mana karta hai ("18 retrieved ko 18 used mat banao"). Inject unknown
+        # block ke BAAD hota hai taaki ginti uske upar rahe, aur §20 state block
+        # se PEHLE taaki chaar state sabse upar hi rahein.
+        answer = quality.inject_context_block(answer, quality_ctx)
+        # §9 — paanch claim-nateeje bhi jawab mein. Ye sirf `verification`
+        # JSON mein pade rehte the, isliye user ko "citation mil gayi" aur "dava
+        # sach nikla" ka farak kabhi dikhta hi nahi tha.
+        answer = quality.inject_claim_block(answer, quality_ctx)
 
         delivered: Dict = {
             "sections_present": list(quality_ctx.get("sections_present") or []),
@@ -1497,8 +1556,28 @@ class DeepResearchEngine:
         if quality_ctx.get("axes_missing_labels"):
             delivered["axes_missing_labels"] = list(
                 quality_ctx["axes_missing_labels"])
+        # §4 ki saat naye demands (units, experiment design, falsification,
+        # confidence, readiness, source depth, tulna ke pehlu, naam se maange
+        # gaye target). Ye FINAL answer ke text par naapi jaati hain — kisi step
+        # ke "ho gaya" keh dene par nahi. Jo naapi na ja sake uski key aati hi
+        # nahi, isliye ledger us par "check nahi hua" likhta hai, "nahi mila"
+        # nahi. `hypotheses=` tabhi bhejte hain jab hypothesis engine sach mein
+        # chala ho — warna experiment design/falsification par False likhna
+        # jhooth hoga.
+        delivered.update(delivery_evidence(
+            contract, answer,
+            hypotheses=(passes["hypotheses"]
+                        if (passes.get("hypothesis_requested")
+                            or passes.get("hypotheses")) else None),
+            calculations=list(calc_records or []),
+            source_titles=[getattr(s, "title", "") for s in pack.sources]))
         c_ledger = contract_ledger(contract, delivered=delivered,
                                    reasons=ledger_reasons)
+        # §4 — asked vs delivered ledger user ko DIKHNA chahiye, sirf result JSON
+        # mein nahi. Ye assemble ke baad hi ban sakta hai (delivered counts final
+        # answer par tike hain), isliye inject yahan hota hai — ginti wale block
+        # ke upar, aur §20 state block ke neeche.
+        answer = quality.inject_ledger_block(answer, c_ledger)
 
         # 10c. §20 — chaar ALAG state + unke beech ke conflicts.
         #

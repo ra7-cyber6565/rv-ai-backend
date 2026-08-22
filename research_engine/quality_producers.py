@@ -550,7 +550,8 @@ def relevance_gate_report(pack=None) -> Dict:
     baatein hain, aur pehli wali VERIFIED ko rokti hai — isliye inhe milaana
     mana hai.
     """
-    empty = {"ran": False, "dimensions": [], "tests_proposition": None,
+    empty = {"ran": False, "dimensions": [], "checklist": [],
+             "tests_proposition": None,
              "does_not_test": None, "undecided": None,
              "failed_dimensions": {}, "reject_codes": {}, "note": ""}
     if pack is None:
@@ -563,6 +564,11 @@ def relevance_gate_report(pack=None) -> Dict:
     return {
         "ran": True,
         "dimensions": list(prop.get("dimensions") or []),
+        # §6 ki poori das-item checklist (nau dimension + daswa aakhri faisla).
+        # Purane pack mein ye key na ho to dimensions par gir jaate hain, aur
+        # report tab bhi sirf utna hi likhegi jitna sach mein dekha gaya.
+        "checklist": list(prop.get("checklist")
+                          or prop.get("dimensions") or []),
         "tests_proposition": prop.get("tests_proposition"),
         "does_not_test": prop.get("does_not_test"),
         "undecided": prop.get("undecided"),
@@ -901,6 +907,11 @@ def rescan_final_answer(ctx: Optional[Dict], pack=None,
 # le kar likhta hai ki kaunsa check HO HI NAHI SAKA.
 UNKNOWN_HEADING = "### Kaunse check HO HI NAHI SAKE"
 
+# §7 — ginti wale block ki pehchaan. Isse do baar inject hona ruk jaata hai
+# (orchestrator dobara chal sakta hai, aur recovery path bhi same answer
+# text par kaam karta hai).
+COUNTERS_HEADING = "**Ginti (har ek ka matlab alag hai):**"
+
 _UNKNOWN_HUMAN: Dict[str, str] = {
     "directly_relevant_sources": "kitne source seedha sawaal ki baat karte hain",
     "sources_supporting_critical_claims": "critical dava ko asli support dene wale source",
@@ -909,8 +920,17 @@ _UNKNOWN_HUMAN: Dict[str, str] = {
     "evidence_graph_complete": "claim-se-source ka poora evidence graph bana ya nahi",
     "counter_search_performed": "khilaf wali side ka search sach mein chala ya nahi",
     "recovery_used": "recovery (adhoore run se jawab bachana) laga ya nahi",
-    "progress_snapshot_preserved": "progress ka snapshot bacha rakha gaya ya nahi",
-    "numeric_confidence_calibrated": "confidence ka number kisi asli hisaab se bana ya nahi",
+    # In do fields ka `None` "aalas" nahi hai, isliye wajah bhi saath likhi hai —
+    # warna user samajhta hai ki koi check chup-chaap fail ho gaya.
+    "progress_snapshot_preserved": ("progress ka snapshot bacha rakha gaya ya "
+                                    "nahi — ye job-server ke level par tay hota "
+                                    "hai, research engine ke andar iska record "
+                                    "hi nahi hota"),
+    "numeric_confidence_calibrated": ("confidence ka number kisi asli hisaab se "
+                                      "bana ya nahi — is jawab mein koi "
+                                      "percentage wala confidence number hi "
+                                      "nahi tha, to calibrate karne ko kuch "
+                                      "nahi bacha"),
     "access_depth_mismatch_count": "padhne ki gehrai ke dave ka mismatch",
     "unsupported_critical_claims": "bina support wali critical dava ki ginti",
     "independent_source_families": "independent source families ki ginti",
@@ -967,15 +987,25 @@ def inject_unknown_block(answer: str, ctx: Optional[Dict]) -> str:
     audit section na mile to `## Sources` se pehle jaata hai — Sources hamesha
     aakhri section rehta hai.
     """
+    return _inject_into_audit(answer, render_unknown_block(ctx), UNKNOWN_HEADING)
+
+
+def _inject_into_audit(answer: str, block: str, marker: str) -> str:
+    """
+    `block` ko audit section ke shuru mein daalo — ek hi baar.
+
+    Ye logic pehle `inject_unknown_block` ke andar tha; ab do injector isi ek
+    jagah se aate hain, taaki dono ka insertion behaviour bilkul same rahe
+    (audit heading ke baad, warna `## Sources` se pehle, warna sabse aakhir).
+    """
     from .answer_order import display_heading, section_start
 
     text = str(answer or "")
-    block = render_unknown_block(ctx)
     if not block:
         return text
     if not text.strip():
         return block
-    if UNKNOWN_HEADING in text:
+    if marker and marker in text:
         return text
     audit = section_start(text, "audit")
     if audit >= 0:
@@ -992,8 +1022,158 @@ def inject_unknown_block(answer: str, ctx: Optional[Dict]) -> str:
     return text.rstrip() + "\n\n" + block + "\n"
 
 
-def context_block(ctx: Optional[Dict]) -> str:
-    """Audit section ke liye saaf-saaf ginti — retrieved ≠ used, saaf likha hua."""
+def inject_context_block(answer: str, ctx: Optional[Dict]) -> str:
+    """
+    §7 ki ginti (retrieved ≠ cited ≠ supporting) user ke jawab mein daalo.
+
+    Ye producer pehle se maujood tha (`context_block`), par production mein use
+    KOI nahi karta tha — sirf tests padhte the. Nateeja: jawab mein "7 sources
+    use hue" jaisi ek hi ginti dikhti thi, aur §7 ka poora point ("18 retrieved
+    ko 18 used mat banao") user tak pahunchta hi nahi tha. Wahi galti pehle
+    `render_unknown_block` ke saath bhi hui thi.
+
+    Unknown-fields ki poonchh yahan JAAN-BOOJH kar band hai — uska apna alag
+    block (`inject_unknown_block`) already lagta hai, aur ek hi list do jagah
+    chhapna sirf shor hai.
+    """
+    block = context_block(ctx, include_unknown=False)
+    # ctx hi na ho to block ek honest ek-line ka bayaan hota hai jismein
+    # COUNTERS_HEADING nahi aata — us haalat mein usi line ko marker bana lo,
+    # warna dobara inject ho jaayega.
+    marker = COUNTERS_HEADING if COUNTERS_HEADING in block else block.strip()
+    return _inject_into_audit(answer, block, marker)
+
+
+# §4 — "Final answer se pehle asked vs delivered ledger banega." Ledger banta
+# tha (requested.contract_ledger) aur result JSON mein jaata bhi tha, par uski
+# ✅/❔/❌ lines KISI ne render nahi ki — yaani user ko kabhi pata nahi chalta
+# tha ki jo maanga gaya tha usme se kya NAHI mila. Ab wahi lines audit section
+# mein chhapti hain.
+LEDGER_HEADING = "### Kya maanga tha vs kya mila (asked vs delivered)"
+
+
+def render_ledger_block(ledger: Optional[Dict]) -> str:
+    """
+    `contract_ledger()` ka `lines` hissa user ke padhne laayak block banao.
+
+    Khaali string laut sakti hai: ledger hi na bana ho ya ek bhi item na ho to
+    khaali heading chhapna sirf dhokha hai. Yahan koi naya faisla NAHI hota —
+    ✅/❔/❌ waise hi aate hain jaise ledger ne tay kiye, taaki result JSON aur
+    user ka jawab do alag baat na bolein.
+    """
+    lines = [str(x) for x in ((ledger or {}).get("lines") or []) if str(x).strip()]
+    if not lines:
+        return ""
+    out = [
+        LEDGER_HEADING,
+        "",
+        "❔ ka matlab \"check hi nahi hua\" hai — ❌ (\"dekha, nahi mila\") se "
+        "alag baat hai:",
+        "",
+    ]
+    out.extend(lines)
+    missing = [str(i.get("what") or i.get("key"))
+               for i in ((ledger or {}).get("mandatory_missing") or [])]
+    if missing:
+        out.append("")
+        out.append("Inke bina jawab ko poora nahi kaha ja sakta: "
+                   + ", ".join(missing) + ".")
+    return "\n".join(out)
+
+
+def inject_ledger_block(answer: str, ledger: Optional[Dict]) -> str:
+    """`render_ledger_block()` ko audit section mein daalo — ek hi baar."""
+    return _inject_into_audit(answer, render_ledger_block(ledger), LEDGER_HEADING)
+
+
+# §9 — paanch claim-nateeje (SUPPORTED / PARTIALLY SUPPORTED / UNSUPPORTED /
+# CONTRADICTED / UNABLE TO VERIFY) sirf result JSON mein pade rehte the. User ke
+# jawab mein claim ke aage kuch bhi nahi likha tha, isliye "source cite hua"
+# aur "dava verify hua" ka farak dikhta hi nahi tha — §8 ka poora point wahi
+# hai. Ab har critical dava ka apna faisla audit mein chhapta hai.
+CLAIMS_HEADING = "### Har critical dava par alag faisla"
+
+_CLAIM_RESULT_NAMES = ("SUPPORTED", "PARTIALLY SUPPORTED", "UNSUPPORTED",
+                       "CONTRADICTED", "UNABLE TO VERIFY")
+
+
+def render_claim_block(ctx: Optional[Dict]) -> str:
+    """
+    §8/§9 — per-claim faisla, dava ka text DOBARA likhe bina.
+
+    Jaan-boojh kar sirf structure chhapta hai (claim id, nateeja, entailment,
+    padhne ki gehrai, source id, source ki haalat) — dava ka vaakya ya source ka
+    passage yahan repeat nahi hota. Wajah: wahi vaakya audit section mein dobara
+    likhne se ek hi dava do jagah dikhta hai, aur retracted source ka passage
+    audit mein utha kar likhna use chupke se "evidence" bana deta hai.
+
+    Khaali string laut sakti hai — koi critical dava hi na ho to khaali heading
+    chhapna dhokha hai.
+    """
+    if not ctx:
+        return ""
+    counts = ctx.get("claim_results")
+    rows = list(ctx.get("critical_claim_evidence_spans") or [])
+    if counts is None and not rows:
+        return ""
+    out = [CLAIMS_HEADING, ""]
+    if counts is None:
+        out.append("Claim-level verification is run mein chali hi NAHI — isliye "
+                   "kisi dave ke aage \"verified\" nahi likha ja sakta.")
+        return "\n".join(out)
+    out.append("\"Citation mil gayi\" aur \"dava sach nikla\" do alag baatein "
+               "hain. Paanch nateeje alag-alag gine jaate hain:")
+    out.append("")
+    out.append("- " + " | ".join(
+        f"{name}: {_num((counts or {}).get(name))}"
+        for name in _CLAIM_RESULT_NAMES))
+    total = ctx.get("critical_claims")
+    if total is not None:
+        out.append(f"- Critical dave: {_num(total)}; inme se bina support wale: "
+                   f"{_num(ctx.get('unsupported_critical_claims'))}, "
+                   f"verify hi na ho paane wale: "
+                   f"{_num(ctx.get('unverifiable_critical_claims'))}.")
+    if rows:
+        out.append("")
+        for row in rows[:8]:
+            if not isinstance(row, dict):
+                continue
+            cid = str(row.get("claim_id") or "?")
+            src = ", ".join(str(x) for x in (row.get("source_ids")
+                                             or row.get("cited_ids") or []))
+            bits = [f"nateeja: **{row.get('result') or 'pata nahi'}**"]
+            if row.get("entailment"):
+                bits.append(f"source ka text dave ko: {row['entailment']}")
+            if row.get("access_depth"):
+                bits.append(f"padhne ki gehrai: {row['access_depth']}")
+            if row.get("epistemic_type"):
+                bits.append(f"label: {row['epistemic_type']}")
+            spans = row.get("evidence_spans") or row.get("spans") or []
+            bits.append("saboot ka tukda mila" if spans
+                        else "saboot ka tukda NAHI mila")
+            out.append(f"- {cid}" + (f" [{src}]" if src else "") + " — "
+                       + "; ".join(bits) + ".")
+            if row.get("source_quality"):
+                out.append(f"  - Source ki haalat: {row['source_quality']}.")
+        if len(rows) > 8:
+            out.append(f"- (aur {len(rows) - 8} critical dave — poora record "
+                       f"technical audit ke claim_checks mein hai.)")
+    return "\n".join(out)
+
+
+def inject_claim_block(answer: str, ctx: Optional[Dict]) -> str:
+    """`render_claim_block()` ko audit section mein daalo — ek hi baar."""
+    return _inject_into_audit(answer, render_claim_block(ctx), CLAIMS_HEADING)
+
+
+def context_block(ctx: Optional[Dict], include_unknown: bool = True) -> str:
+    """
+    Audit section ke liye saaf-saaf ginti — retrieved ≠ used, saaf likha hua.
+
+    `include_unknown=False` sirf tab do jab "kaunse check ho hi nahi sake" wali
+    list alag block ban kar already chhap rahi hai (dekho
+    `inject_context_block`) — ek hi list do jagah likhna sirf shor hai.
+    """
     if not ctx:
         return ("Quality counters chale hi nahi, isliye is jawab ke saath koi "
                 "ginti nahi di ja rahi (jhoothi ginti dene se behtar hai).")
@@ -1017,14 +1197,16 @@ def context_block(ctx: Optional[Dict]) -> str:
         f"nahi hota, ek hi group ka ek hi method ek hi family hai.")
     gate = ctx.get("relevance_gate") or {}
     if gate.get("ran"):
+        checklist = list(gate.get("checklist") or gate.get("dimensions") or [])
         lines.append(
             f"- Sawaal ki baat SACH MEIN test karne wale source: "
             f"{_num(gate.get('tests_proposition'))}; nahi karne wale: "
             f"{_num(gate.get('does_not_test'))}; faisla nahi ho saka: "
             f"{_num(gate.get('undecided'))}. Har source par "
-            f"{len(gate.get('dimensions') or [])} cheezein alag-alag dekhi gayi "
+            f"{len(checklist)} cheezein alag-alag dekhi gayi "
             f"(entity, mechanism, naap, population, tareeka, zaroori raasta, "
-            f"abstract ka nateeja, shirshak, field).")
+            f"abstract ka nateeja, shirshak, field, aur aakhir mein 'ye source "
+            f"sawaal ki BAAT test karta hai ya nahi' ka alag faisla).")
         failed = gate.get("failed_dimensions") or {}
         if failed:
             detail = ", ".join(f"{k}: {v}" for k, v in list(failed.items())[:5])
@@ -1090,9 +1272,10 @@ def context_block(ctx: Optional[Dict]) -> str:
             + ". Ye app ka apna soch hai — kisi source ka claim nahi.")
         if hyp.get("known_ideas_flagged"):
             lines.append(
-                "- " + ", ".join(hyp["known_ideas_flagged"])
-                + " pehle se maujood ideas par bani hain (PBH/MOND/dark photon "
-                  "jaisi cheezein app ki khoj nahi hain).")
+                f"- {len(hyp['known_ideas_flagged'])} hypothesis pehle se "
+                f"maujood ideas par bani hain (PBH/MOND/dark photon jaisi "
+                f"cheezein app ki khoj nahi hain) — kaunsi, ye LAB section ke "
+                f"card par likha hai.")
         if hyp.get("claimed_novel_without_search"):
             lines.append(
                 f"- ⚠️ {hyp['claimed_novel_without_search']} hypothesis 'novel' "
@@ -1100,16 +1283,17 @@ def context_block(ctx: Optional[Dict]) -> str:
                 f"'NOVELTY UNVERIFIED' hi sahi hai.")
         if hyp.get("incomplete_ids"):
             lines.append(
-                "- ⚠️ Inka record adhoora hai (mechanism/prior work/confidence "
-                "jaisa hissa nahi bana): " + ", ".join(hyp["incomplete_ids"]) + ".")
+                f"- ⚠️ {len(hyp['incomplete_ids'])} hypothesis ka record adhoora "
+                f"hai (mechanism/prior work/confidence jaisa hissa nahi bana) — "
+                f"ID LAB section ke card par hi likhi hai.")
         if hyp.get("missing_risk_checks"):
             lines.append(
-                "- ⚠️ Safety se judi hypothesis par risk checks nahi likhe gaye: "
-                + ", ".join(hyp["missing_risk_checks"]) + ".")
+                f"- ⚠️ {len(hyp['missing_risk_checks'])} safety se judi hypothesis "
+                f"par risk checks nahi likhe gaye — card LAB section mein hai.")
     elif ctx.get("hypotheses_present") is None:
         lines.append("- App ki apni hypothesis ka step is run mein chala hi nahi.")
     unknown = ctx.get("unknown_fields") or []
-    if unknown:
+    if unknown and include_unknown:
         lines.append("")
         lines.append("_In cheezon ka check HO HI NAHI SAKA (inhe 'zero' na padha "
                      "jaaye): " + ", ".join(unknown) + "._")

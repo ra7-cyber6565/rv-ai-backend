@@ -362,8 +362,14 @@ Ab jawab likho:"""
             refs = [str(r) for r in (c.get("evidence_span_refs") or []) if str(r).strip()]
             if refs:
                 body.append(f"_Saboot kahan se:_ {', '.join(refs)}")
+            # §11 — method ki line DONO haalat mein chhapti hai. Pehle khaali
+            # `method_difference` par line hi gayab ho jaati thi, jisse padhne
+            # wale ko lagta tha ki method compare ho chuka hai aur farq nahi
+            # mila. Ab "compare nahi ho paaya" bhi saaf likha jaata hai.
             if c.get("method_difference"):
                 body.append(f"_Method ka farq:_ {c['method_difference']}")
+            elif c.get("method_comparison_why"):
+                body.append(f"_Method ka farq:_ {c['method_comparison_why']}")
             for note in (c.get("context_notes") or [])[:2]:
                 if str(note).strip():
                     body.append(f"_Context:_ {note}")
@@ -493,6 +499,17 @@ Ab jawab likho:"""
             if experiment and experiment not in (h.get("how_to_test") or ""):
                 body.append("**Zaroori experiment / simulation:** "
                             + self._join_prose(experiment))
+            # §16 — experiment ki ek line chhaap dene se plan CHALAYA JA SAKNE
+            # WALA lagta tha, jabki spec ke kai hisse (dataset, metric, hadd,
+            # replication) likhe hi nahi gaye hote. Ledger door alag section
+            # mein tha, isliye padhne wale tak baat pahunchti nahi thi. Ab kaunsa
+            # hissa missing hai, wahi card par saaf likha jaata hai.
+            gaps = [str(x).strip() for x in
+                    (h.get("experiment_spec_missing_human") or []) if str(x).strip()]
+            if gaps:
+                body.append("**Is plan mein kya likha hi nahi gaya (isliye ise "
+                            "ready-to-run plan na maanein):** "
+                            + "; ".join(gaps[:11]))
             falsify = str(h.get("falsification_test") or "").strip()
             if falsify:
                 body.append("**Kaunsa result ise galat sabit kar dega:** "
@@ -650,8 +667,6 @@ Ab jawab likho:"""
             return pred.strip()
         if not isinstance(pred, dict):
             return ""
-        if pred.get("text"):
-            return str(pred["text"]).strip()
         bits: List[str] = []
         variables = [str(v).strip() for v in (pred.get("variables") or []) if str(v).strip()]
         if variables:
@@ -663,6 +678,14 @@ Ab jawab likho:"""
         if pred.get("falsification_condition"):
             bits.append("Kaunsa result isse galat sabit kar dega: "
                         f"{pred['falsification_condition']}.")
+        # Structured hissa poora bana ho to wahi behtar hai (§16 ke chaar naam
+        # saaf-saaf). Warna asli text hi imaandaar jawab hai. Dhyaan: dict mein
+        # ab `text` HAMESHA hota hai (structured ke saath bhi), isliye pehle
+        # `text` dekh lena structured prose ko dabaa deta tha.
+        if pred.get("structured") and bits:
+            return " ".join(bits)
+        if pred.get("text"):
+            return str(pred["text"]).strip()
         return " ".join(bits)
 
     # ── §16 item 9: final conclusion ─────────────────────────────────────────
@@ -1732,6 +1755,46 @@ Ab jawab likho:"""
             else:
                 found[key] = body
         return found, "\n\n".join(leftover_parts).strip()
+
+    def canonical_heading_view(self, text: str) -> str:
+        """
+        Model ke text ko canonical headings ke saath dobara likho — SIRF
+        claim verification ke liye. Ye view user ko kabhi nahi dikhta.
+
+        Kyun zaroori hai: koi claim "critical" hai ya nahi, ye us section se
+        tay hota hai jisme wo likhi hai (seedha jawab / final conclusion).
+        Model apni marzi ki heading likhta hai (`### Fact — ...`), isliye RAW
+        model text par verification chalane se har critical claim non-critical
+        ban jaati thi — live dark-matter run mein `critical_claims: 0` aaya,
+        jabki wahi text final answer par 1 critical deta hai. Usse §8 ke
+        evidence spans khaali reh jaate the aur `critical_claim_spans_complete`
+        "pata nahi" par atak jaata tha.
+
+        Assembled (final) answer par verification chalana bhi theek nahi hota:
+        usme audit block ki apni lines bhi claim ban kar ginne lagti hain, aur
+        jawab ke andar do alag ginti aa jaati.
+
+        Content ek shabd bhi nahi badalta — sirf heading ka naam canonical hota
+        hai, aur bina heading wala leftover text sabse pehle (section = khaali,
+        yaani "critical nahi") rakha jaata hai.
+        """
+        raw = text or ""
+        try:
+            found, leftover = self.split_model_sections(raw)
+        except Exception:                                    # noqa: BLE001
+            return raw
+        if not found:
+            return raw
+        parts: List[str] = []
+        if leftover.strip():
+            parts.append(leftover.strip())
+        for key in sorted(k for k in found if isinstance(k, int)):
+            title = (SECTION_TITLES[key] if 0 <= key < len(SECTION_TITLES)
+                     else str(key))
+            parts.append(f"## {title}\n{found[key]}".rstrip())
+        for key in [k for k in found if not isinstance(k, int)]:
+            parts.append(f"## {key}\n{found[key]}".rstrip())
+        return "\n\n".join(p for p in parts if p.strip())
 
     # ── final report ─────────────────────────────────────────────────────────
     _MISSING = "_(Reasoning model ne ye section nahi diya.)_"
