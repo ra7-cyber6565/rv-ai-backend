@@ -353,7 +353,14 @@ class DeepResearchEngine:
         Synthesis output se '## Hypothesis N' blocks alag karo, taaki wo body
         mein bhi na dohrayen aur structured section 8 mein saaf render hon.
         """
-        match = re.search(r"^\s*#{2,4}\s*Hypothesis\b", text or "",
+        # Hypothesis parser jin common provider headings ko samajhta hai, body
+        # splitter ko bhi wahi samajhne chahiye. Warna `## H1` final answer mein
+        # reh jaata aur structured hypotheses khaali milti.
+        heading = (
+            r"(?:hypothesis(?:\s*#?\s*\d+)?|h\s*#?\s*\d+|"
+            r"\d+\s*[\).:\-]?\s*hypothesis)"
+        )
+        match = re.search(r"^\s*#{1,6}\s*" + heading + r"\b", text or "",
                           re.IGNORECASE | re.MULTILINE)
         if not match:
             return text, ""
