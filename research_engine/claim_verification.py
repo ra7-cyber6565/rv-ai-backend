@@ -35,6 +35,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .citation import labelled_claim_spans
 from .models import ClaimType, EvidencePack, SourceRecord, label_to_claim_type
 
 CHECK_LABELS: Dict[str, str] = {
@@ -614,7 +615,7 @@ class VerificationReport:
 def verify_answer(text: str, pack: Optional[EvidencePack] = None,
                   max_claims: int = 60) -> VerificationReport:
     """
-    Answer ki har FACTUAL labelled line par A–E chalao.
+    Answer ke har bounded FACTUAL labelled claim block par A–E chalao.
 
     Do cheezein jaan-boojh kar chhodi gayi hain:
 
@@ -628,17 +629,16 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
       SOURCE-REPORTED) ki ginti hoti hai — wahi lines "sach" ka dava karti hain.
     """
     report = VerificationReport()
-    for raw in (text or "").splitlines():
-        line = raw.strip()
-        if len(line) < 25:
+    for _, _, block in labelled_claim_spans(text):
+        if len(block) < 25:
             continue
-        labels = _LABEL_RE.findall(line)
+        labels = _LABEL_RE.findall(block)
         if not labels:
             continue
         types = {label_to_claim_type(lbl) for lbl in labels}
         if not (types & _GROUNDED_TYPES):
             continue
-        cc = verify_claim(line, pack)
+        cc = verify_claim(block, pack)
         report.claims.append(cc)
         if cc.strong_label and not cc.passes_ae:
             report.overclaims.append(cc)
@@ -712,20 +712,38 @@ def enforce_strict_labels(text: str, pack: Optional[EvidencePack] = None
     if not body.strip() or pack is None:
         return body, report
 
+    lines = body.splitlines()
+    spans = {start: (end, block) for start, end, block in labelled_claim_spans(body)}
     out_lines: List[str] = []
-    for raw in body.splitlines():
+    index = 0
+    while index < len(lines):
+        span = spans.get(index)
+        if span is None:
+            out_lines.append(lines[index])
+            index += 1
+            continue
+
+        end, block = span
+        raw = lines[index]
         if not _STRONG_LABEL_RE.search(raw):
-            out_lines.append(raw)
+            out_lines.extend(lines[index:end])
+            index = end
             continue
         report["checked"] += 1
-        new_line, changed = strict_label_line(raw, pack)
+        changed = entailment_blocked(block, pack)
+        new_line = _STRONG_LABEL_RE.sub(_STRICT_LABEL, raw) if changed else raw
         out_lines.append(new_line)
+        out_lines.extend(lines[index + 1:end])
         if not changed:
+            index = end
             continue
         report["to_unverified"] += 1
         if len(report["details"]) < 8:
-            snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_line).strip()
+            new_block = "\n".join([new_line] + lines[index + 1:end])
+            snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_block).strip()
+            snippet = " ".join(snippet.split())
             report["details"].append(snippet[:150])
+        index = end
     if report["to_unverified"]:
         report["note"] = (
             f"{report['to_unverified']}/{report['checked']} 'established' dave "
