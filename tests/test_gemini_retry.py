@@ -23,7 +23,7 @@ from research_engine.gemini_reasoning import (  # noqa: E402
 )
 from research_engine.model_errors import (  # noqa: E402
     AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, MODEL_NOT_FOUND,
-    RATE_LIMIT, SERVER, UNKNOWN, classify_text,
+    RATE_LIMIT, REQUEST_TIMEOUT, SERVER, UNKNOWN, classify_text,
 )
 
 # Test ko sona nahi hai — backoff 0 kar dete hain (asli value production ki hai).
@@ -110,6 +110,9 @@ def test_error_kinds_are_distinguished():
     assert _classify(RuntimeError(
         "InvalidArgument: 400 Request contains an invalid argument"
     )) == INVALID_REQUEST
+    assert _classify(RuntimeError(
+        "DeadlineExceeded: 504 Deadline Exceeded"
+    )) == REQUEST_TIMEOUT
     assert _classify(RuntimeError(
         "InvalidArgument: system instructions are not supported for model gemma"
     )) == INVALID_REQUEST
@@ -209,6 +212,42 @@ def test_input_limit_compacts_once_and_recovers_same_working_model():
     assert acc["prompt_attempts"][1]["compacted"] is True
     assert INPUT_TOO_LARGE in acc["failure_kinds"]
     assert brain.failure_kind() == "", "successful compact retry public failure nahi"
+
+
+def test_large_server_error_compacts_before_retrying_same_model():
+    server = RuntimeError("503 Service Unavailable")
+    brain = _brain({"model-a": [server, "server recovery jawab"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "server recovery jawab"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 2
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    assert brain.prompt_compactions == 1
+    assert brain.same_model_retries == 1
+    assert SERVER in brain.api_accounting()["failure_kinds"]
+    assert brain.failure_kind() == ""
+
+
+def test_deadline_compacts_then_gets_one_bounded_timeout_recovery():
+    timeout = RuntimeError("DeadlineExceeded: 504 Deadline Exceeded")
+    brain = _brain({"model-a": [timeout, timeout, "timeout recovery jawab"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "timeout recovery jawab"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 3
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    assert fake.prompts[2] == fake.prompts[1]
+    assert brain.prompt_compactions == 1
+    assert brain.timeout_extensions == 1
+    assert brain.same_model_retries == 2
+    attempts = brain.api_accounting()["prompt_attempts"]
+    assert attempts[0]["compacted"] is False
+    assert attempts[1]["compacted"] is True
+    assert attempts[2]["timeout_seconds"] >= attempts[1]["timeout_seconds"]
+    assert REQUEST_TIMEOUT in brain.api_accounting()["failure_kinds"]
+    assert brain.failure_kind() == ""
 
 
 def test_large_generic_invalid_argument_gets_one_bounded_compact_retry():
@@ -348,6 +387,24 @@ def test_deprecated_model_is_marked_dead_and_skipped():
     assert brain.generate("p", "synthesis") == "phir chala"
     assert brain.fakes["model-a"].calls == 1, brain.fakes["model-a"].calls
     gemini_model.forget_dead()
+
+
+def test_candidates_prefer_listed_same_family_peer_before_other_family():
+    gemini_model.forget_dead()
+    gemini_model._cache = "gemma-4-26b-a4b-it"
+    gemini_model._seen = [
+        "gemini-2.5-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it",
+    ]
+
+    class _NoNetworkGenai:
+        @staticmethod
+        def list_models():
+            raise AssertionError("cached candidate order must not make network call")
+
+    order = gemini_model.candidates(_NoNetworkGenai)
+    assert order[:2] == ["gemma-4-26b-a4b-it", "gemma-4-31b-it"], order
+    gemini_model._cache = None
+    gemini_model._seen = []
 
 
 def test_dead_model_never_returned_by_candidates():
