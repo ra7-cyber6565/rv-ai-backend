@@ -27,6 +27,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
+| Real offline API path smoke gate | ChatGPT | CODE COMPLETE / CI PENDING | New zero-network process gate exercises the shipped FastAPI app through health + CSP, anonymous project capability, zero-call QUICK chat, MARATHON job capability, durable result retrieval and fail-closed final quality downgrade. It is wired into the strict foundation runner; dependency-equipped CI is required for execution. |
 | Marathon multilingual specialist research | ChatGPT | PUSHED IN PR #7 / FULL FOUNDATION CI PASS | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented on `chatgpt-marathon-multilingual`. GitHub Actions run 32547266529 passed: 420 focused pytest, 648 full pytest, 593/593 core, cross-domain 633/633, superconductivity 146/146, and architecture/provider/source-boundary/compile gates. CI also exposed and ChatGPT fixed the invalid job-level `runner.temp` context plus the stale 30-minute-only browser assertion. Live zero-cost verification remains a separate honest release gate. |
 | Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
 | Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |

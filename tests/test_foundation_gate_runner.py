@@ -51,6 +51,7 @@ def test_default_stage_plan_contains_real_release_gates():
     assert names[0] == "compileall"
     assert "focused_pytest" in names
     assert "all_pytest" in names
+    assert "offline_api_smoke" in names
     assert "core_regression" in names
     assert "provider_bypass_audit" in names
     assert "architecture_audit" in names
@@ -59,6 +60,9 @@ def test_default_stage_plan_contains_real_release_gates():
 
     all_pytest = next(command for name, command in plan if name == "all_pytest")
     assert all_pytest == ["python", "-m", "pytest", "-q", "tests"]
+
+    smoke = next(command for name, command in plan if name == "offline_api_smoke")
+    assert smoke == ["python", "scripts/run_offline_api_smoke.py"]
 
     focused_command = next(command for name, command in plan if name == "focused_pytest")
     for required in (
@@ -121,6 +125,12 @@ def test_audits_and_cross_domain_run_before_superconductivity_benchmark():
     assert names.index("provider_bypass_audit") < names.index("architecture_audit")
     assert names.index("architecture_audit") < names.index("benchmark_cross_domain")
     assert names.index("benchmark_cross_domain") < names.index("benchmark_superconductivity_v2")
+
+
+def test_real_api_smoke_runs_after_pytest_before_core_regression():
+    names = [name for name, _ in gate.build_stage_plan("python")]
+    assert names.index("all_pytest") < names.index("offline_api_smoke")
+    assert names.index("offline_api_smoke") < names.index("core_regression")
 
 
 def test_receipt_fails_closed_when_any_stage_fails(tmp_path):
