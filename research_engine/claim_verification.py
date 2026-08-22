@@ -63,6 +63,46 @@ VERDICT_LABELS: Dict[str, str] = {
     UNSUPPORTED: "koi valid source nahi",
 }
 
+# ── §8 — ek claim ka apna nateeja (verdict se ALAG vocabulary) ───────────────
+# Purana `verdict` (genuine_support/source_reported/cited_only/unsupported)
+# waise ka waisa zinda hai — purane test, labels aur audit usi par tike hain.
+# Ye naya `result` uske UPAR ek saaf, spec-wala nateeja deta hai, jisme do
+# cheezein alag ho jaati hain jo pehle ek dikhti thi:
+#   "support nahi mila"  ≠  "source ne ulta kaha"  ≠  "check ho hi nahi saka"
+CLAIM_SUPPORTED = "SUPPORTED"
+CLAIM_PARTIAL = "PARTIALLY SUPPORTED"
+CLAIM_UNSUPPORTED = "UNSUPPORTED"
+CLAIM_CONTRADICTED = "CONTRADICTED"
+CLAIM_UNVERIFIABLE = "UNABLE TO VERIFY"
+
+CLAIM_RESULTS: Tuple[str, ...] = (
+    CLAIM_SUPPORTED, CLAIM_PARTIAL, CLAIM_UNSUPPORTED,
+    CLAIM_CONTRADICTED, CLAIM_UNVERIFIABLE,
+)
+
+CLAIM_RESULT_EXPLAIN: Dict[str, str] = {
+    CLAIM_SUPPORTED: ("cited source ka text is claim ko support karta hai aur "
+                      "wo text asli mein padha gaya"),
+    CLAIM_PARTIAL: ("support ke signal mile, par gehrai ya source-quality poori "
+                    "nahi — 'sabit' kehna galat hoga"),
+    CLAIM_UNSUPPORTED: ("us text mein is claim ka support nahi dikha (ya koi "
+                        "valid source hi nahi)"),
+    CLAIM_CONTRADICTED: "cited source is claim ke ULTA keh raha hai",
+    CLAIM_UNVERIFIABLE: ("check HO HI NAHI SAKA — us source ka text humare paas "
+                         "nahi hai; ye 'galat' ka matlab nahi hai"),
+}
+
+# Critical claim = wo dava jis par jawab ka nateeja tikta hai. Do tareeke se
+# banti hai: (1) strong label ([ESTABLISHED FACT]/[FACT]/[STRONG EVIDENCE]),
+# (2) seedha jawab / final conclusion wale section ki labelled line.
+_CRITICAL_SECTION_RE = re.compile(
+    r"(seedha\s+jawab|direct\s+answer|final\s+conclusion|"
+    r"evidence[\s\-]?based\s+conclusion|conclusion)", re.IGNORECASE)
+_HEADING_RE = re.compile(r"^\s{0,3}#{1,6}\s+(.*)$")
+
+# Evidence span = source ke text ka wahi tukda jise dekh kar faisla hua.
+_SPAN_CHARS = 260
+
 _SID_RE = re.compile(r"\[\s*S\s*(\d{1,3})[^\]]*\]", re.IGNORECASE)
 _LABEL_RE = re.compile(
     r"\[\s*(ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE|SOURCE[\s\-]?REPORTED|"
@@ -113,6 +153,13 @@ class ClaimCheck:
     reason: str = ""
     best_source: str = ""
     strong_label: bool = False
+    # ── §8 ke naye field (sab optional, purana behaviour nahi badalta) ────────
+    claim_id: str = ""                   # "CL001" — audit/UI isi se claim dhoondte hain
+    epistemic_type: str = ""             # fact / evidence / hypothesis ...
+    critical: bool = False               # nateeja isi par tika hai?
+    contradicted: bool = False           # source ne ULTA kaha (result badal deta hai)
+    spans: List[Dict] = field(default_factory=list)   # evidence spans
+    section: str = ""                    # kis section ki line thi
 
     def check(self, key: str) -> Optional[Check]:
         for c in self.checks:
@@ -134,6 +181,48 @@ class ClaimCheck:
         """Strong public label tabhi safe hai jab A, B, C, D, E sab PASS hon."""
         return all(self.status(key) == PASS for key in ("A", "B", "C", "D", "E"))
 
+    # ── §8: entailment aur source-quality ALAG-ALAG padhe jaate hain ─────────
+    @property
+    def entailment(self) -> str:
+        """Check C ka apna status — 'verified' ka asli sawaal."""
+        return self.status("C")
+
+    @property
+    def source_quality(self) -> str:
+        """Check E ka apna status — isse entailment na samjha jaaye."""
+        return self.status("E")
+
+    @property
+    def access_depth(self) -> str:
+        """Check D ka status — 'kitna padha' ka sawaal, support ka nahi."""
+        return self.status("D")
+
+    @property
+    def result(self) -> str:
+        """
+        §8 ka nateeja. A pass hona AKELA kabhi 'supported' nahi banata.
+
+        Order jaan-boojh kar aisa hai: contradiction sabse pehle (wo sabse badi
+        khabar hai), phir "koi valid source nahi", phir "check ho hi nahi saka"
+        (ise 'unsupported' mein milana jhoothi ginti banata hai).
+        """
+        if self.contradicted:
+            return CLAIM_CONTRADICTED
+        if self.status("A") == FAIL:
+            return CLAIM_UNSUPPORTED
+        if self.entailment == UNKNOWN:
+            return CLAIM_UNVERIFIABLE
+        if self.entailment == FAIL:
+            return CLAIM_UNSUPPORTED
+        if (self.access_depth == PASS and self.source_quality != FAIL
+                and self.status("B") != FAIL):
+            return CLAIM_SUPPORTED
+        return CLAIM_PARTIAL
+
+    @property
+    def has_spans(self) -> bool:
+        return bool(self.spans)
+
     def failed_checks(self) -> List[str]:
         return [c.key for c in self.checks if c.status == FAIL]
 
@@ -143,6 +232,18 @@ class ClaimCheck:
                     VERDICT_LABELS.get(self.verdict, self.verdict),
                 "reason": self.reason, "best_source": self.best_source,
                 "failed": self.failed_checks(),
+                # §8 — naye field, purane wale hataye bina
+                "claim_id": self.claim_id,
+                "epistemic_type": self.epistemic_type,
+                "critical": bool(self.critical),
+                "section": self.section,
+                "result": self.result,
+                "result_why": CLAIM_RESULT_EXPLAIN.get(self.result, ""),
+                "entailment": self.entailment,
+                "source_quality": self.source_quality,
+                "access_depth_check": self.access_depth,
+                "contradicted": bool(self.contradicted),
+                "evidence_spans": [dict(s) for s in self.spans],
                 "checks": [c.to_dict() for c in self.checks]}
 
 
@@ -183,6 +284,104 @@ def claim_body(line: str) -> str:
     body = _SID_RE.sub(" ", body)
     body = re.sub(r"^[#\s\-\*\d\.\)]+", "", body)
     return " ".join(body.split())
+
+
+def epistemic_type(line: str) -> str:
+    """
+    Is line ka epistemic type — label se, guess se nahi.
+
+    8 categories mix na hon: isliye jo label likha hai wahi type banta hai, aur
+    label na ho to "unlabelled" — "fact" maan lena spec ka saaf violation hai.
+    """
+    labels = _LABEL_RE.findall(line or "")
+    if not labels:
+        return "unlabelled"
+    order = [label_to_claim_type(lbl) for lbl in labels]
+    for wanted in (ClaimType.FACT, ClaimType.EVIDENCE):
+        if wanted in order:
+            return wanted.value
+    first = order[0]
+    return getattr(first, "value", str(first))
+
+
+def _access_depth_of(record: SourceRecord) -> str:
+    """models.SourceRecord.access_depth() — purane fake record par bhi safe."""
+    getter = getattr(record, "access_depth", None)
+    if callable(getter):
+        try:
+            return str(getter())
+        except Exception:               # pragma: no cover - defensive
+            pass
+    try:
+        return str(record.reading_level() or "metadata")
+    except Exception:                   # pragma: no cover - defensive
+        return "metadata"
+
+
+def _best_window(claim: str, text: str, width: int = _SPAN_CHARS
+                 ) -> Tuple[str, float]:
+    """Source text ka wo hissa jo claim se sabse zyada milta hai."""
+    body = (text or "").strip()
+    if not body:
+        return "", 0.0
+    if len(body) <= width:
+        return body, float(_similarity(claim, body))
+    step = max(60, width // 2)
+    best, best_score = body[:width].strip(), -1.0
+    for start in range(0, len(body), step):
+        window = body[start:start + width]
+        if len(window.strip()) < 40:
+            continue
+        score = float(_similarity(claim, window))
+        if score > best_score:
+            best, best_score = window.strip(), score
+    return best, max(best_score, 0.0)
+
+
+def evidence_spans(line: str, records: Sequence[SourceRecord],
+                   pack: Optional[EvidencePack] = None,
+                   max_spans: int = 3) -> List[Dict]:
+    """
+    §8 — har claim ke saath wahi TUKDA jise dekh kar faisla hua.
+
+    Ye "source ne aisa kaha hoga" ko rokta hai: agar span khaali hai to matlab
+    humare paas us source ka text hi nahi tha, aur wahi baat report mein
+    `critical_claim_spans_complete = False` ban kar dikhti hai.
+    """
+    body = claim_body(line)
+    if not body:
+        return []
+    out: List[Dict] = []
+    for record in records:
+        chunks: List[Tuple[str, str, str]] = []
+        if pack is not None:
+            for passage in getattr(pack, "passages", []) or []:
+                if getattr(passage, "source_id", "") != record.source_id:
+                    continue
+                text = (getattr(passage, "text", "") or "").strip()
+                if text:
+                    chunks.append((text,
+                                   getattr(passage, "locator", "") or "",
+                                   "passage"))
+        snippet = (record.snippet or "").strip()
+        if snippet:
+            chunks.append((snippet, record.locator or "", "snippet"))
+        best: Optional[Dict] = None
+        for text, locator, kind in chunks:
+            window, score = _best_window(body, text)
+            if not window:
+                continue
+            if best is None or score > best["match"]:
+                best = {"source_id": record.source_id,
+                        "passage": window,
+                        "locator": locator or record.locator or "",
+                        "span_kind": kind,
+                        "match": round(score, 4),
+                        "access_depth": _access_depth_of(record)}
+        if best is not None:
+            out.append(best)
+    out.sort(key=lambda d: d.get("match", 0.0), reverse=True)
+    return out[:max_spans]
 
 
 def source_text(source: SourceRecord, pack: Optional[EvidencePack] = None) -> str:
@@ -415,8 +614,51 @@ def check_e(records: Sequence[SourceRecord]) -> Check:
     return c
 
 
+# ── §8: "source ne ULTA kaha" — support se alag baat ─────────────────────────
+def claim_contradicted(line: str, records: Sequence[SourceRecord],
+                       pack: Optional[EvidencePack] = None) -> Tuple[bool, str]:
+    """
+    True = cited source is claim ke ULTA keh raha hai.
+
+    Ye asli dark-matter failure ka ilaaj hai: S11 (NFW halo fit) ko "dark matter
+    ki zaroorat nahi" ke support mein cite kar diya gaya tha. Token overlap zyada
+    tha, isliye check C khush ho gaya. Ab stance bhi dekhi jaati hai — same topic
+    par ulta stance milte hi claim CONTRADICTED ho jaata hai, "supported" nahi.
+
+    Jaan-boojh kar tang rakha gaya hai (jhoothi contradiction bhi ek jhooth hai):
+    claim ka apna stance saaf SUPPORT/OPPOSE ho, source ka text kaafi bada ho,
+    aur dono ek hi baat par ho (similarity floor) — tabhi True.
+    """
+    body = claim_body(line)
+    if len(body) < 20 or not records:
+        return False, ""
+    try:
+        from .contradiction import ContradictionEngine
+        engine = ContradictionEngine()
+    except Exception:                       # pragma: no cover - defensive
+        return False, ""
+    claim_stance, _ = engine.stance(body)
+    if claim_stance not in ("SUPPORT", "OPPOSE"):
+        return False, ""
+    for record in records:
+        text = source_text(record, pack)
+        if len(text) < _MIN_TEXT_CHARS:
+            continue
+        if _similarity(body, text) < _ENTAIL_SIM:
+            continue                        # ek hi baat par nahi hain
+        stance, cues = engine.stance(text)
+        if stance in ("SUPPORT", "OPPOSE") and stance != claim_stance:
+            cue = ", ".join(cues[:3])
+            return True, (f"{record.source_id} ka text is claim ke ulta hai "
+                          f"(claim={claim_stance}, source={stance}"
+                          + (f"; ishaara: {cue}" if cue else "") + ")")
+    return False, ""
+
+
 # ── ek claim = A..E + ek verdict ─────────────────────────────────────────────
-def verify_claim(line: str, pack: Optional[EvidencePack] = None) -> ClaimCheck:
+def verify_claim(line: str, pack: Optional[EvidencePack] = None,
+                 claim_id: str = "", critical: Optional[bool] = None,
+                 section: str = "") -> ClaimCheck:
     """
     Ek claim line par paanchon check chalao aur ek verdict do.
 
@@ -425,6 +667,9 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None) -> ClaimCheck:
         source_reported  — A,B,C pass, par gehrai sirf abstract tak
         cited_only       — citation to sahi hai, par C ne support nahi dikhaya
         unsupported      — A hi fail (citation nahi / ID pack mein nahi)
+
+    §8 ke naye field saath mein bharte hain: claim_id, epistemic_type, critical,
+    evidence spans, aur contradiction — purana `verdict` waisa hi rehta hai.
     """
     ids = cited_ids(line)
     records: List[SourceRecord] = []
@@ -436,6 +681,13 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None) -> ClaimCheck:
 
     cc = ClaimCheck(text=claim_body(line), cited_ids=list(ids))
     cc.strong_label = bool(_STRONG_LABEL_RE.search(line or ""))
+    cc.claim_id = claim_id
+    cc.epistemic_type = epistemic_type(line)
+    cc.section = section
+    cc.critical = bool(cc.strong_label if critical is None else critical)
+    cc.spans = evidence_spans(line, records, pack)
+    contradicted, contra_why = claim_contradicted(line, records, pack)
+    cc.contradicted = contradicted
 
     a = check_a(ids, records, line)
     b = check_b(records)
@@ -456,6 +708,11 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None) -> ClaimCheck:
     if e.status == FAIL:
         cc.verdict = CITED_ONLY
         cc.reason = e.detail
+        return cc
+    if contradicted:
+        # Ulta bolne wale source par "support" ka verdict nahi ban sakta.
+        cc.verdict = CITED_ONLY
+        cc.reason = contra_why
         return cc
     if c_check.ok:
         if d.ok:
@@ -556,6 +813,77 @@ class VerificationReport:
             out[key] = row
         return out
 
+    # ── §8 — result-level ginti (verdict counters ke SAATH, unki jagah nahi) ──
+    def result_counts(self) -> Dict[str, int]:
+        row = {name: 0 for name in CLAIM_RESULTS}
+        for cc in self.claims:
+            row[cc.result] = row.get(cc.result, 0) + 1
+        return row
+
+    @property
+    def contradicted(self) -> int:
+        return len([c for c in self.claims if c.contradicted])
+
+    @property
+    def critical_claims(self) -> List[ClaimCheck]:
+        return [c for c in self.claims if c.critical]
+
+    @property
+    def unsupported_critical(self) -> List[ClaimCheck]:
+        """
+        Wo critical claims jo tik NAHI rahe.
+
+        `UNABLE TO VERIFY` yahan JAAN-BOOJH KAR nahi hai — wo "galat" nahi,
+        "check nahi ho saka" hai, aur uski apni ginti alag jaati hai.
+        """
+        return [c for c in self.critical_claims
+                if c.result in (CLAIM_UNSUPPORTED, CLAIM_CONTRADICTED)]
+
+    @property
+    def unverifiable_critical(self) -> List[ClaimCheck]:
+        return [c for c in self.critical_claims
+                if c.result == CLAIM_UNVERIFIABLE]
+
+    @property
+    def critical_without_spans(self) -> List[ClaimCheck]:
+        return [c for c in self.critical_claims if not c.has_spans]
+
+    @property
+    def critical_spans_complete(self) -> Optional[bool]:
+        """None = koi critical claim hi nahi mila (yaani check hua hi nahi)."""
+        if not self.critical_claims:
+            return None
+        return not self.critical_without_spans
+
+    def critical_claim_spans(self) -> List[Dict]:
+        """Har critical claim ka span record — audit/UI isi ko dikhata hai."""
+        out: List[Dict] = []
+        for cc in self.critical_claims:
+            out.append({"claim_id": cc.claim_id, "claim": cc.text[:220],
+                        "result": cc.result, "section": cc.section,
+                        "cited_ids": list(cc.cited_ids),
+                        "spans": [dict(s) for s in cc.spans],
+                        "spans_present": cc.has_spans})
+        return out
+
+    def supporting_source_ids(self, critical_only: bool = False) -> List[str]:
+        """
+        Wo source IDs jinke TEXT ne kisi claim ko asli support diya (check C pass).
+
+        Ye "cited" se alag hai aur "retrieved" se bahut alag: yahi §7 ka
+        `sources_supporting_critical_claims` banata hai.
+        """
+        out: List[str] = []
+        for cc in self.claims:
+            if critical_only and not cc.critical:
+                continue
+            if cc.contradicted or cc.status("C") != PASS:
+                continue
+            for sid in ([cc.best_source] if cc.best_source else cc.cited_ids):
+                if sid and sid not in out:
+                    out.append(sid)
+        return out
+
     def to_dict(self) -> Dict:
         return {"total_claims": self.total, "genuine_support": self.genuine,
                 "source_reported": self.source_reported,
@@ -568,6 +896,17 @@ class VerificationReport:
                 "strong_claims_passed": self.strong_claims_passed,
                 "strong_claims_failed": self.strong_claims_failed,
                 "check_counts": self.check_counts(),
+                # §8 — claim-level results, spans aur critical accounting
+                "result_counts": self.result_counts(),
+                "contradicted_claims": self.contradicted,
+                "critical_claims": len(self.critical_claims),
+                "unsupported_critical_claims": len(self.unsupported_critical),
+                "unverifiable_critical_claims": len(self.unverifiable_critical),
+                "critical_claim_spans_complete": self.critical_spans_complete,
+                "critical_claim_spans": self.critical_claim_spans(),
+                "sources_supporting_claims": self.supporting_source_ids(),
+                "sources_supporting_critical_claims":
+                    self.supporting_source_ids(critical_only=True),
                 "overclaims": [c.to_dict() for c in self.overclaims],
                 "claims": [c.to_dict() for c in self.claims]}
 
@@ -602,6 +941,28 @@ class VerificationReport:
         lines.append("")
         lines.append("_Sirf check **C** 'asli support' dikhata hai. **A** pass hona "
                      "itna hi batata hai ki citation likhne ka tareeka theek hai._")
+        # §8/§9 — har claim ka apna nateeja, ek hi jagah, alag-alag.
+        results = self.result_counts()
+        if self.total:
+            lines.append("")
+            lines.append("**Claim-level nateeje (alag-alag, mile-jule nahi):**")
+            for name in CLAIM_RESULTS:
+                lines.append(f"- {name}: {results.get(name, 0)} — "
+                             f"{CLAIM_RESULT_EXPLAIN.get(name, '')}")
+            crit = self.critical_claims
+            if crit:
+                missing = len(self.critical_without_spans)
+                lines.append("")
+                lines.append(
+                    f"Inme {len(crit)} claim CRITICAL hain (nateeja inhi par tika "
+                    f"hai): {len(self.unsupported_critical)} support nahi kar paaye, "
+                    f"{len(self.unverifiable_critical)} ka check ho hi nahi saka, "
+                    f"{len(crit) - missing}/{len(crit)} ke saath asli evidence span "
+                    f"maujood hai.")
+            else:
+                lines.append("")
+                lines.append("Koi claim CRITICAL nahi nikla, isliye critical-claim "
+                             "wali ginti chali hi nahi (zero nahi — 'check nahi hua').")
         if self.overclaims:
             lines.append("")
             lines.append(f"⚠️ **{len(self.overclaims)} claim par label zarurat se "
@@ -629,7 +990,17 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
       SOURCE-REPORTED) ki ginti hoti hai — wahi lines "sach" ka dava karti hain.
     """
     report = VerificationReport()
-    for _, _, block in labelled_claim_spans(text):
+    # PR #16 ka bounded block + section tracking dono chahiye: block se
+    # multiline claim ka citation nahi tootta, section se "critical claim"
+    # ka faisla hota hai (seedha jawab / conclusion ki dava critical hai).
+    section_at = []
+    current_section = ""
+    for raw in (text or "").splitlines():
+        heading = _HEADING_RE.match(raw)
+        if heading:
+            current_section = " ".join(heading.group(1).split())
+        section_at.append(current_section)
+    for start, _, block in labelled_claim_spans(text):
         if len(block) < 25:
             continue
         labels = _LABEL_RE.findall(block)
@@ -638,7 +1009,13 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
         types = {label_to_claim_type(lbl) for lbl in labels}
         if not (types & _GROUNDED_TYPES):
             continue
-        cc = verify_claim(block, pack)
+        section = section_at[start] if start < len(section_at) else ""
+        cid = f"CL{len(report.claims) + 1:03d}"
+        # Critical = strong label YA seedha-jawab/conclusion section ki dava.
+        critical = (bool(_STRONG_LABEL_RE.search(block))
+                    or bool(_CRITICAL_SECTION_RE.search(section)))
+        cc = verify_claim(block, pack, claim_id=cid, critical=critical,
+                          section=section)
         report.claims.append(cc)
         if cc.strong_label and not cc.passes_ae:
             report.overclaims.append(cc)

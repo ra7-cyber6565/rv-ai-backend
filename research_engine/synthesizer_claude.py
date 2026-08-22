@@ -9,12 +9,19 @@ palat deta hai:
     "DO NOT MIX INTERNAL RESEARCH LOGS WITH THE MAIN ANSWER.
      HUMAN-FRIENDLY ANSWER FIRST. TECHNICAL DETAILS LAST."
 
-Isliye ab report ka order ye hai:
+Isliye ab report ka order ye hai (§12 ka mandatory order, 2026-08-22):
 
-    Seedha jawab → Research se kya pata chala → Ye kyun hota hai →
-    Evidence kya kehta hai → Iske against kya mila → Humari hypotheses →
-    Hypothesis ko kaise test karenge → Kya abhi bhi unknown hai →
-    Final conclusion → Sources → Research quality / technical audit
+    Seedha jawab → Established knowledge → Ye kyun hota hai →
+    Supporting evidence → Counterevidence → Calculations → Unknowns →
+    Evidence-based conclusion → APP ORIGINAL RESEARCH LAB (app ki apni
+    hypotheses + unka test plan, saaf warning ke saath) →
+    Audit and limits → Sources
+
+Do cheezein yahan jaan-boojh kar badli gayi hain (dark-matter run ki dikkat):
+app ki apni hypotheses pehle evidence ke BEECH mein chhapti thi (padhne wale ko
+lagta tha ki wo bhi research ka nateeja hai), aur Sources audit se pehle aata
+tha. Ab hypotheses conclusion ke baad ek alag naam wale section mein hain, aur
+Sources sabse aakhir mein.
 
 Kuch cheezein JAAN-BOOJH KAR waisi hi rahi hain:
 
@@ -29,8 +36,10 @@ Kuch cheezein JAAN-BOOJH KAR waisi hi rahi hain:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
+from .answer_order import LAB_HEADING as ANSWER_LAB_HEADING
+from .answer_order import LAB_WARNING, NO_CALC_REASONS, display_heading
 from .citation import CITATION_INSTRUCTION, CitationEngine
 from .claim_labels import LABEL_RULE_PROMPT
 from .claim_labels import human_note as label_human_note
@@ -41,21 +50,35 @@ from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
 from .specialist_domains import prompt_block as specialist_prompt_block
 
-# §16 ka order — headings mein number NAHI hai, kyunki user ko `## Seedha jawab`
-# hi dikhna chahiye. Index hi order hai.
+# §12 (2026-08-22) — headings ab DO baat kehti hain: pehle contract ka canonical
+# naam, phir "—" ke baad wahi baat aasaan Hinglish mein. Isse do purani dikkatein
+# ek saath khatam hoti hain: (a) `sections poore hain?` wala contract check
+# canonical naam dhoondhta tha aur hamesha fail hota tha, (b) user ko English
+# jargon-only heading samajh nahi aati thi. Index sirf section ki pehchan hai —
+# chhapne ka kram `EMIT_ORDER` tay karta hai (§12 ka mandatory order).
 SECTION_TITLES = [
-    "Seedha jawab",                          # 0
-    "Research se kya pata chala?",           # 1
-    "Ye kyun hota hai?",                     # 2
-    "Evidence kya kehta hai?",               # 3
-    "Iske against kya mila?",                # 4
-    "Humari Hypotheses",                     # 5
-    "Hypothesis ko kaise test karenge?",     # 6
-    "Kya abhi unknown hai?",                 # 7
-    "Final conclusion",                      # 8
-    "Sources",                               # 9
-    "Research quality / technical audit",    # 10
+    display_heading("direct_answer"),                     # 0
+    display_heading("established_knowledge"),             # 1
+    "Ye kyun hota hai?",                                  # 2 (extra, §12 ke bahar)
+    display_heading("supporting_evidence"),               # 3
+    display_heading("counterevidence"),                   # 4
+    ANSWER_LAB_HEADING,                                   # 5 (§12: bilkul yahi shabd)
+    "Hypothesis ko kaise test karenge?",                  # 6 (extra, LAB ke andar ki baat)
+    display_heading("unknowns"),                          # 7
+    display_heading("conclusion"),                        # 8
+    display_heading("sources"),                           # 9
+    display_heading("audit"),                             # 10
 ]
+# §12 — Calculations ki heading bhi wahi jagah se aati hai, aur ye section HAMESHA
+# chhapta hai (na bane to WAJAH ke saath).
+CALC_HEADING = display_heading("calculations")
+
+# §12 ka mandatory order: ... counterevidence → Calculations → Unknowns →
+# conclusion → APP ORIGINAL RESEARCH LAB → Audit and limits → Sources.
+# Pehle app ki apni hypotheses (5) evidence ke BEECH mein chhapti thi aur Sources
+# audit se pehle aata tha — dono §12 se ulte the.
+EMIT_ORDER: Tuple[int, ...] = (0, 1, 2, 3, 4, 7, 8, 5, 6, 10, 9)
+
 
 # Poore system ke haath mein: model ka version inhe replace nahi karega.
 SYSTEM_OWNED = {5, 9, 10}
@@ -92,7 +115,8 @@ _TITLE_HINTS: List[tuple] = [
     ("counter-evidence", 4), ("counter evidence", 4), ("khilaf", 4),
     ("conflicting evidence", 4), ("contradict", 4), ("weakness", 4),
 
-    ("humari hypothes", 5), ("new hypothes", 5), ("nayi hypothes", 5),
+    ("humari hypothes", 5), ("app original research lab", 5),
+    ("original research lab", 5), ("new hypothes", 5), ("nayi hypothes", 5),
     ("hypothes", 5),
 
     ("kya pata chala", 1), ("research se kya", 1), ("established fact", 1),
@@ -323,6 +347,26 @@ Ab jawab likho:"""
             ids = ", ".join(c.get("sources", []))
             head = c.get("summary", "").strip() or "Do sources aapas mein alag baat kehte hain"
             body = [f"**{head}**" + (f" ({ids})" if ids else "")]
+            # §11 — takraav ka structured hissa: kis baat par, kaun kya keh raha
+            # hai, aur saboot ka tukda kahan se aaya. Bina in teen cheezon ke
+            # "takraav" likhna hi pichhli report ki galti thi (wahan sirf saal
+            # alag the aur usi ko contradiction bata diya gaya tha).
+            if c.get("normalized_proposition"):
+                body.append(f"_Kis baat par:_ {c['normalized_proposition']}")
+            if c.get("source_a_claim") and c.get("source_b_claim"):
+                sids = list(c.get("sources") or ["A", "B"])
+                a_id = sids[0] if sids else "A"
+                b_id = sids[1] if len(sids) > 1 else "B"
+                body.append(f"- {a_id} kehta hai: {c['source_a_claim']}")
+                body.append(f"- {b_id} kehta hai: {c['source_b_claim']}")
+            refs = [str(r) for r in (c.get("evidence_span_refs") or []) if str(r).strip()]
+            if refs:
+                body.append(f"_Saboot kahan se:_ {', '.join(refs)}")
+            if c.get("method_difference"):
+                body.append(f"_Method ka farq:_ {c['method_difference']}")
+            for note in (c.get("context_notes") or [])[:2]:
+                if str(note).strip():
+                    body.append(f"_Context:_ {note}")
             if c.get("detail"):
                 body.append(str(c["detail"]))
             why = _WHY_DISAGREE.get(str(c.get("type", "")).upper())
@@ -380,7 +424,19 @@ Ab jawab likho:"""
             statement = (h.get("statement") or "").strip()
             simple = (h.get("simple") or "").strip()
             title = self._short_title(statement or simple)
-            body: List[str] = [f"### Hypothesis {i} — {title}"]
+            hid = str(h.get("hypothesis_id") or "").strip()
+            head = f"### Hypothesis {i} — {title}"
+            if hid:
+                # §13 — har hypothesis ka apna stable ID, taaki baad ke run mein
+                # bhi usi hypothesis ki baat ho sake.
+                head = f"### {hid} — {title}"
+            body: List[str] = [head]
+            # §13/§2 — sabse pehle ye saaf ho jaana chahiye ki ye APP ka apna
+            # idea hai, kisi source ka claim nahi. Pichhli report mein ye baat
+            # neeche dabi rehti thi, isliye log ise "research finding" samajh
+            # lete the.
+            if h.get("source_claim_disclaimer"):
+                body.append(f"> {h['source_claim_disclaimer']}")
             if simple:
                 body.append(f"**Simple words mein:** {simple}")
                 if statement and statement.lower() != simple.lower():
@@ -392,6 +448,21 @@ Ab jawab likho:"""
             if h.get("reasoning"):
                 body.append("**Ye idea kahan se aaya:** "
                             + self._join_prose(h["reasoning"]))
+            # §13 — provenance: kaunse facts par tika hai, aur kahan knowledge
+            # gap tha. Iske bina "ye idea kahan se aaya" ek dawa bhar hai.
+            prov = h.get("provenance") if isinstance(h.get("provenance"), dict) else {}
+            facts = [str(f) for f in (prov.get("facts_used") or []) if str(f).strip()]
+            if facts:
+                body.append("**Kaunse sources ke facts se bana:** "
+                            + ", ".join(facts[:8]))
+            if str(prov.get("gap") or "").strip():
+                body.append("**Kis jagah knowledge gap tha:** "
+                            + self._join_prose(str(prov["gap"])))
+            if str(h.get("mechanism") or "").strip():
+                # §13 — mechanism: "kaise hoga" ka jawab. Sirf "ho sakta hai"
+                # likhna hypothesis nahi, guess hai.
+                body.append("**Ye kaam kaise karega (mechanism):** "
+                            + self._join_prose(str(h["mechanism"])))
             body.append("**Is idea ko support karne wali research:** "
                         + self._evidence_prose(
                             h.get("supporting_evidence"), pack,
@@ -430,18 +501,99 @@ Ab jawab likho:"""
                 body.append("**Agar ye sahi hua:** " + self._join_prose(h["if_true"]))
             if h.get("if_false"):
                 body.append("**Agar ye galat hua:** " + self._join_prose(h["if_false"]))
+            # §14/§15 — novelty ka faisla app ka deterministic label hai, model
+            # ka shabd nahi. Model ki apni "novelty" line neeche context ke liye
+            # rehti hai, par pehle whitelist wala status dikhta hai.
+            nov_status = str(h.get("novelty_status") or "").strip()
+            if nov_status:
+                line = f"**Novelty status:** {nov_status}"
+                if str(h.get("novelty_why") or "").strip():
+                    line += f" — {h['novelty_why']}"
+                body.append(line)
+            prior = [p for p in (h.get("closest_prior_work") or [])
+                     if isinstance(p, dict)]
+            if prior:
+                bits = []
+                for p in prior[:3]:
+                    ref = str(p.get("source_id") or "").strip() or "source"
+                    same = str(p.get("same") or "").strip()
+                    diff = str(p.get("difference") or "").strip()
+                    piece = f"{ref}"
+                    if same:
+                        piece += f" — milta hua hissa: {same}"
+                    if diff:
+                        piece += f"; farak: {diff}"
+                    bits.append(piece)
+                body.append("**Isse sabse milti-julti purani research:** "
+                            + " | ".join(bits))
+            elif nov_status:
+                body.append("**Isse sabse milti-julti purani research:** retrieved "
+                            "sources mein koi close match nahi mila — iska matlab "
+                            "\"duniya mein pehli\" nahi, sirf itna ki humne jo "
+                            "sources padhe unme nahi tha.")
+            nsearch = h.get("novelty_search") if isinstance(
+                h.get("novelty_search"), dict) else {}
+            if nsearch:
+                if nsearch.get("performed") is True:
+                    dbs = ", ".join(str(d) for d in (nsearch.get("databases") or [])) \
+                        or "record nahi hui"
+                    body.append(f"**Prior-art search:** hui — databases: {dbs}.")
+                else:
+                    body.append("**Prior-art search:** is run mein prior-art "
+                                "search nahi chali, isliye novelty verified nahi "
+                                "hai (sirf 'pata nahi' hai).")
             if h.get("novelty"):
-                body.append(f"**Kitna naya hai:** {h['novelty']}")
-            if h.get("confidence_reasoning_based"):
+                body.append(f"**Model ne novelty par kya kaha:** {h['novelty']}")
+            band = str(h.get("confidence_band") or "").strip()
+            conf = h.get("confidence") if isinstance(h.get("confidence"), dict) else {}
+            if band:
+                # §18 — confidence BAND, number nahi. Percentage ke peeche koi
+                # calculation nahi hoti, isliye wo jhoothi precision hai.
+                line = f"**Kitna bharosa (band, percentage nahi):** {band}"
+                reasons_txt = [str(r) for r in (conf.get("reasons") or [])
+                               if str(r).strip()]
+                if reasons_txt:
+                    line += " — wajah: " + "; ".join(reasons_txt[:4])
+                body.append(line)
+                if str(conf.get("model_said") or "").strip():
+                    body.append("_(Model ne khud "
+                                f"\"{conf['model_said']}\" kaha tha — wo uska "
+                                "andaza hai, isliye upar app ka apna band diya "
+                                "gaya hai.)_")
+            elif h.get("confidence_reasoning_based"):
                 body.append(f"**Kitna bharosa (sirf reasoning par, proof nahi):** "
                             f"{h['confidence_reasoning_based']}")
+            exp_struct = h.get("experiment_structured") if isinstance(
+                h.get("experiment_structured"), dict) else {}
+            exp_missing = [str(m) for m in (exp_struct.get("missing") or [])
+                           if str(m).strip()]
+            if exp_missing:
+                # §16 — adhoore test plan ko falsification test kehna hi pichhli
+                # badi galti thi. Ab kami ka naam liya jaata hai.
+                body.append("⚠️ **Test plan mein ye hisse nahi aaye:** "
+                            + ", ".join(exp_missing)
+                            + ". Isliye ise poora falsification test nahi maana "
+                              "ja sakta.")
             missing = [str(m) for m in (h.get("missing_fields") or []) if str(m).strip()]
             if missing:
                 body.append("⚠️ **Is hypothesis mein ye cheezein nahi aayi:** "
                             + ", ".join(missing)
                             + ". Yaani ise poori tarah testable nahi maana ja sakta.")
-            body.append(f"**Current status: {h.get('status', 'UNTESTED HYPOTHESIS')}** — "
-                        f"abhi real-world test nahi hua.")
+            if h.get("safety_sensitive") is True:
+                body.append("⚠️ **Safety-sensitive:** ye hypothesis medical/"
+                            "chemical/biological ya safety se judi hai — bina "
+                            "expert review aur risk assessment iske aage koi "
+                            "kadam nahi lena chahiye.")
+            # §16 — do alag baatein ek hi jagah: ye cheez kya hai (untested
+            # hypothesis) aur uska validation kahan tak pahuncha (plan bhi hai
+            # ya nahi). Pehle dono ko mila diya jaata tha.
+            status_line = (f"**Current status: "
+                           f"{h.get('status') or 'UNTESTED HYPOTHESIS'}** — "
+                           f"abhi real-world test nahi hua.")
+            if str(h.get("validation_status") or "").strip():
+                status_line += f" Validation: {h['validation_status']}."
+            body.append(status_line)
+
             blocks.append("\n\n".join(body))
         if asked and len(hypotheses) < asked:
             blocks.append(f"⚠️ Aapne {asked} maangi thi, {len(hypotheses)} ban paayi — "
@@ -737,12 +889,11 @@ Ab jawab likho:"""
         return "\n".join(lines)
 
     # ── §13 + §14: sources ki imaandaar list ─────────────────────────────────
-    _ACCESS_WORDS = {
-        "full_text": "FULL-TEXT VERIFIED — poora text padha gaya",
-        "abstract": "ABSTRACT REVIEWED — sirf abstract (summary) padha gaya",
-        "snippet": "SNIPPET ONLY — sirf ek chhota hissa mila",
-        "metadata": "METADATA ONLY — sirf title/details mile, content nahi",
-    }
+    # §9 (2026-08-21): "FULL-TEXT VERIFIED" label HATA diya gaya hai. Wo ek hi
+    # shabd mein do baatein keh raha tha — "text mil gaya" aur "claim verify ho
+    # gaya" — aur pichhle run mein abstract-only source par bhi chhap gaya tha.
+    # Ab access depth ka poora vocabulary models.ACCESS_DEPTH_LABELS mein ek hi
+    # jagah hai, aur verification uska hissa nahi hai.
     _KIND_WORDS = {
         "paper": "research paper",
         "web": "web page",
@@ -782,7 +933,7 @@ Ab jawab likho:"""
                              + took[:220] + ("…" if len(took) > 220 else ""))
             else:
                 lines.append("- Isse kya liya gaya: kuch nahi — content mila hi nahi.")
-            lines.append(f"- Kitna padha gaya: {self._ACCESS_WORDS.get(s.reading_level(), s.reading_level())}.")
+            lines.append(f"- Kitna padha gaya: {s.access_depth_note()}.")
             rel = float(getattr(s, "relevance_score", 0.0) or 0.0)
             rel_word = ("sawal se seedha juda hua" if rel >= 0.6 else
                         "thoda sa juda hua" if rel >= 0.3 else
@@ -925,6 +1076,122 @@ Ab jawab likho:"""
             lines.append(f"**Maths/physics sanity check:** {physics['note']}")
         return "\n".join(lines).strip()
 
+    # ── §17: calculation ka poora record, user ke saamne ─────────────────────
+    #
+    # Kyun: dark-matter run mein "numeric sanity check passed" chhapa tha par
+    # jawab mein na formula tha, na inputs, na units. Ab ulta niyam hai — jo
+    # hisaab dikhaya jaayega uska formula, input, unit, assumption aur nateeja
+    # saamne hoga, aur teen check ALAG-ALAG dikhenge (unit theek likhe? dobara
+    # jodne par wahi jawab? koi number humne khud gadha?). Jo check na chal
+    # paaya uske liye "pata nahi" likhte hain, "pass" nahi.
+    _CALC_WORDS = {
+        True: "haan", False: "nahi", None: "check nahi ho paaya",
+    }
+
+    def _calculation_section(self, calculations: Optional[List[Dict]]) -> str:
+        if not calculations:
+            return ""
+        lines: List[str] = []
+        for i, calc in enumerate(calculations, start=1):
+            if not isinstance(calc, dict):
+                continue
+            lines.append(f"### Calculation {i}")
+            formula = str(calc.get("formula") or "").strip()
+            lines.append(f"**Formula:** `{formula}`" if formula
+                         else "**Formula:** likha hi nahi gaya tha — isliye ise "
+                              "verified hisaab nahi maana ja sakta.")
+            inputs = calc.get("inputs") or {}
+            units = calc.get("units") or {}
+            if inputs:
+                pretty = ", ".join(
+                    f"{name} = {value:g} {str(units.get(name) or '').strip()}".strip()
+                    for name, value in list(inputs.items())[:8])
+                lines.append(f"**Inputs (units ke saath):** {pretty}")
+            else:
+                lines.append("**Inputs:** kaunsa number kahan se aaya, ye likha "
+                             "nahi gaya tha.")
+            assumptions = [str(a).strip() for a in (calc.get("assumptions") or [])
+                           if str(a).strip()]
+            if assumptions:
+                lines.append("**Kya maan kar chale (assumptions):**")
+                lines.extend(f"- {a}" for a in assumptions[:4])
+            else:
+                lines.append("**Assumptions:** koi assumption likha nahi gaya — "
+                             "yaani ye hisaab kis haalat mein sach hai, wo saaf "
+                             "nahi hai.")
+            result = str(calc.get("result") or "").strip()
+            unit_of_result = str((units or {}).get("result") or "").strip()
+            if result:
+                line = f"**Result:** {result}"
+                if not unit_of_result:
+                    line += " _(nateeje ka unit nahi likha gaya)_"
+                lines.append(line)
+            else:
+                lines.append("**Result:** koi nateeja saaf likha nahi gaya.")
+            uncertainty = str(calc.get("uncertainty") or "").strip()
+            lines.append(f"**Uncertainty:** {uncertainty}" if uncertainty
+                         else "**Uncertainty:** nahi di gayi — isliye ye number "
+                              "'exact' nahi samajhna.")
+            recomputed = str(calc.get("recomputed") or "").strip()
+            checks = [
+                ("Unit theek likhe hain?", calc.get("unit_check_passed"), ""),
+                ("Dobara jodne par wahi jawab aata hai?",
+                 calc.get("recalculation_passed"),
+                 f" (humara recompute: {recomputed})" if recomputed else ""),
+                ("Physical limit / conversion check theek?",
+                 calc.get("sanity_check_passed"), ""),
+            ]
+            lines.append("**Alag-alag check:**")
+            for label, value, extra in checks:
+                lines.append(f"- {label} **{self._CALC_WORDS.get(value)}**{extra}")
+            invented = calc.get("invented_input")
+            if invented is True:
+                lines.append("- ⚠️ Kam se kam ek input aisa hai jo question ya "
+                             "sources mein nahi mila — wo model ka apna anumaan "
+                             "hai, verified data nahi.")
+            elif invented is False:
+                lines.append("- Saare inputs question ya sources se aaye hain "
+                             "(koi number khud se nahi gadha gaya).")
+            else:
+                lines.append("- Inputs kahan se aaye, ye check nahi ho paaya.")
+            notes = [str(n).strip() for n in (calc.get("notes") or [])
+                     if str(n).strip()]
+            if notes:
+                lines.append("**Kami / wajah:** " + "; ".join(notes[:3]) + ".")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _no_calculation_note(pack: Optional[EvidencePack] = None,
+                             ledger: Optional[Dict] = None,
+                             requests: Optional[Dict] = None) -> str:
+        """§12 — hisaab na bane to bhi section rehta hai, WAJAH ke saath.
+
+        Pehle `_calculation_section` khaali string deta tha aur poori section
+        gayab ho jaati thi. Gayab section apne aap mein ek jhooth hai: user ko
+        pata hi nahi chalta ki hisaab hua tha aur fail ho gaya, ya hisaab ki
+        zaroorat hi nahi thi. Teen wajah alag-alag likhi jaati hain
+        (`answer_order.NO_CALC_REASONS`), kyunki teenon ka matlab alag hai.
+        """
+        asked = any(
+            isinstance(item, dict) and item.get("key") == "calculations"
+            for item in ((ledger or {}).get("items") or [])
+        )
+        if not asked:
+            asked = bool((requests or {}).get("wants_math_model"))
+        reasoning_ok = True
+        try:
+            reasoning_ok = bool(pack.reasoning_complete)
+        except Exception:                        # noqa: BLE001
+            reasoning_ok = True
+        if asked and not reasoning_ok:
+            key = "no_reasoning"
+        elif asked:
+            key = "no_inputs"
+        else:
+            key = "not_asked"
+        return f"_Koi calculation is jawab mein nahi hai._ {NO_CALC_REASONS[key]}"
+
     # ── coverage: "kitna kaam asli mein hua" ─────────────────────────────────
     @staticmethod
     def _reading_line(coverage: Dict) -> str:
@@ -1020,6 +1287,46 @@ Ab jawab likho:"""
         for extra in (self._reading_line(coverage), self._quality_line(coverage, pack)):
             if extra:
                 lines.append(extra)
+        # §5 — "kitne mile" ke baad hi "kaunsa saboot mila hi nahi". Ye lines
+        # `evidence_axes.coverage_note()` se aati hain; axes naape na gaye hon to
+        # ye block chhapta hi nahi (khaali heading/jhoothi tasalli se bachne ke liye).
+        axis_note = ((coverage.get("evidence_axes") or {}).get("note") or "").strip()
+        if axis_note:
+            lines.append("")
+            lines.append("**Saboot ke raaste (evidence axes):**")
+            for row in axis_note.splitlines():
+                row = row.strip()
+                if not row:
+                    continue
+                if row.startswith("•"):
+                    # "•" markdown bullet nahi hai — aisi line pichhli line ke
+                    # saath chipak jaati hai. Nested "-" hi theek se render hota hai.
+                    lines.append(f"  - {row.lstrip('• ').strip()}")
+                else:
+                    lines.append(f"- {row}")
+        # §6 — "kitne mile" se zyada zaroori: unmein se kitne sach mein sawaal ki
+        # baat test karte hain. Ye block sirf tab chhapta hai jab relevance gate
+        # asli mein chala ho (`prop` khaali = gate chala hi nahi), warna 0 likhna
+        # jhooth hota — pichhli report mein yahi confusion tha: 18 source "mile"
+        # likha tha aur unmein calibration/exoplanet papers bhi gine ja rahe the.
+        prop = coverage.get("proposition_test") or {}
+        if prop:
+            lines.append("")
+            lines.append("**Sources sawaal ko test karte hain ya nahi (relevance gate):**")
+            lines.append(f"- Test karte hain: {prop.get('tests_proposition', 0)} | "
+                         f"nahi karte: {prop.get('does_not_test', 0)} | "
+                         f"faisla nahi ho saka: {prop.get('undecided', 0)}.")
+            lines.append("- Aakhri ginti ka matlab 'theek hai' nahi hai — utna "
+                         "metadata hi mila tha ki faisla ho paata.")
+            failed = prop.get("failed_dimensions") or {}
+            if failed:
+                worst = sorted(failed.items(), key=lambda kv: -int(kv[1] or 0))[:4]
+                lines.append("- Kis cheez par fail hue: "
+                             + ", ".join(f"{k}: {v}" for k, v in worst) + ".")
+            codes = coverage.get("relevance_reject_codes") or {}
+            if codes:
+                lines.append("- Kis wajah se hataye gaye: "
+                             + ", ".join(f"{k}: {v}" for k, v in codes.items()) + ".")
         return "\n".join(lines)
 
     # ── "aapne jo maanga tha" ka honest hisaab ───────────────────────────────
@@ -1448,7 +1755,8 @@ Ab jawab likho:"""
                  technical_details: Optional[List[str]] = None,
                  api_accounting: Optional[Dict] = None,
                  claim_checks: Optional[Dict] = None,
-                 hypothesis_plan: Optional[Dict] = None) -> str:
+                 hypothesis_plan: Optional[Dict] = None,
+                 calculations: Optional[List[Dict]] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1540,20 +1848,50 @@ Ab jawab likho:"""
         # CHUP-CHAAP GAYAB ho jaata — aur "content kabhi delete nahi hota" is
         # project ka pakka niyam hai. Isliye anchor wo section hai jo SACH MEIN
         # chhap raha hai (uske aas-paas ka sabse kareebi).
-        printed = sorted(bodies)
+        printed = [i for i in EMIT_ORDER if i in bodies]
         first = printed[0] if printed else 0
-        extras_after = max([i for i in printed if i <= 2], default=first)
-        leftover_after = max([i for i in printed if i <= 8], default=extras_after)
+        slot = {index: place for place, index in enumerate(EMIT_ORDER)}
+
+        def _last_printed(candidates) -> int:
+            available = [i for i in printed if i in candidates]
+            return max(available, key=lambda i: slot[i]) if available else first
+
+        extras_after = _last_printed({0, 1, 2})
+        # Leftover text main answer ke hisse mein rehna chahiye — LAB (5) ke baad
+        # nahi, warna model ka text app ki apni soch jaisa dikhne lagta hai.
+        leftover_after = _last_printed({0, 1, 2, 3, 4, 7, 8})
+        # §17 + §12 — calculation block counter-evidence ke BAAD aur Unknowns se
+        # PEHLE, ek fixed jagah par. Wajah: hisaab evidence ka hissa hai, app ki
+        # apni soch ka nahi. Aur ye section KABHI gayab nahi hota (neeche dekho).
+        calc_block = self._calculation_section(calculations)
+        if not str(calc_block).strip():
+            calc_block = self._no_calculation_note(pack, ledger, requests)
+        calc_done = False
 
         out: List[str] = []
-        for index, title in enumerate(SECTION_TITLES):
+        for index in EMIT_ORDER:
+            # §12 — Calculations ki jagah fixed hai aur ye HAMESHA chhapta hai.
+            # Pehle hisaab na banne par poora section gayab ho jaata tha, aur
+            # gayab section se user ko pata hi nahi chalta tha ki hisaab hua tha
+            # ya nahi — wahi chup-chaap gayab hona pichhli baar jhooth ban gaya.
+            if index == 7 and not calc_done:
+                out.append(f"## {CALC_HEADING}")
+                out.append(calc_block)
+                calc_done = True
             if index not in bodies:
                 continue
+            title = SECTION_TITLES[index]
             out.append(f"## {title}")
             if index == 0:
                 banner = self._status_banner(pack, ledger, status, missing_sections)
                 if banner:
                     out.append(banner)
+            # §12/§13 — APP ORIGINAL RESEARCH LAB ke sar par warning, section ke
+            # content se PEHLE. Ye hissa report ka sabse galat-samajha jaane wala
+            # hissa tha: app ki hypotheses established evidence jaisi padhi ja
+            # rahi thin.
+            if index == 5:
+                out.append(LAB_WARNING)
             out.extend(bodies[index])
 
             # Explicitly maangi hui extra sections — "Ye kyun hota hai?" ke turant
@@ -1572,6 +1910,10 @@ Ab jawab likho:"""
             if index == leftover_after and leftover:
                 out.append("## Extra notes (model se, canonical sections ke bahar)")
                 out.append(leftover)
+
+        if not calc_done:                      # defensive: EMIT_ORDER badal jaaye
+            out.append(f"## {CALC_HEADING}")
+            out.append(calc_block)
 
         # Caller (orchestrator) ko bhi chahiye — API/UI mein `missing_sections`
         # structured roop mein jaata hai, taaki frontend ko text parse na karna pade.
@@ -1606,7 +1948,7 @@ Ab jawab likho:"""
                 continue
             head = f"**[{source.source_id}] {source.title or source.url}**"
             lines.append(f"{head}  \n{text[:300]}{'…' if len(text) > 300 else ''}  \n"
-                         f"_{self._ACCESS_WORDS.get(source.reading_level(), source.reading_level())}_")
+                         f"_{source.access_depth_note()}_")
         lines.append("")
         lines.append("Inhe jodkar koi conclusion humne nahi nikala — wo kaam reasoning "
                      "pass ka tha, jo is baar poora nahi hua.")

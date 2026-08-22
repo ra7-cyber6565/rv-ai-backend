@@ -100,6 +100,7 @@ def line_verdict(
         return UNVERIFIED, "is line par koi [S#] citation nahi hai"
 
     levels = {}
+    depths: Dict[str, str] = {}
     patent_ids: List[str] = []
     for record in records:
         try:
@@ -107,8 +108,18 @@ def line_verdict(
         except Exception:  # pragma: no cover
             level = "metadata"
         levels[record.source_id] = level
+        # §9 — user ko dikhne wali wajah mein wahi 5 allowed access label jaate
+        # hain jo models.py tay karta hai. "full text padha gaya" likh dena us
+        # source ke liye jhooth tha jiske 30 mein se 18 page process hue the.
+        try:
+            depths[record.source_id] = record.access_depth()
+        except Exception:                      # pragma: no cover - defensive
+            depths[record.source_id] = ""
         if getattr(record, "is_patent", False):
             patent_ids.append(record.source_id)
+
+    def _depth_of(sid: str) -> str:
+        return depths.get(sid) or levels.get(sid, "metadata")
 
     # Patent full text can provide prior-art context, never scientific proof.
     full = [sid for sid, level in levels.items()
@@ -119,13 +130,14 @@ def line_verdict(
             return SOURCE_REPORTED, (
                 f"is line ka evidence sirf patent(s) hai ({', '.join(patent_full)}) — "
                 "patent ke claims LEGAL dawe hain, experiment ka proof nahi")
-        detail = ", ".join(f"{sid}={level}" for sid, level in levels.items())
+        detail = ", ".join(f"{sid}: {_depth_of(sid)}" for sid in levels)
         if patent_ids:
             detail += f" (patent: {', '.join(patent_ids)} — legal dawa, proof nahi)"
-        return SOURCE_REPORTED, f"full text nahi padha gaya ({detail})"
+        return SOURCE_REPORTED, f"poora text nahi mila — {detail}"
 
+    shown = ", ".join(f"{sid}: {_depth_of(sid)}" for sid in full)
     if not check_entailment:
-        return ESTABLISHED, f"full text padha gaya: {', '.join(full)}"
+        return ESTABLISHED, f"source ka text padha gaya — {shown}"
 
     verified, why = _ae_verdict(line, pack)
     if verified is True:
@@ -134,7 +146,7 @@ def line_verdict(
         # Strict check requested but context missing: strong label ko pass mat
         # karo. Unknown verification is not PASS.
         return UNVERIFIED, why
-    return UNVERIFIED, f"full text access tha, lekin {why}"
+    return UNVERIFIED, f"source ka text mila ({shown}), lekin {why}"
 
 
 def downgrade(

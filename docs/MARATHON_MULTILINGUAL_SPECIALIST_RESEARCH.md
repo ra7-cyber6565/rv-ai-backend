@@ -137,8 +137,10 @@ reliably interpret the text.
 
 ## App-original hypotheses
 
-Source findings and app-generated hypotheses are not mixed. The visible
-“Humari Hypotheses” section remains system-owned. Every accepted hypothesis is
+Source findings and app-generated hypotheses are not mixed. The visible section
+is `## APP ORIGINAL RESEARCH LAB` (renamed from the older “Humari Hypotheses”
+heading by §20 of the research upgrade, so the heading itself says whose idea it
+is) and it remains system-owned. Every accepted hypothesis is
 an `UNTESTED HYPOTHESIS` and must carry, where evidence permits:
 
 - the source-grounded starting facts;

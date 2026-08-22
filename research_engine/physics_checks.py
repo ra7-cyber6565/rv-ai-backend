@@ -33,7 +33,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 # ── SI (light) unit table ────────────────────────────────────────────────────
 # unit token -> (dimension, SI factor). Temperature affine hai isliye alag.
@@ -457,7 +457,608 @@ def check_comparisons(text: str) -> List[SanityCheck]:
                         f"{tested} tulna unit conversion ke baad bhi sahi nikli")]
 
 
+# ── §17: calculation records ─────────────────────────────────────────────────
+# Kyun zaroori: dark-matter run mein user ne Milky Way ka mass calculation
+# maanga tha. Jawab mein na formula aaya, na inputs, na units — phir bhi upar
+# "numeric sanity check passed" likha tha. Yaani check chala hi nahi tha aur
+# report jhooth bol rahi thi.
+#
+# Ye hissa jawab ke andar se calculation ka POORA record nikaalta hai (formula,
+# inputs, units, assumptions, result, uncertainty) aur teen cheezein ALAG-ALAG
+# batata hai: unit theek likhe hain ya nahi, dobara jodne par wahi jawab aata
+# hai ya nahi, aur koi input humne khud gadha hai ya sources/question se aaya.
+# Jo cheez jaanchi na ja sake wo `None` rehti hai — `False` nahi.
+
+# Astro/extra units sirf calculation ke liye. Inhe `_UNIT_TOKENS` mein daalne se
+# baaki checks ka behaviour badal jaata, isliye alag table.
+_CALC_EXTRA_UNITS: Dict[str, Tuple[str, float]] = {
+    "pc": ("length", 3.0856775814913673e16),
+    "kpc": ("length", 3.0856775814913673e19),
+    "mpc": ("length", 3.0856775814913673e22),
+    "ly": ("length", 9.4607304725808e15),
+    "au": ("length", 1.495978707e11),
+    "r_sun": ("length", 6.957e8),
+    "m_sun": ("mass", 1.98892e30),
+    "msun": ("mass", 1.98892e30),
+    "solar mass": ("mass", 1.98892e30),
+    "solar masses": ("mass", 1.98892e30),
+    "m☉": ("mass", 1.98892e30),
+    "kg/m^3": ("density", 1.0),
+    "gev/cm^3": ("density", 1.0),
+    "g/cm^3": ("density", 1000.0),
+    # Volume/area/energy/force — inke bina "V = 3.0 m^3" par recalculation
+    # ruk jaata tha aur record jhoothi "unit unknown" warning deta tha.
+    "m^3": ("volume", 1.0), "cm^3": ("volume", 1e-6), "mm^3": ("volume", 1e-9),
+    "km^3": ("volume", 1e9), "l": ("volume", 1e-3), "litre": ("volume", 1e-3),
+    "liter": ("volume", 1e-3), "ml": ("volume", 1e-6),
+    "m^2": ("area", 1.0), "cm^2": ("area", 1e-4), "km^2": ("area", 1e6),
+    "n": ("force", 1.0), "kn": ("force", 1e3),
+    "j": ("energy", 1.0), "kj": ("energy", 1e3), "mj": ("energy", 1e6),
+    "ev": ("energy", 1.602176634e-19), "kev": ("energy", 1.602176634e-16),
+    "mev": ("energy", 1.602176634e-13), "gev": ("energy", 1.602176634e-10),
+    "tev": ("energy", 1.602176634e-7), "erg": ("energy", 1e-7),
+    "w": ("power", 1.0), "kw": ("power", 1e3), "mw": ("power", 1e6),
+    "pa": ("pressure", 1.0), "kpa": ("pressure", 1e3),
+    "gpa": ("pressure", 1e9), "bar": ("pressure", 1e5),
+    "m^3/kg/s^2": ("gravitational", 1.0),
+    "km/s/mpc": ("hubble", 1.0),
+}
+
+# Jaane-maane physical constants — inka value "invent" nahi maana jaata, kyunki
+# ye kisi source se aane wali cheez hi nahi hai.
+KNOWN_CONSTANTS: Dict[str, float] = {
+    "g": 6.6743e-11,          # gravitational constant
+    "c": 299792458.0,
+    "h": 6.62607015e-34,
+    "hbar": 1.054571817e-34,
+    "k_b": 1.380649e-23,
+    "kb": 1.380649e-23,
+    "e": 1.602176634e-19,
+    "m_e": 9.1093837015e-31,
+    "m_p": 1.67262192369e-27,
+    "n_a": 6.02214076e23,
+    "sigma": 5.670374419e-8,
+    "m_sun": 1.98892e30,
+    "msun": 1.98892e30,
+    "pi": 3.141592653589793,
+}
+
+_ASSUMPTION_RE = re.compile(
+    r"\b(assum\w*|approximation|approximat\w*|maan\s?kar|maankar|maan lete|"
+    r"idealis\w*|idealiz\w*|neglect\w*|ignoring)\b", re.IGNORECASE)
+_UNCERTAINTY_RE = re.compile(
+    r"(±\s*[\d.]+[^\n,;]*|\+/-\s*[\d.]+[^\n,;]*|uncertaint\w*[^\n]*|"
+    r"error bar[^\n]*|margin of error[^\n]*|lagbhag[^\n]*|\bapprox\b[^\n]*)",
+    re.IGNORECASE)
+# "M = v^2 r / G" — baayein ek symbol, dayein sirf symbol/operator (numbers
+# alag line mein aate hain). Yahi §17 ka "formula" hai.
+_SYMBOLIC_RE = re.compile(
+    r"(?<![\w])([A-Za-z][A-Za-z0-9_]{0,14}(?:\s*\([^)]{0,20}\))?)\s*=\s*"
+    r"([A-Za-z0-9_^*/×·÷() .+\-]{3,80})")
+# Unit ko pehle "solar masses" try karna zaroori hai, warna sirf "solar" milta
+# hai aur mass conversion silently galat ho jaata hai.
+_UNIT_PART = r"(?:solar[ \t]+mass(?:es)?|[A-Za-zµ°☉/^0-9_]{1,14})?"
+_ASSIGN_RE = re.compile(
+    r"(?<![\w])([A-Za-z][A-Za-z0-9_]{0,14})[ \t]*=[ \t]*"
+    r"(-?\d[\d,]*(?:\.\d+)?(?:[ \t]*[eE×x][ \t]*10\^?-?\d+|[eE][+-]?\d+)?)"
+    r"[ \t]*(" + _UNIT_PART + r")")
+_RESULT_RE = re.compile(
+    r"(?:result|answer|nateeja|jawab|≈|~=|=)[ \t]*"
+    r"(-?\d[\d,]*(?:\.\d+)?(?:[ \t]*[eE×x][ \t]*10\^?-?\d+|[eE][+-]?\d+)?)"
+    r"[ \t]*(" + _UNIT_PART + r")", re.IGNORECASE)
+# "Result = 8.99e10" ko input nahi maanenge — wo nateeja hai.
+_RESULT_NAMES = {"result", "results", "answer", "nateeja", "natija", "jawab",
+                 "total", "final", "ans", "output", "uncertainty", "error"}
+# Nateeja chunne ke liye: naam se likha hua result plain "=" se behtar hai.
+_RESULT_HINTS = ("result", "answer", "nateeja", "natija", "jawab", "final",
+                 "total", "output")
+# Uncertainty/error waali line se nateeja NAHI uthana. Sirf match se PEHLE ka
+# text dekhte hain, taaki "M = 8.99e10 ± 0.5e10" jaisa nateeja bacha rahe.
+_UNCERT_PREFIX_RE = re.compile(
+    r"(uncertaint|error|margin|tolerance|±|\+/-)", re.IGNORECASE)
+
+CALC_TOLERANCE = 0.05        # 5% — rounding ("9.2e10") allowed, galti nahi
+
+
+@dataclass
+class CalculationRecord:
+    """§17 ka structured record. Har field ka matlab report mein bhi dikhta hai."""
+    formula: str = ""
+    inputs: Dict[str, float] = None            # type: ignore[assignment]
+    units: Dict[str, str] = None               # type: ignore[assignment]
+    assumptions: List[str] = None              # type: ignore[assignment]
+    result: str = ""
+    uncertainty: str = ""
+    unit_check_passed: Optional[bool] = None
+    recalculation_passed: Optional[bool] = None
+    sanity_check_passed: Optional[bool] = None
+    invented_input: Optional[bool] = None
+    recomputed: str = ""
+    notes: List[str] = None                    # type: ignore[assignment]
+    source_text: str = ""
+
+    def __post_init__(self) -> None:
+        self.inputs = dict(self.inputs or {})
+        self.units = dict(self.units or {})
+        self.assumptions = list(self.assumptions or [])
+        self.notes = list(self.notes or [])
+
+    @property
+    def is_complete(self) -> bool:
+        """Poora record = formula + inputs + units + result. Baaki honesty hai."""
+        return bool(self.formula and self.inputs and self.units and self.result)
+
+    @property
+    def core_missing(self) -> List[str]:
+        """Sirf wo cheezein jinke bina hisaab hi hisaab nahi kehla sakta."""
+        gaps: List[str] = []
+        if not self.formula:
+            gaps.append("formula")
+        if not self.inputs:
+            gaps.append("inputs (kaunsa number kahan se)")
+        if not self.units:
+            gaps.append("units")
+        if not self.result:
+            gaps.append("result")
+        return gaps
+
+    @property
+    def missing(self) -> List[str]:
+        gaps = list(self.core_missing)
+        if not self.assumptions:
+            gaps.append("assumptions")
+        if not self.uncertainty:
+            gaps.append("uncertainty")
+        return gaps
+
+    def to_dict(self) -> Dict:
+        return {
+            "formula": self.formula,
+            "inputs": dict(self.inputs),
+            "units": dict(self.units),
+            "assumptions": list(self.assumptions),
+            "result": self.result,
+            "uncertainty": self.uncertainty,
+            "unit_check_passed": self.unit_check_passed,
+            "recalculation_passed": self.recalculation_passed,
+            "sanity_check_passed": self.sanity_check_passed,
+            "invented_input": self.invented_input,
+            "recomputed": self.recomputed,
+            "complete": self.is_complete,
+            "missing": self.missing,
+            "core_missing": self.core_missing,
+            "notes": list(self.notes),
+        }
+
+
+def _calc_si(value: float, unit: str) -> Tuple[Optional[float], bool]:
+    """(SI value, unit pehchani gayi?) — pehchani na jaaye to `None`, False."""
+    token = (unit or "").strip().lower().replace("−", "-")
+    if not token:
+        return value, False
+    if token in _CALC_EXTRA_UNITS:
+        return value * _CALC_EXTRA_UNITS[token][1], True
+    dimension, factor, offset = _resolve(token, unit or "")
+    if dimension == "unknown" or factor is None:
+        return None, False
+    return value * factor + offset, True
+
+
+_SAFE_EXPR = re.compile(r"^[0-9eE.+\-*/() ]+$")
+
+
+def _safe_eval(expr: str) -> Optional[float]:
+    """
+    Sirf arithmetic. Koi naam, koi function, koi builtin nahi — isliye `eval`
+    yahan safe hai (pattern pehle validate hota hai, phir empty globals).
+    """
+    text = (expr or "").strip()
+    if not text or not _SAFE_EXPR.match(text):
+        return None
+    try:
+        value = eval(text, {"__builtins__": {}}, {})    # noqa: S307 - validated
+    except (SyntaxError, ZeroDivisionError, TypeError, ValueError,
+            OverflowError, MemoryError):
+        return None
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _to_number(raw: str) -> Optional[float]:
+    """'6.6743e-11', '2.2 × 10^5', '9,200' — sabko float banao."""
+    text = (raw or "").strip().replace(",", "").replace("−", "-")
+    text = re.sub(r"\s*(?:[×x]\s*10\s*\^?|[eE])\s*([+-]?\d+)$", r"e\1", text)
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+_CALC_BLOCK_RE = re.compile(
+    r"(?:^|\n)\s*(?:#{1,6}\s*)?[^\n]{0,80}?"
+    r"(calculation|calculate|hisaab|formula|estimate|derivation)[^\n]{0,80}\n",
+    re.IGNORECASE)
+_FORMULA_HINT = re.compile(r"[=∝]")
+
+# "M = v^2 * r / G se nikalta hai" — 'se nikalta hai' formula ka hissa nahi hai.
+# Ye shabd aage aaye to formula wahin khatam maan lete hain, warna recalculation
+# unknown symbol par ruk jaata tha aur hum galti se "check nahi ho saka" kehte.
+_PROSE_WORD_RE = re.compile(
+    r"^(?:use[ds]?|using|karenge|karke|karta|karti|karna|kar|hai|hain|hoga|"
+    r"hogi|hota|hoti|se|ka|ki|ke|ko|jo|mein|aur|ya|from|where|with|and|then|"
+    r"this|that|we|which|gives?|given|standard|relation|formula|equation|"
+    r"according|apply|substitute|values?|nikalta|nikalte|nikaalte|lagakar|"
+    r"hence|thus|because|yaani|matlab)$", re.IGNORECASE)
+
+
+def _trim_prose(rhs: str) -> str:
+    """Formula ke baad likhi hui baat kaat do (pehla prose shabd = poora stop)."""
+    kept: List[str] = []
+    for token in rhs.split():
+        if _PROSE_WORD_RE.match(token.strip(",.;:")):
+            break
+        kept.append(token)
+    return " ".join(kept).strip(" .,;:")
+
+
+def _blocks_with_math(text: str) -> List[str]:
+    """
+    Jawab ko chhote blocks mein todo aur sirf wahi rakho jinme asli hisaab ho.
+
+    Poore jawab par ek saath regex chalane se do alag calculations mil kar ek
+    ban jaate the (aur inputs galat hypothesis se ja mil jaate the).
+    """
+    raw = (text or "").replace("\r", "")
+    if not raw.strip():
+        return []
+    chunks: List[str] = []
+    current: List[str] = []
+    for line in raw.split("\n"):
+        if line.strip().startswith("#") and current:
+            chunks.append("\n".join(current))
+            current = [line]
+            continue
+        current.append(line)
+        # do khaali line = naya block
+        if len(current) >= 3 and not current[-1].strip() and not current[-2].strip():
+            chunks.append("\n".join(current))
+            current = []
+    if current:
+        chunks.append("\n".join(current))
+    return [c for c in chunks if _FORMULA_HINT.search(c) and re.search(r"\d", c)]
+
+
+def _pick_formula(block: str) -> str:
+    """Sabse pehla symbolic formula ('M = v^2 r / G') — number wala nahi."""
+    best = ""
+    for m in _SYMBOLIC_RE.finditer(block):
+        lhs, rhs = m.group(1).strip(), m.group(2).strip(" .")
+        if lhs.lower() in _RESULT_NAMES:
+            continue                        # "Result = 8.99e10" nateeja hai
+        if "\n" in rhs:
+            continue                        # formula ek line mein hota hai
+        rhs = _trim_prose(rhs)
+        if not rhs:
+            continue
+        # Numeric line ko formula samajhna hi pichhli galti thi: formula mein
+        # sirf chhote exponent ('v^2') aate hain, 8.99e10 jaisi value nahi.
+        if re.search(r"\d[\d.,]|[eE][+-]?\d|\d\s*(?:[×x]\s*10|\^\s*\d{2})", rhs):
+            continue
+        letters = len(re.findall(r"[A-Za-z]", rhs))
+        if letters < 1:
+            continue
+        if not re.search(r"[*/^×·÷+\-]|\s", rhs):
+            continue                        # "x = y" ko formula nahi maanenge
+        candidate = f"{lhs} = {rhs}"
+        if len(candidate) > len(best):
+            best = candidate
+    return best[:200]
+
+
+def _expr_from_formula(formula: str, inputs: Dict[str, float],
+                       units: Dict[str, str]) -> Tuple[Optional[str], List[str]]:
+    """
+    Formula ke symbols ki jagah SI numbers rakho.
+
+    Kaunsa symbol nahi mila — wo bhi wapas bhejte hain, taaki record mein
+    "recalculation nahi ho saka: kaunsa input missing tha" likha ja sake.
+    """
+    rhs = formula.split("=", 1)[1] if "=" in formula else formula
+    rhs = (rhs.replace("×", "*").replace("·", "*").replace("÷", "/")
+              .replace("^", "**"))
+    missing: List[str] = []
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9_]*", rhs)
+    for name in sorted(set(tokens), key=len, reverse=True):
+        key = name.lower()
+        value: Optional[float] = None
+        if name in inputs:
+            value, unit = inputs[name], units.get(name, "")
+            si, known = _calc_si(value, unit)
+            if si is None:
+                if key in KNOWN_CONSTANTS:
+                    # G, c, h wagairah SI mein hi likhe jaate hain — unka
+                    # compound unit table mein na hone se hisaab nahi rukega.
+                    si = value
+                else:
+                    missing.append(f"{name} ka unit '{unit}' humari table mein nahi")
+                    continue
+            value = si
+        elif key in KNOWN_CONSTANTS:
+            value = KNOWN_CONSTANTS[key]
+        else:
+            missing.append(f"{name} ki value jawab mein nahi di gayi")
+            continue
+        rhs = re.sub(rf"(?<![A-Za-z0-9_]){re.escape(name)}(?![A-Za-z0-9_])",
+                     f"({value!r})", rhs)
+    # bina operator wala gap ("v**2 r" = guna) explicit karo
+    rhs = re.sub(r"\)\s+\(", ")*(", rhs)
+    rhs = re.sub(r"\)\s*\(", ")*(", rhs)
+    if missing:
+        return None, missing
+    return rhs.strip(), []
+
+
+def extract_calculations(answer: str, question: str = "",
+                         evidence_text: str = "") -> List[CalculationRecord]:
+    """
+    §17 — jawab ke andar se calculation ka poora record nikaalo.
+
+    Kuch bhi "banaya" nahi jaata: jo formula/input/unit likha hi nahi gaya, wo
+    record mein missing rehta hai aur `missing` list uska naam leti hai. Isi
+    tarah jo check chal na sake wo `None` rehta hai.
+    """
+    records: List[CalculationRecord] = []
+    haystack = f"{question}\n{evidence_text}".lower()
+    for block in _blocks_with_math(answer or ""):
+        formula = _pick_formula(block)
+        inputs: Dict[str, float] = {}
+        units: Dict[str, str] = {}
+        for m in _ASSIGN_RE.finditer(block):
+            name = m.group(1).strip()
+            value = _to_number(m.group(2))
+            if value is None or name in inputs or name.lower() in _RESULT_NAMES:
+                continue
+            inputs[name] = value
+            units[name] = (m.group(3) or "").strip()
+        result = ""
+        result_unit = ""
+        # "Result = 8.99e10 solar masses" ke NEECHE "Uncertainty = 20 percent"
+        # likha ho to pehle aakhri match uthate the aur uncertainty hi nateeja
+        # ban jaata tha — phir recalculation ka milaan bekaar ho jaata. Isliye:
+        # uncertainty/error waali line chhod do, aur naam se likha hua nateeja
+        # (result/answer/nateeja/jawab) plain "=" se zyada bharosemand maano.
+        named = None
+        plain = None
+        for rm in _RESULT_RE.finditer(block):
+            line_start = block.rfind("\n", 0, rm.start()) + 1
+            prefix = block[line_start:rm.start()]
+            if _UNCERT_PREFIX_RE.search(prefix):
+                continue
+            context = (prefix + rm.group(0)).lower()
+            if any(word in context for word in _RESULT_HINTS):
+                named = rm
+            else:
+                plain = rm
+        rm = named or plain
+        if rm is not None:
+            result = f"{rm.group(1).strip()} {(rm.group(2) or '').strip()}".strip()
+            result_unit = (rm.group(2) or "").strip()
+        assumptions = [line.strip(" -*\t")
+                       for line in re.split(r"[\n;]+", block)
+                       if _ASSUMPTION_RE.search(line)][:5]
+        um = _UNCERTAINTY_RE.search(block)
+        # Label ("Uncertainty = ") hata do, sirf value rakho — report mein
+        # "Uncertainty: Uncertainty = 20 percent" padhna bekaar lagta hai.
+        uncertainty = re.sub(r"^(?:uncertaint\w*|error bar|margin of error)"
+                             r"[ \t]*[:=]?[ \t]*", "",
+                             um.group(1).strip(), flags=re.IGNORECASE)[:200] \
+            if um else ""
+        if not (formula or inputs):
+            continue
+        rec = CalculationRecord(formula=formula, inputs=inputs, units=units,
+                                assumptions=assumptions, result=result,
+                                uncertainty=uncertainty, source_text=block.strip())
+        if result_unit:
+            rec.units["result"] = result_unit
+
+        # ── A. unit check ────────────────────────────────────────────────────
+        # Jaane-maane constants (G, c, h) SI mein hi likhe jaate hain aur unka
+        # compound unit humari simple table mein nahi hota — unhe "unresolved"
+        # kehna galat warning deta, isliye alag rakha hai.
+        unresolved = [f"{k}='{v}'" for k, v in units.items()
+                      if v and k != "result" and k.lower() not in KNOWN_CONSTANTS
+                      and _calc_si(1.0, v)[0] is None]
+        no_unit = [k for k, v in units.items() if not v and k != "result"
+                   and k.lower() not in KNOWN_CONSTANTS]
+        if not inputs:
+            rec.unit_check_passed = None
+            rec.notes.append("inputs hi nahi mile, isliye unit check nahi ho saka")
+        elif no_unit or not result_unit:
+            rec.unit_check_passed = False
+            if no_unit:
+                rec.notes.append("in inputs ka unit likha hi nahi: "
+                                 + ", ".join(no_unit[:4]))
+            if not result_unit:
+                rec.notes.append("nateeje ka unit nahi likha")
+        elif unresolved:
+            rec.unit_check_passed = None
+            rec.notes.append("ye unit humari table mein nahi, isliye conversion "
+                             "jaanch nahi ho saki: " + ", ".join(unresolved[:4]))
+        else:
+            rec.unit_check_passed = True
+
+        # ── B. recalculation ─────────────────────────────────────────────────
+        stated = _to_number(re.split(r"[^\d.eE+×x^\-,]", result, 1)[0]
+                            if result else "")
+        if not formula:
+            rec.recalculation_passed = None
+            rec.notes.append("formula nahi likha gaya, isliye dobara jodna "
+                             "possible nahi tha")
+        elif stated is None:
+            rec.recalculation_passed = None
+            rec.notes.append("nateeja number ki tarah nahi likha, isliye "
+                             "recalculation ka milaan nahi ho saka")
+        else:
+            expr, gaps = _expr_from_formula(formula, inputs, units)
+            value = _safe_eval(expr) if expr else None
+            if value is None:
+                rec.recalculation_passed = None
+                rec.notes.extend(gaps[:3] or ["formula ko arithmetic mein badla "
+                                              "nahi ja saka"])
+            else:
+                # nateeja SI mein laao, tabhi tulna imaandaar hai
+                target, known_unit = _calc_si(stated, result_unit)
+                rec.recomputed = f"{value:.4g} (SI)"
+                if target is None or not known_unit:
+                    rec.recalculation_passed = None
+                    rec.notes.append(f"nateeje ka unit '{result_unit}' table mein "
+                                     "nahi, isliye number ka milaan nahi ho saka")
+                else:
+                    scale = max(abs(target), abs(value), 1e-30)
+                    rec.recalculation_passed = (
+                        abs(target - value) / scale <= CALC_TOLERANCE)
+                    if not rec.recalculation_passed:
+                        rec.notes.append(
+                            f"dobara jodne par {value:.4g} aata hai, jawab mein "
+                            f"{target:.4g} likha hai (SI) — farak "
+                            f"{abs(target - value) / scale * 100:.1f}%")
+
+        # ── C. sanity checks (limits + conversion) ───────────────────────────
+        checks = check_physical_limits(block) + check_unit_conversions(block)
+        ran = [c for c in checks if c.passed is not None]
+        failed = [c for c in checks if c.passed is False]
+        if failed:
+            rec.sanity_check_passed = False
+            rec.notes.append("sanity check fail: "
+                             + "; ".join(c.detail for c in failed[:2]))
+        elif ran:
+            rec.sanity_check_passed = True
+        else:
+            rec.sanity_check_passed = None
+            rec.notes.append("is block mein sanity check ke liye kaafi "
+                             "number+unit nahi mile")
+
+        # ── D. invented input? ───────────────────────────────────────────────
+        if not inputs:
+            rec.invented_input = None
+        elif not haystack.strip():
+            rec.invented_input = None
+            rec.notes.append("sources ka text nahi mila, isliye ye nahi kaha ja "
+                             "sakta ki inputs kahan se aaye")
+        else:
+            invented: List[str] = []
+            hay_digits = re.sub(r"[^0-9]", "", haystack)
+            for name, value in inputs.items():
+                if name.lower() in KNOWN_CONSTANTS:
+                    continue
+                literal = f"{value:g}"
+                digits = re.sub(r"[^0-9]", "", literal)
+                # 3+ digit ka number sources mein dhoondhna reliable hai; ek-do
+                # digit ke liye exact token match zaroori hai, warna "2" ko
+                # "220" ke andar dekh kar hum galat se "source se aaya" keh dete.
+                if len(digits) >= 3 and digits in hay_digits:
+                    continue
+                if re.search(rf"(?<![\d.]){re.escape(literal)}(?![\d])",
+                             haystack):
+                    continue
+                invented.append(name)
+            rec.invented_input = bool(invented)
+            if invented:
+                rec.notes.append(
+                    "in inputs ki value question/sources mein nahi mili, yaani "
+                    "ye model ka apna number hai: " + ", ".join(invented[:4]))
+        records.append(rec)
+    return records
+
+
+def calculation_records(answer: str, question: str = "",
+                        evidence_text: str = "") -> List[Dict]:
+    """§17 — `quality_context["calculations"]` ke liye ready dict list."""
+    return [r.to_dict() for r in extract_calculations(answer, question,
+                                                      evidence_text)]
+
+
+def _calc_ok(rec) -> bool:
+    """
+    Ek record "kaam ka hisaab" hai ya nahi — record ya dict, dono chalte hain.
+
+    Sakht niyam: formula, inputs, units aur result chaaron likhe hon, aur jo
+    check chala wo fail na hua ho. "Calculation section mein kuch likha tha"
+    ko hisaab hona nahi maanenge — wahi pichhli galti thi.
+    """
+    if isinstance(rec, dict):
+        complete = bool(rec.get("complete"))
+        unit = rec.get("unit_check_passed")
+        recalc = rec.get("recalculation_passed")
+        sanity = rec.get("sanity_check_passed")
+    else:
+        complete = bool(getattr(rec, "is_complete", False))
+        unit = getattr(rec, "unit_check_passed", None)
+        recalc = getattr(rec, "recalculation_passed", None)
+        sanity = getattr(rec, "sanity_check_passed", None)
+    if not complete:
+        return False
+    return not (unit is False or recalc is False or sanity is False)
+
+
+def usable_calculation_count(records: Optional[Sequence]) -> Optional[int]:
+    """
+    Ledger ke liye ginti: kitne hisaab POORE hue. `None` matlab extraction hi
+    nahi chali — "0 hue" se bilkul alag baat.
+    """
+    if records is None:
+        return None
+    return sum(1 for rec in records if _calc_ok(rec))
+
+
+def calculations_done(records: Sequence[CalculationRecord]) -> bool:
+    """§18 ke `NO_CALCULATION` reason code ke liye: koi ek hisaab poora hua?"""
+    return any(_calc_ok(rec) for rec in records or [])
+
+
+def _calc_field(rec, name: str, default=None):
+    """Record ya dict — dono se ek hi tarah field padho (§17 ke saare helpers)."""
+    if isinstance(rec, dict):
+        if name == "core_missing":
+            return rec.get("core_missing") or []
+        return rec.get(name, default)
+    if name == "core_missing":
+        return list(getattr(rec, "core_missing", []) or [])
+    return getattr(rec, name, default)
+
+
+def calculation_warnings(records: Optional[Sequence]) -> List[str]:
+    """User ko dikhane wali imaandaar shikayatein (raw error nahi, Hinglish)."""
+    out: List[str] = []
+    for i, rec in enumerate(records or [], start=1):
+        label = f"Calculation {i}"
+        core_missing = _calc_field(rec, "core_missing") or []
+        if core_missing:
+            out.append(f"{label} adhoora hai — ye cheezein likhi hi nahi gayi: "
+                       f"{', '.join(core_missing[:4])}.")
+        elif not (_calc_field(rec, "assumptions") or []):
+            out.append(f"{label} ke assumptions likhe nahi gaye, isliye ise "
+                       "dobara-check kiya hua hisaab nahi kaha ja sakta.")
+        if _calc_field(rec, "unit_check_passed") is False:
+            out.append(f"{label} ka unit check fail hua (unit likha hi nahi gaya), "
+                       "isliye ise verified numeric result nahi kaha ja sakta.")
+        if _calc_field(rec, "recalculation_passed") is False:
+            out.append(f"{label} dobara jodne par wahi jawab nahi aaya "
+                       f"({_calc_field(rec, 'recomputed') or 'recompute'} vs "
+                       f"{_calc_field(rec, 'result')}).")
+        if _calc_field(rec, "sanity_check_passed") is False:
+            out.append(f"{label} physical limit ya unit conversion check mein "
+                       "fail hua.")
+        if _calc_field(rec, "invented_input") is True:
+            out.append(f"{label} mein kam se kam ek number aisa hai jo "
+                       "question ya sources mein nahi mila — wo model ka apna "
+                       "anumaan hai, verified input nahi.")
+    return out
+
+
 # ── entry point ──────────────────────────────────────────────────────────────
+
+# Sawal quantitative na ho to hum "check pass ho gaya" NAHI likhte — saaf
+# likhte hain ki check chala hi nahi.
 _SKIP_NOTE = ("Ye sawal numbers/units ka nahi tha, isliye maths-physics sanity "
               "check nahi chalaya gaya (bekaar warnings se bachne ke liye).")
 

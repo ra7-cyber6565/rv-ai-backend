@@ -20,6 +20,7 @@ import unicodedata
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
+from .answer_order import section_start
 from .models import EvidencePack
 from .offline_reasoner import OfflineEvidenceReasoner
 from .presentation_guard import PresentationGuard
@@ -70,13 +71,15 @@ def _safe_source_url(value: object) -> str:
 class FinalSynthesizer(_ClaudeFinalSynthesizer):
     """Claude latest formatter + final truth/presentation guardrails."""
 
-    _ACCESS_WORDS = {
-        **_ClaudeFinalSynthesizer._ACCESS_WORDS,
-        "claims": (
-            "PATENT CLAIMS REVIEWED — legal claims process hue; ye experimental "
-            "ya scientific verification nahi hai"
-        ),
-    }
+    # §9 — access depth ka vocabulary ab sirf `models.ACCESS_DEPTH_LABELS` mein
+    # rehta hai (paanch allowed label). Pehle yahan apni alag wording thi
+    # ("FULL-TEXT VERIFIED ACCESS", "PATENT CLAIMS REVIEWED") — do jagah do
+    # bhasha se report aur claim-check ek doosre se ulta bolne lagte the, aur
+    # "VERIFIED" shabd access ke saath lagna hi §8 ka rule todta hai. Iska
+    # matlab yahan koi feature nahi gaya: patent ke claims ab
+    # `RELEVANT SECTIONS REVIEWED` bante hain (models.py mein tay), aur patent
+    # ke "legal dawa, proof nahi" wali baat neeche `_KIND_WORDS` + patent gates
+    # se aati hai.
     _KIND_WORDS = {
         **_ClaudeFinalSynthesizer._KIND_WORDS,
         "patent": "patent document (legal filing; scientific proof nahi)",
@@ -176,9 +179,14 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 "verify nahi ki ja sakti."
             )
         if not full:
+            # §9 — is line mein jaan-boojh kar "full-text verified" shabd nahi
+            # likha jaata, chahe wo negation mein ho. Access-depth detector
+            # (bilkul theek) us phrase ko dhoondta hai, aur apni hi imaandaar
+            # line se audit mein "1 overclaim" ki jhoothi ginti ban rahi thi.
             lines.append(
-                "- Kisi source ka full-text-level access nahi mila, isliye strong claims "
-                "ko full-text verified kehna allowed nahi hai."
+                "- Kisi source ka full-text-level access nahi mila, isliye strong "
+                "claims ke liye 'poora text padh kar check kiya' wala dava bhi "
+                "allowed nahi hai."
             )
         return "\n".join(lines)
 
@@ -226,20 +234,11 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             else:
                 lines.append("- Isse kya liya gaya: kuch nahi — content mila hi nahi.")
 
-            level = s.reading_level()
-            if level == "full_text" and self._is_partial_large_source(s):
-                access = (
-                    f"PARTIAL FULL-TEXT REVIEW — large document ke {int(s.pages_read)}/"
-                    f"{int(s.pages_total)} relevant pages process hue; poora document "
-                    "padha gaya aisa claim nahi hai"
-                )
-            elif level == "full_text":
-                access = (
-                    "FULL-TEXT VERIFIED ACCESS — legally available full text process hua; "
-                    "claim ka support/entailment alag evidence-verification gate check karta hai"
-                )
-            else:
-                access = self._ACCESS_WORDS.get(level, level)
+            # §9 — ek hi jagah se label: partial-page reading `RELEVANT SECTIONS
+            # REVIEWED` banti hai (poora document padha gaya aisa dava nahi),
+            # patent ke claims bhi wahi, aur "FULL TEXT ACCESSED" sirf access
+            # kehta hai — verification ka dava kabhi nahi.
+            access = s.access_depth_note()
             lines.append(f"- Kitna padha gaya: {access}.")
             if getattr(s, "read_note", ""):
                 lines.append(f"- Reading scope: {_safe_source_display(s.read_note, 500)}")
@@ -289,9 +288,19 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             # app-generated hypotheses, so official/traditional/allegation lanes
             # cannot visually merge into the hypothesis section.  Sources and
             # the technical audit remain the final two sections.
-            anchor = report.find("## Humari Hypotheses")
+            # §12 (2026-08-22) — anchor ab canonical key se milta hai. Pehle
+            # yahan literal `"## Humari Hypotheses"` dhoonda jaata tha; heading
+            # `APP ORIGINAL RESEARCH LAB` ho jaane ke baad wo find() hamesha -1
+            # deta aur specialist block chup-chaap Sources se pehle (ya report ke
+            # aakhir mein) chala jaata tha. Purana naam fallback mein rakha hai,
+            # taaki legacy synthesizer se bani report par bhi kaam kare.
+            anchor = section_start(report, "original_lab")
             if anchor < 0:
-                anchor = report.find("## Sources")
+                anchor = report.find("## Humari Hypotheses")
+            if anchor < 0:
+                anchor = section_start(report, "audit")
+            if anchor < 0:
+                anchor = section_start(report, "sources")
             if anchor < 0:
                 report = f"{report.rstrip()}\n\n{specialist_block}".strip()
             else:

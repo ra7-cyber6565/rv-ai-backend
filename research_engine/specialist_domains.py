@@ -20,6 +20,7 @@ from dataclasses import asdict, dataclass
 from typing import Dict, Iterable, List, Sequence, Tuple
 from urllib.parse import urlparse
 
+from .answer_order import LAB_HEADING
 from .local_language import normalize
 from .multilingual_research import build_multilingual_plan
 
@@ -470,7 +471,7 @@ Active lenses: {labels}
 - CIA/FBI/NARA document ke liye 'document mein likha/released hua' kehna allowed hai;
   uske andar ka paranormal/political claim automatically established nahi hai.
 - Hertz wali measured frequency ko symbolic/spiritual vibration se alag rakho.
-- App ki nayi hypothesis sirf 'Humari Hypotheses' mein, UNTESTED label ke saath.
+- App ki nayi hypothesis sirf '{LAB_HEADING}' section mein, UNTESTED label ke saath.
 - Unknown ko unknown rakho; 90–95% success/truth probability invent mat karo.
 - Language status: {language_status}. {language_policy}
 {cautions}{unknown_rule}"""
@@ -583,9 +584,12 @@ def render_evidence_lane_report(report: Dict) -> str:
             "- **Unclear term:** " + ", ".join(str(item) for item in unknown)
             + ". Iska meaning guess nahi kiya gaya; clarification milne tak unknown hai."
         )
+    # §12 (2026-08-22) — user ko sahi section ka naam batana zaroori hai. Pehle
+    # yahan "Humari Hypotheses" likha tha; report mein aisa koi section hi nahi
+    # bachta, isliye reader ko wo hissa dhoondhne ka galat naam mil raha tha.
     lines.append(
         "\n**App ki apni research hypothesis boundary:** Nayi possibilities sirf "
-        "**Humari Hypotheses** section mein dikhengi. Wo cited sources ka direct "
+        f"**{LAB_HEADING}** section mein dikhengi. Wo cited sources ka direct "
         "conclusion nahi, UNTESTED app-generated synthesis hain; unke saath test aur "
         "galat sabit karne ki condition zaroori hai."
     )

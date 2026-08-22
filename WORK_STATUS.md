@@ -102,7 +102,8 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
   honest `translation_required` state for unresolved languages; no paywall,
   copyright or access-control bypass.
 - Added a visible evidence-lane section before the existing system-owned
-  `Humari Hypotheses` section plus structured `specialist_research` API data.
+  app-hypothesis section (now titled `APP ORIGINAL RESEARCH LAB`, earlier
+  `Humari Hypotheses`) plus structured `specialist_research` API data.
 - Local dependency-light checks: **15/15 specialist**, **593/593 core**,
   **633/633 cross-domain**, **146/146 superconductivity**; architecture,
   provider-bypass, source-boundary, compile and web-JS syntax checks pass.
@@ -394,6 +395,66 @@ Regression (sab is sandbox mein 2026-08-21 ko, sab `rc=0`):
 aur `tests/test_*.py` ki saari **20** file `rc=0` (nayi wali samet).
 pytest ka total `194 → 196` hona chahiye (patent batch se +1, is fix se +1) —
 asli ginti intel ke Windows se aayegi.
+
+## Naya batch — RV-AI Advanced Research Upgrade §4–§25 (Owner: Claude, 2026-08-22)
+
+Ye batch live **dark-matter run ki 17 galtiyon** se shuru hua tha (18 retrieved vs 9
+cited, average relevance ≈0.43, irrelevant calibration/exoplanet papers, CMB/BBN/
+Bullet-Cluster/lensing/LSS/dwarf axes gayab, 14 × `[NO-SOURCE]`, counter-search
+nahi, S9/S11/S12 mislabelled, sirf-saal wale nakli contradictions, PBH/dark-photon
+ko "naya" batana, adhoora jawab `COMPLETE` + `✅ VERIFIED`, raw 429/504 jawab mein,
+duplicate footer, gayab hoti progress line).
+
+| Kaam | Owner | Status | Files |
+|---|---|---|---|
+| §4 quality contract + §7/§19 counters aur `quality_context` producer | Claude | done | `research_engine/quality_producers.py` (naya) |
+| §5 query axes + per-axis coverage + retry ladder | Claude | done | `research_engine/evidence_axes.py` (naya), `planner.py`, `query_builder.py` |
+| §6 relevance proposition-test + structured reject codes | Claude | done | `research_engine/relevance.py` |
+| §8/§9 claim evidence spans + paanch access-depth label | Claude | done | `research_engine/claim_verification.py`, `claim_labels.py`, `models.py` |
+| §10/§11 counter-search consensus se pehle + structured contradictions | Claude | done | `research_engine/contradiction.py`, `orchestrator.py` |
+| §13–§16/§18 hypothesis/novelty/prediction/experiment/confidence contract | Claude | done | `research_engine/hypothesis.py` |
+| §17 calculation records + 4 alag verdict | Claude | done | `research_engine/physics_checks.py` |
+| §12/§20 answer order + `APP ORIGINAL RESEARCH LAB` alag + 4 alag state | Claude | done | `research_engine/answer_order.py` (naya), `research_state.py` (naya), `synthesizer*.py` |
+| §21/§22 UI tabs + progress snapshot + recovery contract | Claude | done | `web/index.html`, `tests/test_recovery_ui_contract.py` |
+| §23 saat nayi Claude-owned test file (20 behaviour) | Claude | done | `tests/test_{quality_context_producers,relevance_axis_coverage,structured_contradictions,calculation_records,novelty_contract,original_research_lab,research_output_separation}.py` |
+| §24 dark-matter acceptance matrix DM-01…DM-17 | Claude | done | `tests/benchmark_dark_matter_acceptance.py` (naya) |
+
+**§24 ka nateeja: 285 check pass, 0 fail — 17/17 live galtiyon ka darwaaza band
+(`CLOSED`).** Har row ek hi live galti par khadi hai, aur uski apni pass/fail ginti
+hai, taaki scorecard padh kar pata chale "kaunsa jhooth ab bhi mumkin hai". Chhe
+variant par chalti hai (`live, dead, bad_math, overclaim, support, thin`) aur
+`tests/benchmark_cross_domain.py` ka harness bina badle reuse karti hai.
+
+**§24 ne do asli bug pakde (dono theek kiye gaye):**
+
+- `quality_producers.context_block()` pipeline mein **kabhi call hi nahi hota tha**,
+  isliye §19 ka tri-state vaakya sirf tests tak pahunchta tha — user ke audit mein
+  "0" chhap sakta tha us check ke liye jo chala hi nahi tha. Ab
+  `render_unknown_block()` + `inject_unknown_block()` audit section mein naam le kar
+  likhte hain, aur `orchestrator.py` inhe `rescan_final_answer` ke **baad** aur
+  §20 state block se **pehle** inject karta hai.
+- `synthesizer.py` ka apna imaandaar vaakya "…strong claims ko full-text verified
+  kehna allowed nahi hai" khud access-depth detector mein phans jaata tha (detector
+  theek hai — banned label case-insensitive dhoondta hai), jisse `thin` run ke audit
+  mein jhoothi "1 overclaim" ginti banti thi. Detector kamzor nahi kiya; humari prose
+  badli gayi ("'poora text padh kar check kiya' wala dava").
+
+Regression (sab is sandbox mein 2026-08-22, sab `rc=0`, koi live provider call nahi):
+`test_research_engine.py` **594/0**, `tests/run_pytest_style_suites.py` **266/0**
+(26 skip = sandbox mein `pytest`/`fastapi` nahi, 5 NOT-A-SUITE demo script),
+`tests/benchmark_cross_domain.py` **649/649**,
+`tests/benchmark_superconductivity.py` **156/156**,
+`tests/benchmark_dark_matter_acceptance.py` **285/0 (17/17 CLOSED)**,
+aur PR #14/#15/#16 ki apni suites bhi green — incl.
+`tests/test_multiline_claim_grounding.py` 10/10, `test_claim_verification.py` 150/0,
+`test_hypothesis_quality.py` 141/0, `test_answer_structure.py` 56/0,
+`test_calculation_records.py` 84/0, `test_relevance_axis_coverage.py` 132/0.
+
+**PR #16 ke saath merge:** `044a7d9` ne `verify_answer()` ka loop line-by-line se
+`labelled_claim_spans()` ke bounded block par badal diya, aur Claude ka §8 kaam usi
+loop mein `section`/`claim_id`/`critical` jodta hai. **Dono rakhe gaye:** block PR #16
+ka, aur section ek precomputed `section_at` list se (line index → aakhri `##` heading).
+`citation.py` / `evidence_verification_legacy.py` chhue nahi gaye.
 
 ## Known gaps (jaan-boojh kar khule)
 

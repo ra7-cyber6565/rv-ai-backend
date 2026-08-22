@@ -62,6 +62,88 @@ READ_LEVEL_LABELS = {
 }
 
 
+# ── §9 — ACCESS DEPTH ka poora vocabulary (sirf ye paanch label allowed) ──────
+#
+# Kyun (dark-matter run): report mein "FULL-TEXT VERIFIED" chhapta tha. Us ek
+# label ne DO alag baaton ko ek bana diya — "text mil gaya" aur "claim verify ho
+# gaya". S12 sirf abstract par tha aur phir bhi "full-text verified" dikha.
+# Isliye:
+#   * access depth = humne kitna TEXT dekha (ye label)
+#   * verification  = claim ko us text ne support kiya ya nahi (alag field,
+#                     claim_verification.py mein)
+# "VERIFIED" shabd is vocabulary mein jaan-boojh kar nahi hai.
+ACCESS_METADATA = "METADATA ONLY"
+ACCESS_SNIPPET = "SNIPPET ONLY"
+ACCESS_ABSTRACT = "ABSTRACT ONLY"
+ACCESS_SECTIONS = "RELEVANT SECTIONS REVIEWED"
+ACCESS_FULL = "FULL TEXT ACCESSED"
+
+ACCESS_DEPTH_ALLOWED = (ACCESS_METADATA, ACCESS_SNIPPET, ACCESS_ABSTRACT,
+                        ACCESS_SECTIONS, ACCESS_FULL)
+
+# read_level (andar ka naam) → §9 ka label
+ACCESS_DEPTH_LABELS = {
+    "metadata": ACCESS_METADATA,
+    "snippet": ACCESS_SNIPPET,
+    "abstract": ACCESS_ABSTRACT,
+    # patent ke claims poora document nahi hote — wo document ka ek chuna hua
+    # hissa hai, isliye "sections" family mein aata hai.
+    "claims": ACCESS_SECTIONS,
+    "full_text": ACCESS_FULL,
+}
+
+ACCESS_DEPTH_EXPLAIN = {
+    ACCESS_METADATA: "sirf title/author/year mile — content dekha hi nahi gaya",
+    ACCESS_SNIPPET: "sirf search ka chhota tukda mila",
+    ACCESS_ABSTRACT: "sirf abstract (summary) padha gaya, poora paper nahi",
+    ACCESS_SECTIONS: "document ke chune hue hisse padhe gaye, poora document nahi",
+    ACCESS_FULL: "poora text process hua",
+}
+
+
+# ── §20 — chaar ALAG state machine (ek doosre ka matlab nahi nikaalte) ────────
+#
+# Pichhli galti: "provider ka job complete ho gaya" ko "jawab poora ho gaya"
+# maan liya gaya tha, aur "citation theek hai" ko "evidence strong hai". Isliye
+# ab chaaron cheezein alag naam se, alag values mein rehti hain.
+
+# 1. Job (background kaam) ki haalat — sirf process ke baare mein.
+JOB_QUEUED = "QUEUED"
+JOB_RUNNING = "RUNNING"
+JOB_FINISHED = "FINISHED"          # kaam ruk gaya — jawab acha hai ya nahi, ye ISSE pata NAHI chalta
+JOB_FAILED = "FAILED"
+JOB_RECOVERED = "RECOVERED"        # connection toota tha, result history se wapas mila
+JOB_STATES = (JOB_QUEUED, JOB_RUNNING, JOB_FINISHED, JOB_FAILED, JOB_RECOVERED)
+
+# 2. Jawab poora hua ya nahi — contract ke against (requested.contract_ledger).
+ANSWER_COMPLETE = "COMPLETE"
+ANSWER_PARTIAL = "PARTIAL"
+ANSWER_INSUFFICIENT = "INSUFFICIENT EVIDENCE"
+ANSWER_FAILED = "FAILED"
+ANSWER_STATES = (ANSWER_COMPLETE, ANSWER_PARTIAL, ANSWER_INSUFFICIENT,
+                 ANSWER_FAILED)
+
+# 3. Evidence ki haalat — retrieval/verification se, LLM ke bharose se nahi.
+EVIDENCE_STRONG = "STRONG"
+EVIDENCE_MODERATE = "MODERATE"
+EVIDENCE_WEAK = "WEAK"
+EVIDENCE_MIXED = "MIXED"                 # support aur counter dono mile
+EVIDENCE_NONE = "NO USABLE EVIDENCE"
+EVIDENCE_NOT_CHECKED = "NOT CHECKED"     # check hua hi nahi — "zero" se ALAG
+EVIDENCE_STATES = (EVIDENCE_STRONG, EVIDENCE_MODERATE, EVIDENCE_WEAK,
+                   EVIDENCE_MIXED, EVIDENCE_NONE, EVIDENCE_NOT_CHECKED)
+
+# 4. Novelty ki haalat — §14 ka poora whitelist (isse bahar koi shabd nahi).
+NOVELTY_KNOWN = "KNOWN IDEA"
+NOVELTY_KNOWN_VARIANT = "KNOWN VARIANT"
+NOVELTY_MINOR = "MINOR MODIFICATION"
+NOVELTY_POSSIBLE = "POSSIBLY NOVEL — NO CLOSE MATCH FOUND"
+NOVELTY_UNVERIFIED = "NOVELTY UNVERIFIED"
+NOVELTY_DUPLICATE = "REJECTED AS DUPLICATE"
+NOVELTY_STATES = (NOVELTY_KNOWN, NOVELTY_KNOWN_VARIANT, NOVELTY_MINOR,
+                  NOVELTY_POSSIBLE, NOVELTY_UNVERIFIED, NOVELTY_DUPLICATE)
+
+
 
 # ── Claim classification (Spec Section 7) ────────────────────────────────────
 class ClaimType(str, Enum):
@@ -342,11 +424,46 @@ class SourceRecord:
             return "abstract"
         return "snippet"
 
+    # ── §9 — access depth (5 allowed labels, "VERIFIED" inme se koi nahi) ─────
+    def access_depth(self) -> str:
+        """
+        Humne is source ka kitna TEXT dekha — sirf itni baat.
+
+        Ye claim ke sach hone ke baare mein KUCH NAHI kehta. "18 of 30 pages
+        padhe" ka imaandaar label `RELEVANT SECTIONS REVIEWED` hai, `FULL TEXT
+        ACCESSED` nahi — ye farq yahan ek hi jagah tay hota hai, taaki report,
+        claim-check aur UI teeno wahi ek baat bolein.
+        """
+        level = self.reading_level()
+        label = ACCESS_DEPTH_LABELS.get(level, ACCESS_METADATA)
+        if label == ACCESS_FULL:
+            pages_total = int(self.pages_total or 0)
+            pages_read = int(self.pages_read or 0)
+            # poore document ka dava sirf tab jab (a) page ginti pata na ho, ya
+            # (b) jitne page the utne padhe gaye hon
+            if pages_total and pages_read and pages_read < pages_total:
+                return ACCESS_SECTIONS
+        return label
+
+    def access_depth_note(self) -> str:
+        """Label + insaani matlab + (agar pata ho) page ginti."""
+        label = self.access_depth()
+        note = f"{label} — {ACCESS_DEPTH_EXPLAIN.get(label, '')}".rstrip(" —")
+        pages_total = int(self.pages_total or 0)
+        pages_read = int(self.pages_read or 0)
+        if pages_total and pages_read:
+            note += f" ({pages_read}/{pages_total} page process hue)"
+        elif pages_read:
+            note += f" ({pages_read} page process hue)"
+        return note
+
     def to_dict(self) -> Dict:
         d = asdict(self)
         d["source_type"] = self.source_type.value
         d["domain"] = self.domain
         d["reading_level"] = self.reading_level()
+        d["access_depth"] = self.access_depth()
+        d["access_depth_note"] = self.access_depth_note()
         d["methodology_label"] = methodology_label(self.methodology) if self.methodology else ""
         d["methodology_rank"] = self.methodology_rank
         d["quality_signals"] = self.quality_signal_bits()
@@ -516,7 +633,29 @@ class EvidencePack:
         if borderline:
             parts.append(f"{borderline} source kamzor match ke hain — acche sources "
                          f"kam pad gaye the, isliye majboori mein liye gaye.")
+        # §6 (2026-08-22): "topic ka hai" aur "sawaal ki baat test karta hai" —
+        # ye do alag cheezein hain, aur report mein bhi alag likhni chahiye.
+        # Dark-matter run mein average match 0.43 tha aur usi ginti ko "evidence"
+        # kaha gaya tha, jabki kai source sirf usi field ke the.
+        prop = info.get("proposition") or {}
+        if prop:
+            yes = prop.get("tests_proposition")
+            no = prop.get("does_not_test")
+            und = prop.get("undecided")
+            parts.append(
+                f"Inme se {yes} source sawaal ki baat sach mein test karte hain, "
+                f"{no} nahi karte, aur {und} par faisla nahi ho saka (metadata "
+                f"itna hi mila) — aakhri ginti ko 'theek hai' na samjhein.")
         return " ".join(parts)
+
+    def proposition_report(self) -> Dict:
+        """§6 — relevance gate ka structured record (khaali dict = gate chala nahi)."""
+        return dict((self.retrieval_filter or {}).get("proposition") or {})
+
+    def reject_code_counts(self) -> Dict:
+        """§6 — kis code se kitne source hate (free-text nahi, ginne layak codes)."""
+        info = (self.retrieval_filter or {}).get("reject_codes") or {}
+        return dict(info.get("counts") or {})
 
     def reasoning_note(self) -> str:
         if self.reasoning_planned <= 0:
@@ -809,6 +948,10 @@ class EvidencePack:
             "offtopic_dropped": int((self.retrieval_filter or {}).get(
                 "dropped_offtopic") or 0),
             "relevance_note": self.relevance_note(),
+            # §6 — relevance gate ka structured hisaab (proposition-test +
+            # reject codes). Khaali dict = gate chala hi nahi, "sab pass" nahi.
+            "proposition_test": self.proposition_report(),
+            "relevance_reject_codes": self.reject_code_counts(),
             "reasoning_passes": f"{self.reasoning_done}/{self.reasoning_planned}",
             "reasoning_note": self.reasoning_note(),
             "methodologies": self.methodology_counts(),
@@ -890,6 +1033,22 @@ class ResearchResult:
     # Ye kabhi bhi user-facing jawab ka hissa nahi banta.
     technical_details: List[str] = field(default_factory=list)
     api_accounting: Dict = field(default_factory=dict)
+
+    # §4 + §7/§19 — "kya maanga gaya tha" (quality_contract), "kya asli mein
+    # mila" (quality_context) aur dono ka aamna-saamna (contract_ledger).
+    # Ye teen structured roop mein API/UI/final-gate tak jaate hain, taaki koi
+    # bhi in numbers ke liye answer ka text parse na kare — text parse karna hi
+    # wo raasta tha jisse audit ke andar ek doosre se ulte numbers aa gaye the.
+    quality_contract: Dict = field(default_factory=dict)
+    quality_context: Dict = field(default_factory=dict)
+    contract_ledger: Dict = field(default_factory=dict)
+
+    # §20 — chaar ALAG state ek hi dict mein: job_status / answer_state /
+    # evidence_state / novelty_state, plus `conflicts` aur `verified_allowed`.
+    # UI ko inme se kisi ek ka matlab doosre se nikaalna mana hai — pehle yahi
+    # hota tha ("job FINISHED" ko "jawab COMPLETE" padh liya jaata tha).
+    # Banane wala module: research_engine/research_state.py
+    research_state: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return asdict(self)

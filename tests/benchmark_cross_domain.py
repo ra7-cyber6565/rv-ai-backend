@@ -31,6 +31,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import domain as domain_mod                # noqa: E402
 from research_engine import gemini_reasoning                    # noqa: E402
+from research_engine.answer_order import (LAB_HEADING,          # noqa: E402
+                                          display_heading)
+from research_engine.consensus_gate import opposition_in_queries  # noqa: E402
 from research_engine.models import SourceRecord, SourceType     # noqa: E402
 from research_engine.orchestrator import DeepResearchEngine     # noqa: E402
 from research_engine.relevance import RelevanceEngine           # noqa: E402
@@ -1247,7 +1250,7 @@ def check_consensus(case: DomainCase) -> None:
     with scope(case.key, "consensus"):
         healthy, _, _ = run_cached(case, "healthy")
         answer = _human_part(healthy["answer"])
-        pos = _heading_pos(answer, "## Iske against kya mila?")
+        pos = _heading_pos(answer, f"## {display_heading('counterevidence')}")
         check("'iske against kya mila' section maujood", pos >= 0)
         seg = answer[pos:pos + 900] if pos >= 0 else ""
         check("opposition/contradiction ko asli mein consider kiya",
@@ -1255,12 +1258,33 @@ def check_consensus(case: DomainCase) -> None:
         check("contradiction list khaali nahi",
               bool(healthy.get("contradictions")), str(healthy.get("contradictions"))[:120])
 
-        sup, _, _ = run_cached(case, "support")
+        sup, sup_disc, _ = run_cached(case, "support")
         sa = sup["answer"]
-        check("sirf support-side evidence par consensus claim nahi kiya",
-              "Consensus evaluate nahi kiya ja saka" in sa, sa[-400:])
-        check("kaaran bataya ki criticism-side query chali hi nahi",
-              "Sirf support-side search hui" in sa, sa[-400:])
+        # §5/§10 (2026-08-22): pehle yahan ulta check tha — "support-only run mein
+        # criticism query chali hi nahi, isliye gate ne consensus refuse kiya".
+        # Wo engine ki KAMI thi, guarantee nahi: counter-side search user ke
+        # bhaagya par nahi honi chahiye. Ab har run mein counter-evidence axis ki
+        # query jaati hai (evidence_axes ka `counter_evidence` axis), isliye check
+        # bhi wahi hai jo §10 maangta hai: dono taraf ki search SACH mein chali.
+        sup_queries = [q for _, qs in sup_disc.calls for q in qs]
+        check("counter-side (criticism/null-result) query sach mein chali",
+              opposition_in_queries(sup_queries),
+              " | ".join(sup_queries[-4:])[:200])
+        # Aur nateeja imaandaar ho: counter-evidence axis ka record machine-
+        # readable roop mein maujood ho aur uspar query CHALI hui dikhe — "0 mila"
+        # aur "dhoondha hi nahi" ka farq wahi record rakhta hai.
+        axes = ((sup.get("coverage") or {}).get("evidence_axes") or {}).get("axes") or []
+        counter = [a for a in axes if a.get("axis_id") == "counter_evidence"]
+        check("counter-evidence axis ka coverage record maujood hai",
+              bool(counter), str([a.get("axis_id") for a in axes])[:200])
+        if counter:
+            row = counter[0]
+            check("counter-evidence axis par query chali hui record hui",
+                  len(row.get("queries_tried") or []) >= 1
+                  and row.get("searched") is True
+                  and row.get("status") != "NOT SEARCHED",
+                  f"{row.get('status')} / searched={row.get('searched')} / "
+                  f"queries={len(row.get('queries_tried') or [])}")
         brag = [ln.strip()[:90] for ln in sa.splitlines()
                 if any(b in ln.lower() for b in _CONSENSUS_BRAG)
                 and not any(n in ln.lower() for n in ("galat", "nahi", "mat "))]
@@ -1288,7 +1312,11 @@ def check_hypothesis(case: DomainCase) -> None:
         hyps = healthy.get("hypotheses") or []
         check("maange gaye 3 hypotheses mile", len(hyps) >= 3, f"mile={len(hyps)}")
         answer = _human_part(healthy["answer"])
-        hpos = _heading_pos(answer, "## Humari Hypotheses")
+        # §12 (2026-08-22) — app ki apni soch ka section ab `## APP ORIGINAL
+        # RESEARCH LAB` hai. Pehle yahan literal "## Humari Hypotheses" tha, aur
+        # heading badalne par `hpos` -1 ho jaata: hsec khaali, aur saare
+        # hypothesis-field check jhoothi wajah se fail hote.
+        hpos = _heading_pos(answer, f"## {LAB_HEADING}")
         hsec = answer[hpos:] if hpos >= 0 else ""
         for field in _HYP_FIELDS:
             body = _field_body(hsec, field)
@@ -1312,10 +1340,19 @@ def check_hypothesis(case: DomainCase) -> None:
 
 
 # ── check group 7: fallback resilience + determinism ─────────────────────────
-_MUST_SECTIONS = ("## Seedha jawab", "## Research se kya pata chala?",
-                  "## Ye kyun hota hai?", "## Evidence kya kehta hai?",
-                  "## Iske against kya mila?", "## Kya abhi unknown hai?",
-                  "## Final conclusion")
+# §12 (2026-08-22) — heading ke naam ab `answer_order` se aate hain, hard-coded
+# nahi. Pehle yahan purani Hinglish heading likhi thi; dual heading
+# ("Counterevidence — iske against kya mila?") aane ke baad `_heading_pos()` ka
+# prefix-regex match hi nahi karta tha, aur "section bhara hua hai?" wala check
+# jhoothi wajah se fail hota. Index 2 (`Ye kyun hota hai?`) §12 ki 10-section
+# list ke bahar ka extra section hai, isliye wo literal hi rehta hai.
+_MUST_SECTIONS = (f"## {display_heading('direct_answer')}",
+                  f"## {display_heading('established_knowledge')}",
+                  "## Ye kyun hota hai?",
+                  f"## {display_heading('supporting_evidence')}",
+                  f"## {display_heading('counterevidence')}",
+                  f"## {display_heading('unknowns')}",
+                  f"## {display_heading('conclusion')}")
 
 
 def check_fallback(case: DomainCase) -> None:
@@ -1355,13 +1392,17 @@ def check_presentation(case: DomainCase) -> None:
     with scope(case.key, "presentation"):
         healthy, _, _ = run_cached(case, "healthy")
         answer = healthy["answer"]
-        first = _heading_pos(answer, "## Seedha jawab")
-        src = _heading_pos(answer, "## Sources")
-        audit = _heading_pos(answer, "## Research quality / technical audit")
+        first = _heading_pos(answer, f"## {display_heading('direct_answer')}")
+        src = _heading_pos(answer, f"## {display_heading('sources')}")
+        audit = _heading_pos(answer, f"## {display_heading('audit')}")
         tech = answer.find("### Technical details")
         eq("jawab seedha insaani answer se shuru hota hai", first, 0)
         check("sources human explanation ke baad aate hain", first < src, f"{first} {src}")
-        check("technical audit sources ke baad", src < audit, f"{src} {audit}")
+        # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§12, 2026-08-22): pehle
+        # "technical audit sources ke baad" maanga jaata tha. §12 ka mandatory
+        # order ulta hai — pehle audit, PHIR Sources (Sources aakhri section).
+        check("technical audit sources se pehle (§12)", audit < src, f"{audit} {src}")
+        check("Sources aakhri human section hai", src > audit >= 0, f"{src} {audit}")
         check("developer technical details sabse aakhir mein",
               tech == -1 or tech > audit, f"{tech} {audit}")
         check("jawab ki shuruaat mein koi raw JSON/label dump nahi",

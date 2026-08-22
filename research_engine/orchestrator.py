@@ -43,9 +43,20 @@ from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
+from . import physics_checks
 from .planner import ResearchPlanner
-from .requested import build_ledger, looks_like_chain, looks_like_math_model
+from . import quality_producers as quality
+from .evidence_axes import axes_for
+from .evidence_axes import coverage as axis_coverage
+from .evidence_axes import coverage_note as axis_coverage_note
+from .evidence_axes import coverage_summary
+from .evidence_axes import counter_search_done
+from .evidence_axes import next_queries as axes_next_queries
+from .requested import build_ledger, contract_ledger, looks_like_chain
+from .requested import looks_like_math_model, quality_contract
 from .research_memory import ResearchMemory
+from .research_state import build_state as build_research_state
+from .research_state import inject_state_block, state_warnings
 from .run_status import INCOMPLETE, evaluate as evaluate_status
 from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
@@ -152,6 +163,15 @@ class DeepResearchEngine:
         round_errors: List[str] = []
         round_error_details: List[str] = []
 
+        # §5 — retrieval ab "ek broad query" se nahi, SABOOT KE RAASTON se
+        # chalti hai. `axis_queries` mein likha jaata hai ki kis axis par
+        # kaunsi query gayi — isi se "dhoondha nahi" aur "dhoondha par nahi
+        # mila" ka farq banta hai (dark-matter run mein CMB/BBN/Bullet Cluster
+        # par ek bhi query gayi hi nahi thi, phir bhi answer COMPLETE tha).
+        axes = axes_for(question)
+        axis_queries: Dict[str, List[str]] = {}
+        axis_records: List[Dict] = []
+
         for round_no in range(1, config.max_rounds + 1):
             rounds_run = round_no
             # `plan` classify() ke dict ka SUPERSET hai (planner.plan() mein
@@ -162,6 +182,18 @@ class DeepResearchEngine:
                 # Planner ne kuch na diya to bhi search rukni nahi chahiye —
                 # seedha sawal hi query ban jaata hai.
                 queries = [question]
+            # Har round mein 2-3 axis queries jodte hain: pehle un axes ki jo
+            # abhi cover nahi hue, aur ladder ki AGLI seedhi par (wahi query
+            # dobara nahi). Ginti jaan-boojh kar chhoti hai — connector budget
+            # bhi asli constraint hai, aur ₹0 providers par nirbharta hai.
+            axis_base = self.planner.clean_query(question)
+            for rung in axes_next_queries(axes, axis_records, axis_base,
+                                          round_no=round_no, limit=3):
+                query = rung["query"]
+                if query and query not in queries:
+                    queries.append(query)
+                    axis_queries.setdefault(rung["axis_id"], []).append(query)
+
             for q in queries:
                 if q and q not in queries_run:
                     queries_run.append(q)
@@ -216,7 +248,16 @@ class DeepResearchEngine:
 
             sufficiency = self.evidence.needs_another_round(
                 pack, is_scientific=plan.get("is_scientific", False))
-            if sufficiency.get("sufficient") or round_no >= config.max_rounds:
+            # §5 — per-axis coverage har round ke baad naapte hain, aur agla
+            # round isi par targeted hota hai.
+            axis_records = axis_coverage(axes, pack.sources, searched=axis_queries)
+            axis_gaps = int(coverage_summary(axis_records).get("mandatory_missing") or 0)
+            if round_no >= config.max_rounds:
+                break
+            # "Itne sources aa gaye" ab round rokne ki KAAFI wajah nahi hai —
+            # pichhli baar 18 sources ke saath 7 zaroori raaste khaali the aur
+            # loop pehle hi round mein "sufficient" keh kar ruk gaya tha.
+            if sufficiency.get("sufficient") and not axis_gaps:
                 break
 
         if pack is None:      # koi round hi nahi chala (max_rounds=0 jaisa case)
@@ -224,6 +265,7 @@ class DeepResearchEngine:
                 question=question, doc_records=doc_records, external_records=[],
                 max_sources=config.max_sources, rounds_run=0,
                 chars_per_source=config.chars_per_source, queries=queries_run)
+            axis_records = axis_coverage(axes, pack.sources, searched=axis_queries)
 
         return {
             "pack": pack, "log": logs, "rounds_run": rounds_run,
@@ -232,6 +274,12 @@ class DeepResearchEngine:
             "queries": queries_run,
             "round_errors": round_errors,
             "round_error_details": round_error_details,
+            # §5 ka record — axes khud, per-axis coverage, aur kis axis par
+            # kaunsi query gayi. Teeno report/gate ke liye machine-readable.
+            "axes": [a.to_dict() for a in axes],
+            "axis_coverage": axis_records,
+            "axis_queries": {k: list(v) for k, v in axis_queries.items()},
+            "axis_summary": coverage_summary(axis_records),
         }
 
     # ── prior art honesty (₹0 patent batch, point 8) ─────────────────────────
@@ -434,9 +482,33 @@ class DeepResearchEngine:
                          f"jod diya gaya (naya kuch nahi likha gaya).")
         return text, notes
 
+    @staticmethod
+    def _evidence_text(pack: Optional[EvidencePack]) -> str:
+        """
+        §17 — jo text SACH mein sources se aaya hai, sirf wahi.
+
+        Iska ek hi kaam hai: batana ki calculation ka koi input sources/question
+        se aaya tha ya model ne khud gadha tha. Isliye yahan sirf snippet aur
+        padhe gaye passages jaate hain — humara khud ka likha kuch nahi.
+        """
+        if pack is None:
+            return ""
+        parts: List[str] = []
+        for src in getattr(pack, "sources", []) or []:
+            for field_name in ("title", "snippet"):
+                value = getattr(src, field_name, "") or ""
+                if value:
+                    parts.append(str(value))
+        for passage in getattr(pack, "passages", []) or []:
+            value = getattr(passage, "text", "") or ""
+            if value:
+                parts.append(str(value))
+        return "\n".join(parts)
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
-                    job_id: Optional[str] = None) -> Dict:
+                    job_id: Optional[str] = None,
+                    counter_search_performed: Optional[bool] = None) -> Dict:
         """
         Budget mapping (free tier ka asli constraint):
             1 call  → sirf analysis (wahi final answer banta hai)
@@ -465,6 +537,12 @@ class DeepResearchEngine:
                "hypothesis_gate": {}, "hypothesis_plan": {},
                # §9/§14 — wajah insaani bhasha mein + raw detail alag
                "failure_kind": "", "failure_reason": "",
+               # §17 — calculation ke structured record (formula, inputs, units,
+               # assumptions, result + teen alag check). `None` matlab extraction
+               # chali hi nahi; khaali list matlab chali aur ek bhi hisaab nahi
+               # mila. Ye farak hi wo jhooth rokta hai jisme report "numeric
+               # sanity check passed" likh deti thi bina koi calculation ke.
+               "calculations": None, "calculations_done": None,
                "technical_details": [], "api_accounting": {}}
 
         # ── user ki EXPLICIT requests (planner ne rule-based nikaali hain) ────
@@ -543,7 +621,15 @@ class DeepResearchEngine:
         # hypothesis ab LEDGER ka hissa hai. Pehle ye list mein hi nahi tha,
         # isliye 0 hypotheses aane par kahin darj nahi hota tha ki ek plan kiya
         # hua kaam fail hua hai — report seedha "zaroorat nahi thi" likh deti thi.
-        if want_hypothesis:
+        #
+        # Par plan sirf wahi kaam ban sakta hai jiske liye SACH mein ek raasta
+        # hai. 1-call (QUICK) mode mein hypothesis ke do hi raaste hain: user ne
+        # khud maanga ho (tab wo pass A ke prompt mein chala jaata hai), ya 2+
+        # call ka budget ho (tab critique/synthesis prompt ke andar). In dono ke
+        # bina "hypothesis planned tha" likhna khud ko jhoothi kami dena hai —
+        # report "1/2 pass" dikha kar run ko adhoora bata deti thi, jabki us
+        # mode mein wo pass chal hi nahi sakta.
+        if want_hypothesis and (explicit_hypotheses or config.gemini_calls >= 2):
             out["planned_passes"].append("hypothesis")
         if config.gemini_calls >= 2:
             out["planned_passes"].append("synthesis")
@@ -653,9 +739,35 @@ class DeepResearchEngine:
         # ── parse ───────────────────────────────────────────────────────────
         if out["critique_raw"]:
             out["critique"] = self.critic.parse(out["critique_raw"]).to_dict()
+        # §17 — hisaab ka structured record. Ye hypothesis enrich se PEHLE
+        # nikalna zaroori hai, kyunki confidence band ka ek reason code
+        # ("NO_CALCULATION") isi par tika hai. Extraction deterministic hai:
+        # koi LLM call nahi, aur jo formula/input likha hi nahi gaya use hum
+        # khud se nahi bharte — record mein wo "missing" rehta hai.
+        calc_source_text = "\n\n".join(t for t in (out["analysis"], out["final"])
+                                       if t)
+        calc_records = physics_checks.extract_calculations(
+            calc_source_text, question=question,
+            evidence_text=self._evidence_text(pack))
+        out["calculations"] = [r.to_dict() for r in calc_records]
+        out["calculations_done"] = physics_checks.calculations_done(calc_records)
+        if out["calculations"]:
+            out["errors"].extend(physics_checks.calculation_warnings(calc_records))
         if out["hypothesis_raw"]:
             parsed = self.hypotheses.parse(out["hypothesis_raw"],
                                            max_count=hypothesis_count)
+            # §13-§18 — parse ke baad ka deterministic record: stable ID,
+            # provenance (kaunse facts + kaunsa gap), mechanism, closest prior
+            # work, novelty status (sirf whitelist ke labels), structured
+            # experiment, confidence BAND (number nahi) aur validation status.
+            # Ye step koi API call nahi karta — ₹0 aur repeatable.
+            # `counter_search_performed` yahan zaroori hai: uske bina confidence
+            # band MODERATE tak nahi ja sakta (§10 ka wahi rule).
+            self.hypotheses.enrich(
+                parsed, question=question, pack=pack, gate=gate,
+                contradictions=contradiction_dicts,
+                counter_search_performed=counter_search_performed,
+                calculations_done=out["calculations_done"])
             out["hypotheses"] = [h.to_dict() for h in parsed]
             out["errors"].extend(self.hypotheses.honesty_check(parsed))
         # Maangi thi 3, mili 1 — ye chup-chaap nahi jaana chahiye. Aur wajah bhi
@@ -775,6 +887,31 @@ class DeepResearchEngine:
             for reason in sufficiency.get("reasons", [])[:3]:
                 warnings.append(f"Evidence limit: {reason}")
 
+        # 3a-bis. §5 — EVIDENCE AXIS COVERAGE ka insaani bayaan.
+        #
+        # Dark-matter run ki sabse badi chuppi yahi thi: report ne "18 sources"
+        # ginaye aur ek baar bhi nahi kaha ki CMB, BBN, Bullet Cluster, lensing,
+        # LSS aur dwarf galaxies par ek bhi saboot nahi tha. Ginti badi thi,
+        # coverage lagbhag zero. Isliye ab ginti ke saath-saath ye bhi report
+        # mein jaata hai ki KAUNSA SABOOT KA RAASTA KHAALI reh gaya.
+        #
+        # `axis_records` khaali ho to koi dava nahi hota: na "cover ho gaya",
+        # na "nahi hua" — sirf "naapa nahi gaya" (tri-state rule).
+        axis_records = list(discovered.get("axis_coverage") or [])
+        axis_summary = dict(discovered.get("axis_summary") or {})
+        axis_note = axis_coverage_note(axis_records) if axis_records else ""
+        axis_counter_search = counter_search_done(axis_records)
+        man_missing = axis_summary.get("mandatory_missing")
+        if man_missing:
+            labels = ", ".join(axis_summary.get("missing_labels") or [])
+            warnings.append(
+                f"Saboot ke {man_missing} zaroori raaste khaali hain"
+                + (f" ({labels})" if labels else "")
+                + f" — kul {axis_summary.get('axes_total', 0)} raaston mein se "
+                  f"{axis_summary.get('axes_covered', 0)} par hi relevant source "
+                  f"mila. Source ki ginti isse nahi dhakti: is jawab ko poora "
+                  f"nahi maanein.")
+
         # 3b. READING (Spec Section 3/4/5) — top sources ka legally-free full
         # text. Ye Gemini ki ek bhi call nahi kharchta; iska budget alag hai
         # (config.max_fulltext). Yahi wo step hai jo "search kiya" ko "padha"
@@ -811,6 +948,10 @@ class DeepResearchEngine:
         self._track(job_id, "EVIDENCE_ANALYSIS", "contradiction + independence check")
         contradiction_objects = self.contradictions.detect(pack)
         contradiction_dicts = [c.to_dict() for c in contradiction_objects]
+        # §11 — jo "takraav" jaanch kar hataye gaye (sirf saal ka farq, topic hi
+        # alag, direction ulti nahi), unka hisaab audit mein jaata hai. Ye report
+        # `detect()` ke baad hi padhni hai, warna pichhle run ka data mil jayega.
+        contradiction_rejections = self.contradictions.rejection_report()
         self._counts(job_id, conflicts=len(contradiction_dicts))
 
         # 5. memory + knowledge graph hints
@@ -821,7 +962,8 @@ class DeepResearchEngine:
 
         # 6. gemini passes
         passes = self._run_passes(question, pack, plan, config, contradiction_dicts,
-                                  memory_note, job_id)
+                                  memory_note, job_id,
+                                  counter_search_performed=axis_counter_search)
         # §9 — engine ke raw error (429/protobuf/exception class) warnings mein
         # nahi jaate. Warning insaani bhasha mein, raw line report ke sabse
         # neeche. Pichhle live run mein yahi text "Seedha jawab" ke neeche
@@ -1068,6 +1210,15 @@ class DeepResearchEngine:
             key = source.source_type.value
             by_type[key] = by_type.get(key, 0) + 1
         coverage["by_source_type"] = by_type
+        # §5 — coverage dict machine-readable hai (UI/Android/final gate isse
+        # padhte hain). Yahan "kitne mile" ke saath "kaunsa raasta khaali hai"
+        # bhi jaata hai, aur khaali record par sab `None` rehta hai.
+        coverage["evidence_axes"] = {
+            "axes": axis_records,
+            "summary": axis_summary,
+            "queries": dict(discovered.get("axis_queries") or {}),
+            "note": axis_note,
+        }
         coverage["peer_reviewed"] = sum(1 for s in pack.sources if s.peer_reviewed is True)
         coverage["full_text_available"] = sum(1 for s in pack.sources
                                               if s.full_text_available)
@@ -1169,6 +1320,63 @@ class DeepResearchEngine:
             base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
             evidence_level = f"⚠️ {INCOMPLETE} — {base}" if base else f"⚠️ {INCOMPLETE}"
 
+        # §10 — counter-side search ke BINA top label ("VERIFIED"/"STRONG") mana
+        # hai. Wajah seedhi hai: sirf support-side dhoond kar "verified" kehna
+        # apne hi nateeje ki taraf jhukna hai. `axis_counter_search` teen haalat
+        # rakhta hai — True (counter axis par query gayi), False (nahi gayi),
+        # None (axes hi naape nahi gaye). True ke alawa dono mein label girta
+        # hai, par wajah dono ki alag likhi jaati hai (jhooth se bachne ke liye).
+        #
+        # Match "✅ " ke saath hai, sirf shabd se nahi: "UNVERIFIED" ke andar bhi
+        # "VERIFIED" chhupa hai, aur usse MIXED banana ULTA upgrade ho jaata.
+        top_label = any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))
+        if top_label and axis_counter_search is not True:
+
+            why = ("counter-side (criticism/replication) search nahi chali"
+                   if axis_counter_search is False else
+                   "counter-side search ka koi record nahi hai")
+            base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
+            evidence_level = f"🟡 MIXED — {why}, isliye 'verified' nahi keh sakta"
+            if base:
+                evidence_level += f" (ginti se banta tha: {base})"
+            warnings.append(
+                "Top label isliye nahi diya gaya: " + why + ". §10 ke hisaab se "
+                "support aur counter side dono par search zaroori hai.")
+
+        # §5 — zaroori evidence axis khaali ho to bhi top label mana hai. Ye
+        # counter-search gate se ALAG taala hai: counter-side chal chuki ho phir
+        # bhi CMB/BBN/lensing jaise raaste khaali reh sakte hain, aur us haalat
+        # mein "verified" kehna sirf source-ginti par bharosa karna hai — yahi
+        # pichhli dark-matter report ki sabse badi galti thi.
+        if man_missing and any((evidence_level or "").startswith(f"✅ {word}")
+                               for word in ("VERIFIED", "STRONG")):
+            base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
+            labels = ", ".join((axis_summary.get("missing_labels") or [])[:4])
+            evidence_level = (
+                f"🟡 MIXED — saboot ke {man_missing} zaroori raaste khaali hain, "
+                f"isliye 'verified' nahi keh sakta")
+            if base:
+                evidence_level += f" (ginti se banta tha: {base})"
+            warnings.append(
+                f"Top label isliye nahi diya gaya: {man_missing} zaroori evidence "
+                f"raaste khaali hain"
+                + (f" ({labels})" if labels else "")
+                + ". Source ki ginti is kami ko nahi dhakti.")
+
+        # §17 — reasoning pass ne jo calculation records nikaale the wahi aage
+        # jaate hain (ek hi jagah se: answer aur audit dono, warna do alag
+        # ginti dikhti). `None` matlab extraction chali hi nahi.
+        calc_records = passes.get("calculations")
+        if not calc_records:
+            # LLM na chala ho (offline reasoning) to bhi hisaab dhoondhna hai —
+            # warna quota marne par calculation ka record chup-chaap gayab ho
+            # jaata. Yahan bhi kuch "bhara" nahi jaata: text mein hisaab nahi
+            # hoga to list khaali hi rahegi.
+            calc_records = physics_checks.calculation_records(
+                gemini_answer, question=question,
+                evidence_text=self._evidence_text(pack))
+
         answer = self.synthesizer.assemble(
             gemini_answer=annotated,
             pack=pack,
@@ -1197,11 +1405,146 @@ class DeepResearchEngine:
             claim_checks=claim_checks,
             hypothesis_plan=passes.get("hypothesis_plan") or {},
             specialist_report=specialist_report,
+            # §17 — jo hisaab sach mein mila, uska poora record jawab mein bhi
+            # dikhta hai (formula, inputs+units, assumptions, result, aur teen
+            # alag check). Khaali/None hone par section chhapta hi nahi.
+            calculations=calc_records,
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
         run_status.missing_sections = list(
             getattr(self.synthesizer, "last_missing_sections", []) or [])
+
+        # 10b. §4 + §7 + §19 — quality contract, counters aur quality_context.
+        #
+        # Teen alag cheezein, jaan-boojh kar alag:
+        #   • contract     = is sawaal se KYA maanga gaya tha (upfront rule)
+        #   • quality_ctx  = asal mein KYA hua (counters + tri-state checks)
+        #   • c_ledger     = dono ka milaan (kya poora hua, kya nahi, kya pata nahi)
+        #
+        # Sabse ahem baat: jo check chala hi nahi uska jawab `None` rehta hai,
+        # `0` nahi. Pichhli dark-matter report isi jhooth par gir gayi thi —
+        # "counter-search: 0" padh kar lagta tha ki dhoonda aur kuch nahi mila,
+        # jabki dhoondha hi nahi gaya tha.
+        contract = quality_contract(question, config=config, requests=requests)
+        # §17 ke records upar ek hi baar nikle hain (`calc_records`) — yahan
+        # dobara extraction jaan-boojh kar nahi ki jaati, warna answer aur audit
+        # mein do alag ginti aa sakti thi.
+        quality_ctx = quality.quality_context(
+            pack=pack,
+            # Counters model ke apne text se — final answer ke "Sources" block
+            # mein har source ka [S#] hota hai, usse ginne par har uncited
+            # source "cited" ban jaata (§7 ka asli bug).
+            answer_text=annotated,
+            verification=claim_checks,
+            # §10 ka pehla hissa: counter-side search SACH mein chali ya nahi.
+            # Ye axis record se aata hai (counter axis par kam se kam ek query),
+            # "kisi source mein criticism shabd tha" se nahi. Axes naape na gaye
+            # hon to `None` hi rehta hai — "nahi chali" nahi.
+            counter_search=axis_counter_search,
+            # §17 — asli calculation records (formula, inputs, units,
+            # assumptions, result + unit/recalculation/sanity/invented check).
+            # Khaali list ka matlab "dekha, koi hisaab nahi mila" hai; `None`
+            # ka matlab "dekha hi nahi gaya" — dono alag baatein hain.
+            calculations=calc_records,
+            recovery_used=bool(recovered) or None,
+            progress_snapshot_preserved=None,   # ye server-side (ChatGPT-owned) hai
+            hypotheses=passes["hypotheses"],
+            contradictions=contradiction_dicts,
+            contradiction_rejections=contradiction_rejections,
+            axis_coverage=axis_records or None,
+        )
+        # Section titles / access-depth ke dave / hypothesis-fact mix sirf
+        # assembled answer mein dikhte hain, isliye doosra scan wahan par.
+        quality_ctx = quality.rescan_final_answer(quality_ctx, pack=pack,
+                                                  final_answer=answer)
+        # §19 — "check hi nahi hua" sirf audit dict mein reh jaata tha, user ke
+        # jawab mein nahi. Live dark-matter report ki galti yahi thi: counter par
+        # "0" chhapa jabki wo check chala hi nahi tha. Inject rescan ke BAAD hota
+        # hai (warna block ka apna text hi dobara scan ho jaata) aur §20 state
+        # block se PEHLE, taaki chaar state audit ke sabse upar hi rahein.
+        answer = quality.inject_unknown_block(answer, quality_ctx)
+
+        delivered: Dict = {
+            "sections_present": list(quality_ctx.get("sections_present") or []),
+            "hypotheses": len(passes["hypotheses"]),
+            "math_model": looks_like_math_model(gemini_answer),
+            "second_order": looks_like_chain(gemini_answer),
+            "red_team": bool(passes["critique_raw"]),
+        }
+        # Sirf wahi key bhejte hain jinka jawab humein SACH mein pata hai.
+        # `counter_search_performed` aur `original_hypotheses` aage ke steps
+        # (§10/§13) mein aayenge — tab tak ledger inhe "pata nahi" likhega, jo
+        # "0 mila" se alag aur imaandaar baat hai.
+        #
+        # §17 — calculations ki ginti POORE hisaab ki hai (formula + inputs +
+        # units + result, aur koi check fail na hua ho). Adhoora hisaab ledger
+        # mein "bani" nahi ginta.
+        calc_count = physics_checks.usable_calculation_count(calc_records)
+        if calc_count is not None:
+            delivered["calculations"] = calc_count
+        for key in ("counter_search_performed", "directly_relevant_sources",
+                    "average_relevance"):
+            if quality_ctx.get(key) is not None:
+                delivered[key] = quality_ctx[key]
+        # §5 — axis coverage ledger tak jaata hai, sirf warning tak nahi. Ek bhi
+        # zaroori raasta khaali ho to `answer_complete` aur `verified_allowed`
+        # dono False ho jaate hain (DEEP/MAXIMUM mein). Naapa hi na gaya ho to
+        # key bheji hi nahi jaati — ledger use "check nahi hua" likhega.
+        for key in ("axes_mandatory_missing", "axes_total", "axes_covered"):
+            if quality_ctx.get(key) is not None:
+                delivered[key] = quality_ctx[key]
+        if quality_ctx.get("axes_missing_labels"):
+            delivered["axes_missing_labels"] = list(
+                quality_ctx["axes_missing_labels"])
+        c_ledger = contract_ledger(contract, delivered=delivered,
+                                   reasons=ledger_reasons)
+
+        # 10c. §20 — chaar ALAG state + unke beech ke conflicts.
+        #
+        # Yahan (assemble ke BAAD) banti hai kyunki ye c_ledger aur quality_ctx
+        # ke FINAL numbers par tiki hai; pehle banane par audit mein do alag
+        # ginti aa jaati. Block report ke audit section ke top par inject hota
+        # hai — user ke jawab ke section chhoote bhi nahi, badalte bhi nahi.
+        claim_counts = dict(quality_ctx.get("claim_results") or {})
+        supported = None
+        if quality_ctx.get("claim_results") is not None:
+            supported = (claim_counts.get("SUPPORTED", 0)
+                         + claim_counts.get("PARTIALLY SUPPORTED", 0))
+        unsupported = None
+        if quality_ctx.get("claim_results") is not None:
+            unsupported = (claim_counts.get("UNSUPPORTED", 0)
+                           + claim_counts.get("CONTRADICTED", 0)
+                           + claim_counts.get("UNABLE TO VERIFY", 0))
+        research_state = build_research_state(
+            ledger=c_ledger,
+            answer_text=answer,
+            source_count=len(pack.sources),
+            usable_source_count=quality_ctx.get("directly_relevant_sources"),
+            # Tri-state: claim check chala hi nahi to `None` — "0 supported"
+            # nahi. Yahi farq §20 ke conflict rule ko sach bolne deta hai.
+            verification_ran=(None if quality_ctx.get("claim_results") is None
+                              else True),
+            supported_claims=supported,
+            unsupported_claims=unsupported,
+            contradictions=len(contradiction_dicts or []),
+            counter_search=axis_counter_search,
+            # prior-art ka record hypotheses ke andar hi hota hai
+            # (`novelty_search.performed`), isliye yahan kuch pass nahi karte —
+            # `build_state` khud wahi record padhta hai. Na chali ho to `None`
+            # rehta hai, jhoota True nahi.
+            hypotheses=passes["hypotheses"],
+            top_label=evidence_level,
+            recovered=bool(recovered),
+        )
+        state_dict = research_state.to_dict()
+        # Conflict chhupta nahi: warning list mein bhi jaata hai (UI banner) aur
+        # audit block mein bhi (report). Dono ek hi object se — do jagah do baat
+        # nahi.
+        for line in state_warnings(research_state):
+            if line not in warnings:
+                warnings.append(line)
+        answer = inject_state_block(answer, research_state)
 
         # 11. memory + graph write (best effort)
         if self.memory:
@@ -1255,6 +1598,13 @@ class DeepResearchEngine:
             missing_sections=list(run_status.missing_sections),
             technical_details=list(technical_lines),
             api_accounting=passes.get("api_accounting") or {},
+            # §4/§7/§19 — ye teen dict machine-readable hain aur final gate
+            # (ChatGPT-owned) inhe hi padhta hai. Inme koi bhi 0/True aisa nahi
+            # hai jo "check nahi hua" ko chhupa raha ho.
+            quality_contract=contract,
+            quality_context=quality_ctx,
+            contract_ledger=c_ledger,
+            research_state=state_dict,
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

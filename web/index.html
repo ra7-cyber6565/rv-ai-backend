@@ -14,6 +14,17 @@ header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:
 .msg{display:flex;gap:12px;padding:15px 0}.av{width:30px;height:30px;flex:0 0 30px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:750}.user .av{background:#eef2f7}.rv .av{background:var(--brand);color:#fff}.body{min-width:0;flex:1}.txt{line-height:1.68;overflow-wrap:anywhere;white-space:normal}.txt p{margin:0 0 11px}.txt p:last-child{margin-bottom:0}
 .thinking{display:inline-flex;gap:5px}.thinking i{width:7px;height:7px;border-radius:50%;background:#8b8b8b;animation:p 1.25s infinite}.thinking i:nth-child(2){animation-delay:.18s}.thinking i:nth-child(3){animation-delay:.36s}@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
 .progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.process{margin-top:14px;border:1px solid var(--line);border-radius:11px;background:var(--soft);padding:10px 12px}.process summary{cursor:pointer;font-weight:650}.process .meta{margin-top:7px}.process .log{margin-top:8px;max-height:180px}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
+/* §20 — chaar ALAG state chaar box mein. Ek box ka matlab doosre se nikaalna mana hai. */
+.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(166px,1fr));gap:8px;margin-top:14px}.st{border:1px solid var(--line);border-radius:11px;padding:9px 11px;background:var(--soft)}.st b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.st span{display:block;margin-top:3px;font-weight:650;font-size:13px;overflow-wrap:anywhere}.st em{display:block;margin-top:4px;font-size:11px;color:var(--muted);font-style:normal;line-height:1.45}
+.rule{font-size:11px;color:var(--muted);margin-top:7px}
+.bad{margin-top:10px;background:#fdeceb;border:1px solid #f5c6c2;color:#8a2018;border-radius:10px;padding:9px 11px;font-size:13px}.bad ul{margin:6px 0 0;padding-left:19px}.recov{margin-top:10px;background:#eef7ff;border:1px solid #cfe4f7;color:#1a4b73;border-radius:10px;padding:9px 11px;font-size:13px}
+/* §21 — chhah tab. Har section theek ek tab mein jaata hai, koi hissa gayab nahi hota. */
+.tabs{display:flex;gap:4px;overflow-x:auto;margin-top:14px;border-bottom:1px solid var(--line)}.tab{border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 11px;font:inherit;font-weight:650;font-size:13px;color:var(--muted);cursor:pointer;white-space:nowrap}.tab.on{color:var(--ink);border-bottom-color:var(--brand)}.tab .n{opacity:.7;font-weight:600}
+.pane{display:none;padding-top:13px}.pane.on{display:block}.pane h4{margin:14px 0 6px;font-size:13px}.pane h4:first-child{margin-top:0}
+/* §22 — 12 stage ki 12 row, hamesha. Job khatam hone par bhi ye panel rehta hai. */
+.stages{margin-top:6px}.strow{display:flex;gap:9px;padding:5px 0;border-bottom:1px dashed #f0f0f0;font-size:13px}.strow:last-child{border-bottom:0}.strow .mk{flex:0 0 18px;text-align:center}.strow .nm{font-weight:650}.strow .nt{color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}.strow.pend{color:var(--muted)}.strow.pend .nm{font-weight:600}.strow.now .nm{color:var(--brand)}
+.card{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin:8px 0}.card h5{margin:0 0 5px;font-size:13px}.kv{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.plain{line-height:1.66;overflow-wrap:anywhere}.plain p{margin:0 0 10px}.empty{color:var(--muted);font-size:13px;background:var(--soft);border:1px dashed var(--line);border-radius:10px;padding:10px 11px}
 footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
 @media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
@@ -114,8 +125,28 @@ async function projectPost(url,makePayload,timeoutMs=0){
 
 async function runChat(message,el){thinking(el);try{let out={r:{ok:false,status:0},data:{},aborted:false};for(let attempt=0;attempt<2;attempt++){out=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}),55000);if(out.r.ok||![0,502,503,504].includes(Number(out.r.status||0))||attempt===1)break;await sleep(1500);}const {r,data}=out;if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat",out.aborted));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
 
-function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
-function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
+// §22 — 12 stage ki 12 row. Kabhi banaya hua "62%" nahi; sirf ginti aur record.
+// Jo stage chala hi nahi uska record "nahi chala" hai, aur jiska log trim ho gaya
+// uska record "pata nahi" — dono ko "pending" bana dena jhooth hota.
+function stageTable(p){
+  const prog=p||{},ran=new Map();
+  for(const s of (Array.isArray(prog.stages_completed)?prog.stages_completed:[]))if(!ran.has(s))ran.set(s,"");
+  const log=Array.isArray(prog.log)?prog.log:[];
+  for(const item of log){const s=item&&item.stage;if(s&&STAGES.includes(s))ran.set(s,String(item.note||""));}
+  const done=Math.max(0,Number(prog.stages_done||0)),trimmed=Math.max(0,done-ran.size);
+  const current=String(prog.current_stage||""),finished=ran.has("COMPLETE")||current==="COMPLETE";
+  return STAGES.map(stage=>{
+    const label=STAGE_LABEL[stage]||stage,live=(stage===current&&!finished);
+    if(ran.has(stage))return {stage,label,note:ran.get(stage),mk:live?"●":"✓",cls:live?"now":"done"};
+    if(trimmed>0)return {stage,label,mk:"?",cls:"pend",note:"Is stage ka record pata nahi — progress log ki sirf aakhri lines rakhi jaati hain."};
+    if(finished)return {stage,label,mk:"–",cls:"pend",note:"Is run mein ye stage chala hi nahi."};
+    return {stage,label,mk:"·",cls:"pend",note:"Abhi baaki hai."};
+  });
+}
+function stageRowsHtml(p){return '<div class="stages">'+stageTable(p).map(r=>'<div class="strow '+r.cls+'"><div class="mk">'+r.mk+'</div><div><div class="nm">'+esc(r.label)+'</div>'+(r.note?'<div class="nt">'+esc(r.note)+'</div>':'')+'</div></div>').join("")+'</div>';}
+function progressCounts(p){const prog=p||{};return Number(prog.sources_discovered||0)+" sources • "+Number(prog.documents_processed||0)+" documents • "+Number(prog.full_text_sources_read||0)+" full-text • "+Number(prog.evidence_conflicts_found||0)+" conflicts checked • "+Number(prog.reasoning_calls_used||prog.gemini_calls_used||0)+" reasoning calls";}
+function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="rows"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),rows:el.querySelector(".rows")};}
+function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0)),total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+progressCounts(p);ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";ui.rows.innerHTML=stageRowsHtml(p);down();}
 
 async function runResearch(question,el,requestedMode=mode){const ui=progressPanel(el);let jobId="",jobToken="";try{
   const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
@@ -138,8 +169,146 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
   if(!res.r.ok){friendly(el,clientFailure(res.r.status,res.data,"Research result"));restoreQuestion(question);return false;}renderResearch(el,res.data);return true;
 }catch(e){friendly(el,clientFailure(0,{},"Research"));restoreQuestion(question);return false;}}
 
-function appendResearchProcess(el,p){if(!p||p.available!==true)return;const details=document.createElement("details");details.className="process";const summary=document.createElement("summary");summary.textContent="Research process — "+Number(p.stages_done||0)+"/"+Number(p.stages_total||STAGES.length)+" stages";details.appendChild(summary);const meta=document.createElement("div");meta.className="meta";meta.textContent=Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text • "+Number(p.evidence_conflicts_found||0)+" conflicts checked";details.appendChild(meta);if(Array.isArray(p.log)&&p.log.length){const log=document.createElement("div");log.className="log";log.textContent=p.log.map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");details.appendChild(log);}el.appendChild(details);}
-function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});appendResearchProcess(el,data?.research_progress);const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),href=safeHttpUrl(s.url),url=href?esc(href):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
+// §12/§21 — answer ke `##` section kaun se hain, ye list backend ke
+// research_engine/answer_order.py se mirror hai (wahi canonical naam, wahi
+// aliases, wahi longest-alias rule). Test: tests/test_recovery_ui_contract.py
+// isi table ko HTML se nikaal kar backend ke saath match karta hai, isliye
+// heading badalne par chuppi nahi rahegi.
+const SECTIONS=[
+ ["direct_answer","Seedha jawab",["seedha jawab","direct answer"]],
+ ["established_knowledge","Established knowledge",["established knowledge","research se kya pata chala","established evidence"]],
+ ["supporting_evidence","Supporting evidence",["supporting evidence","evidence kya kehta hai"]],
+ ["counterevidence","Counterevidence",["counterevidence","counter evidence","counter-evidence","iske against kya mila","evidence against"]],
+ ["calculations","Calculations",["calculations","hisaab","quantitative checks"]],
+ ["unknowns","Unknowns",["unknowns","kya abhi unknown hai","what remains unknown"]],
+ ["conclusion","Evidence-based conclusion",["evidence-based conclusion","evidence based conclusion","final conclusion"]],
+ ["original_lab","APP ORIGINAL RESEARCH LAB",["app original research lab","humari hypotheses","app-generated research hypotheses"]],
+ ["audit","Audit and limits",["audit and limits","audit & limits","research quality","technical audit"]],
+ ["sources","Sources",["sources","references"]]];
+// Har canonical section theek EK tab mein. Jo heading pehchani na jaaye wo bhi
+// gayab nahi hoti — wo Jawab tab mein aati hai.
+const TAB_SECTIONS={answer:["direct_answer","conclusion"],evidence:["established_knowledge","supporting_evidence","counterevidence","calculations","unknowns"],lab:["original_lab"],sources:["sources"],audit:["audit"]};
+const TAB_NAMES={answer:"Jawab",evidence:"Evidence",lab:"Research Lab",sources:"Sources",process:"Process",audit:"Audit"};
+function normHead(raw){let s=String(raw??"").trim().replace(/^#+/,"").trim().replace(/^\d+[.)]\s*/,"").replace(/[*_`#]/g,"");s=Array.from(s).filter(ch=>/[\p{L}\p{N}\s]/u.test(ch)||"-/?&,:()'—–".includes(ch)).join("");return s.toLowerCase().split(/\s+/).filter(Boolean).join(" ");}
+function sectionKey(title){const t=normHead(title);if(!t)return "";for(const row of SECTIONS)if(t===normHead(row[1]))return row[0];let key="",len=0;for(const row of SECTIONS)for(const alias of row[2])if(t.includes(alias)&&alias.length>len){key=row[0];len=alias.length;}return key;}
+function splitAnswer(text){const src=String(text||""),re=/^##[ \t]+(.+?)[ \t]*$/gm,marks=[];let m;while((m=re.exec(src)))marks.push({title:m[1].trim(),start:m.index,bodyAt:re.lastIndex});
+  if(!marks.length)return {lead:src.trim(),blocks:[]};
+  const blocks=marks.map((mk,i)=>({key:sectionKey(mk.title),title:mk.title,body:src.slice(mk.bodyAt,i+1<marks.length?marks[i+1].start:src.length).trim()}));
+  return {lead:src.slice(0,marks[0].start).trim(),blocks};}
+function rich(text){return htmlText(text).replace(/\*\*([^*<>]{1,300}?)\*\*/g,"<strong>$1</strong>");}
+function sectionHtml(split,keys){let out="";for(const b of split.blocks)if(keys.includes(b.key))out+='<h4>'+esc(b.title)+'</h4><div class="plain">'+rich(b.body||"(is section mein kuch likha nahi gaya.)")+'</div>';return out;}
+function emptyBox(text){return '<div class="empty">'+esc(text)+'</div>';}
+// Duplicate recovery footer live run mein do baar chhap gaya tha. Bilkul same
+// paragraph do baar dikhana kabhi bhi nayi jaankari nahi deta, isliye display par
+// pehla rakh kar baaki hata dete hain (text badalta nahi, sirf repeat hatta hai).
+function dedupeParas(text){const seen=new Set();return String(text||"").split(/\n{2,}/).filter(p=>{const key=p.trim();if(!key)return false;if(seen.has(key))return false;seen.add(key);return true;}).join("\n\n");}
+// §20 — chaar state chaar box. UI ek se doosra kabhi nahi nikaalta; record na ho
+// to seedha "record nahi mila" likhta hai.
+function stateBarHtml(state){
+  const s=(state&&typeof state==="object")?state:null;
+  if(!s||!s.job_status)return emptyBox("Is result mein chaar-state ka record nahi mila (purana ya recovered result ho sakta hai). UI khud se koi state guess nahi karta.");
+  const ex=s.explain||{},why=s.reasons||{};
+  const rows=[["Background job","job_status"],["Jawab poora hua?","answer_state"],["Evidence ki haalat","evidence_state"],["App ke idea ki novelty","novelty_state"]];
+  let html='<div class="states">';
+  for(const row of rows){const note=String(why[row[1]]||ex[row[1]]||"");html+='<div class="st"><b>'+esc(row[0])+'</b><span>'+esc(String(s[row[1]]||"—"))+'</span>'+(note?'<em>'+esc(note)+'</em>':'')+'</div>';}
+  html+='</div><div class="rule">Job poora hona ≠ jawab poora hona ≠ evidence mazboot hona ≠ idea naya hona. Chaaron alag se naapi jaati hain.'+(s.novelty_applicable===false?" (Novelty is run par laagu nahi — app ne apni koi hypothesis nahi banayi.)":"")+'</div>';
+  if(Array.isArray(s.conflicts)&&s.conflicts.length)html+='<div class="bad"><strong>State conflict — isliye "VERIFIED" jaisa top label allowed nahi:</strong><ul>'+s.conflicts.map(c=>'<li>'+esc(c)+'</li>').join("")+'</ul></div>';
+  return html;
+}
+// §22 recovery contract — banner theek EK baar, aur recovery ko evidence nahi kehta.
+function recoveryHtml(data){
+  const ctx=(data&&data.quality_context)||{},snap=(data&&data.research_progress)||{};
+  if(!(ctx.recovery_used===true||data.recovered===true||data.recovery_used===true))return "";
+  const kept=ctx.progress_snapshot_preserved===true||snap.available===true;
+  return '<div class="recov">♻️ <strong>Recovery use hui:</strong> pehla raasta poora nahi chala, isliye ye jawab bachaye gaye hisse se bana hai. '+(kept?"Research process ka record Process tab mein surakshit hai.":"Process ka record is result ke saath nahi aaya.")+' Recovery se evidence mazboot nahi hota — Evidence tab dekhein.</div>';
+}
+function claimsHtml(data){
+  const cc=((data.verification||{}).claim_checks)||null;
+  if(!cc||!Array.isArray(cc.claims))return emptyBox("Claim-level verification ka record nahi hai — matlab check chala hi nahi. Ise \"kuch galat nahi mila\" na padhein.");
+  if(!cc.claims.length)return emptyBox("Koi labelled + cited claim nahi mila, isliye claim-by-claim check chala hi nahi.");
+  return cc.claims.slice(0,40).map(c=>'<div class="card"><h5>'+esc(String(c.result||c.verdict_label||"—"))+(c.critical?" • critical claim":"")+'</h5><div class="plain">'+rich(String(c.claim||""))+'</div>'+(c.result_why?'<div class="kv">'+esc(c.result_why)+'</div>':'')+(c.reason?'<div class="kv">'+esc(c.reason)+'</div>':'')+'<div class="kv">Cited: '+(Array.isArray(c.cited_ids)&&c.cited_ids.length?esc(c.cited_ids.join(", ")):"koi source cite nahi hua")+'</div></div>').join("");
+}
+function contraHtml(data){
+  const list=Array.isArray(data.contradictions)?data.contradictions:[],counter=(data.quality_context||{}).counter_search_performed;
+  const head=counter===true?"":emptyBox(counter===false?"Counter-side (against) search is run mein nahi chali — isliye \"koi contradiction nahi\" ka matlab \"dhoonda hi nahi\" hai.":"Counter-side search ka record nahi mila (chali ya nahi, pata nahi).");
+  if(!list.length)return head+emptyBox("Koi valid contradiction record nahi mila.");
+  return head+list.slice(0,25).map(c=>'<div class="card"><h5>'+esc(String(c.type||"contradiction"))+(c.severity?" • "+esc(String(c.severity)):"")+'</h5><div class="plain">'+rich(String(c.summary||""))+'</div>'+(c.source_a_claim?'<div class="kv">A: '+esc(String(c.source_a_claim))+'</div>':'')+(c.source_b_claim?'<div class="kv">B: '+esc(String(c.source_b_claim))+'</div>':'')+(Array.isArray(c.sources)&&c.sources.length?'<div class="kv">Sources: '+esc(c.sources.join(", "))+'</div>':'')+(c.note?'<div class="kv">'+esc(String(c.note))+'</div>':'')+'</div>').join("");
+}
+function labHtml(split,data){
+  const list=Array.isArray(data.hypotheses)?data.hypotheses:[];
+  let out=sectionHtml(split,TAB_SECTIONS.lab)||emptyBox("Answer mein \"APP ORIGINAL RESEARCH LAB\" section nahi mila.");
+  if(!list.length)return out+emptyBox("App ne is run mein apni koi hypothesis nahi banayi. Patle evidence par hypothesis banana jaan-boojh kar mana hai.");
+  return out+'<h4>Hypothesis cards ('+list.length+')</h4>'+list.map((h,i)=>{
+    const done=(h.novelty_search||{}).performed;
+    return '<div class="card"><h5>'+esc(String(h.hypothesis_id||("RV-HYP-"+(i+1))))+' • app ka idea, established fact nahi</h5><div class="plain">'+rich(String(h.statement||h.simple||""))+'</div><div class="kv">Novelty: '+esc(String(h.novelty_status||"NOVELTY UNVERIFIED"))+' — prior-art search: '+(done===true?"chali":(done===false?"nahi chali":"record nahi"))+'</div><div class="kv">Testable: '+(h.is_testable?"haan":"nahi")+' • Confidence band: '+esc(String(h.confidence_band||"record nahi"))+'</div>'+(h.disclaimer?'<div class="kv">'+esc(String(h.disclaimer))+'</div>':'')+'</div>';
+  }).join("");
+}
+function auditHtml(split,data){
+  let out=sectionHtml(split,TAB_SECTIONS.audit)||emptyBox("Answer mein audit section nahi mila.");
+  const gate=data.quality_gate||{},led=data.contract_ledger||{};
+  const bits=[];
+  if(data.evidence_level)bits.push("Top label: "+data.evidence_level);
+  if(data.status)bits.push("Run status: "+data.status+(data.status_reason?" — "+data.status_reason:""));
+  if(led.result_state)bits.push("Contract ledger: "+led.result_state+(Array.isArray(led.mandatory_missing)&&led.mandatory_missing.length?" (missing: "+led.mandatory_missing.join(", ")+")":""));
+  if(gate.verified_allowed!==undefined)bits.push("Final quality gate: VERIFIED allowed = "+(gate.verified_allowed?"haan":"nahi"));
+  if(Array.isArray(data.quality_repairs)&&data.quality_repairs.length)bits.push("Gate repairs: "+data.quality_repairs.join(", "));
+  if(bits.length)out+='<h4>Release checks</h4>'+bits.map(b=>'<div class="kv">'+esc(b)+'</div>').join("");
+  const warn=[];for(const w of (Array.isArray(data.warnings)?data.warnings:[]))if(w&&!warn.includes(String(w)))warn.push(String(w));
+  if(warn.length)out+='<h4>Warnings ('+warn.length+')</h4>'+warn.map(w=>'<div class="kv">• '+esc(w)+'</div>').join("");
+  const tech=Array.isArray(data.technical_details)?data.technical_details:[];
+  if(tech.length)out+='<details class="process"><summary>Technical details (developer ke liye — jawab ka hissa nahi)</summary><div class="log">'+esc(tech.join("\n"))+'</div></details>';
+  return out;
+}
+function processHtml(data){
+  const p=data.research_progress||{};
+  if(p.available!==true)return emptyBox("Is result ke saath research process ka snapshot nahi aaya, isliye stage-by-stage record nahi dikhaya ja sakta. (Job chal rahi thi tab ka live panel isse alag hai.)");
+  return '<div class="kv">'+esc(Number(p.stages_done||0)+"/"+Number(p.stages_total||STAGES.length)+" stages • "+progressCounts(p))+'</div>'+stageRowsHtml(p);
+}
+// §21 — chhah tab: Jawab / Evidence / Research Lab / Sources / Process / Audit.
+// Answer ka har section theek ek tab mein jaata hai; pehchani na jaane wali
+// heading aur bina-heading text Jawab tab mein aata hai, taaki kuch bhi gayab
+// na ho. Tab badalna sirf display hai — koi dobara request nahi jaati.
+function renderResearch(el,data){
+  data=(data&&typeof data==="object")?data:{};
+  const raw=data.answer?String(data.answer):"";
+  const text=raw.trim()?raw:"Research complete hui, lekin is run mein readable answer nahi bana.";
+  history.push({role:"rv",content:text});
+  const split=splitAnswer(dedupeParas(text));
+  const known=[].concat(TAB_SECTIONS.answer,TAB_SECTIONS.evidence,TAB_SECTIONS.lab,TAB_SECTIONS.sources,TAB_SECTIONS.audit);
+  let answerPane=(split.lead?'<div class="plain">'+rich(split.lead)+'</div>':"")+sectionHtml(split,TAB_SECTIONS.answer);
+  for(const b of split.blocks)if(!known.includes(b.key))answerPane+='<h4>'+esc(b.title)+'</h4><div class="plain">'+rich(b.body)+'</div>';
+  if(!answerPane)answerPane='<div class="plain">'+rich(text)+'</div>';
+  const evidencePane=sectionHtml(split,TAB_SECTIONS.evidence)+'<h4>Claim-by-claim check</h4>'+claimsHtml(data)+'<h4>Counter-side aur contradictions</h4>'+contraHtml(data);
+  const claimCount=(((data.verification||{}).claim_checks||{}).claims||[]).length;
+  const hypoCount=(Array.isArray(data.hypotheses)?data.hypotheses:[]).length;
+  const srcCount=(Array.isArray(data.sources)?data.sources:[]).length;
+  const snap=data.research_progress||{};
+  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:processHtml(data),audit:auditHtml(split,data)};
+  const badge={answer:"",evidence:claimCount?String(claimCount):"",lab:String(hypoCount),sources:String(srcCount),process:(snap.available===true?Number(snap.stages_done||0)+"/"+Number(snap.stages_total||STAGES.length):""),audit:String((((data.research_state||{}).conflicts)||[]).length||"")};
+  const order=["answer","evidence","lab","sources","process","audit"];
+  const box=document.createElement("div");
+  box.innerHTML=stateBarHtml(data.research_state)+recoveryHtml(data)
+    +'<div class="tabs">'+order.map((k,i)=>'<button type="button" class="tab'+(i?"":" on")+'" data-pane="'+k+'">'+esc(TAB_NAMES[k])+(badge[k]?' <span class="n">'+esc(badge[k])+'</span>':"")+'</button>').join("")+'</div>'
+    +order.map((k,i)=>'<div class="pane'+(i?"":" on")+'" data-pane="'+k+'">'+panes[k]+'</div>').join("");
+  box.addEventListener("click",e=>{const t=e.target.closest(".tab");if(!t||!box.contains(t))return;
+    box.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
+    box.querySelectorAll(".pane").forEach(p=>p.classList.toggle("on",p.dataset.pane===t.dataset.pane));});
+  el.innerHTML="";el.appendChild(box);
+  if(data.status&&String(data.status).toUpperCase()!=="COMPLETE")note(el,"Run status: "+data.status+(data.status_reason?" — "+data.status_reason:""));
+  down();
+}
+
+// Source card. Pehle scheme check (safeHttpUrl), USKE BAAD escape — sirf escape
+// karne se javascript: URL band nahi hoti, isliye kram badalna mana hai.
+function sourcesHtml(split,data){
+  const list=Array.isArray(data.sources)?data.sources:[];
+  let out="";
+  if(!list.length)out=emptyBox("Is run mein koi cited source record nahi mila.");
+  else out=list.slice(0,60).map(s=>{const href=safeHttpUrl(s.url),url=href?esc(href):"",title=esc(String(s.title||s.url||"Source")),read=esc(String(s.access_depth||s.reading_level||""));
+    return '<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Kitna padha: '+read+'</div>':'')+(s.access_depth_note?'<div class="meta">'+esc(String(s.access_depth_note))+'</div>':'')+(s.patent_evidence_note?'<div class="meta">'+esc(String(s.patent_evidence_note))+'</div>':'')+'</div>';}).join("");
+  const raw=sectionHtml(split,TAB_SECTIONS.sources);
+  return out+(raw?'<details class="process"><summary>Answer ka Sources section (jaisa likha gaya)</summary>'+raw+'</details>':"");
+}
 
 async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");const completed=mode==="QUICK"?await runChat(message,r):await runResearch(message,r);if(!completed&&history.length&&history[history.length-1]?.role==="user")history.pop();busy=false;send.disabled=false;input.focus();}
 function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);

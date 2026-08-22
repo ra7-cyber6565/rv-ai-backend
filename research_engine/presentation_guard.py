@@ -16,6 +16,12 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
+from .answer_order import (
+    canonical_key,
+    display_heading,
+    section_body,
+    section_start,
+)
 from .models import EvidencePack
 
 _HEADING_RE = re.compile(r"^##\s+(.+?)\s*$", re.MULTILINE)
@@ -81,12 +87,53 @@ def _section_spans(text: str) -> List[Tuple[str, int, int]]:
 
 
 def _body(text: str, title: str) -> str:
+    """Section ka body — pehle canonical pehchan se, warna exact naam se.
+
+    §12 (2026-08-22): pehle yahan sirf EXACT lowercase heading match tha. Jab
+    headings dual ho gayi ("Supporting evidence — evidence kya kehta hai?"), to
+    ye function chup-chaap khaali string dene lagta — aur us par tikke A/E/L
+    check bina wajah fail ho jaate. Ab pehchan `answer_order` se hoti hai,
+    isliye heading ka wording badalne par kuch nahi tootta.
+    """
+    key = canonical_key(title)
+    if key:
+        found_body = section_body(text, key)
+        if found_body:
+            return found_body
     wanted = title.strip().lower()
     for found, start, end in _section_spans(text):
         if found.strip().lower() == wanted:
             block = text[start:end]
             return block.split("\n", 1)[1].strip() if "\n" in block else ""
     return ""
+
+
+def _tail_start(text: str) -> int:
+    """Human answer kahan khatam hota hai — audit/Sources me se jo pehle aaye.
+
+    §12 mein order "audit phir Sources" hai; purani reports mein ulta tha.
+    Dono haalat sahi se handle hoti hain, kyunki yahan minimum liya jaata hai.
+    """
+    marks = [pos for pos in (section_start(text, "audit"),
+                             section_start(text, "sources")) if pos >= 0]
+    return min(marks) if marks else len(text or "")
+
+
+def _tail_order_ok(text: str) -> bool:
+    """§12 — aakhir ke do section: pehle "Audit and limits", phir "Sources".
+
+    Ye check jaan-boojh kar badla gaya (2026-08-22). Pehle ye "Sources phir
+    audit" maangta tha, jo §12 ke mandatory order se ULTA hai. Sakhti waisi hi
+    hai: ye dono hi report ke aakhri do section hone chahiye aur inke baad koi
+    doosra section nahi aana chahiye — sirf inka aapas ka kram palta hai.
+    """
+    audit_at = section_start(text, "audit")
+    sources_at = section_start(text, "sources")
+    if audit_at < 0 or sources_at < 0 or audit_at > sources_at:
+        return False
+    others = [start for title, start, _ in _section_spans(text)
+              if canonical_key(title) not in {"audit", "sources"}]
+    return all(start < audit_at for start in others)
 
 
 def _positions(text: str) -> Dict[str, int]:
@@ -106,11 +153,7 @@ def _simplify_formal_hindi(text: str) -> Tuple[str, int]:
 
 def _clean_main_technical_junk(text: str) -> Tuple[str, List[str]]:
     """Move raw diagnostic lines/URLs out of the main explanation, never lose them."""
-    marker = text.find("## Sources")
-    if marker < 0:
-        marker = text.find("## Research quality / technical audit")
-    if marker < 0:
-        marker = len(text)
+    marker = _tail_start(text)
     main, tail = text[:marker], text[marker:]
     kept: List[str] = []
     moved: List[str] = []
@@ -136,9 +179,16 @@ def _clean_main_technical_junk(text: str) -> Tuple[str, List[str]]:
 
 
 def _ensure_unknown_section(text: str, pack: EvidencePack) -> Tuple[str, bool]:
-    if _body(text, "Kya abhi unknown hai?"):
+    if section_body(text, "unknowns"):
         return text, False
-    insert_at = text.find("## Final conclusion")
+    # §12 — Unknowns conclusion se PEHLE aata hai. Conclusion na mile to LAB /
+    # audit / Sources me se jo pehle aaye, uske pehle daal dete hain — text
+    # kabhi report ke bahar nahi girta.
+    insert_at = section_start(text, "conclusion")
+    if insert_at < 0:
+        insert_at = section_start(text, "original_lab")
+    if insert_at < 0:
+        insert_at = _tail_start(text) if (text or "") else -1
     if insert_at < 0:
         return text, False
     unknown: List[str] = []
@@ -154,31 +204,55 @@ def _ensure_unknown_section(text: str, pack: EvidencePack) -> Tuple[str, bool]:
             "Available evidence ke bahar kaunse important missing factors bache hain, "
             "is run ne unhe reliably identify nahi kiya; isliye unhe unknown maana gaya hai."
         )
-    block = "## Kya abhi unknown hai?\n\n" + "\n\n".join(unknown) + "\n\n"
+    block = f"## {display_heading('unknowns')}\n\n" + "\n\n".join(unknown) + "\n\n"
     return text[:insert_at] + block + text[insert_at:], True
+
+
+def _flatten_excerpt(body: str) -> str:
+    """
+    Section ke body ko EK line ki prose banao — markdown ke markers hata kar.
+
+    Kyun (2026-08-22, §24 dark-matter run): pehle sirf `\\s+` collapse hota tha.
+    Us section ke andar ke `### Fact — …` sub-heading aur `- ` bullets waise hi
+    line ke shuru mein aa jaate the, isliye "Seedha jawab" ke andar ek naya
+    NAKLI heading ban jaata tha:
+
+        ### Fact — jo research se already support hota hai - **Dark matter…
+
+    Aur `quality_producers.sections_present()` use ek asli section maan leta tha
+    — audit mein 300 character ka ek bekaar "section" chhap raha tha. Content
+    kuch nahi hataya ja raha, sirf `#`, bullet aur bold ke nishaan.
+    """
+    text = body or ""
+    text = re.sub(r"(?m)^[ \t]{0,3}#{1,6}[ \t]*", "", text)   # heading markers
+    text = re.sub(r"(?m)^[ \t]{0,3}[-*+][ \t]+", "", text)    # bullet markers
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
 
 
 def _strengthen_seedha_from_existing_sections(text: str) -> Tuple[str, bool]:
     """If Seedha jawab is too thin, reuse existing human sections; invent nothing."""
-    seedha = _body(text, "Seedha jawab")
+    seedha = section_body(text, "direct_answer")
     if len(re.sub(r"\s+", " ", seedha)) >= 240:
         return text, False
     spans = _section_spans(text)
-    seed_span = next((row for row in spans if row[0].lower() == "seedha jawab"), None)
+    seed_span = next((row for row in spans
+                      if canonical_key(row[0]) == "direct_answer"), None)
     if not seed_span:
         return text, False
 
     pieces: List[str] = [seedha] if seedha else []
-    for title in (
-        "Research se kya pata chala?",
-        "Ye kyun hota hai?",
-        "Evidence kya kehta hai?",
-        "Iske against kya mila?",
-        "Humari Hypotheses",
-        "Kya abhi unknown hai?",
-        "Final conclusion",
+    # §12 ke canonical order mein — heading ka wording badal jaaye to bhi ye
+    # list kaam karti rehti hai, kyunki pehchan key se hoti hai.
+    for key in (
+        "established_knowledge",
+        "supporting_evidence",
+        "counterevidence",
+        "original_lab",
+        "unknowns",
+        "conclusion",
     ):
-        body = re.sub(r"\s+", " ", _body(text, title)).strip()
+        body = _flatten_excerpt(section_body(text, key))
         if not body:
             continue
         # Reuse, do not generate: one compact excerpt per already-written section.
@@ -189,21 +263,35 @@ def _strengthen_seedha_from_existing_sections(text: str) -> Tuple[str, bool]:
         return text, False
     replacement = "\n\n".join(pieces)
     title, start, end = seed_span
-    old_block = text[start:end]
-    new_block = "## Seedha jawab\n\n" + replacement + "\n\n"
+    new_block = f"## {title}\n\n" + replacement + "\n\n"
     return text[:start] + new_block + text[end:], True
 
 
 def _append_moved_to_audit(text: str, moved: List[str]) -> str:
     if not moved:
         return text
-    audit = text.find("## Research quality / technical audit")
-    if audit < 0:
-        return text + "\n\n## Research quality / technical audit\n\n"
     block = (
         "\n\n### Technical details jo main answer se neeche move kiye gaye\n"
         + "\n".join(f"- `{line[:280]}`" for line in moved[:10])
     )
+    audit_at = section_start(text, "audit")
+    if audit_at < 0:
+        # Audit section hi nahi hai. §12 ka order "audit phir Sources" hai,
+        # isliye naya audit Sources se PEHLE banta hai — moved lines report ke
+        # aakhir mein Sources ke baad latak kar order nahi todengi.
+        sources_at = section_start(text, "sources")
+        new_audit = f"## {display_heading('audit')}\n{block.lstrip()}\n"
+        if sources_at < 0:
+            return text.rstrip() + "\n\n" + new_audit.rstrip()
+        return (text[:sources_at].rstrip() + "\n\n" + new_audit.rstrip()
+                + "\n\n" + text[sources_at:].lstrip())
+    # Audit section maujood hai: uske BODY ke aakhir mein jodo. Pehle ye poori
+    # report ke aakhir mein chipak jaata tha, jo §12 ke baad Sources ke neeche
+    # gir jaata (aur Sources aakhri section rehna chahiye).
+    sources_at = section_start(text, "sources")
+    if sources_at > audit_at:
+        return (text[:sources_at].rstrip() + block + "\n\n"
+                + text[sources_at:].lstrip())
     return text.rstrip() + block
 
 
@@ -238,17 +326,12 @@ class PresentationGuard:
         if strengthened:
             audit.repairs.append("thin Seedha jawab strengthened only with already-produced report text")
 
-        main_end = text.find("## Sources")
-        if main_end < 0:
-            main_end = text.find("## Research quality / technical audit")
-        if main_end < 0:
-            main_end = len(text)
+        main_end = _tail_start(text)
         main = text[:main_end]
-        seedha = _body(text, "Seedha jawab")
-        positions = _positions(text)
+        seedha = section_body(text, "direct_answer")
         lower = text.lower()
         main_lower = main.lower()
-        hyp_text = _body(text, "Humari Hypotheses").lower()
+        hyp_text = section_body(text, "original_lab").lower()
         has_hypotheses = bool(hypotheses)
         incomplete = (not pack.reasoning_complete) or str((status or {}).get("status") or "").upper() in {
             "RESEARCH INCOMPLETE", "INCOMPLETE", "PARTIAL"
@@ -259,23 +342,34 @@ class PresentationGuard:
             "B_natural_hinglish": not any(old in main for old, _ in _FORMAL_REPLACEMENTS),
             "C_common_english_words_kept": any(word in main_lower for word in ("research", "evidence", "source", "hypothesis", "result")),
             "D_no_overly_formal_hindi": not any(old in main for old, _ in _FORMAL_REPLACEMENTS),
-            "E_hypotheses_explained": (not has_hypotheses) or all(token in hyp_text for token in _HYPOTHESIS_REQUIRED),
+            # §12 (2026-08-22) — E ab do baat maangta hai: hypothesis card ke
+            # saare human field, AUR app ki apni soch par lagi warning. Checklist
+            # A–L ki ginti jaan-boojh kar 12 hi rakhi gayi hai (naya letter nahi
+            # joda), kyunki "hypothesis samjhaya gaya" ka matlab hi ye hai ki
+            # user ko pata chale ki ye research ka established fact NAHI hai.
+            "E_hypotheses_explained": (
+                (not has_hypotheses)
+                or (all(token in hyp_text for token in _HYPOTHESIS_REQUIRED)
+                    and "app ki khud ki soch hai" in hyp_text)
+            ),
             "F_support_and_opposition_explained": (
-                ("evidence kya kehta hai" in lower and "iske against kya mila" in lower)
+                bool(section_body(text, "supporting_evidence"))
+                and bool(section_body(text, "counterevidence"))
             ),
             "G_fact_inference_hypothesis_distinct": all(token in lower for token in ("fact", "inference", "hypothesis")),
             "H_no_raw_logs_in_main": not bool(_RAW_LINE_RE.search(main)),
-            "I_sources_and_audit_last": (
-                "Sources" in positions and "Research quality / technical audit" in positions
-                and positions["Sources"] < positions["Research quality / technical audit"]
-                and all(positions["Sources"] > pos for name, pos in positions.items()
-                        if name not in {"Sources", "Research quality / technical audit"})
-            ),
+            # §12 (2026-08-22) — JAAN-BOOJH KAR BADLA GAYA. Pehle ye check
+            # "Sources phir audit" maangta tha aur heading ka poora literal naam
+            # match karta tha. §12 ka mandatory order ulta hai (audit, phir
+            # Sources) aur heading ab dual hai, isliye literal match chup-chaap
+            # False de deta. Ab pehchan canonical key se hoti hai aur sakhti
+            # waisi hi hai: report ke aakhri do section yahi dono hone chahiye.
+            "I_sources_and_audit_last": _tail_order_ok(text),
             "J_incomplete_run_not_called_verified": (
                 (not incomplete)
                 or any(token in lower for token in ("research run poora nahi", "run complete nahi", "preliminary", "fully verified final conclusion nahi"))
             ),
-            "K_limitations_simple": "kya abhi unknown hai" in lower,
+            "K_limitations_simple": bool(section_body(text, "unknowns")),
             "L_first_section_gives_useful_picture": len(re.sub(r"\s+", " ", seedha)) >= 240,
         }
         audit.checks = checks

@@ -62,6 +62,30 @@ ON_TOPIC = [
      "Review of hypoglycaemia events reported during intermittent fasting "
      "protocols among diabetes patients on insulin.",
      False, ""),
+    # §5 (2026-08-22) — ye teen source isliye jode gaye ki "healthy run" ka
+    # matlab sirf "peer-reviewed source mil gaye" nahi hai. Top label ke liye
+    # saboot ke zaroori raaste bhi bhare hone chahiye: mechanism, swatantra
+    # replication aur counter-side. Pehle fixture in teenon par khaali tha aur
+    # phir bhi ✅ VERIFIED maang raha tha — wahi dark-matter wali galti thi.
+    ("Mechanism and pathway of improved insulin sensitivity during "
+     "intermittent fasting",
+     "https://openalex.org/W1001",
+     "Mechanistic study explaining the pathway by which intermittent fasting "
+     "improves insulin sensitivity in type 2 diabetes.",
+     True, "10.1/if-mechanism"),
+    ("Independent replication of a time-restricted eating trial in type 2 "
+     "diabetes: multi-centre confirmation",
+     "https://pubmed.ncbi.nlm.nih.gov/34444444/",
+     "Multi-centre independent replication reproduced the HbA1c reduction "
+     "reported for intermittent fasting in type 2 diabetes.",
+     True, "10.1/if-replication"),
+    ("Null result and limitations: intermittent fasting showed no effect on "
+     "HbA1c in a 12-month diabetes trial",
+     "https://doaj.org/article/null-if",
+     "This trial reported a null result with no effect of intermittent fasting "
+     "on HbA1c; the authors discuss limitations and criticism of earlier "
+     "diabetes studies.",
+     True, "10.1/if-null"),
 ]
 
 # Bilkul wahi kachra jo pichhle live test mein energy ke sawaal par aa gaya tha
@@ -226,14 +250,29 @@ def _run(records, read_ok: bool, fail_after: int = 99, mode: str = "MAXIMUM"):
 
 # ── A. healthy run ───────────────────────────────────────────────────────────
 def test_healthy_run_reaches_top_label():
+    """
+    EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§5, 2026-08-22).
+
+    Pehle ye test 4 source ke saath ✅ VERIFIED maangta tha, jabki mechanism,
+    swatantra replication aur counter-side — teen zaroori evidence axes — khaali
+    the. §5 ka naya taala aisi haalat mein top label nahi deta. Isliye fixture
+    mein wo teen source jode gaye hain (koi feature hata nahi) aur pass ki ginti
+    "3/3" se "4/4" ho gayi: behtar evidence par hypothesis pass bhi genuinely
+    plan hota hai. Asli shart wahi hai — jitne pass plan hue, sab chale.
+    """
     result, fake = _run(_records(ON_TOPIC), read_ok=True)
     level = result["evidence_level"]
     assert _is_top_label(level), level
     assert "MIXED" not in level, level
     cov = result["coverage"]
     assert cov["full_text_sources_read"] >= 1, cov
-    assert cov["reasoning_passes"] == "3/3", cov["reasoning_passes"]
+    done, planned = cov["reasoning_passes"].split("/")
+    assert done == planned, cov["reasoning_passes"]
+    assert int(planned) >= 3, cov["reasoning_passes"]
     assert cov["offtopic_dropped"] == 0, cov
+    # §5 — top label mila hai, to zaroori evidence raaste bhi bhare hone chahiye
+    axes = result["coverage"]["evidence_axes"]["summary"]
+    assert axes["mandatory_missing"] == 0, axes
 
 
 def test_pipeline_returns_structured_advanced_discovery_without_extra_model_call():
@@ -251,21 +290,25 @@ def test_pipeline_returns_structured_advanced_discovery_without_extra_model_call
 
 def test_healthy_run_answer_has_real_sections():
     """
-    §16 ka naya structure. (Pehle ye test purane numbered headings —
-    "1. Seedha Jawab", "9. Verification Status" — dhoondta tha. Wo structure
-    intel ke naye instruction se badal gaya hai: ab pehla section `## Seedha
-    jawab` hai aur technical sab kuch aakhir mein. Feature kuch nahi hata,
-    sirf test ki expectation naye structure par le aayi gayi hai.)
+    §12 ka structure (2026-08-22 ko update hua).
+
+    Pehle ye test purane numbered headings ("1. Seedha Jawab") dhoondta tha,
+    phir Hinglish-only headings ("## Research se kya pata chala?"). Ab headings
+    dual hain — pehle contract ka canonical naam, phir "—" ke baad wahi baat
+    Hinglish mein — aur aakhir ke do section ka kram §12 ke hisaab se palta hai:
+    pehle "Audit and limits", uske baad "Sources" sabse aakhir. Feature kuch
+    nahi hata; sirf naam aur kram naye contract par aa gaye hain.
     """
     result, _ = _run(_records(ON_TOPIC), read_ok=True)
     answer = result["answer"]
-    for heading in ("## Seedha jawab", "## Research se kya pata chala?",
-                    "## Final conclusion", "## Sources",
-                    "## Research quality / technical audit"):
+    for heading in ("## Seedha jawab", "## Established knowledge",
+                    "## Calculations", "## Evidence-based conclusion",
+                    "## APP ORIGINAL RESEARCH LAB", "## Audit and limits",
+                    "## Sources"):
         assert heading in answer, f"section gum: {heading}"
-    # insaan pehle, technical baad mein — audit sabse aakhir mein hona chahiye
+    # insaan pehle, technical baad mein — Sources sabse aakhir, audit usse pehle
     assert answer.lstrip().startswith("## Seedha jawab"), answer[:80]
-    assert answer.find("## Research quality / technical audit") > answer.find("## Sources")
+    assert answer.find("## Sources") > answer.find("## Audit and limits") > 0
     assert "[S1]" in answer
 
 

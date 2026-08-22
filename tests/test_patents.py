@@ -588,8 +588,16 @@ def main() -> int:
           str(patent_only.patent_family_count()))
 
     patent_sources_text = FinalSynthesizer()._sources_section(deep_pack)
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§9, 2026-08-22).
+    # Pehle yahan "PATENT CLAIMS REVIEWED" maanga jaata tha. §9 ke baad access
+    # depth ka vocabulary sirf paanch label ka hai (models.ACCESS_DEPTH_LABELS)
+    # aur patent ke claims poora document nahi hote — wo document ka chuna hua
+    # hissa hai, isliye label `RELEVANT SECTIONS REVIEWED` hai. Test ka ASLI
+    # maqsad wahi hai jo pehle tha aur wo abhi bhi check hota hai: (a) andar ka
+    # raw token "claims" user ko nahi dikhta, (b) patent ko legal dawa kaha
+    # jaata hai, scientific proof nahi (agla check).
     check("patent claims ka raw technical label user ko nahi dikhaya",
-          "PATENT CLAIMS REVIEWED" in patent_sources_text
+          "RELEVANT SECTIONS REVIEWED" in patent_sources_text
           and "Kitna padha gaya: claims." not in patent_sources_text,
           patent_sources_text[-500:])
     check("patent source scientific proof se alag explain hua",

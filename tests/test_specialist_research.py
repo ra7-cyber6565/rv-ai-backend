@@ -1,19 +1,27 @@
 """Offline adversarial checks for Marathon multilingual specialist research."""
 from __future__ import annotations
 
-from research_engine.depth import get_depth_config
-from research_engine.models import EvidencePack, SourceRecord, SourceType
-from research_engine.multilingual_research import build_multilingual_plan
-from research_engine.planner import ResearchPlanner
-from research_engine.source_discovery import SourceDiscovery
-from research_engine.specialist_domains import (
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from research_engine.answer_order import LAB_HEADING, section_start  # noqa: E402
+from research_engine.depth import get_depth_config  # noqa: E402
+from research_engine.models import EvidencePack, SourceRecord  # noqa: E402
+from research_engine.models import SourceType  # noqa: E402
+from research_engine.multilingual_research import (  # noqa: E402
+    build_multilingual_plan)
+from research_engine.planner import ResearchPlanner  # noqa: E402
+from research_engine.source_discovery import SourceDiscovery  # noqa: E402
+from research_engine.specialist_domains import (  # noqa: E402
     build_evidence_lane_report,
     build_specialist_plan,
     prompt_block,
     render_evidence_lane_report,
     specialist_classification,
 )
-from research_engine.synthesizer import FinalSynthesizer
+from research_engine.synthesizer import FinalSynthesizer  # noqa: E402
 
 
 def _source(source_id: str, *, kind: SourceType, url: str, title: str) -> SourceRecord:
@@ -193,7 +201,11 @@ def test_evidence_lane_report_separates_official_paper_book_and_hypothesis():
     assert lanes["app_original_hypothesis"]["source_count"] == 0
     rendered = render_evidence_lane_report(report)
     assert "document contents are not automatically true" in rendered
-    assert "Humari Hypotheses" in rendered
+    # §12 (2026-08-22) — lane report user ko app ki apni soch ka SAHI section
+    # naam batata hai. Pehle yahan "Humari Hypotheses" tha, jo report mein ab
+    # exist hi nahi karta — reader ko galat naam pakadaya jaa raha tha.
+    assert LAB_HEADING in rendered
+    assert "Humari Hypotheses" not in rendered
     assert "UNTESTED" in rendered
 
 
@@ -233,8 +245,54 @@ def test_synthesizer_visibly_inserts_lane_section_before_app_hypotheses():
         consensus={},
         specialist_report=specialist,
     )
+    # §12 (2026-08-22) — section ki jagah ab canonical key se dekhi jaati hai.
+    #
+    # Pehle yahan literal `report.find("## Humari Hypotheses")` tha. App ki apni
+    # soch ki heading `## APP ORIGINAL RESEARCH LAB` ho jaane ke baad wo find()
+    # hamesha -1 deta tha, isliye `0 < lane_pos < -1` fail hona chahiye tha —
+    # par ye file pytest-style thi aur sandbox mein chalti hi nahi thi, to
+    # failure chhupa raha. Aakhir ka kram bhi §12 ke hisaab se badla gaya hai:
+    # pehle audit, PHIR Sources (pehle ulta tha).
     lane_pos = report.find("## Evidence ki alag-alag lanes")
-    hypothesis_pos = report.find("## Humari Hypotheses")
-    source_pos = report.find("## Sources")
-    assert 0 < lane_pos < hypothesis_pos < source_pos
-    assert report.rfind("## Research quality / technical audit") > source_pos
+    lab_pos = section_start(report, "original_lab")
+    audit_pos = section_start(report, "audit")
+    source_pos = section_start(report, "sources")
+    assert 0 < lane_pos < lab_pos, (lane_pos, lab_pos)
+    assert lab_pos < audit_pos < source_pos, (lab_pos, audit_pos, source_pos)
+    # Sources aakhri section rehna chahiye
+    assert source_pos == max(section_start(report, key) for key in
+                             ("direct_answer", "established_knowledge",
+                              "supporting_evidence", "counterevidence",
+                              "calculations", "unknowns", "conclusion",
+                              "original_lab", "audit", "sources"))
+
+
+def main() -> int:
+    """
+    Direct runner (2026-08-22).
+
+    Ye file pytest-style thi aur sandbox mein pytest nahi hai, isliye
+    `python3 tests/test_specialist_research.py` chup-chaap exit 0 deta tha —
+    ek asli failure (purani `## Humari Hypotheses` heading) is chuppi mein
+    chhupa hua tha. Ab direct chalane par bhi sach dikhta hai.
+    """
+    failed = 0
+    for name, func in sorted(globals().items()):
+        if not name.startswith("test_") or not callable(func):
+            continue
+        try:
+            func()
+        except AssertionError as exc:                  # noqa: PERF203
+            failed += 1
+            print(f"  [FAIL] {name} -> {exc}")
+        except Exception as exc:                       # noqa: BLE001
+            failed += 1
+            print(f"  [ERROR] {name} -> {type(exc).__name__}: {exc}")
+        else:
+            print(f"  [PASS] {name}")
+    print(f"\n{'FAIL' if failed else 'ok'} — {failed} failed")
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

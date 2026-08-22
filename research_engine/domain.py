@@ -442,6 +442,20 @@ _SPACE_BRANCHES = (
     Branch("instrument", "instruments / missions",
            ("mission", "spacecraft", "detector", "calibration", "payload"),
            "space mission instrument calibration payload"),
+    # 2026-08-22 (§24 dark-matter acceptance): `space` profile poori tarah
+    # planetary/observational tha. Cosmology ka ek bhi raasta nahi tha, isliye
+    # dark-matter ke sawaal par Bullet Cluster ka lensing paper, CMB ka paper
+    # aur review chapter — teenon "is field ka anchor nahi mila" keh kar HARD
+    # REJECT ho rahe the, jabki ek exoplanet transit paper (planet/orbit/
+    # photometry anchors ke saath) pack mein aaram se baith jaata tha. Yaani
+    # field theek tha par vocabulary galat, aur nateeja live failure #1 hi tha:
+    # kaam ke sources bahar, kaam ke na hone waale andar.
+    Branch("cosmology", "cosmology / dark matter & energy",
+           ("dark matter", "dark energy", "cosmic microwave background",
+            "lensing", "rotation curve", "halo", "galaxy cluster",
+            "structure formation", "nucleosynthesis", "relic density"),
+           "dark matter evidence rotation curve gravitational lensing "
+           "cosmic microwave background"),
 )
 
 _ENG_BRANCHES = (
@@ -665,14 +679,30 @@ PROFILES: Tuple[DomainProfile, ...] = (
         key="space",
         label="astronomy / space science",
         triggers=("galaxy", "planet", "telescope", "orbit", "cosmology",
-                  "spacecraft", "exoplanet", "black hole", "supernova"),
+                  "spacecraft", "exoplanet", "black hole", "supernova",
+                  # cosmology ka subject bhi trigger hai — sirf multi-word
+                  # phrase, taaki "cluster"/"halo" jaise aam shabd doosre
+                  # field ke sawaal ko yahan na kheench lein.
+                  "dark matter", "dark energy", "gravitational lensing",
+                  "rotation curve", "cosmic microwave background"),
         anchors=("galaxy", "star", "planet", "orbit", "telescope", "redshift",
-                 "cosmic", "spectrum", "luminosity", "mission"),
+                 "cosmic", "spectrum", "luminosity", "mission",
+                 # cosmology / dark-matter vocabulary
+                 "dark matter", "dark energy", "lensing", "halo",
+                 "rotation curve", "cosmic microwave background",
+                 "galaxy cluster", "baryon", "kpc", "mpc", "nucleosynthesis"),
         branches=_SPACE_BRANCHES,
         connectors=("arxiv", "openalex", "semantic_scholar", "crossref") + BOOKS,
         avoid_connectors=("who_gho", "pubmed", "world_bank"),
         strict=True,
-        shared_anchors=("mission", "spectrum"),
+        # "dark matter" ko SHARED rakha gaya hai: ye phrase doosre field bhi
+        # metaphor ki tarah use karte hain ("the dark matter of the genome",
+        # "dark matter of the internet"). Isliye akele is phrase par space ka
+        # source nahi maana jaata — rule 2 (sirf shared anchor + rival field ki
+        # poori vocabulary) us jaal ko wahin reject kar deta hai, aur asli
+        # cosmology paper ke paas lensing/halo/kpc/CMB jaise apne anchor hote
+        # hain.
+        shared_anchors=("mission", "spectrum", "dark matter", "halo"),
     ),
     # ── 2026-08-21: do naye profiles. Cross-domain benchmark mein engineering
     # aur archaeology ke sawaal `generic` par gir rahe the (confidence 0,

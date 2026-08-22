@@ -30,8 +30,26 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Sequence, Tuple
 
+from .answer_order import display_heading
 from .explain_style import detect_language
 from .models import EvidencePack, SourceRecord
+
+# §12 (2026-08-22) — heading ka source ek hi jagah hai: `answer_order`. Pehle
+# yahan purani Hinglish heading ("Research se kya pata chala?") hard-coded thi.
+# Do list alag-alag hone ki wajah se quota-fallback ka jawab canonical section
+# naam se match hi nahi karta tha, aur "kaunse hisse nahi ban paaye" list mein
+# jhooth chala jaata tha. `display_heading()` se ab dono jagah ek hi shabd hai.
+# Index 2 aur uske jaise "extra" section §12 ki 10-section list ka hissa nahi
+# hain, isliye unke naam yahin literal rehte hain.
+_BLOCK_TITLES: Tuple[str, ...] = (
+    display_heading("direct_answer"),            # synthesizer index 0
+    display_heading("established_knowledge"),    # 1
+    "Ye kyun hota hai?",                         # 2 (extra)
+    display_heading("supporting_evidence"),      # 3
+    display_heading("counterevidence"),          # 4
+    display_heading("unknowns"),                 # 7
+    display_heading("conclusion"),               # 8
+)
 
 # read level -> imaandaar label + insaani lafz
 _LEVEL_WORD = {
@@ -441,16 +459,17 @@ def compose(question: str, pack: EvidencePack, plan: Optional[Dict] = None,
     """
     lang = language or detect_language(question)
     pack = pack or EvidencePack(question=question)
-    blocks = [
-        ("Seedha jawab", _direct(question, pack, lang)),
-        ("Research se kya pata chala?", _findings(question, pack, lang)),
-        ("Ye kyun hota hai?", _mechanism(question, pack, lang)),
-        ("Evidence kya kehta hai?", _evidence(pack, lang)),
-        ("Iske against kya mila?", _against(question, pack, lang, contradictions)),
-        ("Kya abhi unknown hai?", _unknown(question, pack, plan, lang)),
-        ("Final conclusion", _conclusion(question, pack, lang)),
-    ]
-    return "\n\n".join(f"## {title}\n{body}".rstrip() for title, body in blocks)
+    bodies = (
+        _direct(question, pack, lang),
+        _findings(question, pack, lang),
+        _mechanism(question, pack, lang),
+        _evidence(pack, lang),
+        _against(question, pack, lang, contradictions),
+        _unknown(question, pack, plan, lang),
+        _conclusion(question, pack, lang),
+    )
+    return "\n\n".join(f"## {title}\n{body}".rstrip()
+                       for title, body in zip(_BLOCK_TITLES, bodies))
 
 
 # ── QUICK mode ka backup (chat.py isse use karta hai) ───────────────────────
