@@ -21,7 +21,7 @@ from .citation import CITATION_INSTRUCTION
 from .claim_labels import LABEL_RULE_PROMPT
 from .explain_style import style_block
 from .key_pool import KeyPool
-from .model_errors import AUTH, DAILY_QUOTA, FailureLedger
+from .model_errors import AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, FailureLedger
 from .model_errors import classify as classify_error
 from .models import EvidencePack
 
@@ -52,6 +52,95 @@ _ROLE_HONESTY = (
 _BACKOFF_SECONDS = (1.5, 4.0)      # ek pass ke andar max ~6s rukte hain
 _MAX_SLEEP_SECONDS = 6.0           # server 21s maange to bhi itna hi rukte hain
 _MAX_MODELS = 4                    # pehla + teen fallback (quota per model hota hai)
+
+_SOURCE_BEGIN = "BEGIN_UNTRUSTED_SOURCES"
+_SOURCE_END = "END_UNTRUSTED_SOURCES"
+
+
+def _compact_prompt_limit() -> int:
+    """Provider-size recovery ke liye safe prompt target (content nahi, sirf limit)."""
+    try:
+        value = int(os.getenv("GEMINI_COMPACT_PROMPT_CHARS", "") or 24000)
+    except (TypeError, ValueError):
+        value = 24000
+    return max(8000, min(value, 120000))
+
+
+def _clip_compact(value: str, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:max(0, limit - 1)].rstrip() + "…"
+
+
+def _compact_source_block(block: str, budget: int) -> str:
+    """Citation identity/read depth bachao; bulky metadata/excerpt ko bound karo."""
+    lines = [line.strip() for line in str(block or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    budget = max(320, int(budget))
+    head_rows: List[str] = []
+    for line in lines[:2]:
+        if line not in head_rows:
+            head_rows.append(line)
+    for prefix in ("Title:", "Author(s):", "Publisher:", "Venue:", "Read:"):
+        row = next((line for line in lines if line.startswith(prefix)), "")
+        if row and row not in head_rows:
+            head_rows.append(row)
+
+    excerpt_index = next(
+        (index for index, line in enumerate(lines) if line.startswith("Excerpt:")),
+        -1,
+    )
+    excerpt = " ".join(lines[excerpt_index:]) if excerpt_index >= 0 else ""
+    head_budget = max(220, min(int(budget * 0.45), budget - 120))
+    head = _clip_compact("\n".join(head_rows), head_budget)
+    evidence_budget = max(100, budget - len(head) - 1)
+    evidence = _clip_compact(excerpt, evidence_budget) if excerpt else ""
+    return head + (("\n" + evidence) if evidence else "")
+
+
+def _compact_prompt(prompt: str, max_chars: Optional[int] = None) -> str:
+    """Only an input/context-limit failure may call this deterministic fallback.
+
+    The full evidence pack remains stored in the engine. Only the provider-bound
+    copy is reduced, while every source ID, the question, source boundary and
+    post-source reasoning/citation rules are retained.
+    """
+    original = str(prompt or "")
+    if not original:
+        return original
+    configured = max_chars if max_chars is not None else _compact_prompt_limit()
+    configured = max(8000, min(int(configured), 120000))
+    target = min(configured, max(8000, int(len(original) * 0.60)))
+    begin_at = original.find(_SOURCE_BEGIN)
+    end_at = original.find(_SOURCE_END, begin_at + len(_SOURCE_BEGIN))
+    if begin_at < 0 or end_at < 0:
+        # Non-evidence prompts are rare here. Preserve both the question-side
+        # instructions and the requested output rules rather than cutting one.
+        if len(original) <= target:
+            return original
+        marker = "\n\n[PROVIDER-BOUND PROMPT COMPACTED AFTER INPUT-LIMIT ERROR]\n\n"
+        left = max(1000, (target - len(marker)) // 2)
+        right = max(1000, target - len(marker) - left)
+        return original[:left].rstrip() + marker + original[-right:].lstrip()
+
+    prefix = original[:begin_at + len(_SOURCE_BEGIN)]
+    body = original[begin_at + len(_SOURCE_BEGIN):end_at]
+    suffix = original[end_at:]
+    blocks = [part.strip() for part in body.split("\n\n") if part.strip()]
+    fixed = len(prefix) + len(suffix) + 4
+    body_budget = max(2000, target - fixed)
+    per_source = max(320, body_budget // max(1, len(blocks)))
+    compacted_blocks = [
+        _compact_source_block(block, per_source) for block in blocks
+    ]
+    compacted = prefix + "\n\n" + "\n\n".join(
+        block for block in compacted_blocks if block
+    ) + "\n\n" + suffix
+    if len(compacted) >= len(original):
+        return original
+    return compacted
 
 # ── §8 backup FREE keys (2026-08-21 ki demand) ───────────────────────────────
 # intel: "gimini ko call krte h to quta khatam ho jaata h ... iska quta khatam ho
@@ -93,6 +182,10 @@ class GeminiReasoning:
         self.models_tried: List[str] = []
         self.switched_models = 0             # doosre model par kitni baar gaye
         self.same_model_retries = 0          # WAHI model, dobara (asli retry)
+        # Provider-bound prompt content kabhi audit mein nahi jaata — sirf safe
+        # size metadata, taaki live request-limit failures diagnose ho saken.
+        self.prompt_compactions = 0
+        self.prompt_attempt_log: List[Dict] = []
         # §7 — kaun kis wajah se gira, aur kaun is run mein band hai
         self.ledger = FailureLedger()
         self.blocked: Dict[str, str] = {}    # model -> kind (is run ke liye)
@@ -355,8 +448,16 @@ class GeminiReasoning:
                 # `same_model_retries` se bilkul alag hai: model badalna retry
                 # nahi hai.
                 self.switched_models += 1
+            request_prompt = prompt
+            compacted_for_model = False
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 self.attempts += 1
+                self.prompt_attempt_log.append({
+                    "label": tag,
+                    "model": name,
+                    "chars": len(request_prompt),
+                    "compacted": compacted_for_model,
+                })
                 try:
                     # Bandhi hui waqt-seema ke saath. Latki hui call ab TRANSIENT
                     # error ban kar wahi purana retry/backoff chalati hai — poori
@@ -364,7 +465,7 @@ class GeminiReasoning:
                     # website par aakhir mein "server se baat nahi ho paayi"
                     # aata tha).
                     from .gemini_model import generate as _generate
-                    response = _generate(self._model, prompt)
+                    response = _generate(self._model, request_prompt)
                     text = (getattr(response, "text", "") or "").strip()
                     if not text:
                         # khaali jawab bhi failure hai — chup-chaap "" lautana
@@ -385,6 +486,24 @@ class GeminiReasoning:
                         f"{tag} failed (model={name}, try={attempt + 1}, "
                         f"{v.kind}): {type(exc).__name__}: {exc}")
 
+                    if v.kind == INPUT_TOO_LARGE:
+                        # Same live model chhote diagnostic prompt par chal sakta
+                        # hai; working model ko dead mark karna galat hoga. Full
+                        # evidence local rehta hai, provider copy ek baar compact.
+                        if not compacted_for_model:
+                            compact_prompt = _compact_prompt(request_prompt)
+                            if len(compact_prompt) < len(request_prompt):
+                                request_prompt = compact_prompt
+                                compacted_for_model = True
+                                self.prompt_compactions += 1
+                                self.same_model_retries += 1
+                                self.notes.append(
+                                    f"{tag}: '{name}' ki input limit ke baad "
+                                    "source IDs/rules bachakar compact retry kiya")
+                                continue
+                        # Compact copy bhi reject hui: unchanged blind retry ya
+                        # permanent model death nahi; seedha agla free model.
+                        break
                     if v.stop_all:              # auth — is key par sab band
                         self.stopped = True
                         self.notes.append(f"{tag}: {v.human} — aage koshish rok di")
@@ -525,6 +644,8 @@ class GeminiReasoning:
             "blocked_models": dict(self.blocked),
             "failure_kinds": self.ledger.kinds(),
             "failure_summary": self.ledger.summary(),
+            "prompt_compactions": self.prompt_compactions,
+            "prompt_attempts": [dict(row) for row in self.prompt_attempt_log[:40]],
             "stopped_early": self.stopped,
             "no_api_calls": self.attempts == 0,
             "counted_by": "engine ki apni ginti (Google billing dashboard se nahi)",
