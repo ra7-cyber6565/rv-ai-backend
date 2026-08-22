@@ -394,6 +394,8 @@ def run_audit() -> AuditReport:
         "research_engine/connectors/patent_connector.py",
         "scripts/run_live_zero_cost_gate.py",
         "scripts/run_offline_api_smoke.py",
+        "RUN_LIVE_ZERO_COST_GATE.ps1",
+        "START_BACKEND.bat",
         "research_engine/verification.py",
         "research_engine/synthesizer.py",
         "research_engine/presentation_guard.py",
@@ -427,6 +429,7 @@ def run_audit() -> AuditReport:
         "tests/test_patents.py",
         "tests/test_chat_resilience.py",
         "tests/test_live_zero_cost_gate.py",
+        "tests/test_windows_launchers.py",
         "tests/benchmark_cross_domain.py",
         "tests/benchmark_superconductivity.py",
     )
@@ -536,10 +539,25 @@ def run_audit() -> AuditReport:
         _contains(
             "scripts/run_live_zero_cost_gate.py",
             "def preflight(",
+            "def _validate_runtime_storage(",
             "inspect_zero_cost_config",
             "has_model_layer_usable_now",
             "def evaluate_result(",
+            "live_research_execution_failed",
+            '"--data-root"',
             '"contains_credentials": False',
+        ),
+        _contains(
+            "RUN_LIVE_ZERO_COST_GATE.ps1",
+            "$PSScriptRoot",
+            '"--data-root"',
+            "$gateExitCode",
+        ),
+        _contains(
+            "START_BACKEND.bat",
+            'cd /d "%~dp0"',
+            "venv\\Scripts\\python.exe",
+            "--host 127.0.0.1 --port 8000",
         ),
         _contains(
             "scripts/run_offline_api_smoke.py",
