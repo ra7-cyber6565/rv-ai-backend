@@ -27,7 +27,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| Marathon multilingual specialist research | ChatGPT | PUSHED IN PR #7 / OFFLINE VERIFIED / FULL PYTEST CI PENDING | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented on `chatgpt-marathon-multilingual`. 15/15 new adversarial checks, 593/593 core, cross-domain 633/633, superconductivity 146/146, architecture/provider/source-boundary audits and compile checks pass; PR #7 targets `main` so the dependency-equipped foundation workflow can verify full pytest. |
+| Marathon multilingual specialist research | ChatGPT | PUSHED IN PR #7 / OFFLINE VERIFIED / FULL PYTEST CI PENDING | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented on `chatgpt-marathon-multilingual`. 15/15 new adversarial checks, 593/593 core, cross-domain 633/633, superconductivity 146/146, architecture/provider/source-boundary audits and compile checks pass; the branch is explicitly included in the zero-cost foundation-workflow push allowlist for dependency-equipped CI verification. |
 | Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
 | Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |
 | Full-text + large PDF handling | Claude + ChatGPT audit | DONE / VERIFY | Claude removed 4MB blind skip; ChatGPT added honest access wording and whole-document sparse sampling so huge PDFs are not first-N biased |
