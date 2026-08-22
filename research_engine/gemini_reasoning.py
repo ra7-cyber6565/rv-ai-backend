@@ -22,7 +22,8 @@ from .claim_labels import LABEL_RULE_PROMPT
 from .explain_style import style_block
 from .key_pool import KeyPool
 from .model_errors import (
-    AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, FailureLedger,
+    AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, REQUEST_TIMEOUT,
+    SERVER, FailureLedger,
 )
 from .model_errors import classify as classify_error
 from .models import EvidencePack
@@ -66,6 +67,15 @@ def _compact_retry_min_chars() -> int:
     except (TypeError, ValueError):
         value = 12000
     return max(4000, min(value, 60000))
+
+
+def _timeout_recovery_seconds() -> int:
+    """Configured primary ke compact timeout recovery ki bounded waqt-seema."""
+    try:
+        value = int(os.getenv("GEMINI_TIMEOUT_RECOVERY_SECONDS", "") or 180)
+    except (TypeError, ValueError):
+        value = 180
+    return max(30, min(value, 600))
 
 
 def _compact_prompt_limit() -> int:
@@ -196,6 +206,7 @@ class GeminiReasoning:
         # Provider-bound prompt content kabhi audit mein nahi jaata — sirf safe
         # size metadata, taaki live request-limit failures diagnose ho saken.
         self.prompt_compactions = 0
+        self.timeout_extensions = 0
         self.prompt_attempt_log: List[Dict] = []
         # §7 — kaun kis wajah se gira, aur kaun is run mein band hai
         self.ledger = FailureLedger()
@@ -463,6 +474,9 @@ class GeminiReasoning:
                 self.switched_models += 1
             request_prompt = prompt
             compacted_for_model = False
+            timeout_extended = False
+            from .gemini_model import call_timeout as _call_timeout
+            request_timeout = _call_timeout()
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 self.attempts += 1
                 self.prompt_attempt_log.append({
@@ -470,6 +484,7 @@ class GeminiReasoning:
                     "model": name,
                     "chars": len(request_prompt),
                     "compacted": compacted_for_model,
+                    "timeout_seconds": request_timeout,
                 })
                 try:
                     # Bandhi hui waqt-seema ke saath. Latki hui call ab TRANSIENT
@@ -478,7 +493,9 @@ class GeminiReasoning:
                     # website par aakhir mein "server se baat nahi ho paayi"
                     # aata tha).
                     from .gemini_model import generate as _generate
-                    response = _generate(self._model, request_prompt)
+                    response = _generate(
+                        self._model, request_prompt, timeout=request_timeout
+                    )
                     text = (getattr(response, "text", "") or "").strip()
                     if not text:
                         # khaali jawab bhi failure hai — chup-chaap "" lautana
@@ -499,16 +516,15 @@ class GeminiReasoning:
                         f"{tag} failed (model={name}, try={attempt + 1}, "
                         f"{v.kind}): {type(exc).__name__}: {exc}")
 
-                    compactable_invalid = (
-                        v.kind == INVALID_REQUEST
+                    large_provider_failure = (
+                        v.kind in {INVALID_REQUEST, REQUEST_TIMEOUT, SERVER}
                         and len(request_prompt) >= _compact_retry_min_chars()
                     )
-                    if v.kind == INPUT_TOO_LARGE or compactable_invalid:
-                        # Same live model chhote diagnostic prompt par chal sakta
-                        # hai; working model ko dead mark karna galat hoga. Google
-                        # kabhi large request ko sirf generic InvalidArgument bhi
-                        # bolta hai, isliye woh recovery sirf large prompts par.
-                        # Full evidence local rehta hai, provider copy ek baar compact.
+                    if v.kind == INPUT_TOO_LARGE or large_provider_failure:
+                        # Full evidence engine mein rehta hai. Provider ne large
+                        # request ko input error, deadline ya 5xx diya to usi
+                        # failed provider-copy ko source IDs/rules bachakar ek
+                        # baar compact karo; unchanged blind retries mat bhejo.
                         if not compacted_for_model:
                             compact_prompt = _compact_prompt(request_prompt)
                             if len(compact_prompt) < len(request_prompt):
@@ -517,11 +533,31 @@ class GeminiReasoning:
                                 self.prompt_compactions += 1
                                 self.same_model_retries += 1
                                 self.notes.append(
-                                    f"{tag}: '{name}' ki request/input limit ke baad "
-                                    "source IDs/rules bachakar compact retry kiya")
+                                    f"{tag}: '{name}' ki large request "
+                                    f"({v.kind}) ke baad source IDs/rules bachakar "
+                                    "compact retry kiya")
                                 continue
-                        # Compact copy bhi reject hui: unchanged blind retry ya
-                        # permanent model death nahi; seedha agla free model.
+                        if v.kind in {INPUT_TOO_LARGE, INVALID_REQUEST}:
+                            # Compact copy bhi validation/input par reject hui:
+                            # unchanged retry ya permanent model death nahi.
+                            break
+
+                    if v.kind == REQUEST_TIMEOUT:
+                        # Compact primary prompt ko ek hi bounded longer chance.
+                        # Har fallback/model par lamba retry karke request ko
+                        # ghanton latkana mana hai.
+                        if (name == first_model and not timeout_extended
+                                and attempt < len(_BACKOFF_SECONDS)):
+                            request_timeout = max(
+                                request_timeout, _timeout_recovery_seconds()
+                            )
+                            timeout_extended = True
+                            self.timeout_extensions += 1
+                            self.same_model_retries += 1
+                            self.notes.append(
+                                f"{tag}: compact primary timeout ke baad "
+                                f"{request_timeout}s ka ek bounded recovery attempt")
+                            continue
                         break
                     if v.stop_all:              # auth — is key par sab band
                         self.stopped = True
@@ -588,6 +624,8 @@ class GeminiReasoning:
             bits.append("0 actual API attempts (ek bhi network call nahi hui)")
         if self.same_model_retries:
             bits.append(f"{self.same_model_retries} same-model retry")
+        if self.timeout_extensions:
+            bits.append(f"{self.timeout_extensions} bounded timeout recovery")
         if self.switched_models:
             # Ye jaan-boojh kar "retry" nahi kehta: doosre model par jaana retry
             # nahi hai, aur pehle audit dono ko ek hi number mein mila deta tha.
@@ -675,6 +713,7 @@ class GeminiReasoning:
             ],
             "failure_summary": self.ledger.summary(),
             "prompt_compactions": self.prompt_compactions,
+            "timeout_extensions": self.timeout_extensions,
             "prompt_attempts": [dict(row) for row in self.prompt_attempt_log[:40]],
             "stopped_early": self.stopped,
             "no_api_calls": self.attempts == 0,
