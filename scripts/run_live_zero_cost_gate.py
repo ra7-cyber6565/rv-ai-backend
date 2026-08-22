@@ -40,6 +40,16 @@ def _truthy(value: object) -> bool:
     return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _safe_identifier(value: object, *, default: str = "") -> str:
+    """Keep live receipts/console diagnostics coarse and provider-body-free."""
+    token = str(value or "").strip().lower()
+    if token and len(token) <= 64 and all(
+        ch.isalnum() or ch in {"_", "-"} for ch in token
+    ):
+        return token
+    return default
+
+
 def load_local_env() -> None:
     """Load a private .env when python-dotenv is installed; never print it."""
     try:
@@ -183,7 +193,7 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
          f"{len(result.get('invalid_citations') or [])} invalid"),
         ("citations_present", len(result.get("citations") or []) >= 1,
          f"{len(result.get('citations') or [])} citation(s)"),
-        ("claim_gate", claim_checks.get("gate_passed") is not False,
+        ("claim_gate", claim_checks.get("gate_passed") is True,
          str(claim_checks.get("gate_passed"))),
         ("three_hypotheses", len(hypotheses) >= 3,
          f"{len(hypotheses)} hypothesis/hypotheses"),
@@ -218,6 +228,15 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "hypotheses": len(hypotheses),
             "discovery_status": str(discovery.get("status") or ""),
             "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest(),
+            "failure_kind": _safe_identifier(
+                result.get("failure_kind"), default="unclassified"
+            ) if result.get("failure_kind") else "",
+            "missing_passes": [
+                name for name in (
+                    _safe_identifier(item) for item in (result.get("missing_passes") or [])
+                )
+                if name in {"analysis", "critique", "hypothesis", "synthesis"}
+            ][:4],
         },
     }
 
@@ -345,6 +364,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     receipt_written = _write_receipt_safely(path, receipt)
     for row in evaluation["checks"]:
         print(f"[{'PASS' if row['passed'] else 'FAIL'}] {row['name']}: {row['detail']}")
+    if not evaluation["passed"]:
+        summary = evaluation.get("summary") or {}
+        if summary.get("failure_kind"):
+            print(f"[INFO] reasoning_failure_kind: {summary['failure_kind']}")
+        if summary.get("missing_passes"):
+            print("[INFO] missing_reasoning_passes: "
+                  + ", ".join(summary["missing_passes"]))
     passed = bool(evaluation["passed"] and receipt_written)
     print("LIVE ZERO-COST GATE: " + ("PASS" if passed else "FAIL"))
     if receipt_written:

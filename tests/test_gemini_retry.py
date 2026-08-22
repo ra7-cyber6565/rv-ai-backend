@@ -204,7 +204,10 @@ def test_daily_quota_is_not_retried_uselessly():
         f"daily quota par sirf 1 attempt honi chahiye, hui {brain.fakes['model-a'].calls}"
     assert brain.attempts == 2, brain.attempts
     assert brain.blocked.get("model-a") == DAILY_QUOTA, brain.blocked
-    assert brain.failure_kind() == DAILY_QUOTA
+    # The failed attempt remains auditable, but a later model produced the
+    # requested output, so the completed logical pass is not a public failure.
+    assert brain.failure_kind() == ""
+    assert DAILY_QUOTA in brain.api_accounting()["failure_kinds"]
 
 
 def test_blocked_model_is_skipped_in_later_passes():
