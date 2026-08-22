@@ -32,6 +32,7 @@ from research_engine.requested import (  # noqa: E402
     any_explicit, build_ledger, chain_steps, hypothesis_count, looks_like_chain,
     looks_like_math_model, math_variables, parse_requests, prompt_block,
 )
+from scripts.run_live_zero_cost_gate import LIVE_QUESTION  # noqa: E402
 
 # intel ka asli prompt (chhota kiya hua, par maangi hui cheezein wahi hain)
 REAL_PROMPT = (
@@ -77,6 +78,14 @@ def test_hypothesis_count_reads_digits_words_and_devanagari():
     assert hypothesis_count("ek hypothesis banao") == 1
     assert hypothesis_count("hypothesis generate karo") == 1
     assert hypothesis_count("sirf summary chahiye") == 0
+
+
+def test_live_release_question_requests_three_testable_hypotheses():
+    """Production question ka exact wording dobara kabhi 3 ko 1 na padhe."""
+    requests = parse_requests(LIVE_QUESTION)
+    assert requests["wants_hypotheses"] is True
+    assert requests["hypothesis_count"] == 3, requests
+    assert hypothesis_count("3 nayi falsifiable hypotheses do") == 3
 
 
 def test_variables_come_from_the_prompt_not_from_imagination():
