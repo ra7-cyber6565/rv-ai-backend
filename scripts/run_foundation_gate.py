@@ -13,6 +13,7 @@ The default mode is deliberately strict:
 - runs compile checks;
 - runs targeted infrastructure/integration pytest gates;
 - runs the complete ``tests/`` pytest suite (so pytest-only files really execute);
+- exercises the real FastAPI session/chat/async-job/result path with no network;
 - runs the legacy/core regression;
 - directly executes only test files that contain an explicit ``__main__`` harness;
 - runs a direct-provider-bypass audit;
@@ -310,6 +311,13 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
         # This is the real catch-all. Running a pytest-only file with `python`
         # merely imports/defines tests and exits 0 without executing assertions.
         plan.append(("all_pytest", [python, "-m", "pytest", "-q", "tests"]))
+
+    api_smoke = REPO_ROOT / "scripts" / "run_offline_api_smoke.py"
+    if api_smoke.is_file():
+        plan.append((
+            "offline_api_smoke",
+            [python, api_smoke.relative_to(REPO_ROOT).as_posix()],
+        ))
 
     if (REPO_ROOT / "test_research_engine.py").is_file():
         plan.append(("core_regression", [python, "test_research_engine.py"]))
