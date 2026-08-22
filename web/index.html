@@ -15,7 +15,7 @@ header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:
 .thinking{display:inline-flex;gap:5px}.thinking i{width:7px;height:7px;border-radius:50%;background:#8b8b8b;animation:p 1.25s infinite}.thinking i:nth-child(2){animation-delay:.18s}.thinking i:nth-child(3){animation-delay:.36s}@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
 .progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.process{margin-top:14px;border:1px solid var(--line);border-radius:11px;background:var(--soft);padding:10px 12px}.process summary{cursor:pointer;font-weight:650}.process .meta{margin-top:7px}.process .log{margin-top:8px;max-height:180px}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
 footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
-@media(max-width:600px){header{padding:0 10px}.brand span:last-child{display:none}.modes button{padding:7px 10px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
+@media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
 <body>
@@ -25,13 +25,14 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
     <button class="on" data-mode="QUICK">Chat</button>
     <button data-mode="DEEP">Deep</button>
     <button data-mode="MAXIMUM">Max</button>
+    <button data-mode="MARATHON">Marathon</button>
   </div>
 </header>
 <div class="hint" id="hint">Chat — turant seedha jawab.</div>
 <div id="scroll"><main id="thread">
   <section class="welcome" id="welcome">
     <h1>Kya research karni hai?</h1>
-    <p>Normal baat ke liye Chat. Sources, evidence aur cross-check ke liye Deep ya Max.</p>
+    <p>Normal baat ke liye Chat. Sources aur cross-check ke liye Deep/Max; books, archives aur specialist lanes ke liye Marathon.</p>
     <div class="chips">
       <button class="chip" data-q="Explain black holes simply">Black holes simple words mein</button>
       <button class="chip" data-q="Room-temperature superconductors ka future evidence ke saath research karo">Superconductors research</button>
@@ -48,7 +49,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
 const API="", IS_FILE=location.protocol==="file:";
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
-const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — sabse gehri available research. Isme zyada time lag sakta hai."};
+const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — multilingual books + official archives + alag evidence lanes. Background mein lamba chal sakta hai."};
 let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
 const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
@@ -121,7 +122,7 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
-  const hardDeadline=Date.now()+30*60*1000,stallMs=6*60*1000;let lastChange=Date.now(),lastSignature="";
+  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMs=6*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
@@ -129,7 +130,7 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
     if(prog.r.ok){const p=prog.data.progress||{};paintProgress(ui,p);const signature=[status.data.status,p.current_stage,p.stages_done,Array.isArray(p.log)?p.log.length:0].join("|");if(signature!==lastSignature){lastSignature=signature;lastChange=Date.now();}}
     if(status.data.status==="completed")break;
     if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
-    if(Date.now()>hardDeadline){friendly(el,"Research 30 minute ki browser wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
+    if(Date.now()>hardDeadline){friendly(el,"Research browser ki wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
     if(Date.now()-lastChange>stallMs){friendly(el,"Research progress 6 minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.");restoreQuestion(question);return false;}
     await sleep(1200);
   }

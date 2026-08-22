@@ -1,7 +1,7 @@
 """
 Research Depth Modes — Spec Section 13
 
-QUICK / DEEP / MAXIMUM / CUSTOM.
+QUICK / DEEP / MAXIMUM / MARATHON / CUSTOM.
 
 IMPORTANT (Spec Section 13): "Maximum" ka matlab unlimited internet NAHI hai.
 Gemini free tier ~20 requests/din hai, isliye har mode ka call budget yahan
@@ -78,7 +78,22 @@ MAXIMUM = DepthConfig(
     chars_per_source=1500, max_fulltext=6, discovery_seconds=150,
 )
 
-_PRESETS = {"QUICK": QUICK, "DEEP": DEEP, "MAXIMUM": MAXIMUM}
+MARATHON = DepthConfig(
+    # Durable background-only specialist mode.  It deliberately stays inside
+    # the same hard CUSTOM rails: "long" is not "unlimited", and four model
+    # calls still respect the zero-cost policy/fallback router.
+    name="MARATHON", gemini_calls=4, max_sources=32, max_per_connector=5,
+    max_rounds=4, use_papers=True, use_books=True, use_datasets=True,
+    use_patents=True, use_red_team=True, chars_per_source=2200,
+    max_fulltext=12, discovery_seconds=300,
+)
+
+_PRESETS = {
+    "QUICK": QUICK,
+    "DEEP": DEEP,
+    "MAXIMUM": MAXIMUM,
+    "MARATHON": MARATHON,
+}
 
 # Safety rails — CUSTOM mode mein user in limits se aage nahi ja sakta
 _LIMITS = {

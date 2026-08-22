@@ -21,6 +21,12 @@ from .local_language import normalize
 from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
 from .requested import parse_requests
+from .specialist_domains import (
+    build_specialist_plan,
+    phrase_hit,
+    specialist_classification,
+    specialist_queries,
+)
 
 # Query ki upper limit. OpenAlex ne live test mein HTTP 400 diya tha kyunki
 # poora 2000-character prompt URL parameter mein chala gaya tha.
@@ -117,11 +123,49 @@ class ResearchPlanner:
         fields: List[str] = []
 
         for qtype, keywords in QUESTION_TYPES.items():
-            if any(kw in q for kw in keywords):
+            # Exact phrase boundary matters here.  The old substring rule made
+            # ``physics`` match inside ``metaphysics`` and ``science`` match
+            # ``occult sciences``.  That silently routed philosophical/history
+            # questions through hard-science connectors and evidence rules.
+            if any(phrase_hit(q, kw) for kw in keywords):
                 detected.append(qtype)
                 for f in FIELD_MAP.get(qtype, []):
                     if f not in fields:
                         fields.append(f)
+
+        specialist = specialist_classification(question)
+        for qtype in specialist.get("question_types", []):
+            if qtype not in detected:
+                detected.append(qtype)
+        for field in specialist.get("relevant_fields", []):
+            if field not in fields:
+                fields.append(field)
+
+        # Strict domain profiles know important scientific topics that the old
+        # flat keyword list never named (for example superconductivity).  The
+        # previous substring bug accidentally classified such questions as
+        # technical because ``ai`` appeared inside an unrelated word.  Once
+        # substring matching was correctly removed, that accidental route also
+        # disappeared.  Restore it explicitly from the real domain detector.
+        dplan = domain_detect(question)
+        domain_type = {
+            "superconductivity": "scientific",
+            "materials_physics": "scientific",
+            "medicine_health": "medical",
+            "biology_genetics": "scientific",
+            "cs_ml": "technical",
+            "energy_climate": "scientific",
+            "economics": "financial",
+            "chemistry": "scientific",
+            "space": "scientific",
+            "engineering": "technical",
+            "archaeology_history": "historical",
+        }.get(dplan.key)
+        if domain_type and domain_type not in detected:
+            detected.append(domain_type)
+            for field in FIELD_MAP.get(domain_type, []):
+                if field not in fields:
+                    fields.append(field)
 
         if not detected:
             detected = ["factual"]
@@ -134,14 +178,21 @@ class ResearchPlanner:
         return {
             "question_types": primary,
             "all_detected_types": detected,
-            "relevant_fields": fields[:6],
+            "relevant_fields": fields[:10] if specialist.get("active") else fields[:6],
             "is_scientific": any(t in detected for t in
                                  ("scientific", "medical", "mathematical", "technical")),
             "is_medical": "medical" in detected,
             "is_multidisciplinary": len(detected) >= 3,
-            "needs_books": any(h in q for h in _BOOK_HINTS) or "historical" in detected,
+            "needs_books": (any(phrase_hit(q, h) for h in _BOOK_HINTS)
+                            or "historical" in detected
+                            or bool(specialist.get("needs_books"))),
             "is_creative": "creative" in detected,
             "is_unresolved": "unresolved_research" in detected,
+            "specialist_active": bool(specialist.get("active")),
+            "specialist_profile_keys": list(specialist.get("profile_keys", [])),
+            "specialist_expected_lanes": list(specialist.get("expected_lanes", [])),
+            "specialist_empirical_data_useful": bool(
+                specialist.get("empirical_data_useful")),
         }
 
     # ── 3. sub-questions (free, rule-based) ───────────────────────────────────
@@ -166,6 +217,11 @@ class ResearchPlanner:
             subs.append(f"{core} — clinical evidence, risks aur contraindications kya hain?")
         if cls.get("is_unresolved") or cls.get("is_creative"):
             subs.append(f"{core} — kya abhi tak unknown hai aur kaun sa test isse settle karega?")
+        if cls.get("specialist_active"):
+            subs.append(
+                f"{core} — primary text/official document kya kehta hai, aur "
+                "independent evidence asal mein kya establish karta hai?"
+            )
         subs.append(f"{core} — kaun sa evidence is baat ke KHILAF jaata hai?")
         return subs[:6]
 
@@ -236,6 +292,9 @@ class ResearchPlanner:
         """
         cls = cls or self.classify(question)
         base = self.clean_query(question)
+        specialist_qs = specialist_queries(question, base, round_no=round_no, limit=4)
+        if specialist_qs:
+            return specialist_qs
         plan = domain_detect(question)
 
         # §11 — round 2 se opposition side bhi dhoondhna ZAROORI hai. Pehle
@@ -299,6 +358,12 @@ class ResearchPlanner:
         kar diya. Ab domain profile decide karta hai kaun chalega — aur jo band
         hua wo report mein wajah ke saath likha jaata hai (chupchaap nahi).
         """
+        high_depth = config.name in {"MAXIMUM", "MARATHON"}
+        specialist = build_specialist_plan(
+            question or cls.get("question") or "",
+            self.clean_query(question or cls.get("question") or ""),
+        )
+
         papers: List[str] = []
         if config.use_papers:
             papers = ["openalex", "crossref"]
@@ -306,13 +371,13 @@ class ResearchPlanner:
                 papers.append("pubmed")
             if cls.get("is_scientific"):
                 papers += ["arxiv", "doaj"]
-            if config.name == "MAXIMUM":
+            if high_depth:
                 papers.append("semantic_scholar")
 
         books: List[str] = []
         if config.use_books or cls.get("needs_books"):
             books = ["internet_archive", "open_library"]
-            if config.name == "MAXIMUM":
+            if high_depth:
                 books.append("google_books")
 
         # Datasets (Spec §2 + §11) — raw data jispar claims tikte hain. Har sawal
@@ -331,8 +396,22 @@ class ResearchPlanner:
                 datasets.append("world_bank")
             if "technical" in types:
                 datasets.append("huggingface")
-            if config.name == "MAXIMUM":
+            if high_depth:
                 datasets += ["world_bank", "huggingface", "data_gov_in"]
+
+        # Interpretive/history/tradition questions do not become better merely
+        # by adding unrelated generic datasets.  Empirical mind/frequency
+        # questions keep the data tier; other specialist profiles disable it.
+        if specialist.get("active"):
+            profile_keys = set(specialist.get("profile_keys", []))
+            if "mind_cognition" in profile_keys:
+                datasets = [name for name in datasets
+                            if name in {"zenodo", "data_gov", "who_gho"}]
+            elif "frequency_claims" in profile_keys and cls.get("is_scientific"):
+                datasets = [name for name in datasets
+                            if name in {"zenodo", "data_gov"}]
+            else:
+                datasets = []
 
         dplan = domain_detect(question or cls.get("question") or "")
         intents = dplan.search_intents(self.clean_query(question or ""), limit=8)
@@ -396,11 +475,21 @@ class ResearchPlanner:
             "useful_source_types": list(dplan.profile.source_types),
             "skipped_connectors": sorted(set(dropped)),
             "routing_note": dplan.routing_note(dropped),
+            # Specialist/archival/book queries remain separate from ordinary
+            # web/paper queries so their evidence lanes can be audited.
+            "specialist_profile_keys": list(specialist.get("profile_keys", [])),
+            "specialist_expected_lanes": list(specialist.get("expected_lanes", [])),
+            "official_archive_queries": list(
+                specialist.get("official_archive_queries", [])),
+            "book_queries": list(specialist.get("book_queries", [])),
+            "legal_access_only": bool(specialist.get("legal_access_only", True)),
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────
     def plan(self, question: str, config: DepthConfig) -> Dict:
         cls = self.classify(question)
+        base_query = self.clean_query(question)
+        specialist = build_specialist_plan(question, base_query)
         return {
             **cls,
             "topic_terms": self.topic_terms(question),
@@ -408,6 +497,7 @@ class ResearchPlanner:
             "queries": self.search_queries(question, cls, round_no=1),
             "connectors": self.connector_plan(cls, config, question),
             "depth": config.to_dict(),
+            "specialist": specialist,
             # Prompt mein user ne jo CHEEZEIN saaf-saaf maangi hain (3 hypotheses,
             # mathematical model, second-order chain, red-team) — wo yahin plan ke
             # andar aa jaati hain, taaki prompt banane wale aur report banane wale

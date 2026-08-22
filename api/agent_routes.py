@@ -32,7 +32,7 @@ class ChatRequest(BaseModel):
 class DeepResearchRequest(BaseModel):
     question: str = Field(..., min_length=1, max_length=_MAX_QUESTION_CHARS)
     project_id: str = Field(default="default", min_length=1, max_length=_MAX_PROJECT_ID_CHARS)
-    depth_mode: str = Field(default="DEEP", min_length=1, max_length=16)  # QUICK | DEEP | MAXIMUM | CUSTOM
+    depth_mode: str = Field(default="DEEP", min_length=1, max_length=16)  # QUICK | DEEP | MAXIMUM | MARATHON | CUSTOM
     max_sources: Optional[int] = None
     max_rounds: Optional[int] = None
     gemini_calls: Optional[int] = None
@@ -137,7 +137,7 @@ def chat_diag():
 def depth_modes():
     """Har mode ka honest quota/limit disclosure (Spec Section 13 + 18)."""
     modes = {}
-    for name in ("QUICK", "DEEP", "MAXIMUM"):
+    for name in ("QUICK", "DEEP", "MAXIMUM", "MARATHON"):
         config = get_depth_config(name)
         modes[name] = {**config.to_dict(), "note": quota_note(config)}
     modes["CUSTOM"] = {

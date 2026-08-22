@@ -29,7 +29,7 @@ from typing import Dict, List, Optional
 from research_engine.agent_manager import manager
 from research_engine.planner import classify_question  # noqa: F401 (purana re-export)
 
-VALID_MODES = ("QUICK", "DEEP", "MAXIMUM", "CUSTOM")
+VALID_MODES = ("QUICK", "DEEP", "MAXIMUM", "MARATHON", "CUSTOM")
 
 
 class ResearchAgent:

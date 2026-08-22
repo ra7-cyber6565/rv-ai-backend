@@ -27,6 +27,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
+| Marathon multilingual specialist research | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED / FULL PYTEST CI PENDING | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented. 15/15 new adversarial checks, 593/593 core, cross-domain 633/633, superconductivity 146/146, architecture/provider/source-boundary audits and compile checks pass; full pytest must still run in the dependency-equipped CI/runtime. |
 | Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
 | Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |
 | Full-text + large PDF handling | Claude + ChatGPT audit | DONE / VERIFY | Claude removed 4MB blind skip; ChatGPT added honest access wording and whole-document sparse sampling so huge PDFs are not first-N biased |
@@ -78,6 +79,33 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 - Superconductivity Benchmark V2: **146 passed, 0 failed**.
 - Provider-bypass audit, architecture audit and source-boundary audit: **PASS**.
 - This is offline/₹0 verification only. The live zero-cost benchmark and deployment/runtime checks remain required before production sign-off.
+
+## Marathon multilingual specialist batch — 2026-08-22
+
+- Added a bounded `MARATHON` background mode: 4 reasoning calls, 32 ranked sources,
+  4 rounds, 12 legally accessible full-text attempts and 300s discovery budget per round.
+- Added exact specialist profiles for mind/cognition, Jung/depth psychology,
+  metaphysics, esoteric/occult/Hermetic history, declassified records,
+  Freemasonry/secret societies, conspiracy claims and measured-vs-symbolic frequency.
+- Fixed raw-substring classification: `physics` no longer fires inside
+  `metaphysics`, `science` no longer turns `occult sciences` into ordinary
+  science, and scientific domain routing now comes explicitly from the strict
+  domain detector instead of accidental `ai` substring matches.
+- Added separate official-document, empirical, historical, traditional,
+  interpretation, allegation, app-original-hypothesis and unknown lanes.
+- Added bounded CIA Reading Room/NARA/FBI Vault/GovInfo site queries for relevant
+  questions. Official-document provenance is explicitly not treated as truth proof.
+- Added original-preserving Hindi/Hinglish multilingual search planning and an
+  honest `translation_required` state for unresolved languages; no paywall,
+  copyright or access-control bypass.
+- Added a visible evidence-lane section before the existing system-owned
+  `Humari Hypotheses` section plus structured `specialist_research` API data.
+- Local dependency-light checks: **15/15 specialist**, **593/593 core**,
+  **633/633 cross-domain**, **146/146 superconductivity**; architecture,
+  provider-bypass, source-boundary, compile and web-JS syntax checks pass.
+- The current scratch Python lacks `pytest`/FastAPI runtime dependencies, so the
+  complete collected pytest suite is not being falsely reported as run; CI or a
+  dependency-equipped runtime remains the mandatory final collected-test gate.
 
 ## Current independent audit findings fixed
 
@@ -172,7 +200,7 @@ Every generated hypothesis must eventually carry support, counter-evidence, assu
 
 ## UI/product requirements remembered
 
-- Modes: Quick / Deep / Maximum / Custom.
+- Modes: Quick / Deep / Maximum / Marathon / Custom.
 - Real progress/stages, not fake percentages.
 - Sources: uploaded docs + legally/publicly accessible papers, books, reports, patents, datasets, webpages and video/audio transcripts.
 - Easy teacher-like Hinglish first; technical source/audit layer afterward.

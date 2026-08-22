@@ -49,6 +49,7 @@ from .research_memory import ResearchMemory
 from .run_status import INCOMPLETE, evaluate as evaluate_status
 from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
+from .specialist_domains import build_evidence_lane_report
 from .synthesizer import FinalSynthesizer
 from .vector_search import VectorSearch
 from .verification import VerificationEngine
@@ -784,6 +785,21 @@ class DeepResearchEngine:
                 "abstract/snippet level par hai. Wajah: "
                 + (reading.get("entries", [{}])[0].get("reason", "unknown"))[:120])
 
+        # Specialist topics get a deterministic, structured evidence boundary
+        # before any model reasoning.  This does not upgrade source quality; it
+        # only prevents official records, traditions, allegations and empirical
+        # findings from being blended into one truth bucket.
+        specialist_report = build_evidence_lane_report(question, plan, pack)
+        if specialist_report.get("active"):
+            self._track(job_id, "SPECIALIST_ANALYSIS",
+                        "official/traditional/scientific/claim lanes alag ki ja rahi hain")
+        if specialist_report.get("unknown_terms"):
+            warnings.append(
+                "Ek term ka meaning reliably resolve nahi hua ("
+                + ", ".join(specialist_report["unknown_terms"])
+                + ") — app ne uska matlab invent nahi kiya."
+            )
+
         # 4. contradictions (local, free)
         self._track(job_id, "EVIDENCE_ANALYSIS", "contradiction + independence check")
         contradiction_objects = self.contradictions.detect(pack)
@@ -1062,6 +1078,7 @@ class DeepResearchEngine:
                 for e in reading.get("entries", [])
             ],
         }
+        coverage["specialist_research"] = specialist_report
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -1172,6 +1189,7 @@ class DeepResearchEngine:
             api_accounting=passes.get("api_accounting") or {},
             claim_checks=claim_checks,
             hypothesis_plan=passes.get("hypothesis_plan") or {},
+            specialist_report=specialist_report,
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -1220,6 +1238,7 @@ class DeepResearchEngine:
             requested_ledger=ledger,
             label_report=label_report,
             discovery=discovery_analysis,
+            specialist_research=specialist_report,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

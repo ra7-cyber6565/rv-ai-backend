@@ -23,6 +23,7 @@ from urllib.parse import urlparse
 from .models import EvidencePack
 from .offline_reasoner import OfflineEvidenceReasoner
 from .presentation_guard import PresentationGuard
+from .specialist_domains import render_evidence_lane_report
 from .synthesizer_claude import *  # noqa: F401,F403 - compatibility exports
 from .synthesizer_claude import FinalSynthesizer as _ClaudeFinalSynthesizer
 
@@ -280,7 +281,27 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
 
     def assemble(self, *args, **kwargs) -> str:
         """Assemble with Claude features, then enforce the user's A-L presentation gate."""
+        specialist_report = kwargs.pop("specialist_report", None)
         report = super().assemble(*args, **kwargs)
+        specialist_block = render_evidence_lane_report(specialist_report or {})
+        if specialist_block:
+            # System-owned deterministic boundary.  It sits immediately before
+            # app-generated hypotheses, so official/traditional/allegation lanes
+            # cannot visually merge into the hypothesis section.  Sources and
+            # the technical audit remain the final two sections.
+            anchor = report.find("## Humari Hypotheses")
+            if anchor < 0:
+                anchor = report.find("## Sources")
+            if anchor < 0:
+                report = f"{report.rstrip()}\n\n{specialist_block}".strip()
+            else:
+                report = (
+                    report[:anchor].rstrip()
+                    + "\n\n"
+                    + specialist_block
+                    + "\n\n"
+                    + report[anchor:].lstrip()
+                )
         pack = kwargs.get("pack")
         if pack is None and len(args) > 1:
             pack = args[1]

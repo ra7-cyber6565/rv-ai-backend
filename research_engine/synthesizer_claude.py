@@ -39,6 +39,7 @@ from .explain_style import style_block
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
+from .specialist_domains import prompt_block as specialist_prompt_block
 
 # §16 ka order — headings mein number NAHI hai, kyunki user ko `## Seedha jawab`
 # hi dikhna chahiye. Index hi order hai.
@@ -171,6 +172,7 @@ class FinalSynthesizer:
         plan = plan or {}
         fields = ", ".join(plan.get("relevant_fields", [])[:4]) or "relevant areas"
         extras = requested_prompt_block(plan.get("requests"))
+        specialist_rules = specialist_prompt_block(plan)
 
         return f"""Tum ek bahut acche teacher ho. Tumhara kaam research ka result
 aam bhasha mein aise samjhana hai ki padhne wale ko poori baat samajh aa jaye.
@@ -187,6 +189,8 @@ SOURCES (sirf inhi IDs se cite karo):
 {CITATION_INSTRUCTION}
 
 {LABEL_RULE_PROMPT}
+
+{specialist_rules}
 
 {style_block(question, SECTION_TITLES)}
 
@@ -1607,4 +1611,3 @@ Ab jawab likho:"""
         lines.append("Inhe jodkar koi conclusion humne nahi nikala — wo kaam reasoning "
                      "pass ka tha, jo is baar poora nahi hua.")
         return "\n\n".join(lines)
-

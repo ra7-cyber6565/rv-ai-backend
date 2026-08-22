@@ -870,6 +870,10 @@ class ResearchResult:
     # Advanced scientific-discovery assessment.  Structured and optional so
     # older Android clients that ignore unknown fields remain compatible.
     discovery: Dict = field(default_factory=dict)
+    # Specialist evidence lanes keep empirical science, official/declassified
+    # records, historical/traditional texts, allegations and app-original
+    # hypotheses machine-readably separate.  Optional for old clients.
+    specialist_research: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 
