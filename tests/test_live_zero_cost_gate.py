@@ -188,6 +188,27 @@ def test_healthy_live_result_passes_all_checks_without_storing_answer():
     assert len(report["summary"]["answer_sha256"]) == 64
 
 
+def test_unassessed_claim_gate_fails_closed():
+    result = _result()
+    result["verification"]["claim_checks"] = {}
+    report = evaluate_result(result)
+    row = next(item for item in report["checks"] if item["name"] == "claim_gate")
+    assert row["passed"] is False
+    assert report["passed"] is False
+
+
+def test_live_failure_summary_keeps_only_safe_reasoning_identifiers():
+    result = _result()
+    result["status"] = "RESEARCH INCOMPLETE"
+    result["failure_kind"] = "daily_quota"
+    result["missing_passes"] = ["analysis", "hypothesis", "api_key=secret"]
+    report = evaluate_result(result)
+    summary = report["summary"]
+    assert summary["failure_kind"] == "daily_quota"
+    assert summary["missing_passes"] == ["analysis", "hypothesis"]
+    assert "secret" not in json.dumps(summary)
+
+
 def test_raw_provider_error_in_public_answer_fails_gate():
     result = _result()
     result["answer"] += " ResourceExhausted grpc_status"
