@@ -22,6 +22,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
+from .citation import labelled_claim_spans
 from .models import ClaimType, EvidencePack, SourceRecord, SourceType, label_to_claim_type
 from .semantic import similarity
 
@@ -255,24 +256,24 @@ class EvidenceVerifier:
         result = EvidenceVerificationReport()
         valid = set(pack.valid_ids)
 
-        for raw in (answer or "").splitlines():
-            labels = _LABEL_RE.findall(raw)
+        for _, _, block in labelled_claim_spans(answer):
+            labels = _LABEL_RE.findall(block)
             if not labels:
                 continue
             label = re.sub(r"[\s\-]+", " ", labels[0]).strip().upper()
             claim_type = label_to_claim_type(labels[0])
             if claim_type not in {ClaimType.FACT, ClaimType.EVIDENCE}:
                 continue
-            claim = _clean_claim(raw)
+            claim = _clean_claim(block)
             if len(claim) < 12:
                 continue
 
-            cited = _ids(raw)
+            cited = _ids(block)
             valid_ids = [sid for sid in cited if sid in valid]
             citation_ok = (
                 bool(valid_ids)
                 and len(valid_ids) == len(cited)
-                and not _NO_SOURCE_RE.search(raw)
+                and not _NO_SOURCE_RE.search(block)
             )
             item = ClaimEvidenceResult(
                 claim=claim[:500], label=label, source_ids=cited, citation=citation_ok,

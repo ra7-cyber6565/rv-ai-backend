@@ -13,6 +13,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List, Optional, Tuple
 
+from .citation import labelled_claim_spans
 from .models import EvidencePack
 
 ESTABLISHED = "ESTABLISHED"
@@ -160,15 +161,27 @@ def downgrade(
     if not body.strip():
         return body, report
 
+    lines = body.splitlines()
+    spans = {start: (end, block) for start, end, block in labelled_claim_spans(body)}
     out_lines: List[str] = []
-    for raw in body.splitlines():
+    index = 0
+    while index < len(lines):
+        span = spans.get(index)
+        if span is None:
+            out_lines.append(lines[index])
+            index += 1
+            continue
+
+        end, block = span
+        raw = lines[index]
         if not _STRONG_LABEL_RE.search(raw):
-            out_lines.append(raw)
+            out_lines.extend(lines[index:end])
+            index = end
             continue
 
         report["checked"] += 1
-        ae_attempted = bool(check_entailment and _has_full_text_cite(raw, pack))
-        verdict, why = line_verdict(raw, pack, check_entailment=check_entailment)
+        ae_attempted = bool(check_entailment and _has_full_text_cite(block, pack))
+        verdict, why = line_verdict(block, pack, check_entailment=check_entailment)
 
         # A-E is a separate stage from access-depth gating. Do not report an
         # abstract/snippet downgrade as "A-E checked and failed" when the A-E
@@ -180,19 +193,24 @@ def downgrade(
                 report["entailment_blocked"] += 1
 
         if verdict == ESTABLISHED:
-            out_lines.append(raw)
+            out_lines.extend(lines[index:end])
+            index = end
             continue
 
         new_line = _STRONG_LABEL_RE.sub(f"[{verdict}]", raw)
         out_lines.append(new_line)
+        out_lines.extend(lines[index + 1:end])
         report["downgraded"] += 1
         if verdict == SOURCE_REPORTED:
             report["to_source_reported"] += 1
         else:
             report["to_unverified"] += 1
         if len(report["details"]) < 8:
-            snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_line).strip()
+            new_block = "\n".join([new_line] + lines[index + 1:end])
+            snippet = re.sub(r"^[#\s\-\*\d\.]+", "", new_block).strip()
+            snippet = " ".join(snippet.split())
             report["details"].append(f"{snippet[:150]} — {why}")
+        index = end
 
     if report["downgraded"]:
         bits = []
