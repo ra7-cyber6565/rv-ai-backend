@@ -39,13 +39,14 @@ DAILY_QUOTA = "daily_quota"
 MODEL_NOT_FOUND = "model_not_found"
 INPUT_TOO_LARGE = "input_too_large"
 INVALID_REQUEST = "invalid_request"
+REQUEST_TIMEOUT = "request_timeout"
 AUTH = "auth_failure"
 SERVER = "server_error"
 EMPTY = "empty_response"
 UNKNOWN = "unknown"
 
 KINDS = (TRANSIENT, RATE_LIMIT, DAILY_QUOTA, MODEL_NOT_FOUND, INPUT_TOO_LARGE,
-         INVALID_REQUEST, AUTH, SERVER, EMPTY, UNKNOWN)
+         INVALID_REQUEST, REQUEST_TIMEOUT, AUTH, SERVER, EMPTY, UNKNOWN)
 
 # Har kind ka insaani matlab — user ko yahi dikhta hai, stack trace nahi.
 HUMAN: Dict[str, str] = {
@@ -55,6 +56,7 @@ HUMAN: Dict[str, str] = {
     MODEL_NOT_FOUND: "ye model naam is API key ke liye maujood nahi hai",
     INPUT_TOO_LARGE: "research prompt is model ki input/context limit se bada tha",
     INVALID_REQUEST: "reasoning request ka format/provider validation accept nahi hua",
+    REQUEST_TIMEOUT: "deep reasoning request provider ki waqt-seema mein poori nahi hui",
     AUTH: "API key galat hai ya usse permission nahi mili",
     SERVER: "Google ke server ne apni taraf se error diya (5xx)",
     EMPTY: "model ne khaali jawab bheja",
@@ -92,6 +94,10 @@ _MODEL_MISSING_MARKERS = (
 _AUTH_MARKERS = ("api key not valid", "api_key_invalid", "401", "403",
                  "permission denied", "permissiondenied", "unauthenticated",
                  "unauthorized", "api key expired")
+_TIMEOUT_MARKERS = (
+    "deadline exceeded", "deadlineexceeded", "timed out", "timeout",
+    "read operation timed out", "request deadline",
+)
 _SERVER_MARKERS = ("500", "502", "503", "504", "internal error", "internal server",
                    "unavailable", "backend error", "service is currently")
 _TRANSIENT_MARKERS = ("timeout", "timed out", "deadline", "connection",
@@ -219,7 +225,16 @@ def classify_text(text: str, detail: str = "") -> ErrorVerdict:
         v.retry_same_model = True
         return v
 
-    # 4. SERVER 5xx — Google ki taraf ki dikkat, retry ka matlab banta hai.
+    # Deadline/timeout ko generic 504 server error mein mat milao. Caller large
+    # evidence ko compact karke aur configured primary par ek bounded longer
+    # attempt karke recover kar sakta hai.
+    if _has(low, _TIMEOUT_MARKERS):
+        v.kind = REQUEST_TIMEOUT
+        v.retry_same_model = False
+        v.try_other_model = True
+        return v
+
+    # SERVER 5xx — Google ki taraf ki dikkat, retry ka matlab banta hai.
     if _has(low, _SERVER_MARKERS):
         v.kind = SERVER
         v.retry_same_model = True
@@ -274,8 +289,8 @@ class FailureLedger:
     @staticmethod
     def _priority(present) -> str:
         order = (AUTH, DAILY_QUOTA, RATE_LIMIT, INPUT_TOO_LARGE,
-                 INVALID_REQUEST, MODEL_NOT_FOUND, SERVER, TRANSIENT, EMPTY,
-                 UNKNOWN)
+                 INVALID_REQUEST, REQUEST_TIMEOUT, MODEL_NOT_FOUND, SERVER,
+                 TRANSIENT, EMPTY, UNKNOWN)
         values = set(present or ())
         for kind in order:
             if kind in values:
