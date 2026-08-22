@@ -21,7 +21,9 @@ from .citation import CITATION_INSTRUCTION
 from .claim_labels import LABEL_RULE_PROMPT
 from .explain_style import style_block
 from .key_pool import KeyPool
-from .model_errors import AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, FailureLedger
+from .model_errors import (
+    AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, FailureLedger,
+)
 from .model_errors import classify as classify_error
 from .models import EvidencePack
 
@@ -55,6 +57,15 @@ _MAX_MODELS = 4                    # pehla + teen fallback (quota per model hota
 
 _SOURCE_BEGIN = "BEGIN_UNTRUSTED_SOURCES"
 _SOURCE_END = "END_UNTRUSTED_SOURCES"
+
+
+def _compact_retry_min_chars() -> int:
+    """Generic InvalidArgument par compact retry sirf genuinely large prompt ko."""
+    try:
+        value = int(os.getenv("GEMINI_COMPACT_RETRY_MIN_CHARS", "") or 12000)
+    except (TypeError, ValueError):
+        value = 12000
+    return max(4000, min(value, 60000))
 
 
 def _compact_prompt_limit() -> int:
@@ -486,10 +497,16 @@ class GeminiReasoning:
                         f"{tag} failed (model={name}, try={attempt + 1}, "
                         f"{v.kind}): {type(exc).__name__}: {exc}")
 
-                    if v.kind == INPUT_TOO_LARGE:
+                    compactable_invalid = (
+                        v.kind == INVALID_REQUEST
+                        and len(request_prompt) >= _compact_retry_min_chars()
+                    )
+                    if v.kind == INPUT_TOO_LARGE or compactable_invalid:
                         # Same live model chhote diagnostic prompt par chal sakta
-                        # hai; working model ko dead mark karna galat hoga. Full
-                        # evidence local rehta hai, provider copy ek baar compact.
+                        # hai; working model ko dead mark karna galat hoga. Google
+                        # kabhi large request ko sirf generic InvalidArgument bhi
+                        # bolta hai, isliye woh recovery sirf large prompts par.
+                        # Full evidence local rehta hai, provider copy ek baar compact.
                         if not compacted_for_model:
                             compact_prompt = _compact_prompt(request_prompt)
                             if len(compact_prompt) < len(request_prompt):
@@ -498,7 +515,7 @@ class GeminiReasoning:
                                 self.prompt_compactions += 1
                                 self.same_model_retries += 1
                                 self.notes.append(
-                                    f"{tag}: '{name}' ki input limit ke baad "
+                                    f"{tag}: '{name}' ki request/input limit ke baad "
                                     "source IDs/rules bachakar compact retry kiya")
                                 continue
                         # Compact copy bhi reject hui: unchanged blind retry ya
