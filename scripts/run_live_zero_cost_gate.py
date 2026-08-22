@@ -50,6 +50,16 @@ def _safe_identifier(value: object, *, default: str = "") -> str:
     return default
 
 
+def _safe_model_name(value: object) -> str:
+    """Allow only inert provider/model identifier characters in public receipts."""
+    token = str(value or "").strip()
+    if token and len(token) <= 96 and all(
+        ch.isalnum() or ch in {"_", "-", ".", "/", ":"} for ch in token
+    ):
+        return token
+    return ""
+
+
 def load_local_env() -> None:
     """Load a private .env when python-dotenv is installed; never print it."""
     try:
@@ -180,6 +190,30 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     sources = result.get("sources") or []
     hypotheses = result.get("hypotheses") or []
     evidence_level = str(result.get("evidence_level") or "")
+    accounting = result.get("api_accounting") or {}
+    models_tried = [
+        name for name in (
+            _safe_model_name(item) for item in (accounting.get("models_tried") or [])
+        ) if name
+    ][:8]
+    failure_events = []
+    for event in list(accounting.get("failure_events") or [])[:12]:
+        if not isinstance(event, Mapping):
+            continue
+        model = _safe_model_name(event.get("model"))
+        label = _safe_identifier(event.get("label"))
+        kind = _safe_identifier(event.get("kind"))
+        try:
+            attempt = max(0, min(20, int(event.get("attempt") or 0)))
+        except (TypeError, ValueError):
+            attempt = 0
+        if kind:
+            failure_events.append({
+                "model": model, "label": label, "kind": kind, "attempt": attempt,
+            })
+    primary_failure_kind = _safe_identifier(
+        accounting.get("primary_failure_kind"), default=""
+    )
 
     checks = [
         ("status_complete", result.get("status") == "COMPLETE",
@@ -231,6 +265,9 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "failure_kind": _safe_identifier(
                 result.get("failure_kind"), default="unclassified"
             ) if result.get("failure_kind") else "",
+            "primary_failure_kind": primary_failure_kind,
+            "models_tried": models_tried,
+            "failure_events": failure_events,
             "missing_passes": [
                 name for name in (
                     _safe_identifier(item) for item in (result.get("missing_passes") or [])
@@ -368,6 +405,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         summary = evaluation.get("summary") or {}
         if summary.get("failure_kind"):
             print(f"[INFO] reasoning_failure_kind: {summary['failure_kind']}")
+        if summary.get("primary_failure_kind"):
+            print(f"[INFO] primary_reasoning_failure: {summary['primary_failure_kind']}")
+        if summary.get("models_tried"):
+            print("[INFO] models_tried: " + ", ".join(summary["models_tried"]))
+        if summary.get("failure_events"):
+            event_bits = [
+                f"{row.get('model') or '?'}:{row.get('kind') or '?'}"
+                for row in summary["failure_events"][:8]
+            ]
+            print("[INFO] safe_failure_events: " + ", ".join(event_bits))
         if summary.get("missing_passes"):
             print("[INFO] missing_reasoning_passes: "
                   + ", ".join(summary["missing_passes"]))
