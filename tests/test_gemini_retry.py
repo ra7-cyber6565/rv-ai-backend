@@ -110,6 +110,12 @@ def test_error_kinds_are_distinguished():
     assert _classify(RuntimeError(
         "InvalidArgument: 400 Request contains an invalid argument"
     )) == INVALID_REQUEST
+    assert _classify(RuntimeError(
+        "InvalidArgument: system instructions are not supported for model gemma"
+    )) == INVALID_REQUEST
+    assert _classify(RuntimeError(
+        "PermissionDenied: 403 User location is not supported for API use"
+    )) == INVALID_REQUEST
     assert _classify(RuntimeError("PermissionDenied: 403 permission denied")) == AUTH
     assert _classify(RuntimeError("ValueError: kuch aur")) == UNKNOWN
 
