@@ -101,6 +101,8 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_job_routes_access.py",
         "tests/test_network_safety.py",
         "tests/test_patents.py",
+        "tests/test_live_zero_cost_gate.py",
+        "tests/test_windows_launchers.py",
         "tests/test_unverified_semantics.py",
         "tests/test_foundation_gate_runner.py",
     ):
