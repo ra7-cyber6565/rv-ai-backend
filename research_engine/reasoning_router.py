@@ -533,6 +533,9 @@ class ResilientReasoning(_GeminiReasoning):
             "failure_kinds": primary.get("failure_kinds", []),
             "primary_failure_kind": primary.get("primary_failure_kind", ""),
             "failure_events": list(primary.get("failure_events", []) or [])[:20],
+            "prompt_compactions": int(primary.get("prompt_compactions") or 0),
+            "timeout_extensions": int(primary.get("timeout_extensions") or 0),
+            "prompt_attempts": list(primary.get("prompt_attempts", []) or [])[:40],
             "failure_summary": self.failure_reason(),
             "stopped_early": bool(self.failure_kind() and not self._router_last_success),
         }
