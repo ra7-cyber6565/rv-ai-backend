@@ -169,6 +169,40 @@ def test_gemini_daily_quota_then_free_backup_repairs_empty_pass_log(monkeypatch)
     assert brain.failure_reason() == "", "saved pass ko quota failure bana kar user ko mat dikhao"
 
 
+def test_same_key_model_recovery_clears_stale_failure(monkeypatch):
+    """A failed first model must not poison a pass saved by a later model."""
+    brain = ResilientReasoning(
+        budget=1, fallback_providers=[], model_name="model-a"
+    )
+    daily = RuntimeError(
+        "429 ResourceExhausted quota_id: "
+        "GenerateRequestsPerDayPerProjectPerModel-FreeTier"
+    )
+    _force_fake_gemini(monkeypatch, brain, [daily])
+    models = {
+        "model-a": FakeGeminiModel([daily]),
+        "model-b": FakeGeminiModel(["recovered output"]),
+    }
+    brain._model = models["model-a"]
+    brain.model_name = "model-a"
+    brain.model = lambda: brain._model
+    brain._model_order = lambda: ["model-a", "model-b"]
+
+    def _build(name):
+        brain.model_name = name
+        brain._model = models[name]
+        return brain._model
+
+    brain._build = _build
+
+    assert brain.generate("prompt", "diagnostic") == "recovered output"
+    assert brain.failure_kind() == ""
+    assert brain.failure_reason() == ""
+    accounting = brain.api_accounting()
+    assert accounting["passes_with_output"] == 1
+    assert accounting["blocked_models"]["model-a"] == "daily_quota"
+
+
 def test_dead_gemini_is_not_retried_on_next_logical_pass(monkeypatch):
     backup = FakeProvider("openrouter", "openrouter/free", ["first", "second"])
     brain = ResilientReasoning(budget=2, fallback_providers=[backup], model_name="fake-gemini")
