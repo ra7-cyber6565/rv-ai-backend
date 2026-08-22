@@ -327,7 +327,9 @@ class GeminiReasoning:
 
     # ── §9/§25: user ko batane layak wajah (raw error NAHI) ──────────────────
     def failure_kind(self) -> str:
-        return self.ledger.worst_kind()
+        # A later fallback-model 404 must not hide why the configured primary
+        # model actually failed. Full-cycle kinds remain in API accounting.
+        return self.ledger.primary_kind() or self.ledger.worst_kind()
 
     def failure_reason(self) -> str:
         """Ek Hinglish line — kyun reasoning poori nahi hui."""
@@ -660,6 +662,17 @@ class GeminiReasoning:
             "keys_note": self.keys.note(),
             "blocked_models": dict(self.blocked),
             "failure_kinds": self.ledger.kinds(),
+            "primary_failure_kind": self.ledger.primary_kind(),
+            "failure_events": [
+                {
+                    "model": str(row.get("model") or ""),
+                    "label": str(row.get("label") or ""),
+                    "kind": str(row.get("kind") or ""),
+                    "attempt": int(row.get("attempt") or 0),
+                }
+                for row in self.ledger.events[:20]
+                if isinstance(row, dict)
+            ],
             "failure_summary": self.ledger.summary(),
             "prompt_compactions": self.prompt_compactions,
             "prompt_attempts": [dict(row) for row in self.prompt_attempt_log[:40]],
