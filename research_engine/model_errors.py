@@ -37,13 +37,15 @@ TRANSIENT = "transient_network"
 RATE_LIMIT = "rate_limit"
 DAILY_QUOTA = "daily_quota"
 MODEL_NOT_FOUND = "model_not_found"
+INPUT_TOO_LARGE = "input_too_large"
+INVALID_REQUEST = "invalid_request"
 AUTH = "auth_failure"
 SERVER = "server_error"
 EMPTY = "empty_response"
 UNKNOWN = "unknown"
 
-KINDS = (TRANSIENT, RATE_LIMIT, DAILY_QUOTA, MODEL_NOT_FOUND, AUTH, SERVER,
-         EMPTY, UNKNOWN)
+KINDS = (TRANSIENT, RATE_LIMIT, DAILY_QUOTA, MODEL_NOT_FOUND, INPUT_TOO_LARGE,
+         INVALID_REQUEST, AUTH, SERVER, EMPTY, UNKNOWN)
 
 # Har kind ka insaani matlab — user ko yahi dikhta hai, stack trace nahi.
 HUMAN: Dict[str, str] = {
@@ -51,6 +53,8 @@ HUMAN: Dict[str, str] = {
     RATE_LIMIT: "ek minute ki free rate limit lag gayi (per-minute cap)",
     DAILY_QUOTA: "aaj ke liye is model ki free daily limit khatam ho gayi",
     MODEL_NOT_FOUND: "ye model naam is API key ke liye maujood nahi hai",
+    INPUT_TOO_LARGE: "research prompt is model ki input/context limit se bada tha",
+    INVALID_REQUEST: "reasoning request ka format/provider validation accept nahi hua",
     AUTH: "API key galat hai ya usse permission nahi mili",
     SERVER: "Google ke server ne apni taraf se error diya (5xx)",
     EMPTY: "model ne khaali jawab bheja",
@@ -69,9 +73,22 @@ _MINUTE_MARKERS = (
 )
 _QUOTA_MARKERS = ("429", "quota", "resource_exhausted", "resourceexhausted",
                   "rate limit", "ratelimit", "too many requests")
-_NOT_FOUND_MARKERS = ("404", "not found", "notfound", "is not supported",
-                      "not supported", "unsupported", "invalid argument",
-                      "invalidargument", "unknown name", "does not exist")
+_INPUT_TOO_LARGE_MARKERS = (
+    "input token count exceeds", "input tokens exceed", "too many input tokens",
+    "request too large", "payload too large", "request payload size exceeds",
+    "context length", "context window", "maximum context", "max context",
+    "token limit exceeded", "exceeds the maximum number of tokens",
+)
+_INVALID_REQUEST_MARKERS = ("invalid argument", "invalidargument", "bad request", "400")
+_UNSUPPORTED_LOCATION_MARKERS = (
+    "user location is not supported", "location is not supported",
+    "unsupported region", "region is not supported",
+)
+_MODEL_WORD_MARKERS = ("model", "models/", "generative model")
+_MODEL_MISSING_MARKERS = (
+    "model not found", "model is not found", "models/unknown",
+    "unknown model", "unknown name", "model does not exist",
+)
 _AUTH_MARKERS = ("api key not valid", "api_key_invalid", "401", "403",
                  "permission denied", "permissiondenied", "unauthenticated",
                  "unauthorized", "api key expired")
@@ -138,7 +155,16 @@ def classify_text(text: str, detail: str = "") -> ErrorVerdict:
         v.retry_same_model = True
         return v
 
-    # 1. AUTH — sabse pehle. Key galat ho to doosra model bhi nahi chalega,
+    # Provider region block aksar InvalidArgument/403 ke roop mein aata hai.
+    # Ye key ko invalid aur model ko dead nahi banata; configured fallback ko
+    # chance milna chahiye.
+    if _has(low, _UNSUPPORTED_LOCATION_MARKERS):
+        v.kind = INVALID_REQUEST
+        v.retry_same_model = False
+        v.try_other_model = True
+        return v
+
+    # 1. AUTH — key sach mein galat ho to doosra Gemini model bhi nahi chalega,
     #    isliye poori reasoning wahin rok dena imaandaar hai.
     if _has(low, _AUTH_MARKERS):
         v.kind = AUTH
@@ -147,16 +173,35 @@ def classify_text(text: str, detail: str = "") -> ErrorVerdict:
         v.stop_all = True
         return v
 
-    # 2. MODEL NOT FOUND — naam hi galat/purana hai. Usi naam par dobara
-    #    koshish karna pakka bekaar hai; naam ko permanently chhodo.
-    if _has(low, _NOT_FOUND_MARKERS):
+    # 2. INPUT/CONTEXT TOO LARGE — model zinda ho sakta hai. Caller ek baar
+    #    source evidence ko compact karke isi model par safe retry kar sakta hai.
+    if _has(low, _INPUT_TOO_LARGE_MARKERS):
+        v.kind = INPUT_TOO_LARGE
+        v.retry_same_model = True
+        v.try_other_model = True
+        return v
+
+    # 3. MODEL NOT FOUND — sirf model-specific signal par. Generic
+    #    InvalidArgument/unsupported text ko model naam ki maut mat banao:
+    #    location, payload aur request validation bhi wahi words use karte hain.
+    model_word = _has(low, _MODEL_WORD_MARKERS)
+    model_missing = _has(low, _MODEL_MISSING_MARKERS)
+    if model_word and (model_missing or "404" in low):
         v.kind = MODEL_NOT_FOUND
         v.retry_same_model = False
         v.disable_model = True
         v.permanent = True
         return v
 
-    # 3. QUOTA — asli farak: DIN ka quota vs MINUTE ki rate limit.
+    # 4. INVALID REQUEST — permanent model failure nahi. Doosra model/provider
+    #    try ho sakta hai, lekin isi unchanged request ka blind retry bekaar hai.
+    if _has(low, _INVALID_REQUEST_MARKERS):
+        v.kind = INVALID_REQUEST
+        v.retry_same_model = False
+        v.try_other_model = True
+        return v
+
+    # 5. QUOTA — asli farak: DIN ka quota vs MINUTE ki rate limit.
     if _has(low, _QUOTA_MARKERS):
         v.retry_after = retry_after_seconds(low)
         if _has(low, _DAILY_MARKERS) and not _has(low, _MINUTE_MARKERS):
@@ -228,8 +273,9 @@ class FailureLedger:
 
     def worst_kind(self) -> str:
         """User ko batane ke liye sabse maayne wala kind."""
-        order = (AUTH, DAILY_QUOTA, RATE_LIMIT, MODEL_NOT_FOUND, SERVER,
-                 TRANSIENT, EMPTY, UNKNOWN)
+        order = (AUTH, DAILY_QUOTA, RATE_LIMIT, INPUT_TOO_LARGE,
+                 INVALID_REQUEST, MODEL_NOT_FOUND, SERVER, TRANSIENT, EMPTY,
+                 UNKNOWN)
         present = set(self.kinds())
         for k in order:
             if k in present:
