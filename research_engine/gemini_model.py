@@ -191,7 +191,15 @@ def resolve(genai, force: bool = False) -> str:
 def candidates(genai) -> List[str]:
     first = resolve(genai)
     order = [first] if not is_dead(first) else []
-    for name in _alive(_seen) + _alive(list(FALLBACKS)):
+
+    # A listed same-family peer is a better fallback than a hard-coded name that
+    # this key may list but reject at generateContent time. In the live ₹0 run,
+    # configured Gemma worked on a controlled request while Gemini 2.5 fallbacks
+    # returned 404; prefer another listed Gemma before crossing families.
+    seen = _alive(_seen)
+    family = (first.split("-", 1)[0].lower() + "-") if first else ""
+    same_family = [name for name in seen if name.lower().startswith(family)]
+    for name in same_family + seen + _alive(list(FALLBACKS)):
         if name not in order:
             order.append(name)
     if not order:
