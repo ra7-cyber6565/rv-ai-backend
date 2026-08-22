@@ -122,6 +122,10 @@ class ResilientReasoning(_Router):
         provider_switches_before = int(getattr(self, "provider_switches", 0) or 0)
 
         text = super().generate(prompt, label)
+        # A successful later model/provider saves this logical pass. Earlier
+        # failed model attempts remain in accounting, but must not leave a stale
+        # public failure reason after real output was produced.
+        self._router_last_success = bool(text)
 
         events_after = list(getattr(getattr(self, "ledger", None), "events", []) or [])
         new_primary_events = [row for row in events_after[events_before:] if isinstance(row, dict)]
@@ -168,6 +172,12 @@ class ResilientReasoning(_Router):
                     if getattr(self, "models_tried", None):
                         row["model"] = str(self.models_tried[-1])
         return text
+
+    def failure_kind(self) -> str:
+        """Do not report a saved pass as failed because an earlier model fell."""
+        if getattr(self, "_router_last_success", None) is True:
+            return ""
+        return super().failure_kind()
 
     def technical_details(self, limit: int = 8) -> List[str]:
         """Return coarse failure metadata only, never raw provider bodies.
