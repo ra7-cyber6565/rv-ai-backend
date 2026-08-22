@@ -126,7 +126,11 @@ def _browser_checks() -> None:
     check("insecure public history recovery not introduced",
           "/api/v1/history/" not in page)
 
-    check("30-minute hard deadline present", "30*60*1000" in page)
+    check(
+        "default 30-minute and Marathon 60-minute deadlines present",
+        'requestedMode==="MARATHON"?60:30' in page
+        and "*60*1000" in page,
+    )
     check("stalled progress guard present", "6*60*1000" in page and "lastChange" in page)
     check("single live progress writer", code.count("paintProgress(ui,p);") == 1)
 

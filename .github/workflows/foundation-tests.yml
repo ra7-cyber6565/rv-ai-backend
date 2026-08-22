@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [chatgpt-upload-safety, chatgpt-marathon-multilingual]
+    branches: [chatgpt-upload-safety]
   workflow_dispatch:
 
 permissions:

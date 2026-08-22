@@ -184,7 +184,7 @@ def _foundation_workflow_safe() -> AuditCheck:
     required = (
         "ubuntu-latest",
         "scripts/run_foundation_gate.py",
-        "chatgpt-marathon-multilingual",
+        "pull_request:\n    branches: [main]",
         "INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data",
     )
     missing = [needle for needle in required if needle not in text]
@@ -193,7 +193,7 @@ def _foundation_workflow_safe() -> AuditCheck:
         name="ci:foundation-workflow-valid-contexts",
         passed=bool(text) and not missing and not invalid_job_env,
         detail=(
-            "foundation workflow has a valid Linux temp root and branch trigger"
+            "foundation workflow has a valid Linux temp root and PR trigger"
             if text and not missing and not invalid_job_env
             else f"missing={missing}; invalid_runner_context={invalid_job_env}"
         ),
