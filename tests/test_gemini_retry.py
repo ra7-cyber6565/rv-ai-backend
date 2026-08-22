@@ -211,6 +211,21 @@ def test_input_limit_compacts_once_and_recovers_same_working_model():
     assert brain.failure_kind() == "", "successful compact retry public failure nahi"
 
 
+def test_large_generic_invalid_argument_gets_one_bounded_compact_retry():
+    invalid = RuntimeError("InvalidArgument: 400 Request contains an invalid argument")
+    brain = _brain({"model-a": [invalid, "large request recovered"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "large request recovered"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 2
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    assert brain.prompt_compactions == 1
+    assert brain.same_model_retries == 1
+    assert INVALID_REQUEST in brain.api_accounting()["failure_kinds"]
+    assert brain.failure_kind() == ""
+
+
 def test_generic_invalid_argument_is_not_mislabeled_or_retried_blindly():
     invalid = RuntimeError("InvalidArgument: 400 Request contains an invalid argument")
     brain = _brain({"model-a": [invalid, "same model must not retry"],
