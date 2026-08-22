@@ -200,13 +200,37 @@ def test_unassessed_claim_gate_fails_closed():
 def test_live_failure_summary_keeps_only_safe_reasoning_identifiers():
     result = _result()
     result["status"] = "RESEARCH INCOMPLETE"
-    result["failure_kind"] = "daily_quota"
+    result["failure_kind"] = "unknown"
     result["missing_passes"] = ["analysis", "hypothesis", "api_key=secret"]
+    result["api_accounting"] = {
+        "primary_failure_kind": "unknown",
+        "models_tried": [
+            "gemma-4-26b-a4b-it", "gemini-2.5-flash", "api_key=secret",
+        ],
+        "failure_events": [
+            {"model": "gemma-4-26b-a4b-it", "label": "analysis",
+             "kind": "unknown", "attempt": 1, "detail": "PRIVATE RAW BODY"},
+            {"model": "api_key=secret", "label": "analysis",
+             "kind": "model_not_found", "attempt": 99},
+        ],
+    }
     report = evaluate_result(result)
     summary = report["summary"]
-    assert summary["failure_kind"] == "daily_quota"
+    assert summary["failure_kind"] == "unknown"
+    assert summary["primary_failure_kind"] == "unknown"
+    assert summary["models_tried"] == [
+        "gemma-4-26b-a4b-it", "gemini-2.5-flash",
+    ]
+    assert summary["failure_events"] == [
+        {"model": "gemma-4-26b-a4b-it", "label": "analysis",
+         "kind": "unknown", "attempt": 1},
+        {"model": "", "label": "analysis",
+         "kind": "model_not_found", "attempt": 20},
+    ]
     assert summary["missing_passes"] == ["analysis", "hypothesis"]
-    assert "secret" not in json.dumps(summary)
+    serialized = json.dumps(summary)
+    assert "secret" not in serialized
+    assert "PRIVATE RAW BODY" not in serialized
 
 
 def test_raw_provider_error_in_public_answer_fails_gate():

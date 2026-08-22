@@ -271,16 +271,32 @@ class FailureLedger:
                 out.append(e["kind"])
         return out
 
-    def worst_kind(self) -> str:
-        """User ko batane ke liye sabse maayne wala kind."""
+    @staticmethod
+    def _priority(present) -> str:
         order = (AUTH, DAILY_QUOTA, RATE_LIMIT, INPUT_TOO_LARGE,
                  INVALID_REQUEST, MODEL_NOT_FOUND, SERVER, TRANSIENT, EMPTY,
                  UNKNOWN)
-        present = set(self.kinds())
-        for k in order:
-            if k in present:
-                return k
+        values = set(present or ())
+        for kind in order:
+            if kind in values:
+                return kind
         return ""
+
+    def primary_kind(self) -> str:
+        """Root model ka failure; later fallback 404 ise mask nahi kar sakta."""
+        if not self.events:
+            return ""
+        primary_model = str(self.events[0].get("model") or "")
+        kinds = [
+            str(event.get("kind") or "")
+            for event in self.events
+            if str(event.get("model") or "") == primary_model
+        ]
+        return self._priority(kinds)
+
+    def worst_kind(self) -> str:
+        """Poore fallback cycle ka strongest audit kind (root kind alag hai)."""
+        return self._priority(self.kinds())
 
     def is_empty(self) -> bool:
         return not self.events
