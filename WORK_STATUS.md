@@ -27,7 +27,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 | Task | Owner | Status | Notes |
 |---|---|---|---|
-| Real offline API path smoke gate | ChatGPT | CODE COMPLETE / CI PENDING | New zero-network process gate exercises the shipped FastAPI app through health + CSP, anonymous project capability, zero-call QUICK chat, MARATHON job capability, durable result retrieval and fail-closed final quality downgrade. It is wired into the strict foundation runner; dependency-equipped CI is required for execution. |
+| Real offline API path smoke gate | ChatGPT | FULL FOUNDATION CI PASS | New zero-network process gate exercises the shipped FastAPI app through health + CSP, raw-credential canary redaction, anonymous project capability, zero-call QUICK chat, MARATHON job capability, durable result retrieval and fail-closed final quality downgrade. GitHub Actions run 32548467255 passed all 40 smoke checks inside the strict foundation gate. |
 | Marathon multilingual specialist research | ChatGPT | PUSHED IN PR #7 / FULL FOUNDATION CI PASS | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented on `chatgpt-marathon-multilingual`. GitHub Actions run 32547266529 passed: 420 focused pytest, 648 full pytest, 593/593 core, cross-domain 633/633, superconductivity 146/146, and architecture/provider/source-boundary/compile gates. CI also exposed and ChatGPT fixed the invalid job-level `runner.temp` context plus the stale 30-minute-only browser assertion. Live zero-cost verification remains a separate honest release gate. |
 | Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
 | Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |
@@ -65,16 +65,17 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Encryption for cloud archive | ChatGPT | BLOCKED ON SAFE KEY/RECOVERY DESIGN | No homemade/insecure crypto and no unrecoverable-key design |
 | Secondary compact metadata backup | ChatGPT | PLANNED | Only after a genuinely free private destination is selected |
 | Patents connector | Claude + ChatGPT integration | DONE / OFFLINE VERIFIED | Official ₹0 EPO Linked Data plus optional official USPTO ODP key; family dedup, relevance traps, legal-status honesty and patent-vs-science separation are release-gated |
-| Integrated regression | ChatGPT | OFFLINE PASS / LIVE RETEST PENDING | 2026-08-21 post-merge strict gate: 405 focused pytest, 633 full pytest, 593 core checks, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
-| Final architecture/integration audit | ChatGPT | OFFLINE PASS / LIVE GATE PENDING | Static architecture and provider/source-boundary audits pass; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
+| Integrated regression | ChatGPT | FULL FOUNDATION CI PASS / LIVE RETEST PENDING | 2026-08-22 strict gate on PR #8: 421 focused pytest, 649 full pytest, 40/40 real offline API smoke, 593 core checks, provider/architecture audits, cross-domain 633/633 and superconductivity 146/146 |
+| Final architecture/integration audit | ChatGPT | FULL FOUNDATION CI PASS / LIVE GATE PENDING | GitHub Actions run 32548467255 passed the complete offline gate; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
 | Advanced Scientific Discovery Engine | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED | Structured discovery field includes all 16 planned layers; arbitrary code, automatic real experiments, global-novelty claims and success-probability claims are fail-closed |
 | Live ₹0 release runner | ChatGPT | CODE COMPLETE / CREDENTIALS PENDING | No-call preflight is default; real run requires `--execute`, explicit D-root and a currently usable confirmed/free model layer; receipt contains no answer/source text/credentials |
 
-## Latest independent offline validation — 2026-08-21
+## Latest independent offline validation — 2026-08-22
 
-- Strict default `scripts/run_foundation_gate.py` execution: **PASS across every enforced stage**.
-- Focused release pytest: **405 passed**.
-- Full `pytest -q tests`: **633 passed**; the strict gate also executed the separate 593-check core regression harness.
+- Strict default `scripts/run_foundation_gate.py` execution in GitHub Actions run **32548467255**: **PASS across every enforced stage**.
+- Focused release pytest: **421 passed**.
+- Full `pytest -q tests`: **649 passed**; the strict gate also executed the separate 593-check core regression harness.
+- Real FastAPI/session/chat/job/result process smoke: **40 passed, 0 failed**.
 - Ordered core regression: **593 passed, 0 failed**.
 - Cross-domain adversarial benchmark: **633 passed, 0 failed** across eight domains.
 - Superconductivity Benchmark V2: **146 passed, 0 failed**.
