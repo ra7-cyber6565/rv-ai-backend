@@ -38,12 +38,25 @@ _HYP = r"(?:hypothes[ei]s|hypotheses|hypothesis|परिकल्पना(?:�
 _ATLEAST = r"(?:kam[\s\-]?se[\s\-]?kam|कम[\s\-]?से[\s\-]?कम|at\s*least|minimum)"
 _NEWISH = r"(?:new|nayi|nai|naye|naya|नई|नयी|नए|नये)?"
 
+# Count aur `hypothesis` ke beech user aksar quality adjective likhta hai:
+# "3 testable hypotheses", "3 nayi falsifiable hypotheses". Purana regex
+# sirf `3 hypotheses` / `3 nayi hypotheses` samajhta tha. Live release question
+# isi wajah se 3 ko 1 padh raha tha. Qualifiers ko explicit allow-list rakha hai
+# taaki kisi door ke unrelated number ko hypothesis count na maan lein.
+_HYP_QUALIFIER = (
+    r"(?:new|nayi|nai|naye|naya|novel|testable|falsifiable|scientific|"
+    r"नई|नयी|नए|नये|परीक्षणीय|जाँचने\s*योग्य)"
+)
+
 _TOKEN = r"([0-9०-९]+|[A-Za-zऀ-ॿ]{2,7})"
 
 # "kam se kam 3 ... hypotheses" / "3 nayi hypotheses" / "hypotheses: at least 3"
 _HYP_COUNT_RES = (
     re.compile(_ATLEAST + r"\s*" + _TOKEN + r"[^.\n।]{0,40}?" + _HYP, re.IGNORECASE),
-    re.compile(_TOKEN + r"\s*" + _NEWISH + r"\s*" + _HYP, re.IGNORECASE),
+    re.compile(
+        _TOKEN + r"\s+(?:" + _HYP_QUALIFIER + r"\s+){0,4}" + _HYP,
+        re.IGNORECASE,
+    ),
     re.compile(_HYP + r"[^.\n।]{0,30}?" + _ATLEAST + r"\s*" + _TOKEN, re.IGNORECASE),
 )
 _HYP_ANY_RE = re.compile(_HYP, re.IGNORECASE)
