@@ -22,8 +22,18 @@ from .models import EvidencePack
 
 STATUS = "UNTESTED HYPOTHESIS"
 
-_H_SPLIT_RE = re.compile(r"^\s*#{2,4}\s*(?:hypothesis|hypothesis\s*\d+)\b.*$",
-                         re.IGNORECASE | re.MULTILINE)
+# Provider exact template follow kare to `## Hypothesis 1` aata hai, lekin
+# kabhi `## H1`, `### Hypothesis #2`, ya `## 3. Hypothesis` bhi aa jaata hai.
+# In headings ko ek block maan kar parse karo; prose ke andar likhe shabd par
+# split nahi hota kyunki markdown heading marker zaroori hai.
+_H_HEADING = (
+    r"(?:hypothesis(?:\s*#?\s*\d+)?|h\s*#?\s*\d+|"
+    r"\d+\s*[\).:\-]?\s*hypothesis)"
+)
+_H_SPLIT_RE = re.compile(
+    r"^\s*#{1,6}\s*" + _H_HEADING + r"\b.*$",
+    re.IGNORECASE | re.MULTILINE,
+)
 # NOTE: `simple explanation`, `assumptions`, `if true`, `if false` baad mein
 # add hue (2026-08-20) — intel ka rule: hypothesis ko aise samjhao jaise samne
 # baithe bande ne ye concept pehle kabhi suna hi nahi. Sirf ek-line statement

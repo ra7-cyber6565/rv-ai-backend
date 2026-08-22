@@ -233,6 +233,23 @@ def test_live_failure_summary_keeps_only_safe_reasoning_identifiers():
     assert "PRIVATE RAW BODY" not in serialized
 
 
+def test_complete_run_marks_old_provider_failure_as_recovered_not_current():
+    result = _result()
+    result["api_accounting"] = {
+        "primary_failure_kind": "request_timeout",
+        "models_tried": ["gemma-4-26b-a4b-it"],
+        "failure_events": [{
+            "model": "gemma-4-26b-a4b-it", "label": "analysis",
+            "kind": "request_timeout", "attempt": 1,
+        }],
+    }
+    report = evaluate_result(result)
+    summary = report["summary"]
+    assert summary["primary_failure_kind"] == ""
+    assert summary["recovered_primary_failure_kind"] == "request_timeout"
+    assert summary["failure_events"][0]["kind"] == "request_timeout"
+
+
 def test_raw_provider_error_in_public_answer_fails_gate():
     result = _result()
     result["answer"] += " ResourceExhausted grpc_status"

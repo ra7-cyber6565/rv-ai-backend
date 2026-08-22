@@ -128,6 +128,11 @@ class ClaimCheck:
         """Sirf C pass hone par hi "asli support" — spec ka rule."""
         return self.status("C") == PASS
 
+    @property
+    def passes_ae(self) -> bool:
+        """Strong public label tabhi safe hai jab A, B, C, D, E sab PASS hon."""
+        return all(self.status(key) == PASS for key in ("A", "B", "C", "D", "E"))
+
     def failed_checks(self) -> List[str]:
         return [c.key for c in self.checks if c.status == FAIL]
 
@@ -518,6 +523,29 @@ class VerificationReport:
     def genuine_ratio(self) -> float:
         return round(self.genuine / self.total, 3) if self.total else 0.0
 
+    @property
+    def strong_claims(self) -> List[ClaimCheck]:
+        return [claim for claim in self.claims if claim.strong_label]
+
+    @property
+    def strong_claims_passed(self) -> int:
+        return len([claim for claim in self.strong_claims if claim.passes_ae])
+
+    @property
+    def strong_claims_failed(self) -> int:
+        return len([claim for claim in self.strong_claims if not claim.passes_ae])
+
+    @property
+    def gate_passed(self) -> bool:
+        """Release safety contract: koi unsupported strong label bachna nahi chahiye.
+
+        Zero strong labels par gate pass hona jaan-boojh kar hai: iska matlab
+        "claims verified" nahi, sirf itna ki answer ne ESTABLISHED/FACT jaisa
+        unsupported strong dawa public nahi chhoda. `gate_applicable` aur
+        claim counts alag fields mein is distinction ko audit ke liye rakhte hain.
+        """
+        return self.strong_claims_failed == 0
+
     def check_counts(self) -> Dict[str, Dict[str, int]]:
         out: Dict[str, Dict[str, int]] = {}
         for key in ("A", "B", "C", "D", "E"):
@@ -533,6 +561,11 @@ class VerificationReport:
                 "cited_only": self.cited_only, "unsupported": self.unsupported,
                 "entailment_not_checkable": self.unknown_entailment,
                 "genuine_ratio": self.genuine_ratio,
+                "gate_passed": self.gate_passed,
+                "gate_applicable": bool(self.strong_claims),
+                "strong_claims_checked": len(self.strong_claims),
+                "strong_claims_passed": self.strong_claims_passed,
+                "strong_claims_failed": self.strong_claims_failed,
                 "check_counts": self.check_counts(),
                 "overclaims": [c.to_dict() for c in self.overclaims],
                 "claims": [c.to_dict() for c in self.claims]}
@@ -607,7 +640,7 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
             continue
         cc = verify_claim(line, pack)
         report.claims.append(cc)
-        if cc.strong_label and cc.verdict != GENUINE_SUPPORT:
+        if cc.strong_label and not cc.passes_ae:
             report.overclaims.append(cc)
         if len(report.claims) >= max_claims:
             break

@@ -214,9 +214,17 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     primary_failure_kind = _safe_identifier(
         accounting.get("primary_failure_kind"), default=""
     )
+    status_complete = result.get("status") == "COMPLETE"
+    strong_checked = int(claim_checks.get("strong_claims_checked") or 0)
+    strong_passed = int(claim_checks.get("strong_claims_passed") or 0)
+    claim_gate_value = claim_checks.get("gate_passed")
+    claim_gate_detail = (
+        f"{claim_gate_value} ({strong_passed}/{strong_checked} strong-label "
+        "claim(s) passed A-E)"
+    )
 
     checks = [
-        ("status_complete", result.get("status") == "COMPLETE",
+        ("status_complete", status_complete,
          str(result.get("status") or "missing")),
         ("sources_retrieved", len(sources) >= 3, f"{len(sources)} source(s)"),
         ("on_topic_sources", int(coverage.get("on_topic_sources") or 0) >= 3,
@@ -227,8 +235,7 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
          f"{len(result.get('invalid_citations') or [])} invalid"),
         ("citations_present", len(result.get("citations") or []) >= 1,
          f"{len(result.get('citations') or [])} citation(s)"),
-        ("claim_gate", claim_checks.get("gate_passed") is True,
-         str(claim_checks.get("gate_passed"))),
+        ("claim_gate", claim_gate_value is True, claim_gate_detail),
         ("three_hypotheses", len(hypotheses) >= 3,
          f"{len(hypotheses)} hypothesis/hypotheses"),
         ("advanced_discovery", discovery.get("status") == "ASSESSMENT_READY",
@@ -265,7 +272,12 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "failure_kind": _safe_identifier(
                 result.get("failure_kind"), default="unclassified"
             ) if result.get("failure_kind") else "",
-            "primary_failure_kind": primary_failure_kind,
+            # A recovered provider failure stays in failure_events for audit,
+            # but it is not the current failure of a COMPLETE run.
+            "primary_failure_kind": "" if status_complete else primary_failure_kind,
+            "recovered_primary_failure_kind": (
+                primary_failure_kind if status_complete else ""
+            ),
             "models_tried": models_tried,
             "failure_events": failure_events,
             "missing_passes": [

@@ -49,6 +49,9 @@ _CAUSE: Dict[str, str] = {
     "rate_limit": "AI reasoning model ki free API limit khatam ho gayi",
     "auth_failure": "AI reasoning model ki API key kaam nahi kar rahi",
     "model_not_found": "AI reasoning model ka naam is API key ke liye kaam nahi kar raha",
+    "input_too_large": "research prompt model ki input/context limit se bada tha",
+    "invalid_request": "reasoning request ka format provider ne accept nahi kiya",
+    "request_timeout": "deep reasoning request provider ki waqt-seema mein poori nahi hui",
     "server_error": "AI reasoning model ka server apni taraf se error de raha tha",
     "transient_network": "network beech mein saath chhod gaya",
     "empty_response": "AI reasoning model ne khaali jawab bheja",
@@ -124,8 +127,11 @@ def cause_line(failure_kind: str = "", failure_reason: str = "") -> str:
 # mein line daal dete hain, ledger ko chhue bina. Us halat mein pehle user ko
 # KOI warning hi nahi milti thi — raw line §9 ke tahat hata di jaati thi aur
 # uski jagah kuch nahi aata tha. Ab wajah raw text se hi padh lete hain.
-_KIND_PRIORITY = ("auth_failure", "daily_quota", "rate_limit", "model_not_found",
-                  "server_error", "transient_network", "empty_response")
+_KIND_PRIORITY = (
+    "auth_failure", "daily_quota", "rate_limit", "model_not_found",
+    "input_too_large", "invalid_request", "request_timeout", "server_error",
+    "transient_network", "empty_response",
+)
 
 
 def infer_kind(messages: Iterable) -> str:
@@ -249,6 +255,12 @@ def evaluate(planned_passes: Sequence[str] = (), done_passes: Sequence[str] = ()
         status.code = COMPLETE
 
     if status.code == COMPLETE:
+        # Provider attempt beech mein fail hua aur bounded recovery baad mein
+        # kaam kar gayi to failure event audit/accounting mein rehna chahiye,
+        # lekin final run ko current failure label dena stale aur misleading hai.
+        status.failure_kind = ""
+        status.reason = ""
+        status.banner = ""
         return status
 
     cause = cause_line(failure_kind, failure_reason)
@@ -274,4 +286,3 @@ def evaluate(planned_passes: Sequence[str] = (), done_passes: Sequence[str] = ()
             f"({cause}). Isliye ise partial result maanein.")
         status.reason = f"{gap} nahi hua — {cause}"
     return status
-
