@@ -80,10 +80,14 @@ _INPUT_TOO_LARGE_MARKERS = (
     "token limit exceeded", "exceeds the maximum number of tokens",
 )
 _INVALID_REQUEST_MARKERS = ("invalid argument", "invalidargument", "bad request", "400")
+_UNSUPPORTED_LOCATION_MARKERS = (
+    "user location is not supported", "location is not supported",
+    "unsupported region", "region is not supported",
+)
 _MODEL_WORD_MARKERS = ("model", "models/", "generative model")
 _MODEL_MISSING_MARKERS = (
-    "not found", "notfound", "is not supported", "model not supported",
-    "unknown model", "unknown name", "does not exist",
+    "model not found", "model is not found", "models/unknown",
+    "unknown model", "unknown name", "model does not exist",
 )
 _AUTH_MARKERS = ("api key not valid", "api_key_invalid", "401", "403",
                  "permission denied", "permissiondenied", "unauthenticated",
@@ -151,7 +155,16 @@ def classify_text(text: str, detail: str = "") -> ErrorVerdict:
         v.retry_same_model = True
         return v
 
-    # 1. AUTH — sabse pehle. Key galat ho to doosra model bhi nahi chalega,
+    # Provider region block aksar InvalidArgument/403 ke roop mein aata hai.
+    # Ye key ko invalid aur model ko dead nahi banata; configured fallback ko
+    # chance milna chahiye.
+    if _has(low, _UNSUPPORTED_LOCATION_MARKERS):
+        v.kind = INVALID_REQUEST
+        v.retry_same_model = False
+        v.try_other_model = True
+        return v
+
+    # 1. AUTH — key sach mein galat ho to doosra Gemini model bhi nahi chalega,
     #    isliye poori reasoning wahin rok dena imaandaar hai.
     if _has(low, _AUTH_MARKERS):
         v.kind = AUTH
