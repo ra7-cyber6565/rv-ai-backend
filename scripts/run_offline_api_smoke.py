@@ -100,7 +100,26 @@ def _fake_research(**kwargs: Any) -> dict:
 
 
 def _run_with_client(client: Any, runtime_root: str, manager: Any) -> None:
-    health = client.get("/health")
+    # Import/startup happened with every provider credential blank.  Inject fake
+    # canary values only for this read-only health request so the smoke test
+    # proves that public diagnostics expose readiness metadata, never raw
+    # credential values.  Restore the blank values before any chat/job work.
+    credential_canaries = {
+        "GEMINI_API_KEY": "rv-smoke-gemini-credential-must-not-leak",
+        "GROQ_API_KEY": "rv-smoke-groq-credential-must-not-leak",
+        "OPENROUTER_API_KEY": "rv-smoke-openrouter-credential-must-not-leak",
+        "GOOGLE_DRIVE_RCLONE_REMOTE": "rv-smoke-archive-credential-must-not-leak",
+    }
+    previous_values = {name: os.environ.get(name) for name in credential_canaries}
+    os.environ.update(credential_canaries)
+    try:
+        health = client.get("/health")
+    finally:
+        for name, value in previous_values.items():
+            if value is None:
+                os.environ.pop(name, None)
+            else:
+                os.environ[name] = value
     check("real /health route responds", health.status_code == 200, str(health.status_code))
     health_json = health.json()
     check("temporary runtime storage is available", health_json.get("storage", {}).get("available") is True)
@@ -110,10 +129,16 @@ def _run_with_client(client: Any, runtime_root: str, manager: Any) -> None:
     )
     health_text = health.text.lower()
     check("public health hides absolute runtime root", runtime_root.lower() not in health_text)
-    check("public health hides credential fields", "api_key" not in health_text and "client_secret" not in health_text)
+    check(
+        "public health hides credential values",
+        all(value.lower() not in health_text for value in credential_canaries.values()),
+    )
 
     website = client.get("/")
-    check("shipped web client loads", website.status_code == 200 and "RV AI" in website.text)
+    check(
+        "shipped web client loads",
+        website.status_code == 200 and "Infinity Research AI" in website.text,
+    )
     check("web client gets CSP", bool(website.headers.get("content-security-policy")))
     check("web client is not cached", "no-store" in website.headers.get("cache-control", ""))
 
