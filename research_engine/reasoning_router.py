@@ -531,6 +531,8 @@ class ResilientReasoning(_GeminiReasoning):
             "blocked_models": dict(getattr(self, "blocked", {}) or {}),
             "blocked_providers": dict(self.blocked_providers),
             "failure_kinds": primary.get("failure_kinds", []),
+            "primary_failure_kind": primary.get("primary_failure_kind", ""),
+            "failure_events": list(primary.get("failure_events", []) or [])[:20],
             "failure_summary": self.failure_reason(),
             "stopped_early": bool(self.failure_kind() and not self._router_last_success),
         }
