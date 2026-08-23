@@ -519,6 +519,8 @@ TRISTATE_FIELDS: tuple = (
     "directly_relevant_sources", "sources_supporting_critical_claims",
     "average_relevance", "critical_claim_spans_complete",
     "critical_claims_same_source_ae_passed", "claim_verification_achievement",
+    "evidence_first_required", "critical_claim_preselection_complete",
+    "critical_claims_preselected_span_unmatched", "evidence_first_achievement",
     "evidence_graph_complete", "counter_search_performed", "recovery_used",
     "progress_snapshot_preserved", "numeric_confidence_calibrated",
     "access_depth_mismatch_count", "unsupported_critical_claims",
@@ -609,6 +611,7 @@ def quality_context(pack=None, answer_text: str = "", verification=None,
                     contradiction_rejections: Optional[Dict] = None,
                     evidence_graph: Optional[bool] = None,
                     axis_coverage: Optional[Sequence[Dict]] = None,
+                    evidence_first_audit: Optional[Dict] = None,
                     floor: float = DIRECT_RELEVANCE_FLOOR) -> Dict:
     """
     §19 — poora `quality_context`, ek hi jagah se, ek hi definition se.
@@ -620,6 +623,8 @@ def quality_context(pack=None, answer_text: str = "", verification=None,
     koi calculation hi nahi hui thi.
     """
     vdict = _verification_dict(verification)
+    evidence_first = (dict(evidence_first_audit)
+                      if isinstance(evidence_first_audit, dict) else None)
     supporting = None
     if vdict is not None:
         supporting = vdict.get("sources_supporting_critical_claims")
@@ -667,6 +672,34 @@ def quality_context(pack=None, answer_text: str = "", verification=None,
         "critical_claim_spans_complete":
             (vdict or {}).get("critical_claim_spans_complete"),
         "critical_claim_evidence_spans": (vdict or {}).get("critical_claim_spans"),
+        # P0-B — no raw evidence passage is copied into quality_context;
+        # hashes/locators/counts are sufficient for release audit.
+        "evidence_first_required": (evidence_first or {}).get("evidence_first_required")
+            if evidence_first is not None else None,
+        "preselected_evidence_spans_count":
+            (evidence_first or {}).get("preselected_evidence_spans_count")
+            if evidence_first is not None else None,
+        "preselected_strong_eligible_spans":
+            (evidence_first or {}).get("preselected_strong_eligible_spans")
+            if evidence_first is not None else None,
+        "critical_claims_preselected_span_matched":
+            (evidence_first or {}).get("critical_claims_preselected_span_matched")
+            if evidence_first is not None else None,
+        "critical_claims_preselected_span_unmatched":
+            (evidence_first or {}).get("critical_claims_preselected_span_unmatched")
+            if evidence_first is not None else None,
+        "critical_claim_preselection_complete":
+            (evidence_first or {}).get("critical_claim_preselection_complete")
+            if evidence_first is not None else None,
+        "evidence_first_achievement":
+            (evidence_first or {}).get("evidence_first_achievement")
+            if evidence_first is not None else None,
+        "evidence_first_claim_matches":
+            list((evidence_first or {}).get("claim_matches") or [])
+            if evidence_first is not None else None,
+        "evidence_first_failures":
+            list((evidence_first or {}).get("preselection_failures") or [])
+            if evidence_first is not None else None,
         "critical_no_source_claims": len([c for c in no_source if c["critical"]]),
         "no_source_claims": len(no_source),
         "no_source_claim_details": no_source,
