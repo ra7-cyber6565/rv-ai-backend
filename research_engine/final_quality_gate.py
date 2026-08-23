@@ -326,7 +326,7 @@ class FinalQualityGate:
         spec = self._merge_ledger_requirements(spec, ledger)
         self._check_requirements(state, data, answer, ledger, spec)
         self._check_sources(state, sources, coverage, quality_context, spec)
-        self._check_claims(state, answer, verification, labels, quality_context)
+        self._check_claims(state, answer, verification, labels, quality_context, spec)
         self._check_reasoning(state, contradictions, quality_context, spec)
         self._check_calculations(state, calculations, spec)
         self._check_hypotheses(state, answer, hypotheses, quality_context, spec)
@@ -541,6 +541,7 @@ class FinalQualityGate:
         verification: Mapping[str, Any],
         labels: Mapping[str, Any],
         quality_context: Mapping[str, Any],
+        spec: QualityContract,
     ) -> None:
         invalid = verification.get("invalid_citations") or quality_context.get("invalid_citations") or []
         fabricated = _as_int(verification.get("fabricated_citations"), len(invalid) if isinstance(invalid, list) else 0)
@@ -572,6 +573,75 @@ class FinalQualityGate:
                 details={"count": unsupported},
             )
 
+        # P0-A keeps two meanings separate:
+        #   safety: no unsupported strong label escaped (can be true at 0/0)
+        #   achievement: at least one required critical claim genuinely passed
+        #                A-E on the SAME source (must never pass at 0/0).
+        achievement_required = any(
+            section in set(spec.required_sections)
+            for section in ("direct_answer", "established_knowledge",
+                            "supporting_evidence", "conclusion")
+        )
+        explicit_achievement = quality_context.get("claim_verification_achievement")
+        explicit_passed = quality_context.get("critical_claims_same_source_ae_passed")
+        explicit_total = quality_context.get("critical_claims")
+        if not achievement_required:
+            achievement_ok = True
+        elif explicit_achievement is not None:
+            achievement_ok = _as_bool(explicit_achievement)
+        elif explicit_passed is not None or explicit_total is not None:
+            achievement_ok = (_as_int(explicit_total) > 0
+                              and _as_int(explicit_passed) > 0)
+        else:
+            legacy_support = _as_int(
+                quality_context.get("sources_supporting_critical_claims"), 0
+            )
+            legacy_spans = quality_context.get("critical_claim_evidence_spans")
+            achievement_ok = legacy_support > 0 and isinstance(legacy_spans, list) and bool(legacy_spans)
+        state.check("verified_critical_claim_achievement", achievement_ok)
+        if not achievement_ok:
+            state.issue(
+                "CRITICAL_CLAIM_ACHIEVEMENT_MISSING",
+                "claim_citation",
+                "critical",
+                "No required critical claim achieved same-source A-E support; 0/0 is not verification success.",
+                deduction=8,
+                hard_cap=70,
+                details={
+                    "critical_claims": explicit_total,
+                    "same_source_ae_passed": explicit_passed,
+                    "achievement": explicit_achievement,
+                },
+            )
+
+        # P0-B — post-hoc citation fitting is not release-safe. Legacy
+        # callers remain compatible when the field is absent/None; the
+        # current orchestrator explicitly sets it True and must then
+        # provide a complete preselection audit. Zero supported critical
+        # claims are handled separately by P0-A's non-vacuous achievement.
+        evidence_first_required = quality_context.get("evidence_first_required") is True
+        if evidence_first_required:
+            preselection_flag = quality_context.get("critical_claim_preselection_complete")
+            preselection_unmatched = _as_int(
+                quality_context.get("critical_claims_preselected_span_unmatched"))
+            preselection_ok = (preselection_flag is not None
+                               and _as_bool(preselection_flag)
+                               and preselection_unmatched == 0)
+        else:
+            preselection_unmatched = 0
+            preselection_ok = True
+        state.check("critical_claims_preselected_before_generation", preselection_ok)
+        if not preselection_ok:
+            state.issue(
+                "CRITICAL_CLAIM_NOT_PRESELECTED",
+                "claim_citation",
+                "critical",
+                "A supported critical claim used evidence that was not in the pre-draft manifest.",
+                deduction=8,
+                hard_cap=60,
+                details={"unmatched": preselection_unmatched},
+            )
+
         no_source_count = _as_int(
             quality_context.get("critical_no_source_claims"),
             len(NO_SOURCE_RE.findall(answer)),
@@ -588,7 +658,14 @@ class FinalQualityGate:
                 details={"count": no_source_count},
             )
 
-        access_depth_mismatch = _as_int(quality_context.get("access_depth_mismatches"))
+        mismatch_value = quality_context.get("access_depth_mismatch_count")
+        if mismatch_value is None:
+            raw_mismatches = quality_context.get("access_depth_mismatches")
+            access_depth_mismatch = (len(raw_mismatches)
+                                     if isinstance(raw_mismatches, list)
+                                     else _as_int(raw_mismatches))
+        else:
+            access_depth_mismatch = _as_int(mismatch_value)
         state.check("access_depth_labels_accurate", access_depth_mismatch == 0)
         if access_depth_mismatch:
             state.issue(
@@ -602,9 +679,11 @@ class FinalQualityGate:
             )
 
         evidence_spans = quality_context.get("critical_claim_evidence_spans")
-        spans_present = _as_bool(quality_context.get("critical_claim_spans_complete")) or (
-            isinstance(evidence_spans, list) and bool(evidence_spans)
-        )
+        spans_complete_flag = quality_context.get("critical_claim_spans_complete")
+        if spans_complete_flag is None:
+            spans_present = isinstance(evidence_spans, list) and bool(evidence_spans)
+        else:
+            spans_present = _as_bool(spans_complete_flag)
         state.check("critical_claim_evidence_spans_present", spans_present)
         if not spans_present:
             state.issue(

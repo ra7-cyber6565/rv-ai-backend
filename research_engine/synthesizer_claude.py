@@ -187,7 +187,8 @@ class FinalSynthesizer:
 
     # ── synthesis prompt — "teacher ki tarah samjhao" ────────────────────────
     def prompt(self, question: str, analysis: str, critique: str, hypothesis_text: str,
-               pack: EvidencePack, plan: Dict, memory_note: str = "") -> str:
+               pack: EvidencePack, plan: Dict, memory_note: str = "",
+               evidence_first_block: str = "") -> str:
         critique_block = (f"\nCRITIC KE INTERNAL FINDINGS:\n{critique[:2500]}\n"
                           if critique else "")
         hypothesis_block = (f"\nGENERATED HYPOTHESES (status: UNTESTED):\n"
@@ -197,6 +198,7 @@ class FinalSynthesizer:
         fields = ", ".join(plan.get("relevant_fields", [])[:4]) or "relevant areas"
         extras = requested_prompt_block(plan.get("requests"))
         specialist_rules = specialist_prompt_block(plan)
+        evidence_first_prompt = (evidence_first_block or "").strip()
 
         return f"""Tum ek bahut acche teacher ho. Tumhara kaam research ka result
 aam bhasha mein aise samjhana hai ki padhne wale ko poori baat samajh aa jaye.
@@ -209,6 +211,8 @@ karo, inse samjho aur apne shabdon mein samjhao):
 {critique_block}{hypothesis_block}{memory_block}
 SOURCES (sirf inhi IDs se cite karo):
 {pack.to_prompt_block(max_chars_per_source=500)}
+
+{evidence_first_prompt}
 
 {CITATION_INSTRUCTION}
 
