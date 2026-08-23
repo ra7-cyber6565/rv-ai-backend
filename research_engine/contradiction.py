@@ -77,6 +77,9 @@ _SUPPORT_CUES = (
 _OPPOSE_CUES = (
     "not effective", "ineffective", "no significant", "no effect", "no evidence",
     "failed to", "does not", "did not", "no association", "no benefit", "contradicts",
+    # Do not let the SUPPORT cue "consistent with" fire inside the opposite
+    # phrase "inconsistent with".  Treat the whole phrase as explicit opposition.
+    "inconsistent with",
     "refuted", "disproved", "inconclusive", "no difference", "harmful", "adverse",
     "nuksan", "koi fayda nahi",
     # Domain-neutral "null result" ki bhaasha — har field mein milti hai.
@@ -97,6 +100,7 @@ _HEDGE_CUES = ("may", "might", "suggests", "possible", "preliminary", "unclear",
 _STRONG_OPPOSE_CUES = (
     "not effective", "ineffective", "no significant", "no effect", "no evidence",
     "failed to", "does not", "did not", "no association", "no benefit",
+    "inconsistent with",
     "no difference", "refuted", "disproved", "not reproduced",
     "could not reproduce", "failed replication", "null result", "no detectable",
     "no measurable", "not preserved", "no useful", "no reduction",

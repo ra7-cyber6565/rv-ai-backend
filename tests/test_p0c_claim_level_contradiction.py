@@ -8,6 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import claim_verification as CV
 from research_engine import final_quality_gate as FQ
+from research_engine.contradiction import ContradictionEngine
 from research_engine.models import EvidencePack, Passage, SourceRecord, SourceType
 from research_engine.quality_producers import quality_context
 
@@ -71,6 +72,15 @@ def _pack(passages: list[tuple[str, str, str]]) -> EvidencePack:
         for sid, text, locator in passages
     ]
     return pack
+
+
+def test_inconsistent_with_is_opposition_not_false_consistent_support():
+    engine = ContradictionEngine()
+    stance, cues = engine.stance(EXACT_OPPOSE)
+
+    assert stance == "OPPOSE"
+    assert "inconsistent with" in cues
+    assert "consistent with" not in cues
 
 
 def test_distant_opposing_paragraph_cannot_bleed_into_selected_claim_span():
