@@ -1,7 +1,14 @@
 """Run the guarded P0-D patcher with one generated-loop normalization."""
 from __future__ import annotations
 
-from scripts import apply_p0d_evidence_provenance as base
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts import apply_p0d_evidence_provenance as base  # noqa: E402
 
 
 _original_replace_once = base.replace_once
