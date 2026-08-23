@@ -594,7 +594,12 @@ def check_c_span(claim: str, span: Optional[Dict]) -> Check:
     hits = [n for n in wanted if n in low]
     matched_all = bool(wanted) and len(hits) == len(wanted)
     effective = score + (0.20 if matched_all else 0.0)
-    threshold = _ENTAIL_SIM_WITH_NUM if wanted else _ENTAIL_SIM
+    # Relaxed numeric threshold sirf tab, jab claim ke SAARE numbers isi span mein
+    # exact mile hon. Pehle yahan `if wanted` tha: claim mein number hone se hi
+    # bar 0.30 se 0.12 gir jaata tha, chahe ek bhi number span mein na mile —
+    # yaani "same-ish numbers, bilkul alag matlab" wala text bhi genuine support
+    # ban jaata tha. Numbers adhoore mile to poora text-match hi maangte hain.
+    threshold = _ENTAIL_SIM_WITH_NUM if matched_all else _ENTAIL_SIM
     sid = str(span.get("source_id") or "?")
     locator = str(span.get("locator") or "").strip()
     note = (f"{len(hits)}/{len(wanted)} number exact span mein mile, text-match {score:.2f}"
