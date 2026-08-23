@@ -10,6 +10,20 @@ Kyun ye file bani (2026-08-22):
 
 Ye file jaan-boojh kar pytest ke bina chalti hai (plain assert), taaki
 `tests/run_pytest_style_suites.py` bhi ise chala sake.
+
+Ek defect jo isi file ne paida kiya tha (2026-08-23, band):
+    Do test asli `load_dotenv()` chalate hain. pytest poori suite EK process
+    mein chalata hai, isliye `.env` ki `GEMINI_API_KEY` +
+    `GEMINI_ZERO_COST_CONFIRMED=true` process ke `os.environ` mein baith jaati
+    thi. `tests/test_provider_health.py` aur `tests/test_reasoning_router.py`
+    apne import ke waqt wahi key `pop` karke "offline" hone ka bharosa karte
+    hain - par unka import pehle hota hai aur ye test baad mein chalta hai, to
+    pop bekaar ho jaata tha. Nateeja: router ka
+    `ResilientReasoning._gemini_allowed()` True ban jaata tha aur wo offline
+    test asli Gemini primary call maar dete the -> 6 test fail (Windows par,
+    jahan `google-generativeai` install hai; sandbox mein SDK na hone se ye
+    chhupa raha). Isliye neeche har dotenv-wala test `_restored_env()` ke andar
+    chalta hai aur baad mein saabit karta hai ki ek bhi naam leak nahi hua.
 """
 from __future__ import annotations
 
@@ -17,6 +31,7 @@ import importlib.util
 import os
 import sys
 import tempfile
+from contextlib import contextmanager
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if ROOT not in sys.path:
@@ -38,6 +53,24 @@ FAKE_KEY = "AIzaSyRVTESTFAKEKEYVALUE0123456789xyz"
 
 def _root(folder: str) -> str:
     return os.path.join(folder, "runtime_data")
+
+
+@contextmanager
+def _restored_env():
+    """`os.environ` ka snapshot lo aur block ke baad hu-ba-hu wapas rakho.
+
+    Sirf naye naam hataana kaafi nahi - `load_dotenv()` maujood naam ki value
+    bhi badal sakta hai, isliye value-wise wapasi hoti hai.
+    """
+    before = dict(os.environ)
+    try:
+        yield before
+    finally:
+        for name in [n for n in os.environ if n not in before]:
+            del os.environ[name]
+        for name, value in before.items():
+            if os.environ.get(name) != value:
+                os.environ[name] = value
 
 
 def test_gemini_key_without_confirmation_is_named_as_the_boot_killer():
@@ -188,15 +221,43 @@ def test_cause_chain_reaches_the_innermost_reason():
 
 def test_explicit_env_never_gets_polluted_by_local_dotenv():
     """Test-env do to `.env` load nahi hona chahiye, warna jawab badal jaata hai."""
-    with tempfile.TemporaryDirectory() as folder:
+    before = dict(os.environ)
+    with tempfile.TemporaryDirectory() as folder, _restored_env():
         env = {"PORT": "8080", "INFINITY_DATA_ROOT": _root(folder),
                "GEMINI_API_KEY": FAKE_KEY}
         results = BP.run(env=env, use_dotenv=True)
     assert len(results) == len(BP.GATES)
     assert BP.exit_code(results) == 1  # .env ka CONFIRMED=true isko chura nahi sakta
+    assert dict(os.environ) == before, "test ne process env badal diya"
 
 
 def test_dotenv_step_is_never_startup_fatal():
-    result = BP.load_dotenv_like_main()
-    assert result.level in (BP.OK, BP.WARN), result.detail
-    assert not result.fatal
+    before = dict(os.environ)
+    with _restored_env():
+        result = BP.load_dotenv_like_main()
+        assert result.level in (BP.OK, BP.WARN), result.detail
+        assert not result.fatal
+    assert dict(os.environ) == before, "test ne process env badal diya"
+
+
+def test_dotenv_test_does_not_leak_env_into_the_rest_of_the_suite():
+    """Ye guard hi 2026-08-23 ke 6 pytest failures ki wajah pakadta hai.
+
+    Upar wale do test asli `load_dotenv()` chalate hain. Wo `.env` ki
+    `GEMINI_API_KEY`/`GEMINI_ZERO_COST_CONFIRMED` process env mein chhod dein to
+    `tests/test_reasoning_router.py` aur `tests/test_provider_health.py` ke
+    offline test asli Gemini call maarne lagte hain. Yahan hum wahi do test
+    seedha chala kar naapte hain ki ek bhi naam bacha to nahi.
+    """
+    watched = ("GEMINI_API_KEY", "GEMINI_API_KEYS", "GEMINI_API_KEY_2",
+               "GEMINI_ZERO_COST_CONFIRMED", "GEMINI_MODEL", "TAVILY_API_KEY",
+               "ZERO_COST_ONLY")
+    before = {name: os.environ.get(name) for name in watched}
+    test_dotenv_step_is_never_startup_fatal()
+    test_explicit_env_never_gets_polluted_by_local_dotenv()
+    after = {name: os.environ.get(name) for name in watched}
+    leaked = sorted(name for name in watched if before[name] != after[name])
+    assert not leaked, (
+        "dotenv test ne env leak kiya (naam only, value nahi): %s - isse "
+        "offline router test live provider call maar dete hain" % (leaked,)
+    )
