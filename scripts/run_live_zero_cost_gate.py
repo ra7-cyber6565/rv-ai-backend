@@ -223,6 +223,55 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         "claim(s) passed A-E)"
     )
 
+    # P0-C — live release must prove non-vacuous P0-A achievement AND P0-B
+    # evidence-before-generation adherence. `gate_passed=True` alone is a safety
+    # property and can be vacuously true at 0/0, so it is never enough here.
+    critical_total = int(claim_checks.get("critical_claims") or 0)
+    critical_same_source = int(
+        claim_checks.get("critical_claims_same_source_ae_passed") or 0
+    )
+    claim_achievement_value = claim_checks.get("claim_verification_achievement")
+    claim_achievement_ok = (
+        critical_total > 0
+        and critical_same_source > 0
+        and claim_achievement_value is True
+    )
+    claim_achievement_detail = (
+        f"{claim_achievement_value} "
+        f"({critical_same_source}/{critical_total} critical claim(s) passed same-source A-E)"
+    )
+
+    evidence_first = verification.get("evidence_first_audit") or {}
+    evidence_first_required = evidence_first.get("evidence_first_required") is True
+    preselected_count = int(
+        evidence_first.get("preselected_evidence_spans_count") or 0
+    )
+    preselected_strong = int(
+        evidence_first.get("preselected_strong_eligible_spans") or 0
+    )
+    preselected_matched = int(
+        evidence_first.get("critical_claims_preselected_span_matched") or 0
+    )
+    preselected_unmatched = int(
+        evidence_first.get("critical_claims_preselected_span_unmatched") or 0
+    )
+    preselection_complete = evidence_first.get("critical_claim_preselection_complete")
+    evidence_first_achievement = evidence_first.get("evidence_first_achievement")
+    evidence_first_ok = (
+        evidence_first_required
+        and preselected_count > 0
+        and preselected_strong > 0
+        and preselection_complete is True
+        and preselected_unmatched == 0
+        and preselected_matched > 0
+        and evidence_first_achievement is True
+    )
+    evidence_first_detail = (
+        f"required={evidence_first_required}, achievement={evidence_first_achievement}, "
+        f"matched={preselected_matched}, unmatched={preselected_unmatched}, "
+        f"eligible={preselected_strong}/{preselected_count}"
+    )
+
     checks = [
         ("status_complete", status_complete,
          str(result.get("status") or "missing")),
@@ -236,6 +285,9 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         ("citations_present", len(result.get("citations") or []) >= 1,
          f"{len(result.get('citations') or [])} citation(s)"),
         ("claim_gate", claim_gate_value is True, claim_gate_detail),
+        ("claim_verification_achievement", claim_achievement_ok,
+         claim_achievement_detail),
+        ("evidence_first_achievement", evidence_first_ok, evidence_first_detail),
         ("three_hypotheses", len(hypotheses) >= 3,
          f"{len(hypotheses)} hypothesis/hypotheses"),
         ("advanced_discovery", discovery.get("status") == "ASSESSMENT_READY",
@@ -267,6 +319,18 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "full_text_sources_read": int(coverage.get("full_text_sources_read") or 0),
             "citations": len(result.get("citations") or []),
             "hypotheses": len(hypotheses),
+            # P0-C stores only structural evidence counters/booleans. No source
+            # passage, URL, prompt or claim text is copied into the receipt.
+            "critical_claims": critical_total,
+            "critical_claims_same_source_ae_passed": critical_same_source,
+            "claim_verification_achievement": bool(claim_achievement_ok),
+            "evidence_first_required": bool(evidence_first_required),
+            "preselected_evidence_spans_count": preselected_count,
+            "preselected_strong_eligible_spans": preselected_strong,
+            "critical_claims_preselected_span_matched": preselected_matched,
+            "critical_claims_preselected_span_unmatched": preselected_unmatched,
+            "critical_claim_preselection_complete": preselection_complete is True,
+            "evidence_first_achievement": bool(evidence_first_ok),
             "discovery_status": str(discovery.get("status") or ""),
             "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest(),
             "failure_kind": _safe_identifier(
