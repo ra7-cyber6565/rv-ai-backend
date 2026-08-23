@@ -642,6 +642,47 @@ class FinalQualityGate:
                 details={"unmatched": preselection_unmatched},
             )
 
+        # P0-C — an explicit claim-level contradiction must itself have
+        # exact provenance.  Legacy callers that do not emit the new count remain
+        # compatible; current verification emits count + completeness explicitly.
+        contradicted_value = quality_context.get("critical_contradicted_claims")
+        if contradicted_value is None:
+            contradicted_count = 0
+            contradiction_span_ok = True
+        else:
+            contradicted_count = _as_int(contradicted_value)
+            if contradicted_count <= 0:
+                contradiction_span_ok = True
+            else:
+                contradiction_rows = [
+                    row for row in _list_of_mappings(
+                        quality_context.get("critical_claim_evidence_spans"))
+                    if str(row.get("result") or "").strip().upper() == "CONTRADICTED"
+                ]
+                rows_complete = (
+                    len(contradiction_rows) >= contradicted_count
+                    and all(_meaningful(row.get("contradiction_span"), 2)
+                            for row in contradiction_rows)
+                )
+                explicit_complete = quality_context.get(
+                    "critical_contradiction_spans_complete")
+                contradiction_span_ok = (
+                    explicit_complete is not None
+                    and _as_bool(explicit_complete)
+                    and rows_complete
+                )
+        state.check("critical_contradictions_have_exact_spans", contradiction_span_ok)
+        if not contradiction_span_ok:
+            state.issue(
+                "CONTRADICTION_SPAN_MISSING",
+                "claim_citation",
+                "critical",
+                "A critical claim is marked contradicted without an exact source passage/locator.",
+                deduction=5,
+                hard_cap=60,
+                details={"count": contradicted_count},
+            )
+
         no_source_count = _as_int(
             quality_context.get("critical_no_source_claims"),
             len(NO_SOURCE_RE.findall(answer)),

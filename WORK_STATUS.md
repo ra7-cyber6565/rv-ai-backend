@@ -71,6 +71,12 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Advanced Scientific Discovery Engine | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED | Structured discovery field includes all 16 planned layers; arbitrary code, automatic real experiments, global-novelty claims and success-probability claims are fail-closed |
 | Live ₹0 release runner | ChatGPT | CODE COMPLETE / CREDENTIALS PENDING | No-call preflight is default; real run requires `--execute`, explicit D-root and a currently usable confirmed/free model layer; receipt contains no answer/source text/credentials |
 
+## Evidence-grounding continuation — 2026-08-23
+
+- **P0-A same-source evidence grounding:** merged through PR #18 at `66a4668` after Foundation run #371 passed. Critical support now requires one source to pass A-E together; check C is tied to a canonical evidence span/locator; explicit 0/0 does not count as verification achievement.
+- **P0-B evidence-before-generation:** merged through PR #19 at `0874d93` after Foundation run #372 passed. A deterministic pre-draft evidence manifest constrains analysis/synthesis, post-generation matching is audited, and the final gate fails closed when required critical support was not preselected.
+- These are **offline foundation** claims only. They do not replace the separate live ₹0 provider/deployment validation required before production sign-off.
+
 ## Latest independent offline validation — 2026-08-22
 
 - Strict default `scripts/run_foundation_gate.py` execution in GitHub Actions run **32550623409**: **PASS across every enforced stage**.
