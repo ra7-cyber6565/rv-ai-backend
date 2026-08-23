@@ -79,8 +79,22 @@ def _source_access_depth(source: SourceRecord) -> str:
         return "metadata"
 
 
-def _eligibility(source: SourceRecord, passage: str) -> Tuple[bool, List[str], Dict[str, str]]:
-    """Pre-claim B/D/E eligibility.  C is intentionally impossible pre-draft."""
+def _eligibility(
+    source: SourceRecord,
+    passage: str,
+    *,
+    span_kind: str = "passage",
+    passage_provenance: str = "",
+    read_level_at_capture: str = "",
+) -> Tuple[bool, List[str], Dict[str, str]]:
+    """Pre-claim B/D/E + capture-provenance eligibility.
+
+    C is intentionally impossible pre-draft. Crucially, D on the mutable
+    SourceRecord cannot promote material that was captured earlier at a shallower
+    depth. Explicit capture depth therefore adds a second fail-closed depth lock.
+    Legacy/manual Passage objects with no capture metadata retain old behavior;
+    all current production writers stamp the metadata.
+    """
     b = CV.check_b([source])
     d = CV.check_d([source])
     e = CV.check_e([source])
@@ -88,6 +102,17 @@ def _eligibility(source: SourceRecord, passage: str) -> Tuple[bool, List[str], D
     reasons: List[str] = []
     if len((passage or "").strip()) < CV._MIN_TEXT_CHARS:
         reasons.append("segment_too_short")
+
+    # `source.snippet` is a display/context aggregate and may combine several
+    # locators. It remains useful context, but strong claims must bind to an
+    # exact Passage record instead.
+    if span_kind == "snippet":
+        reasons.append("snippet_not_strong_evidence_span")
+
+    captured = (read_level_at_capture or "").strip().lower()
+    if span_kind == "passage" and captured and captured != "full_text":
+        reasons.append("passage_capture_depth_not_strong")
+
     if b.status != CV.PASS:
         reasons.append("source_relevance_not_pass")
     if d.status != CV.PASS:
@@ -114,6 +139,8 @@ class EvidenceDraftSpan:
     strong_claim_eligible: bool
     eligibility_reasons: List[str] = field(default_factory=list)
     eligibility_checks: Dict[str, str] = field(default_factory=dict)
+    passage_provenance: str = ""
+    read_level_at_capture: str = ""
 
     def compact_dict(self) -> Dict[str, Any]:
         """Safe machine-readable record; source passage itself is deliberately omitted."""
@@ -124,6 +151,8 @@ class EvidenceDraftSpan:
             "passage_sha256": self.passage_sha256,
             "passage_chars": len(self.passage),
             "span_kind": self.span_kind,
+            "passage_provenance": self.passage_provenance,
+            "read_level_at_capture": self.read_level_at_capture,
             "question_match": round(float(self.question_match), 4),
             "source_relevance": round(float(self.source_relevance), 4),
             "source_quality": round(float(self.source_quality), 4),
@@ -158,6 +187,7 @@ class EvidenceDraftManifest:
     def manifest_sha256(self) -> str:
         payload = [
             (s.span_id, s.source_id, s.locator, s.passage_sha256,
+             s.passage_provenance, s.read_level_at_capture,
              bool(s.strong_claim_eligible))
             for s in self.spans
         ]
@@ -196,7 +226,8 @@ class EvidenceDraftManifest:
             eligible = "yes" if span.strong_claim_eligible else "no"
             lines.append(
                 f"[{span.span_id}] source={span.source_id} strong_claim_eligible={eligible} "
-                f"kind={span.span_kind} access={span.access_depth} "
+                f"kind={span.span_kind} provenance={span.passage_provenance or 'legacy'} "
+                f"captured_read={span.read_level_at_capture or 'unknown'} access={span.access_depth} "
                 f"relevance={span.source_relevance:.2f} quality={span.source_quality:.2f} "
                 f"sha256={span.passage_sha256}"
             )
@@ -224,23 +255,32 @@ def build_evidence_draft_manifest(
     if pack is None or not getattr(pack, "sources", None):
         return manifest
 
-    candidates: List[Tuple[SourceRecord, str, str, str, float]] = []
+    candidates: List[Tuple[SourceRecord, str, str, str, float, str, str]] = []
     passages = list(getattr(pack, "passages", None) or [])
     for source in list(pack.sources):
-        chunks: List[Tuple[str, str, str]] = []
+        chunks: List[Tuple[str, str, str, str, str]] = []
         for passage in passages:
             if getattr(passage, "source_id", "") != source.source_id:
                 continue
             text = (getattr(passage, "text", "") or "").strip()
             if text:
-                chunks.append((text, getattr(passage, "locator", "") or "", "passage"))
+                chunks.append((
+                    text,
+                    getattr(passage, "locator", "") or "",
+                    "passage",
+                    str(getattr(passage, "provenance", "") or ""),
+                    str(getattr(passage, "read_level_at_capture", "") or ""),
+                ))
         snippet = (getattr(source, "snippet", "") or "").strip()
         if snippet:
-            chunks.append((snippet, getattr(source, "locator", "") or "", "snippet"))
+            chunks.append((
+                snippet, getattr(source, "locator", "") or "", "snippet",
+                "source_snippet", str(source.reading_level() or ""),
+            ))
 
-        ranked: List[Tuple[str, str, str, float]] = []
+        ranked: List[Tuple[str, str, str, float, str, str]] = []
         seen_hashes: set = set()
-        for text, locator, kind in chunks:
+        for text, locator, kind, provenance, captured_level in chunks:
             selected, score = _bounded_question_segment(question, text, segment_chars)
             if not selected:
                 continue
@@ -253,16 +293,19 @@ def build_evidence_draft_manifest(
                 where = ("selected source passage (exact page/section unavailable)"
                          if kind == "passage" else
                          "source snippet (exact page/section unavailable)")
-            ranked.append((selected, where, kind, score))
+            ranked.append((selected, where, kind, score, provenance, captured_level))
         ranked.sort(key=lambda row: (row[3], len(row[0])), reverse=True)
-        for selected, where, kind, score in ranked[:max(1, int(max_segments_per_source))]:
-            candidates.append((source, selected, where, kind, score))
+        for selected, where, kind, score, provenance, captured_level in ranked[:max(1, int(max_segments_per_source))]:
+            candidates.append((source, selected, where, kind, score,
+                               provenance, captured_level))
 
     # Keep eligible/deeper/high-relevance candidates first while retaining weak
     # candidates for SOURCE-REPORTED/counterevidence context.
     prepared: List[Tuple[Tuple[int, float, float, float], EvidenceDraftSpan]] = []
-    for source, passage, locator, kind, score in candidates:
-        eligible, reasons, checks = _eligibility(source, passage)
+    for source, passage, locator, kind, score, provenance, captured_level in candidates:
+        eligible, reasons, checks = _eligibility(
+            source, passage, span_kind=kind, passage_provenance=provenance,
+            read_level_at_capture=captured_level)
         span = EvidenceDraftSpan(
             span_id="",
             source_id=str(source.source_id or ""),
@@ -279,6 +322,8 @@ def build_evidence_draft_manifest(
             strong_claim_eligible=eligible,
             eligibility_reasons=reasons,
             eligibility_checks=checks,
+            passage_provenance=provenance,
+            read_level_at_capture=captured_level,
         )
         rank = (
             1 if eligible else 0,

@@ -477,10 +477,19 @@ class SourceRecord:
 # ── Passage ──────────────────────────────────────────────────────────────────
 @dataclass
 class Passage:
-    """Kisi source ka wo hissa jo actually reasoning model ko bheja gaya."""
+    """Kisi source ka exact hissa + capture-time provenance/depth.
+
+    SourceRecord mutable hai: full-text reading ke baad uska read_level upgrade
+    ho sakta hai. Isliye passage ko capture ke waqt ka level alag freeze karna
+    zaroori hai; warna purana search snippet baad mein full-text evidence ban
+    sakta hai. Khaali fields legacy/manual callers ke liye backward-compatible
+    hain; production writers inhe explicitly set karte hain.
+    """
     source_id: str
     text: str
     locator: str = ""
+    provenance: str = ""
+    read_level_at_capture: str = ""
 
     def to_dict(self) -> Dict:
         return asdict(self)

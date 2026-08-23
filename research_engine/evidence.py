@@ -132,6 +132,8 @@ class EvidenceEngine:
                     source_id=s.source_id,
                     text=text[:chars_per_source],
                     locator=s.locator,
+                    provenance="retrieval_excerpt",
+                    read_level_at_capture=s.reading_level(),
                 ))
 
         return EvidencePack(
