@@ -673,6 +673,15 @@ class ContentFetcher:
             if signals.get("methodology") and not source.methodology:
                 source.methodology = signals["methodology"]
 
+            # The source object has just been upgraded to full_text. Any
+            # passage captured before this successful read still represents the
+            # old snippet/abstract depth, so it must not survive as if it were a
+            # full-text passage. Keep other sources untouched.
+            pack.passages[:] = [
+                passage for passage in pack.passages
+                if passage.source_id != source.source_id
+            ]
+
             combined = []
             for excerpt in entry["excerpts"]:
                 locator = excerpt.get("locator") or ""
@@ -682,6 +691,8 @@ class ContentFetcher:
                     source_id=source.source_id,
                     text=excerpt["text"],
                     locator=locator,
+                    provenance="full_text_excerpt",
+                    read_level_at_capture=source.reading_level(),
                 ))
             # snippet ko full-text excerpt se badlo, taaki Gemini asli content
             # dekhe — warna download ka koi fayda hi nahi
