@@ -23,6 +23,15 @@ chhota, imaandaar shim yahin bana hua hai (`_TmpPath`, `_MonkeyPatch`) — isliy
 wo test bhi asli mein chalte hain, "fixture nahi mila" keh kar chhoote nahi.
 Jo fixture shim mein nahi hai uska test SKIP hota hai, naam ke saath.
 
+Iske alawa file ke andar likhe `@pytest.fixture` bhi asli mein chalte hain —
+`autouse=True` wale har test se pehle/baad, aur naam se maange gaye wale
+zaroorat par (nested fixture bhi). Ye 2026-08-22 ka asli defect tha: autouse
+fixture na chalne se `provider_health` ka global state ek test se doosre mein
+leak hota tha aur 5 test JHOOTHE RED aate the. Kya support hai aur kya nahi,
+poora hisaab `_FixtureSession` ke paas likha hai; jo shape support nahi hai
+(parametrized/async/dynamic-scope fixture) uska test SKIP hota hai — chupaya
+nahi jaata. Iska apna test: `tests/test_runner_fixture_support.py`.
+
 Kisi bhi test file ko badalna nahi padta, isliye ChatGPT-owned test files
 (`test_final_quality_gate.py`, `test_job_result_progress_snapshot.py`) ko chhua
 bhi nahi jaata — wo bas chal jaate hain.
@@ -226,28 +235,235 @@ class _MonkeyPatch:
                 sys.path[:] = old
 
 
-def _fixtures(func: Any) -> Tuple[Dict[str, Any], List[Any], str]:
-    """Test ko chahiye fixtures banata hai. Teesra return = missing fixture."""
-    try:
-        params = list(inspect.signature(func).parameters)
-    except (TypeError, ValueError):
-        return {}, [], ""
-    kwargs: Dict[str, Any] = {}
-    cleanup: List[Any] = []
-    for param in params:
+# ---------------------------------------------------------------------------
+# pytest fixtures (autouse + naam se maange gaye) — bina pytest import kiye
+# ---------------------------------------------------------------------------
+# Asli defect jo isne pakda (2026-08-22): ye runner `@pytest.fixture` ko
+# chalata hi nahi tha. `tests/test_reasoning_router_integration.py` aur
+# `tests/test_live_zero_cost_gate.py` ke autouse fixture
+# `_isolated_provider_health()` ka kaam hai har test se pehle/baad
+# `provider_health.clear()` karna. Wo na chalne se ek test ka fake outage
+# (cooldown state) agle test mein leak hota tha aur 5 test JHOOTHE RED aate
+# the — asli pytest wahi test pass karta hai (933 passed). Ye "chup-chaap
+# green" defect ka ulta hai: chup-chaap RED.
+#
+# pytest ko import nahi kar sakte (sandbox mein install nahi hai), isliye uska
+# shape duck-type karte hain:
+#   marker   : func._pytestfixturefunction  (.scope / .params / .autouse / .name)
+#   asli fn  : func.__pytest_wrapped__.obj  (pytest <= 8.3.x)
+#              func._fixture_function       (pytest >= 8.4)
+#              func.__wrapped__             (functools.wraps se)
+# Jo shape samajh na aaye (parametrized ya async fixture, dynamic scope) uska
+# test SKIP hota hai — naam aur wajah ke saath, chupaya nahi jaata.
+_FIXTURE_MARKER = "_pytestfixturefunction"
+
+
+class _FixtureError(Exception):
+    """Fixture chalane mein asli gadbad — test FAIL hona chahiye."""
+
+
+class _FixtureUnsupported(Exception):
+    """Fixture ka shape shim ke bahar hai — test SKIP hona chahiye."""
+
+
+def _unwrap_fixture(obj: Any) -> Any:
+    """pytest ke wrapper ke andar se asli fixture function nikaalta hai."""
+    current = obj
+    for _ in range(10):
+        wrapped = getattr(current, "__pytest_wrapped__", None)
+        inner = getattr(wrapped, "obj", None) if wrapped is not None else None
+        if inner is None:
+            inner = getattr(current, "_fixture_function", None)
+        if inner is None:
+            inner = getattr(current, "__wrapped__", None)
+        if inner is None or inner is current or not callable(inner):
+            return current
+        current = inner
+    return current
+
+
+class _FixtureDef:
+    """Ek fixture ka poora hisaab (naam, asli function, scope, autouse)."""
+
+    __slots__ = ("name", "func", "scope", "autouse", "needs", "order",
+                 "unsupported")
+
+    def __init__(self, name: str, func: Any, scope: str, autouse: bool,
+                 order: int, unsupported: str = "") -> None:
+        self.name = name
+        self.func = func
+        self.scope = scope or "function"
+        self.autouse = bool(autouse)
+        self.order = order
+        self.unsupported = unsupported
+        try:
+            self.needs = list(inspect.signature(func).parameters)
+        except (TypeError, ValueError):
+            self.needs = []
+
+
+def _collect_fixtures(module: Any) -> Dict[str, _FixtureDef]:
+    """Module ke saare `@pytest.fixture` dhoondho (marker duck-typing se)."""
+    found: Dict[str, _FixtureDef] = {}
+    for order, (attr, obj) in enumerate(list(vars(module).items())):
+        marker = getattr(obj, _FIXTURE_MARKER, None)
+        if marker is None or not callable(obj):
+            continue
+        name = str(getattr(marker, "name", None) or attr)
+        func = _unwrap_fixture(obj)
+        scope = getattr(marker, "scope", "function")
+        reason = ""
+        if getattr(marker, "params", None):
+            reason = f"parametrized fixture support nahi hai: {name}"
+        elif callable(scope):
+            reason = f"dynamic-scope fixture support nahi hai: {name}"
+        elif (inspect.iscoroutinefunction(func)
+              or inspect.isasyncgenfunction(func)):
+            reason = f"async fixture support nahi hai: {name}"
+        found[name] = _FixtureDef(
+            name, func, "function" if callable(scope) else str(scope or "function"),
+            getattr(marker, "autouse", False), order, reason,
+        )
+    return found
+
+
+def _start_fixture(fdef: _FixtureDef, kwargs: Dict[str, Any]) -> Tuple[Any, Any]:
+    """Fixture chalao. Generator ho to `yield` tak chalao + teardown lauta do."""
+    if inspect.isgeneratorfunction(fdef.func):
+        gen = fdef.func(**kwargs)
+        try:
+            value = next(gen)
+        except StopIteration:
+            raise _FixtureError(f"fixture '{fdef.name}' ne yield hi nahi kiya")
+
+        def finish(handle: Any = gen, label: str = fdef.name) -> None:
+            try:
+                next(handle)
+            except StopIteration:
+                return
+            raise _FixtureError(f"fixture '{label}' ne ek se zyada yield kiya")
+
+        return value, finish
+    return fdef.func(**kwargs), None
+
+
+class _FixtureSession:
+    """Ek test-module ke fixtures: wide-scope cache + teardown stack.
+
+    Note (imaandaar limitation): is repo mein `conftest.py` nahi hai, isliye
+    har fixture usi module mein banti hai jahan use hoti hai. Module/session/
+    package/class scope ko yahan "ek module ke poore run" tak cache kiya jaata
+    hai aur module khatam hone par teardown hota hai — cross-module session
+    sharing (jo asli pytest karta hai) ki zaroorat is repo mein padti hi nahi.
+    """
+
+    def __init__(self, module: Any) -> None:
+        self.defs = _collect_fixtures(module)
+        self.wide: Dict[str, Any] = {}
+        self.wide_cleanup: List[Any] = []
+
+    def prepare(self, func: Any) -> Tuple[Dict[str, Any], List[Any], str]:
+        """(kwargs, cleanup, skip_reason). Autouse pehle, phir naam wale."""
+        cleanup: List[Any] = []
+        local: Dict[str, Any] = {}
+        kwargs: Dict[str, Any] = {}
+        try:
+            params = list(inspect.signature(func).parameters)
+        except (TypeError, ValueError):
+            params = []
+        autouse = sorted((d for d in self.defs.values() if d.autouse),
+                         key=lambda d: d.order)
+        try:
+            for fdef in autouse:
+                self._resolve(fdef.name, local, cleanup, [])
+            for param in params:
+                kwargs[param] = self._resolve(param, local, cleanup, [])
+        except _FixtureUnsupported as exc:
+            _drain(cleanup)
+            return {}, [], str(exc)
+        except BaseException:                                  # noqa: BLE001
+            # Setup beech mein toota: jo ban gaya usko saaf karke aage phenk do
+            # (warna aadha-bana fixture agle test mein leak karega).
+            _drain(cleanup)
+            raise
+        return kwargs, cleanup, ""
+
+
+    def _resolve(self, param: str, local: Dict[str, Any],
+                 cleanup: List[Any], chain: List[str]) -> Any:
+        """Ek fixture (ya shim) banao; nested fixture bhi khud resolve karo."""
+        if param in local:
+            return local[param]
         if param == "tmp_path":
             folder = Path(tempfile.mkdtemp(prefix="silentsuite_"))
-            kwargs[param] = folder
             cleanup.append(lambda p=folder: shutil.rmtree(p, ignore_errors=True))
-        elif param == "monkeypatch":
+            local[param] = folder
+            return folder
+        if param == "monkeypatch":
             patch = _MonkeyPatch()
-            kwargs[param] = patch
             cleanup.append(patch.undo)
+            local[param] = patch
+            return patch
+        fdef = self.defs.get(param)
+        if fdef is None:
+            raise _FixtureUnsupported(f"fixture shim mein nahi: {param}")
+        if fdef.unsupported:
+            raise _FixtureUnsupported(fdef.unsupported)
+        if fdef.scope != "function" and fdef.name in self.wide:
+            return self.wide[fdef.name]
+        if fdef.name in chain:
+            raise _FixtureError("fixture chakkar (circular): "
+                                + " -> ".join(chain + [fdef.name]))
+        kwargs = {name: self._resolve(name, local, cleanup, chain + [fdef.name])
+                  for name in fdef.needs}
+        value, finish = _start_fixture(fdef, kwargs)
+        if fdef.scope == "function":
+            local[fdef.name] = value
+            if finish is not None:
+                cleanup.append(finish)
         else:
-            for done in cleanup:
+            self.wide[fdef.name] = value
+            if finish is not None:
+                self.wide_cleanup.append(finish)
+        return value
+
+    def close(self) -> List[str]:
+        """Module khatam: wide-scope teardown chalao, gadbad ki list lauta do."""
+        problems: List[str] = []
+        while self.wide_cleanup:
+            done = self.wide_cleanup.pop()
+            try:
                 done()
-            return {}, [], param
-    return kwargs, cleanup, ""
+            except BaseException as exc:                       # noqa: BLE001
+                problems.append(f"{type(exc).__name__}: {exc}")
+        self.wide.clear()
+        return problems
+
+
+def _drain(cleanup: List[Any]) -> None:
+    """Aadhe bane fixtures ko ulte kram mein saaf karo (leak na ho)."""
+    while cleanup:
+        done = cleanup.pop()
+        try:
+            done()
+        except BaseException:                                  # noqa: BLE001
+            pass
+
+
+def _teardown(cleanup: List[Any]) -> List[str]:
+    """Ulte kram mein poora teardown; jo toote unki list lauta do.
+
+    Ek teardown toot jaane par baaki ko chhodte nahi — warna doosra fixture ka
+    state agle test mein leak karta rahega (yahi asli bug tha).
+    """
+    problems: List[str] = []
+    while cleanup:
+        done = cleanup.pop()
+        try:
+            done()
+        except BaseException as exc:                           # noqa: BLE001
+            problems.append(f"{type(exc).__name__}: {exc}")
+    return problems
 
 
 def run(paths: List[str]) -> Tuple[int, int, List[str], List[Tuple[str, str]]]:
@@ -275,11 +491,22 @@ def run(paths: List[str]) -> Tuple[int, int, List[str], List[Tuple[str, str]]]:
         if not tests:
             skipped.append((rel, "koi test_* function nahi mila"))
             continue
+        session = _FixtureSession(module)
         for name, func in tests:
-            kwargs, cleanup, missing_fixture = _fixtures(func)
+            try:
+                kwargs, cleanup, missing_fixture = session.prepare(func)
+            except BaseException as exc:                       # noqa: BLE001
+                missing = _env_skip(exc)
+                if missing:
+                    skipped.append((f"{rel}::{name}",
+                                    f"module missing: {missing}"))
+                    continue
+                failed += 1
+                failures.append(f"{rel}::{name} :: FIXTURE SETUP -> "
+                                f"{type(exc).__name__}: {exc}")
+                continue
             if missing_fixture:
-                skipped.append((f"{rel}::{name}",
-                                f"fixture shim mein nahi: {missing_fixture}"))
+                skipped.append((f"{rel}::{name}", missing_fixture))
                 continue
             try:
                 with redirect_stdout(io.StringIO()):
@@ -296,11 +523,14 @@ def run(paths: List[str]) -> Tuple[int, int, List[str], List[Tuple[str, str]]]:
             else:
                 passed += 1
             finally:
-                for done in reversed(cleanup):
-                    try:
-                        done()
-                    except Exception:                      # noqa: BLE001
-                        pass
+                # Teardown chup-chaap nigla nahi jaata: fixture ka cleanup
+                # toota to wo bhi ek asli failure hai (state leak ho sakta hai).
+                for problem in _teardown(cleanup):
+                    failed += 1
+                    failures.append(f"{rel}::{name} :: TEARDOWN -> {problem}")
+        for problem in session.close():
+            failed += 1
+            failures.append(f"{rel} :: MODULE-FIXTURE TEARDOWN -> {problem}")
     return passed, failed, failures, skipped
 
 
