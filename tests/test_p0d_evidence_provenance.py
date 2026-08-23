@@ -122,7 +122,11 @@ def test_capture_time_snippet_cannot_be_promoted_by_later_source_mutation():
 
 
 def test_generic_source_snippet_is_context_only_not_strong_evidence_span():
-    source = _source(read_level="full_text", snippet=FULL_TEXT, full_text_chars=40000)
+    # ContentFetcher stores a combined display snippet with locator prefixes;
+    # this is intentionally not byte-identical to the exact Passage record.
+    source = _source(
+        read_level="full_text", snippet="[p.10 ¶2] " + FULL_TEXT,
+        full_text_chars=40000)
     pack = EvidencePack(question=CLAIM, sources=[source], passages=[Passage(
         source_id="S1", text=FULL_TEXT, locator="p.10 ¶2",
         provenance="full_text_excerpt", read_level_at_capture="full_text",
