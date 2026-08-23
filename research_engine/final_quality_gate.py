@@ -614,6 +614,34 @@ class FinalQualityGate:
                 },
             )
 
+        # P0-B — post-hoc citation fitting is not release-safe. Legacy
+        # callers remain compatible when the field is absent/None; the
+        # current orchestrator explicitly sets it True and must then
+        # provide a complete preselection audit. Zero supported critical
+        # claims are handled separately by P0-A's non-vacuous achievement.
+        evidence_first_required = quality_context.get("evidence_first_required") is True
+        if evidence_first_required:
+            preselection_flag = quality_context.get("critical_claim_preselection_complete")
+            preselection_unmatched = _as_int(
+                quality_context.get("critical_claims_preselected_span_unmatched"))
+            preselection_ok = (preselection_flag is not None
+                               and _as_bool(preselection_flag)
+                               and preselection_unmatched == 0)
+        else:
+            preselection_unmatched = 0
+            preselection_ok = True
+        state.check("critical_claims_preselected_before_generation", preselection_ok)
+        if not preselection_ok:
+            state.issue(
+                "CRITICAL_CLAIM_NOT_PRESELECTED",
+                "claim_citation",
+                "critical",
+                "A supported critical claim used evidence that was not in the pre-draft manifest.",
+                deduction=8,
+                hard_cap=60,
+                details={"unmatched": preselection_unmatched},
+            )
+
         no_source_count = _as_int(
             quality_context.get("critical_no_source_claims"),
             len(NO_SOURCE_RE.findall(answer)),

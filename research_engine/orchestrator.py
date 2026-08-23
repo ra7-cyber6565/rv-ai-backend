@@ -38,6 +38,9 @@ from .contradiction import ContradictionEngine
 from .critic import Critic
 from .depth import get_depth_config, quota_note
 from .evidence import EvidenceEngine
+from .evidence_drafting import (
+    audit_claims_against_manifest, build_evidence_draft_manifest,
+)
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
@@ -563,6 +566,15 @@ class DeepResearchEngine:
                "calculations": None, "calculations_done": None,
                "technical_details": [], "api_accounting": {}}
 
+        # P0-B — evidence exists BEFORE any model-generated factual prose.
+        # The private manifest retains source text only for runtime audit;
+        # the compact form exposes hashes/locators/counts without copying
+        # source passages into API diagnostics.
+        draft_manifest = build_evidence_draft_manifest(question, pack)
+        evidence_first_block = draft_manifest.prompt_block()
+        out["_evidence_first_manifest"] = draft_manifest
+        out["evidence_first_manifest"] = draft_manifest.to_dict()
+
         # ── user ki EXPLICIT requests (planner ne rule-based nikaali hain) ────
         # Ye pichhle live run ka sabse bada sabak hai: prompt mein saaf likha tha
         # "kam se kam 3 nayi hypotheses banao", par engine ka andar ka
@@ -660,6 +672,9 @@ class DeepResearchEngine:
                 prompt = brain.prompt_analysis(question, pack, plan)
                 if memory_note:
                     prompt = f"{memory_note}\n\n{prompt}"
+                # P0-B is appended LAST so broad source/context text cannot
+                # silently override the critical-claim preselection contract.
+                prompt = f"{prompt}\n\n{evidence_first_block}"
                 # EXPLICIT request ho to hypotheses PEHLI call mein hi maang lete
                 # hain. Wajah: quota kabhi bhi khatam ho sakti hai (429 pichhli
                 # baar pass 2 par hi laga tha). Pehli call sabse zyada chance
@@ -677,8 +692,10 @@ class DeepResearchEngine:
                 else:
                     out["analysis"] = text
             else:
+                no_source_prompt = brain.prompt_no_sources(question, plan)
+                no_source_prompt = f"{no_source_prompt}\n\n{evidence_first_block}"
                 out["analysis"] = brain.generate(
-                    brain.prompt_no_sources(question, plan), "no-source answer")
+                    no_source_prompt, "no-source answer")
         except QuotaExhausted as exc:
             out["errors"].append(str(exc))
 
@@ -734,7 +751,8 @@ class DeepResearchEngine:
                                  "nikalo, tareef mat karo.)")
             prompt = self.synthesizer.prompt(question, out["analysis"], critique_text,
                                              out["hypothesis_raw"], pack, plan,
-                                             memory_note)
+                                             memory_note,
+                                             evidence_first_block=evidence_first_block)
             # DEEP mode mein hypothesis ke liye alag call nahi hoti — usi
             # synthesis call mein maang lete hain, aur baad mein body se
             # nikaal kar structured section 7 mein daal dete hain
@@ -1152,6 +1170,15 @@ class DeepResearchEngine:
             except Exception:                                # noqa: BLE001
                 claim_source_text = gemini_answer
         claim_checks = verify_claims(claim_source_text, pack).to_dict()
+        evidence_first_audit = audit_claims_against_manifest(
+            claim_checks, passes.get("_evidence_first_manifest"))
+        unmatched_preselected = int(
+            evidence_first_audit.get("critical_claims_preselected_span_unmatched") or 0)
+        if unmatched_preselected:
+            warnings.append(
+                f"{unmatched_preselected} same-source supported critical claim ka "
+                "canonical span drafting se pehle preselected evidence mein nahi tha; "
+                "verified/release gate fail-closed rahega.")
         if claim_checks.get("overclaims"):
             warnings.append(
                 f"{len(claim_checks['overclaims'])} claim par label evidence se "
@@ -1186,6 +1213,9 @@ class DeepResearchEngine:
         # report ke text mein nahi. `verification` dict pehle se result mein
         # jaata hai, isliye naya top-level field banane ki zaroorat nahi.
         verification["claim_checks"] = claim_checks
+        verification["evidence_first_audit"] = evidence_first_audit
+        verification["evidence_first_manifest"] = (
+            passes.get("evidence_first_manifest") or {})
         # point 11 — kitni hypotheses evidence ke hisaab se banayi ja sakti thi,
         # ye ginti bhi API/Android tak jaani chahiye (report ke text ke alawa).
         if passes.get("hypothesis_gate"):
@@ -1473,6 +1503,7 @@ class DeepResearchEngine:
             # source "cited" ban jaata (§7 ka asli bug).
             answer_text=annotated,
             verification=claim_checks,
+            evidence_first_audit=evidence_first_audit,
             # §10 ka pehla hissa: counter-side search SACH mein chali ya nahi.
             # Ye axis record se aata hai (counter axis par kam se kam ek query),
             # "kisi source mein criticism shabd tha" se nahi. Axes naape na gaye
