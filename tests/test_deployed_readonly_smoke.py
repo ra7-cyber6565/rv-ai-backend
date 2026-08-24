@@ -24,6 +24,7 @@ def _response(status: int, payload: dict, headers: dict | None = None) -> HttpRe
 class FakeDeployment:
     token = "project-token-with-more-than-twenty-four-characters"
     project_id = "p_project_identifier_long_enough"
+    revision = "2a21a6fbcb0771be746766dad3c6a511a7c3ec5e"
 
     def __init__(self) -> None:
         self.requests: list[tuple[str, str, dict]] = []
@@ -42,6 +43,7 @@ class FakeDeployment:
                 "service": "RV AI Backend",
                 "zero_cost_only": True,
                 "release_state": "foundation_verification_pending",
+                "build_revision": self.revision,
                 "storage": {"available": True},
             })
         if method == "GET" and path == "/api":
@@ -82,12 +84,15 @@ def test_complete_probe_is_zero_model_and_receipt_has_no_capability():
     result = DeployedReadonlySmoke(
         "https://research.example",
         expected_origin="https://android-web.example",
+        expected_revision=fake.revision,
         transport=fake,
     ).run()
 
     assert result["complete"] is True
     assert result["zero_model_calls_by_construction"] is True
     assert result["capabilities_or_secrets_recorded"] is False
+    assert result["expected_code_revision"] == fake.revision
+    assert result["deployed_code_revision"] == fake.revision
     serialized = json.dumps(result)
     assert fake.token not in serialized
     assert fake.project_id not in serialized
@@ -118,6 +123,28 @@ def test_private_path_or_raw_trace_in_health_turns_gate_red():
     checks = {row["name"]: row["passed"] for row in result["checks"]}
     assert checks["health_public_payload_safe"] is False
     assert result["complete"] is False
+
+
+def test_wrong_or_missing_deployed_revision_turns_gate_red():
+    fake = FakeDeployment()
+    fake.revision = "1" * 40
+    result = DeployedReadonlySmoke(
+        "https://research.example",
+        expected_revision="2" * 40,
+        transport=fake,
+    ).run()
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["deployed_revision_matches"] is False
+    assert result["complete"] is False
+
+
+def test_expected_revision_requires_a_full_sha():
+    with pytest.raises(ValueError):
+        DeployedReadonlySmoke(
+            "https://research.example",
+            expected_revision="2a21a6f",
+            transport=FakeDeployment(),
+        )
 
 
 @pytest.mark.parametrize("value", [

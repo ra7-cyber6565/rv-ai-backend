@@ -22,6 +22,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from utils.release_identity import repository_identity
+
 LIVE_QUESTION = (
     "Kya room-temperature superconductivity practically possible hai? Ambient "
     "pressure par hydrides aur cuprates ke confirmed limits compare karo, "
@@ -420,9 +422,11 @@ def _failure_receipt(
 ) -> Dict[str, Any]:
     """Build a useful failure receipt without raw exception/provider content."""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at_epoch": int(time.time()),
         "duration_seconds": round(time.time() - started, 2),
+        "code_revision": str(ready.get("code_revision") or ""),
+        "repository_clean": bool(ready.get("repository_clean") is True),
         "zero_cost_preflight": dict(ready),
         "passed": False,
         "checks": [{
@@ -469,6 +473,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.data_root:
         os.environ["INFINITY_DATA_ROOT"] = args.data_root
     ready = preflight(os.environ, validate_storage=True)
+    code = repository_identity(ROOT)
+    ready["code_revision"] = str(code.get("revision") or "")
+    ready["repository_clean"] = bool(code.get("clean") is True)
+    if not code.get("available"):
+        ready["blockers"].append("current Git revision could not be verified")
+    elif code.get("clean") is not True:
+        ready["blockers"].append("current Git checkout must be clean and committed")
+    ready["ready"] = not ready["blockers"]
     print("LIVE ₹0 PREFLIGHT: " + ("READY" if ready["ready"] else "BLOCKED"))
     for blocker in ready["blockers"]:
         print(f"- {blocker}")
@@ -508,9 +520,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_at_epoch": int(time.time()),
         "duration_seconds": round(time.time() - started, 2),
+        "code_revision": str(ready.get("code_revision") or ""),
+        "repository_clean": bool(ready.get("repository_clean") is True),
         "zero_cost_preflight": ready,
         "passed": evaluation["passed"],
         "checks": evaluation["checks"],

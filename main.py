@@ -35,10 +35,12 @@ from utils.request_guard import (
 )
 from utils.reasoning_status import reasoning_status
 from utils.project_access import project_access
+from utils.release_identity import deployment_revision
 
 ZERO_COST_STATUS = enforce_zero_cost_config()
 CORS_ORIGINS = allowed_cors_origins()
 RELEASE_STATE = "foundation_verification_pending"
+BUILD_REVISION = deployment_revision()
 
 app = FastAPI(
     title="RV AI",
@@ -165,6 +167,10 @@ def _runtime_safety_status() -> dict:
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "release_state": RELEASE_STATE,
+        # A Git SHA is public build provenance, not a credential. Empty means
+        # the host did not provide a validated full revision, so deployment
+        # sign-off must fail closed instead of guessing which code is live.
+        "build_revision": BUILD_REVISION,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
         "project_isolation": project_access.status(),

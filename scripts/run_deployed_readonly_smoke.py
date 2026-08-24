@@ -22,6 +22,13 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from utils.release_identity import normalize_git_revision, repository_identity
+
+
 PRIVATE_VALUE_RE = re.compile(
     r"(?:[A-Za-z]:\\(?:Users|ProgramData|Windows|InfinityResearchAI)\\|"
     r"/(?:home|root|workspace|tmp)/)", re.IGNORECASE,
@@ -120,6 +127,7 @@ class DeployedReadonlySmoke:
         *,
         timeout: float = 15.0,
         expected_origin: str = "",
+        expected_revision: str = "",
         transport: Optional[Callable[..., HttpResult]] = None,
     ) -> None:
         self.base_url = base_url.rstrip("/")
@@ -128,6 +136,10 @@ class DeployedReadonlySmoke:
             normalize_base_url(raw_origin, allow_http_local=True)
             if raw_origin else ""
         )
+        raw_revision = str(expected_revision or "").strip()
+        self.expected_revision = normalize_git_revision(raw_revision)
+        if raw_revision and not self.expected_revision:
+            raise ValueError("Expected commit poora 40-character Git SHA hona chahiye")
         self.transport = transport or _stdlib_transport(timeout)
         self.checks: list[SmokeCheck] = []
         self.calls: list[str] = []
@@ -157,6 +169,16 @@ class DeployedReadonlySmoke:
             health.get("release_state") == "foundation_verification_pending",
             str(health.get("release_state") or "missing"),
         )
+        deployed_revision = normalize_git_revision(health.get("build_revision"))
+        if self.expected_revision:
+            self._check(
+                "deployed_revision_matches",
+                deployed_revision == self.expected_revision,
+                (
+                    "exact expected Git revision"
+                    if deployed_revision else "missing/invalid build revision"
+                ),
+            )
         self._check("health_public_payload_safe", _public_payload_safe(health),
                     "private path/raw provider trace absent")
 
@@ -248,6 +270,8 @@ class DeployedReadonlySmoke:
             "complete": passed,
             "checked_at_utc": datetime.now(timezone.utc).isoformat(),
             "target_origin": self.base_url,
+            "expected_code_revision": self.expected_revision,
+            "deployed_code_revision": deployed_revision,
             "zero_model_calls_by_construction": True,
             "checks": [asdict(check) for check in self.checks],
             "calls": list(self.calls),
@@ -286,6 +310,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout-seconds", type=float, default=15.0)
     parser.add_argument("--receipt", default="",
                         help="Optional non-secret JSON receipt path.")
+    parser.add_argument(
+        "--expected-commit", default="",
+        help="Expected full Git SHA; defaults to the current clean checkout.",
+    )
     parser.add_argument("--allow-http-local", action="store_true",
                         help="Allow http://localhost only; remote targets still require HTTPS.")
     return parser
@@ -295,6 +323,21 @@ def main(argv: Optional[list[str]] = None) -> int:
     args = build_parser().parse_args(argv)
     try:
         base = normalize_base_url(args.base_url, allow_http_local=args.allow_http_local)
+        raw_expected = str(args.expected_commit or "").strip()
+        expected_revision = normalize_git_revision(raw_expected)
+        if raw_expected and not expected_revision:
+            raise ValueError("Expected commit poora 40-character Git SHA hona chahiye")
+        if not expected_revision:
+            identity = repository_identity(ROOT)
+            if not identity["available"]:
+                raise ValueError(
+                    "Current Git revision safely resolve nahi hui; --expected-commit dein"
+                )
+            if not identity["clean"]:
+                raise ValueError(
+                    "Current Git checkout clean nahi hai; pehle changes commit karein"
+                )
+            expected_revision = str(identity["revision"])
     except ValueError as exc:
         print(f"DEPLOYED SMOKE: BLOCKED — {exc}")
         return 2
@@ -307,6 +350,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             base,
             timeout=max(1.0, min(float(args.timeout_seconds), 60.0)),
             expected_origin=args.expected_origin,
+            expected_revision=expected_revision,
         ).run()
     except (RuntimeError, ValueError) as exc:
         print(f"DEPLOYED SMOKE: FAIL — {exc}")

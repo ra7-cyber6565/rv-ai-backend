@@ -39,8 +39,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from utils.release_identity import repository_identity
+
+
 DEFAULT_TIMEOUT_SECONDS = 15 * 60
 
 # These files are the focused integration gates maintained by ChatGPT. The full
@@ -116,6 +121,8 @@ FOCUSED_PYTEST = (
     "tests/test_lenses.py",
     "tests/test_lens_independent_audit.py",
     "tests/test_deployed_readonly_smoke.py",
+    "tests/test_release_identity.py",
+    "tests/test_release_bundle.py",
     "tests/test_patents.py",
     "tests/test_live_zero_cost_gate.py",
     "tests/test_windows_launchers.py",
@@ -139,6 +146,9 @@ class GateReceipt:
     created_at_epoch: int
     python: str
     repo_root: str
+    code_revision: str
+    repository_clean: bool
+    code_identity_verified: bool
     offline_zero_cost: bool
     passed: bool
     failed_stages: list[str]
@@ -284,13 +294,29 @@ def _receipt_path(value: str | None, env: dict[str, str]) -> Path:
     return root / "audit" / "foundation_gate_latest.json"
 
 
-def _write_receipt(path: Path, stages: list[StageResult]) -> GateReceipt:
+def _write_receipt(
+    path: Path,
+    stages: list[StageResult],
+    *,
+    identity: dict[str, object] | None = None,
+) -> GateReceipt:
     failed = [stage.name for stage in stages if stage.status != "passed"]
+    code = repository_identity(REPO_ROOT) if identity is None else dict(identity)
+    identity_verified = bool(
+        code.get("available")
+        and code.get("revision")
+        and code.get("clean") is True
+    )
+    if not identity_verified:
+        failed.append("clean_repository_identity")
     receipt = GateReceipt(
-        schema_version=1,
+        schema_version=2,
         created_at_epoch=int(time.time()),
         python=sys.version.split()[0],
         repo_root=str(REPO_ROOT),
+        code_revision=str(code.get("revision") or ""),
+        repository_clean=bool(code.get("clean") is True),
+        code_identity_verified=identity_verified,
         offline_zero_cost=True,
         passed=not failed,
         failed_stages=failed,
