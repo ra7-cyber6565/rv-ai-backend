@@ -21,6 +21,9 @@ def _base_context() -> dict:
         "critical_claims": 1,
         "critical_claims_same_source_ae_passed": 1,
         "claim_verification_achievement": True,
+        "critical_claim_coverage_complete": True,
+        "unverifiable_critical_claims": 0,
+        "critical_contradicted_claims": 0,
     }
 
 
@@ -111,3 +114,25 @@ def test_complete_nonvacuous_evidence_first_audit_passes_contract_checks():
     assert "EVIDENCE_FIRST_AUDIT_MISSING" not in codes
     assert "CRITICAL_CLAIM_NOT_PRESELECTED" not in codes
     assert "EVIDENCE_FIRST_ACHIEVEMENT_MISSING" not in codes
+
+
+def test_partial_critical_coverage_is_a_hard_quality_failure():
+    spec = replace(FQ.QualityContract(), evidence_first_required=True)
+    ctx = _base_context()
+    ctx.update({
+        "critical_claims": 6,
+        "critical_claims_same_source_ae_passed": 3,
+        "claim_verification_achievement": True,
+        "critical_claim_coverage_complete": False,
+        "unsupported_critical_claims": 2,
+        "unverifiable_critical_claims": 1,
+        "critical_contradicted_claims": 0,
+        "evidence_first_required": True,
+        "critical_claim_preselection_complete": True,
+        "critical_claims_preselected_span_unmatched": 0,
+        "evidence_first_achievement": True,
+    })
+    state, codes = _run_claim_gate(ctx, spec)
+    assert state.checks["verified_critical_claim_achievement"] is True
+    assert state.checks["verified_critical_claim_coverage_complete"] is False
+    assert "CRITICAL_CLAIM_COVERAGE_INCOMPLETE" in codes
