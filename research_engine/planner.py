@@ -16,6 +16,7 @@ import re
 from typing import Callable, Dict, List, Optional
 
 from . import classics as classics_mod
+from . import concept_ledger as ledger_mod
 from .connectors.classic_connector import wikisource_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
@@ -444,8 +445,15 @@ class ResearchPlanner:
         # `books` tier ko bhi prabhavit karta hai (neeche). Poora detection
         # deterministic hai — `classics.py` mein tradition marker + generic
         # text-shabd ka reasoning, koi Gemini call nahi.
-        lane = classics_mod.lane_plan(question or cls.get("question") or "",
-                                      limit=4)
+        #
+        # Iske upar ek parat aur hai: `concept_ledger` un naamon ko yaad rakhta
+        # hai jo app ne KHUD pehle pehchane the (kriti/vyakti). Isliye "muqaddimah
+        # me nyay ka niyam" jaisa bina-cue sawaal bhi lane khol leta hai, bina
+        # kisi hand-typed book list ke. Ledger sirf JODTA hai — lane band karne
+        # ya base plan ki query girane ka koi raasta uske paas nahi, aur uska
+        # output kabhi evidence nahi ginta (`verified` hamesha False).
+        lane = ledger_mod.lane_plan(question or cls.get("question") or "",
+                                    limit=4)
         wants_primary_text = bool(lane.get("wants_primary_text"))
 
         papers: List[str] = []
@@ -625,7 +633,12 @@ class ResearchPlanner:
                              "model_used": bool(lane.get("model_used")),
                              "verified": False,
                              "evidence_status": lane.get("evidence_status", ""),
-                             "note": classics_reason},
+                             "note": classics_reason,
+                             # Ledger ki parat alag dikhti hai, taaki report me
+                             # saaf rahe ki lane KISNE kholi: sawaal ke apne cue
+                             # ne, ya pehle yaad kiya hua naam (jo evidence nahi).
+                             "ledger_opened_lane": bool(lane.get("ledger_opened_lane")),
+                             "ledger": dict(lane.get("ledger") or {})},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────

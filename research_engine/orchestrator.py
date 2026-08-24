@@ -60,6 +60,7 @@ from .requested import build_ledger, contract_ledger, delivery_evidence
 from .requested import looks_like_chain
 from .requested import looks_like_math_model, quality_contract
 from .research_memory import ResearchMemory
+from . import concept_ledger
 from .research_state import build_state as build_research_state
 from .research_state import inject_state_block, state_warnings
 from .run_status import COMPLETE, INCOMPLETE, evaluate as evaluate_status
@@ -1901,6 +1902,18 @@ class DeepResearchEngine:
             # kya pehle bekaar gaya tha, taaki wahi galti dohrayi na jaaye.
             self._remember_dead_ends(question, discovered, reading)
             self.memory.save()
+        # Concept ledger (task #83): jo kriti/vyakti ke naam is run me app ne
+        # KHUD pehchane, wo agli baar bina cue wale sawaal par bhi kaam aayein.
+        # Ye ResearchMemory se alag rehta hai kyunki ye project-specific nahi
+        # hai — naam ek baar seekha, har project me hint ban jaata hai.
+        # Jaan-boojhkar `self.memory` ke bahar aur try ke andar: ledger ki koi
+        # kharaabi kabhi kisi answer ko nahi rok sakti, aur ye HINT layer hai —
+        # yahan se koi claim, evidence level ya confidence nahi banta.
+        try:
+            concept_ledger.remember_question(question)
+            concept_ledger.remember_sources(list(pack.sources or []))
+        except Exception:                                  # pragma: no cover
+            pass
         self.graph.store(question, passes["analysis"] or gemini_answer, self.project_id)
 
         self._track(job_id, "COMPLETE",

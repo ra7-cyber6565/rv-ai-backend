@@ -142,6 +142,7 @@ def is_unauthorised_host(url: str) -> bool:
 _TEXT_WORDS = {
     "book", "books", "kitab", "kitaab", "kitabe", "kitaben", "granth",
     "granths", "granthon", "shastra", "shastras", "shastron", "sutra", "sutras",
+    "pustak", "pustaken", "pustakein", "pustakon", "pothi",
     "notebook", "notebooks", "diary", "diaries", "journal", "letters",
     "manuscript", "manuscripts", "scripture", "scriptures", "text", "texts",
     "verse", "verses", "shlok", "shloka", "shlokas", "mantra", "mantras",
@@ -164,10 +165,41 @@ _SUMMARY_CUES = {
     "explain", "explained", "explanation", "vyakhya", "gist", "overview",
     "review", "notes", "takeaways", "seekh", "matlab",
 }
+# Hinglish/English ke sawaal-shabd. Ye kisi topic ki list nahi — bhasha ke
+# sawaal poochne wale shabd hain. Kriti ke naam me ye kabhi nahi aate, isliye
+# "muqaddimah kis saal likhi" me naam "muqaddimah" par ruk jaata hai (probe me
+# pakda gaya: pehle "muqaddimah kis" ek naam ban kar search bhi ho raha tha aur
+# ledger me yaad bhi ho raha tha).
+_QUESTION_WORDS = {
+    "kya", "kyu", "kyun", "kyon", "kaise", "kaisa", "kaisi", "kab", "kahan",
+    "kaha", "kaun", "kaun-sa", "kis", "kisne", "kiska", "kiski", "kiske",
+    "kitna", "kitni", "kitne", "konsa", "kaunsa", "what", "why", "how", "when",
+    "where", "who", "whom", "whose", "which",
+}
+
+
+def is_question_word(word: str) -> bool:
+    """Ye bhasha ka sawaal-shabd hai (kis/kya/kaise/what/why)?"""
+    return str(word or "").strip().casefold() in _QUESTION_WORDS
 
 
 def _clean(text: object) -> str:
     return re.sub(r"\s+", " ", str(text or "")).strip()
+
+
+# Teen generic set ek jagah — concept_ledger isse poochta hai ki koi shabd
+# "aam" hai ya nahi.
+_GENERIC_LANE_WORDS = set(_TEXT_WORDS) | set(_READ_CUES) | set(_SUMMARY_CUES)
+
+
+def is_generic_text_word(word: str) -> bool:
+    """Ye shabd "likhi hui cheez" ka AAM shabd hai (granth/book/padho/summary)?
+
+    Ledger isse yaad-rakhne se pehle poochta hai. Warna wo "granth" ko hi ek
+    kriti samajh kar yaad kar leta hai aur phir har sawaal par galat lane
+    kholta hai — list se azaadi ke naam par ledger khud ko zeher de leta.
+    """
+    return str(word or "").strip().casefold() in _GENERIC_LANE_WORDS
 
 
 def _uniq(items: Sequence[str], limit: int = 8) -> List[str]:
@@ -258,11 +290,25 @@ def work_candidates(question: str, limit: int = 5) -> List[str]:
             # cue-shabd naam ka hissa nahi hote: "text padhna hai" me "padhna"
             # kriti ka naam nahi, kaam ka naam hai (probe me pakda gaya).
             if (L.is_stopword(follow) or follow in _TEXT_WORDS
-                    or follow in _READ_CUES or follow in _SUMMARY_CUES):
+                    or follow in _READ_CUES or follow in _SUMMARY_CUES
+                    or follow in _QUESTION_WORDS):
                 break
             tail.append(follow)
         if tail:
             out.append(" ".join(tail))
+        # Hinglish aksar ulta chalti hai — naam PEHLE, text-shabd BAAD me
+        # ("muqaddimah granth", "gita granth me"). Isliye peeche ke 1-2 shabd
+        # bhi dekhe jaate hain, wahi rukne ke niyam ke saath. (Probe: "muqaddimah
+        # granth me ..." par pehle ek bhi kriti-naam nahi banta tha.)
+        lead: List[str] = []
+        for back in reversed(words[max(0, index - 2):index]):
+            if (L.is_stopword(back) or back in _TEXT_WORDS
+                    or back in _READ_CUES or back in _SUMMARY_CUES
+                    or back in _QUESTION_WORDS):
+                break
+            lead.insert(0, back)
+        if lead:
+            out.append(" ".join(lead))
     out += L.hyphenated_compounds(question)
     for person in people[:2]:
         person_tail = person.split()[-1].casefold()
