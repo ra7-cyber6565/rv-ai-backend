@@ -49,6 +49,17 @@ class DepthConfig:
     # jo connector isme poora na ho, wo honestly "deadline" reason ke saath
     # report hota hai — chup-chaap "0 results" nahi banta.
     discovery_seconds: int = 90
+    # MARATHON ka maksad jaldi rukna nahi hai. Normal modes credible evidence
+    # aur saare mandatory axes milte hi early-stop kar sakte hain; MARATHON
+    # har configured round chalata hai taaki source-derived authors, works,
+    # counter-evidence aur cross-domain lenses ko agle rounds mein follow kiya
+    # ja sake. Ye phir bhi bounded hai — "jitna time lage" ka matlab unlimited
+    # network/API nahi.
+    require_all_rounds: bool = False
+    # Ye TRUTH ya real-world success probability nahi. Sirf measured research
+    # process (rounds, axis-search, full text, independence, red-team, claim
+    # checks) ka target hai. 0 = is preset par scalar target expose mat karo.
+    research_process_target_percent: int = 0
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -79,13 +90,15 @@ MAXIMUM = DepthConfig(
 )
 
 MARATHON = DepthConfig(
-    # Durable background-only specialist mode.  It deliberately stays inside
-    # the same hard CUSTOM rails: "long" is not "unlimited", and four model
-    # calls still respect the zero-cost policy/fallback router.
-    name="MARATHON", gemini_calls=4, max_sources=32, max_per_connector=5,
-    max_rounds=4, use_papers=True, use_books=True, use_datasets=True,
+    # Durable background-only specialist preset. It may use deeper *fixed*
+    # retrieval rails than arbitrary CUSTOM input, while remaining bounded and
+    # capability-protected. Four model calls still respect the zero-cost
+    # policy/fallback router.
+    name="MARATHON", gemini_calls=4, max_sources=40, max_per_connector=6,
+    max_rounds=5, use_papers=True, use_books=True, use_datasets=True,
     use_patents=True, use_red_team=True, chars_per_source=2200,
-    max_fulltext=12, discovery_seconds=300,
+    max_fulltext=16, discovery_seconds=360, require_all_rounds=True,
+    research_process_target_percent=90,
 )
 
 _PRESETS = {

@@ -168,8 +168,12 @@ def _run_with_client(client: Any, runtime_root: str, manager: Any) -> None:
     modes_json = modes.json()
     marathon = modes_json.get("MARATHON", {})
     check("MARATHON is exposed by the real API", modes.status_code == 200 and bool(marathon))
-    check("MARATHON source rail is 32", marathon.get("max_sources") == 32)
-    check("MARATHON full-text rail is 12", marathon.get("max_fulltext") == 12)
+    check("MARATHON source rail is 40", marathon.get("max_sources") == 40)
+    check("MARATHON full-text rail is 16", marathon.get("max_fulltext") == 16)
+    check("MARATHON runs all five bounded rounds",
+          marathon.get("max_rounds") == 5 and marathon.get("require_all_rounds") is True)
+    check("MARATHON exposes a 90% process target, not a truth probability",
+          marathon.get("research_process_target_percent") == 90)
 
     job_payload = {
         "question": "Offline end-to-end API smoke question",

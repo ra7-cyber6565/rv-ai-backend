@@ -1040,6 +1040,9 @@ class ResearchResult:
     # records, historical/traditional texts, allegations and app-original
     # hypotheses machine-readably separate.  Optional for old clients.
     specialist_research: Dict = field(default_factory=dict)
+    # MARATHON-only measured checklist. Iska percentage answer/hypothesis ki
+    # truth, profitability ya real-world success probability nahi hai.
+    research_assurance: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

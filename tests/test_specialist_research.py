@@ -166,10 +166,12 @@ def test_marathon_preset_is_bounded_deep():
     config = get_depth_config("MARATHON")
     assert config.name == "MARATHON"
     assert config.gemini_calls == 4
-    assert config.max_sources == 32
-    assert config.max_rounds == 4
-    assert config.max_fulltext == 12
-    assert config.discovery_seconds == 300
+    assert config.max_sources == 40
+    assert config.max_rounds == 5
+    assert config.max_fulltext == 16
+    assert config.discovery_seconds == 360
+    assert config.require_all_rounds is True
+    assert config.research_process_target_percent == 90
     assert config.use_books is True
 
 

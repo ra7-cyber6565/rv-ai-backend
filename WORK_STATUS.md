@@ -30,6 +30,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Windows live ₹0 gate + launcher hardening | ChatGPT | FULL FOUNDATION CI PASS | PowerShell runner accepts only non-secret data-root/receipt arguments; preflight probes an absolute writable out-of-repo root and minimum free space before any provider call. Live crashes produce sanitized receipts, and backend startup is repo-relative instead of hard-coded to one `C:\Users\...` checkout. GitHub Actions run 32550623409 passed 428 focused and 656 full pytest plus every strict foundation stage. |
 | Real offline API path smoke gate | ChatGPT | FULL FOUNDATION CI PASS | New zero-network process gate exercises the shipped FastAPI app through health + CSP, raw-credential canary redaction, anonymous project capability, zero-call QUICK chat, MARATHON job capability, durable result retrieval and fail-closed final quality downgrade. GitHub Actions run 32548467255 passed all 40 smoke checks inside the strict foundation gate. |
 | Marathon multilingual specialist research | ChatGPT | PUSHED IN PR #7 / FULL FOUNDATION CI PASS | Isolated modules + bounded planner/discovery/API/UI/synthesis hooks are implemented on `chatgpt-marathon-multilingual`. GitHub Actions run 32547266529 passed: 420 focused pytest, 648 full pytest, 593/593 core, cross-domain 633/633, superconductivity 146/146, and architecture/provider/source-boundary/compile gates. CI also exposed and ChatGPT fixed the invalid job-level `runner.temp` context plus the stale 30-minute-only browser assertion. Live zero-cost verification remains a separate honest release gate. |
+| MARATHON research-process assurance | ChatGPT | CODE COMPLETE / VERIFY | Existing Claude/ChatGPT lens, concept-ledger, evidence-axis, claim A-E and discovery layers are preserved. MARATHON now always runs five bounded rounds, raises only the privileged preset to 40 ranked/16 full-text sources, records marginal round yield, and exposes a fail-closed 90% process target that is explicitly not truth/profit/success probability. Arbitrary CUSTOM rails remain unchanged. |
 | Research relevance hardening | Claude | DONE / INDEPENDENT VERIFY GATE ADDED | Claude domain-aware relevance is in branch; ChatGPT regression tests cover original off-domain failure |
 | Source routing + query expansion | Claude | DONE / VERIFY | Domain-aware routing + deterministic fallback present; integrated suite still must run |
 | Full-text + large PDF handling | Claude + ChatGPT audit | DONE / VERIFY | Claude removed 4MB blind skip; ChatGPT added honest access wording and whole-document sparse sampling so huge PDFs are not first-N biased |
@@ -84,6 +85,24 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 - Provider-bypass audit, architecture audit and source-boundary audit: **PASS**.
 - This is offline/₹0 verification only. The live zero-cost benchmark and deployment/runtime checks remain required before production sign-off.
 
+## MARATHON research-process assurance — 2026-08-24
+
+- Existing source-derived thinkers/works, concept ledger, multilingual/classic
+  text routing, evidence axes, A-E claim checks, falsification and advanced
+  discovery were audited and retained instead of duplicated.
+- MARATHON no longer stops when an early round merely looks sufficient; all 5
+  bounded rounds run so later corpus-derived authors, works, counter-evidence
+  and cross-domain leads get searched.
+- Fixed preset rails are 40 ranked sources, 16 legal full-text attempts, 6 per
+  connector and 360 discovery seconds per round. User-controlled CUSTOM limits
+  remain at the older safer 40/4/12 rails.
+- `research_assurance` measures rounds, mandatory axis-search, independent
+  sources, legal full text, counter-search, reasoning passes, critical-claim A-E
+  verification and hypothesis testability. Mandatory gaps fail the target even
+  at a numeric 90.
+- The percentage is process-checklist coverage only. It is never truth,
+  profitability, global exhaustiveness or real-world hypothesis success.
+
 ## Marathon multilingual specialist batch — 2026-08-22
 
 - Added a bounded `MARATHON` background mode: 4 reasoning calls, 32 ranked sources,
@@ -135,6 +154,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 19. Final live verification had no safe one-command boundary. Added a no-call-by-default runner that refuses unconfirmed/non-free model configuration, requires an explicit runtime root and writes only a non-secret summary receipt after an explicitly requested live run.
 20. QUICK chat ran its evidence fallback synchronously for up to the 45-second discovery budget, so a proxy/browser timeout could repeatedly replace ongoing work with one generic server-error sentence. Model failure now promotes to the capability-protected durable QUICK job path, while transport/session failures show bounded actionable reasons and preserve the question for retry.
 21. Release sign-off required three receipts from one exact commit, but none of the receipt formats enforced that identity. Foundation/live receipts now bind to a clean full SHA, deployment health reports only a validated host-provided build SHA, deployed smoke compares it exactly, and the bounded release-bundle verifier rejects mixed revisions without copying secrets/capabilities.
+22. MARATHON could stop early after a superficially sufficient evidence pack and exposed no single audit of how much of the intended process actually ran. It now completes every bounded round, records marginal yield, and reports a mandatory-gap-aware 90% research-process target without turning that number into truth, profitability or hypothesis success probability.
 
 ## Required gates before foundation can be called reliable
 

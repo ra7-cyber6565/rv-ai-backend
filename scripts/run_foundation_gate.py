@@ -115,6 +115,8 @@ FOCUSED_PYTEST = (
     "tests/test_network_safety.py",
     "tests/test_advanced_discovery.py",
     "tests/test_specialist_research.py",
+    "tests/test_research_assurance.py",
+    "tests/test_marathon_all_rounds.py",
     "tests/test_exam_intelligence.py",
     "tests/test_resumable_reading.py",
     "tests/test_evidence_mutation_matrix.py",
