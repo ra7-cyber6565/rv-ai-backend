@@ -4,7 +4,9 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [chatgpt-upload-safety]
+    # PR checks should prevent bad merges once branch protection is enabled;
+    # this second line also detects any accidental/admin direct main push.
+    branches: [main, chatgpt-upload-safety]
   workflow_dispatch:
 
 permissions:

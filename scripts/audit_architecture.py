@@ -188,12 +188,20 @@ def _foundation_workflow_safe() -> AuditCheck:
         "INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data",
     )
     missing = [needle for needle in required if needle not in text]
+    push_block = re.search(r"(?ms)^  push:\s*\n(?P<body>(?: {4}.*\n?)*)", text)
+    main_push = bool(
+        push_block
+        and re.search(r"(?m)^    branches:\s*\[[^\]]*\bmain\b",
+                      push_block.group("body"))
+    )
+    if not main_push:
+        missing.append("push trigger for main")
     invalid_job_env = "INFINITY_DATA_ROOT: ${{ runner." in text
     return AuditCheck(
         name="ci:foundation-workflow-valid-contexts",
         passed=bool(text) and not missing and not invalid_job_env,
         detail=(
-            "foundation workflow has a valid Linux temp root and PR trigger"
+            "foundation workflow has valid PR + main-push triggers and Linux temp root"
             if text and not missing and not invalid_job_env
             else f"missing={missing}; invalid_runner_context={invalid_job_env}"
         ),
