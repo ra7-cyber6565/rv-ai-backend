@@ -196,11 +196,29 @@ def test_nonempty_but_unattributable_contradiction_span_still_fails():
     assert "CONTRADICTION_SPAN_MISSING" in codes
 
 
+def test_generic_placeholder_or_snippet_cannot_pass_exact_contradiction_gate():
+    base = {
+        "source_id": "S2",
+        "passage": EXACT_OPPOSE,
+        "claim_stance": "SUPPORT",
+        "source_stance": "OPPOSE",
+    }
+    for mutation in (
+        {**base, "locator": "abstract/snippet (exact page ka pata nahi)",
+         "span_kind": "passage"},
+        {**base, "locator": "p.7 ¶2", "span_kind": "snippet"},
+    ):
+        state, codes = _run_contradiction_gate(mutation)
+        assert state.checks["critical_contradictions_have_exact_spans"] is False
+        assert "CONTRADICTION_SPAN_MISSING" in codes
+
+
 def test_complete_exact_opposite_span_passes_contradiction_provenance_check():
     span = {
         "source_id": "S2",
         "locator": "p.7 ¶2",
         "passage": EXACT_OPPOSE,
+        "span_kind": "passage",
         "claim_stance": "SUPPORT",
         "source_stance": "OPPOSE",
     }

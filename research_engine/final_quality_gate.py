@@ -22,6 +22,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
+from .locator_policy import exact_locator_available
+
 
 CONTRACT_VERSION = "1.0"
 
@@ -709,7 +711,8 @@ class FinalQualityGate:
                     source_stance = str(span.get("source_stance") or "").strip().upper()
                     return bool(
                         _meaningful(span.get("source_id"), 1)
-                        and _meaningful(span.get("locator"), 2)
+                        and exact_locator_available(span.get("locator"))
+                        and span.get("span_kind") == "passage"
                         and _meaningful(span.get("passage"), 40)
                         and claim_stance in {"SUPPORT", "OPPOSE"}
                         and source_stance in {"SUPPORT", "OPPOSE"}
