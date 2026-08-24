@@ -167,3 +167,13 @@ hypothesis ranking, falsification/virtual-experiment plans, calibrated
 pre-validation confidence, weakest-link analysis, a bounded next-query loop,
 domain requirements and a conservative reality/TRL ladder. These are research
 prioritisation aids—not proof, clinical advice or real-world success odds.
+
+After deployment, run the zero-model remote smoke before any live research call:
+
+```powershell
+python .\scripts\run_deployed_readonly_smoke.py --execute --base-url "https://YOUR-HOST"
+```
+
+This checks public health/privacy, security headers and project capability
+isolation without spending model quota. See `docs/RELEASE_SIGNOFF_CHECKLIST.md`
+for the same-SHA offline, live, deployment and governance sign-off sequence.
