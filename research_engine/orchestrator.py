@@ -1097,8 +1097,10 @@ class DeepResearchEngine:
             # sirf itna hai ki koi section khaali nahi rehta.
             from .local_reasoning import compose as compose_offline
 
-            gemini_answer = compose_offline(question, pack, plan,
-                                            contradiction_dicts)
+            gemini_answer = compose_offline(
+                question, pack, plan, contradiction_dicts,
+                evidence_manifest=passes.get("_evidence_first_manifest"),
+            )
             warnings.append(
                 "AI reasoning model is baar nahi chala (free limit khatam thi), "
                 "isliye ye jawab engine ke apne offline reasoning se bana hai — "

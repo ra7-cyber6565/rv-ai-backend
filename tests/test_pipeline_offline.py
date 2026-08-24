@@ -33,7 +33,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import gemini_reasoning  # noqa: E402
-from research_engine.models import SourceRecord, SourceType  # noqa: E402
+from research_engine.models import Passage, SourceRecord, SourceType  # noqa: E402
 from research_engine.orchestrator import DeepResearchEngine  # noqa: E402
 
 QUESTION = ("intermittent fasting type 2 diabetes par kya asar daalta hai, "
@@ -154,10 +154,29 @@ def _fake_reader(read_ok: bool):
     """
     def enrich(pack, max_sources=3, budget_chars=2400):
         entries = []
-        for s in pack.sources[:max_sources]:
+        for index, s in enumerate(pack.sources[:max_sources], 1):
             if read_ok:
+                # Mirror ContentFetcher.enrich's production contract: a
+                # full-text upgrade replaces stale passages and freezes exact
+                # locator + capture-time depth. Merely flipping SourceRecord's
+                # mutable read_level would let its display snippet borrow a
+                # false full-text badge and is intentionally rejected by P0-A.
+                full_text = ((s.snippet or s.title) + " ") * 4
                 s.full_text_chars = 5000
                 s.read_level = "full_text"
+                s.locator = f"Fixture section {index}"
+                pack.passages[:] = [
+                    passage for passage in pack.passages
+                    if passage.source_id != s.source_id
+                ]
+                pack.passages.append(Passage(
+                    source_id=s.source_id,
+                    text=full_text,
+                    locator=s.locator,
+                    provenance="full_text_fixture",
+                    read_level_at_capture="full_text",
+                ))
+                s.snippet = full_text[:budget_chars]
                 entries.append({"source_id": s.source_id, "ok": True,
                                 "chars": 5000, "reason": "", "title": s.title})
             else:

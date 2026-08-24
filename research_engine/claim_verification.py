@@ -446,22 +446,27 @@ def evidence_spans(line: str, records: Sequence[SourceRecord],
     wanted = _numbers(body)
     out: List[Dict] = []
     for record in records:
-        chunks: List[Tuple[str, str, str]] = []
+        chunks: List[Tuple[str, str, str, str, str]] = []
         if pack is not None:
             for passage in getattr(pack, "passages", []) or []:
                 if getattr(passage, "source_id", "") != record.source_id:
                     continue
                 chunk = (getattr(passage, "text", "") or "").strip()
                 if chunk:
-                    chunks.append((chunk,
-                                   getattr(passage, "locator", "") or "",
-                                   "passage"))
+                    chunks.append((
+                        chunk,
+                        getattr(passage, "locator", "") or "",
+                        "passage",
+                        str(getattr(passage, "provenance", "") or ""),
+                        str(getattr(passage, "read_level_at_capture", "") or ""),
+                    ))
         snippet = (record.snippet or "").strip()
         if snippet:
-            chunks.append((snippet, record.locator or "", "snippet"))
+            chunks.append((snippet, record.locator or "", "snippet",
+                           "source_snippet", str(record.reading_level() or "")))
 
         best: Optional[Dict] = None
-        for chunk_text, locator, kind in chunks:
+        for chunk_text, locator, kind, provenance, captured_level in chunks:
             window, score = _best_window(body, chunk_text)
             if not window:
                 continue
@@ -479,6 +484,8 @@ def evidence_spans(line: str, records: Sequence[SourceRecord],
                 "passage": window,
                 "locator": where,
                 "span_kind": kind,
+                "passage_provenance": provenance,
+                "read_level_at_capture": captured_level,
                 "match": round(float(score), 4),
                 "entailment_score": round(entailment_score, 4),
                 "numbers_matched": len(hits),
@@ -725,6 +732,47 @@ def check_d(records: Sequence[SourceRecord]) -> Check:
     return c
 
 
+def check_d_span(record: SourceRecord, span: Optional[Dict]) -> Check:
+    """Bind reading-depth D to the exact canonical span that drove C.
+
+    SourceRecord is mutable: a successful full-text read upgrades it, while a
+    display/search snippet may still exist beside the exact Passage records.
+    Source-level D alone therefore lets a snippet borrow the later full-text
+    badge.  Same-source A-E must prove that *the selected span* is an exact
+    passage captured at full-text depth.  Legacy/manual Passage fixtures with no
+    capture metadata keep their historical behaviour; production writers stamp
+    both fields and fail closed when they disagree.
+    """
+    base = check_d([record])
+    if base.status != PASS:
+        return base
+    if not span:
+        return Check("D", CHECK_LABELS["D"], UNKNOWN,
+                     "canonical evidence span select nahi hua")
+    kind = str(span.get("span_kind") or "").strip().lower()
+    locator = str(span.get("locator") or "").strip()
+    captured = str(span.get("read_level_at_capture") or "").strip().lower()
+    if kind != "passage":
+        return Check(
+            "D", CHECK_LABELS["D"], FAIL,
+            "selected support source snippet/display text hai, exact full-text passage nahi",
+        )
+    if not exact_locator_available(locator):
+        return Check(
+            "D", CHECK_LABELS["D"], UNKNOWN,
+            "selected passage ka exact page/section/paragraph locator nahi hai",
+        )
+    if captured and captured != "full_text":
+        return Check(
+            "D", CHECK_LABELS["D"], FAIL,
+            f"selected passage capture ke waqt {captured} level par tha, full_text par nahi",
+        )
+    detail = base.detail + "; canonical passage exact locator se bandha hai"
+    if captured:
+        detail += f" (capture={captured})"
+    return Check("D", CHECK_LABELS["D"], PASS, detail)
+
+
 # ── E: source quality ───────────────────────────────────────────────────────
 def check_e(records: Sequence[SourceRecord]) -> Check:
     c = Check("E", CHECK_LABELS["E"])
@@ -843,7 +891,7 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None,
         a = check_a([record.source_id], [record], line)
         b = check_b([record])
         c_check = check_c_span(line, canonical)
-        d = check_d([record])
+        d = check_d_span(record, canonical)
         e = check_e([record])
         checks = [a, b, c_check, d, e]
         path = {

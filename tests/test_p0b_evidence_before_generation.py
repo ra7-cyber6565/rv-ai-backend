@@ -14,6 +14,7 @@ from research_engine.evidence_drafting import (
     build_evidence_draft_manifest,
     passage_sha256,
 )
+from research_engine.local_reasoning import compose as compose_offline
 from research_engine.models import EvidencePack, Passage, SourceRecord, SourceType
 from research_engine.quality_producers import quality_context
 from research_engine.synthesizer_claude import FinalSynthesizer as ClaudeFinalSynthesizer
@@ -162,6 +163,23 @@ def test_supported_canonical_span_matches_preselected_manifest():
     assert audit["critical_claim_preselection_complete"] is True
     assert audit["evidence_first_achievement"] is True
     assert audit["claim_matches"][0]["preselected_span_id"].startswith("ES")
+
+
+def test_quota_fallback_critical_claims_draft_from_preselected_evidence():
+    """No-model prose still obeys the same evidence-before-drafting boundary."""
+    pack = _pack()
+    manifest = build_evidence_draft_manifest(CLAIM, pack)
+    answer = compose_offline(
+        CLAIM, pack, {"sub_questions": []}, evidence_manifest=manifest)
+    report = CV.verify_answer(answer, pack)
+    audit = audit_claims_against_manifest(report.to_dict(), manifest)
+
+    assert report.critical_claims
+    assert report.critical_same_source_ae_passed >= 1
+    assert audit["critical_claims_preselected_span_matched"] >= 1
+    assert audit["critical_claims_preselected_span_unmatched"] == 0
+    assert audit["critical_claim_preselection_complete"] is True
+    assert audit["evidence_first_achievement"] is True
 
 
 def test_unpreselected_canonical_passage_fails_closed():

@@ -20,7 +20,7 @@ from research_engine.citation import (
 from research_engine.claim_labels import downgrade
 from research_engine.evidence import EvidenceEngine
 from research_engine.evidence_verification import EvidenceVerifier
-from research_engine.models import EvidencePack, SourceRecord, SourceType
+from research_engine.models import EvidencePack, Passage, SourceRecord, SourceType
 
 
 CLAIM = "Higher urban density reduces per-capita car travel in the studied cities."
@@ -40,11 +40,18 @@ def _pack() -> EvidencePack:
         quality_score=0.8,
         source_id="S1",
     )
-    return EvidencePack(
+    pack = EvidencePack(
         question="Does higher urban density reduce per-capita car travel?",
         sources=[source],
         topic_terms=["urban", "density", "car", "travel"],
     )
+    # Production full-text readers persist an exact Passage with capture-time
+    # provenance; a SourceRecord display snippet alone is not A-E proof.
+    pack.passages = [Passage(
+        source_id="S1", text=SUPPORT, locator="Fixture section 1",
+        provenance="full_text_fixture", read_level_at_capture="full_text",
+    )]
+    return pack
 
 
 def test_claim_span_accepts_a_nearby_continuation_citation():
@@ -104,6 +111,7 @@ def test_both_AE_verifiers_accept_the_same_multiline_claim():
     detailed = claim_checks.verify_answer(answer, pack)
     assert detailed.total == 1
     assert detailed.claims[0].passes_ae is True
+    assert detailed.claims[0].canonical_span["span_kind"] == "passage"
     assert detailed.to_dict()["gate_passed"] is True
 
     release = EvidenceVerifier().verify(answer, pack)
