@@ -1066,6 +1066,21 @@ class VerificationReport:
         return bool(self.critical_claims) and self.critical_same_source_ae_passed > 0
 
     @property
+    def critical_claim_coverage_complete(self) -> bool:
+        """Every critical claim, not merely one, passed same-source A-E.
+
+        ``claim_verification_achievement`` deliberately keeps its original
+        non-vacuous "at least one" meaning for API compatibility.  Release
+        callers that need a complete critical surface must use this stricter
+        field.  Equality also covers unsupported, unverifiable and contradicted
+        outcomes because none of them can contribute to the A-E pass count.
+        """
+        return (
+            bool(self.critical_claims)
+            and self.critical_same_source_ae_passed == len(self.critical_claims)
+        )
+
+    @property
     def gate_passed(self) -> bool:
         """Release safety contract: koi unsupported strong label bachna nahi chahiye.
 
@@ -1209,6 +1224,7 @@ class VerificationReport:
                 "same_source_ae_passed": self.same_source_ae_passed,
                 "critical_claims_same_source_ae_passed": self.critical_same_source_ae_passed,
                 "claim_verification_achievement": self.claim_verification_achievement,
+                "critical_claim_coverage_complete": self.critical_claim_coverage_complete,
                 "check_counts": self.check_counts(),
                 # §8 — claim-level results, spans aur critical accounting
                 "result_counts": self.result_counts(),
