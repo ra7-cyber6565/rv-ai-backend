@@ -185,6 +185,9 @@ class QualityContract:
     calculations_required: bool = False
     counter_search_required: bool = True
     evidence_graph_required: bool = False
+    # Production research opts in explicitly. The default remains False so
+    # small standalone/legacy gate callers do not acquire hidden requirements.
+    evidence_first_required: bool = False
     minimum_directly_relevant_sources: int = 2
     minimum_average_relevance: float = 0.65
 
@@ -204,6 +207,7 @@ class QualityContract:
                 else _as_bool(data.get("counter_search_required"))
             ),
             evidence_graph_required=_as_bool(data.get("evidence_graph_required")),
+            evidence_first_required=_as_bool(data.get("evidence_first_required")),
             minimum_directly_relevant_sources=max(
                 1, _as_int(data.get("minimum_directly_relevant_sources"), 2)
             ),
@@ -614,24 +618,47 @@ class FinalQualityGate:
                 },
             )
 
-        # P0-B — post-hoc citation fitting is not release-safe. Legacy
-        # callers remain compatible when the field is absent/None; the
-        # current orchestrator explicitly sets it True and must then
-        # provide a complete preselection audit. Zero supported critical
-        # claims are handled separately by P0-A's non-vacuous achievement.
-        evidence_first_required = quality_context.get("evidence_first_required") is True
-        if evidence_first_required:
+        # P0-B — post-hoc citation fitting is not release-safe. Production
+        # requires an independently supplied, complete and non-vacuous audit.
+        # The contract, not an optional result field, decides whether absence is
+        # allowed; otherwise deleting the audit from quality_context fails open.
+        context_requires = quality_context.get("evidence_first_required") is True
+        evidence_first_required = bool(spec.evidence_first_required or context_requires)
+        audit_fields = (
+            "evidence_first_required",
+            "critical_claim_preselection_complete",
+            "critical_claims_preselected_span_unmatched",
+            "evidence_first_achievement",
+        )
+        audit_present = (
+            not evidence_first_required
+            or all(quality_context.get(field) is not None for field in audit_fields)
+        )
+        state.check("evidence_first_audit_present", audit_present)
+        if evidence_first_required and not audit_present:
+            state.issue(
+                "EVIDENCE_FIRST_AUDIT_MISSING",
+                "claim_citation",
+                "critical",
+                "Production evidence-first audit is missing or incomplete.",
+                deduction=8,
+                hard_cap=50,
+            )
+
+        if evidence_first_required and audit_present:
             preselection_flag = quality_context.get("critical_claim_preselection_complete")
             preselection_unmatched = _as_int(
                 quality_context.get("critical_claims_preselected_span_unmatched"))
-            preselection_ok = (preselection_flag is not None
-                               and _as_bool(preselection_flag)
+            preselection_ok = (_as_bool(preselection_flag)
                                and preselection_unmatched == 0)
+        elif evidence_first_required:
+            preselection_unmatched = 0
+            preselection_ok = False
         else:
             preselection_unmatched = 0
             preselection_ok = True
         state.check("critical_claims_preselected_before_generation", preselection_ok)
-        if not preselection_ok:
+        if evidence_first_required and audit_present and not preselection_ok:
             state.issue(
                 "CRITICAL_CLAIM_NOT_PRESELECTED",
                 "claim_citation",
@@ -640,6 +667,76 @@ class FinalQualityGate:
                 deduction=8,
                 hard_cap=60,
                 details={"unmatched": preselection_unmatched},
+            )
+
+        achievement_ok = (
+            not evidence_first_required
+            or (audit_present
+                and _as_bool(quality_context.get("evidence_first_achievement")))
+        )
+        state.check("evidence_first_achievement", achievement_ok)
+        if evidence_first_required and audit_present and not achievement_ok:
+            state.issue(
+                "EVIDENCE_FIRST_ACHIEVEMENT_MISSING",
+                "claim_citation",
+                "critical",
+                "No required critical claim was matched to eligible pre-draft evidence.",
+                deduction=8,
+                hard_cap=60,
+            )
+
+        # P0-C — a critical contradiction is release-relevant evidence too. It
+        # must point to exact opposite text, not a source-wide keyword collision
+        # or an unrelated paragraph elsewhere in the document.
+        contradicted_value = quality_context.get("critical_contradicted_claims")
+        if contradicted_value is None:
+            contradicted_count = 0
+            contradiction_span_ok = True  # explicit legacy compatibility
+        else:
+            contradicted_count = _as_int(contradicted_value)
+            if contradicted_count <= 0:
+                contradiction_span_ok = True
+            else:
+                contradiction_rows = [
+                    row for row in _list_of_mappings(
+                        quality_context.get("critical_claim_evidence_spans"))
+                    if str(row.get("result") or "").strip().upper() == "CONTRADICTED"
+                ]
+
+                def exact_opposite_span(row: Mapping[str, Any]) -> bool:
+                    span = _plain_mapping(row.get("contradiction_span"))
+                    claim_stance = str(span.get("claim_stance") or "").strip().upper()
+                    source_stance = str(span.get("source_stance") or "").strip().upper()
+                    return bool(
+                        _meaningful(span.get("source_id"), 1)
+                        and _meaningful(span.get("locator"), 2)
+                        and _meaningful(span.get("passage"), 40)
+                        and claim_stance in {"SUPPORT", "OPPOSE"}
+                        and source_stance in {"SUPPORT", "OPPOSE"}
+                        and claim_stance != source_stance
+                    )
+
+                rows_complete = (
+                    len(contradiction_rows) >= contradicted_count
+                    and all(exact_opposite_span(row) for row in contradiction_rows)
+                )
+                explicit_complete = quality_context.get(
+                    "critical_contradiction_spans_complete")
+                contradiction_span_ok = (
+                    explicit_complete is not None
+                    and _as_bool(explicit_complete)
+                    and rows_complete
+                )
+        state.check("critical_contradictions_have_exact_spans", contradiction_span_ok)
+        if not contradiction_span_ok:
+            state.issue(
+                "CONTRADICTION_SPAN_MISSING",
+                "claim_citation",
+                "critical",
+                "A critical contradiction lacks exact opposite text and locator provenance.",
+                deduction=5,
+                hard_cap=60,
+                details={"count": contradicted_count},
             )
 
         no_source_count = _as_int(
