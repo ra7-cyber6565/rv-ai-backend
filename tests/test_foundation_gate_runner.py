@@ -7,6 +7,13 @@ from pathlib import Path
 from scripts import run_foundation_gate as gate
 
 
+_CLEAN_IDENTITY = {
+    "available": True,
+    "revision": "2a21a6fbcb0771be746766dad3c6a511a7c3ec5e",
+    "clean": True,
+}
+
+
 def test_safe_env_forces_offline_zero_cost(monkeypatch, tmp_path):
     monkeypatch.setenv("GEMINI_API_KEY", "should-not-survive")
     monkeypatch.setenv("GEMINI_API_KEY_2", "backup-should-not-survive")
@@ -102,6 +109,8 @@ def test_default_stage_plan_contains_real_release_gates():
         "tests/test_network_safety.py",
         "tests/test_patents.py",
         "tests/test_live_zero_cost_gate.py",
+        "tests/test_release_identity.py",
+        "tests/test_release_bundle.py",
         "tests/test_windows_launchers.py",
         "tests/test_unverified_semantics.py",
         "tests/test_foundation_gate_runner.py",
@@ -142,12 +151,14 @@ def test_receipt_fails_closed_when_any_stage_fails(tmp_path):
         gate.StageResult("bad", ["python", "bad.py"], 1, 0.2, "failed", ["boom"]),
     ]
 
-    receipt = gate._write_receipt(path, stages)
+    receipt = gate._write_receipt(path, stages, identity=_CLEAN_IDENTITY)
 
     assert receipt.passed is False
     assert receipt.failed_stages == ["bad"]
     payload = json.loads(path.read_text(encoding="utf-8"))
     assert payload["offline_zero_cost"] is True
+    assert payload["code_identity_verified"] is True
+    assert payload["code_revision"] == _CLEAN_IDENTITY["revision"]
     assert payload["passed"] is False
     assert payload["stages"][1]["output_tail"] == ["boom"]
 
@@ -159,9 +170,27 @@ def test_receipt_passes_only_when_every_stage_passes(tmp_path):
         gate.StageResult("two", ["python", "two.py"], 0, 0.1, "passed", []),
     ]
 
-    receipt = gate._write_receipt(path, stages)
+    receipt = gate._write_receipt(path, stages, identity=_CLEAN_IDENTITY)
 
     assert receipt.passed is True
     assert receipt.failed_stages == []
     assert path.is_file()
     assert not Path(str(path) + ".tmp").exists()
+
+
+def test_receipt_fails_closed_for_dirty_or_unknown_checkout(tmp_path):
+    stages = [
+        gate.StageResult("one", ["python", "one.py"], 0, 0.1, "passed", []),
+    ]
+    for identity in (
+        {**_CLEAN_IDENTITY, "clean": False},
+        {"available": False, "revision": "", "clean": False},
+    ):
+        receipt = gate._write_receipt(
+            tmp_path / f"{len(identity['revision'])}.json",
+            stages,
+            identity=identity,
+        )
+        assert receipt.passed is False
+        assert receipt.code_identity_verified is False
+        assert "clean_repository_identity" in receipt.failed_stages

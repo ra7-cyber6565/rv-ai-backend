@@ -70,6 +70,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 | Final architecture/integration audit | ChatGPT | FULL FOUNDATION CI PASS / LIVE GATE PENDING | GitHub Actions run 32550623409 passed the complete offline gate; offline evidence is not a 100/100 production sign-off and live zero-cost validation remains open |
 | Advanced Scientific Discovery Engine | ChatGPT | CODE COMPLETE / OFFLINE VERIFIED | Structured discovery field includes all 16 planned layers; arbitrary code, automatic real experiments, global-novelty claims and success-probability claims are fail-closed |
 | Live ₹0 release runner | ChatGPT | CODE COMPLETE / CREDENTIALS PENDING | No-call preflight is default; real run requires `--execute`, explicit D-root and a currently usable confirmed/free model layer; receipt contains no answer/source text/credentials |
+| Exact-revision release proof | ChatGPT | DONE / VERIFY | Foundation/live/deployed receipts now carry validated full Git revisions; dirty checkouts and mixed-commit proof bundles fail closed, and deployed smoke compares Railway's reported build SHA with the expected checkout |
 
 ## Latest independent offline validation — 2026-08-22
 
@@ -133,6 +134,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 18. The advanced-discovery roadmap existed only as an aspirational checklist. Added one deterministic, network-free production layer covering all 16 planned stages and wired its bounded result into every research response without extra model calls.
 19. Final live verification had no safe one-command boundary. Added a no-call-by-default runner that refuses unconfirmed/non-free model configuration, requires an explicit runtime root and writes only a non-secret summary receipt after an explicitly requested live run.
 20. QUICK chat ran its evidence fallback synchronously for up to the 45-second discovery budget, so a proxy/browser timeout could repeatedly replace ongoing work with one generic server-error sentence. Model failure now promotes to the capability-protected durable QUICK job path, while transport/session failures show bounded actionable reasons and preserve the question for retry.
+21. Release sign-off required three receipts from one exact commit, but none of the receipt formats enforced that identity. Foundation/live receipts now bind to a clean full SHA, deployment health reports only a validated host-provided build SHA, deployed smoke compares it exactly, and the bounded release-bundle verifier rejects mixed revisions without copying secrets/capabilities.
 
 ## Required gates before foundation can be called reliable
 

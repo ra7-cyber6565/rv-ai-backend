@@ -179,6 +179,15 @@ def test_live_exception_writes_sanitized_failure_receipt(tmp_path, monkeypatch, 
 
     monkeypatch.setattr(live_gate, "load_local_env", lambda: None)
     monkeypatch.setattr(live_gate, "run_live", crash)
+    monkeypatch.setattr(
+        live_gate,
+        "repository_identity",
+        lambda _root: {
+            "available": True,
+            "revision": "2a21a6fbcb0771be746766dad3c6a511a7c3ec5e",
+            "clean": True,
+        },
+    )
     with patch.dict(os.environ, env, clear=True):
         return_code = live_gate.main([
             "--execute",
@@ -196,6 +205,8 @@ def test_live_exception_writes_sanitized_failure_receipt(tmp_path, monkeypatch, 
     assert body["failure_code"] == "live_research_execution_failed"
     assert body["contains_answer_or_source_text"] is False
     assert body["contains_credentials"] is False
+    assert body["repository_clean"] is True
+    assert len(body["code_revision"]) == 40
     assert secret not in output
     assert secret not in serialized
     assert "configured-free-key-not-printed" not in output
