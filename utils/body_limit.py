@@ -26,6 +26,7 @@ _DEFAULT_API_BYTES = 256 * 1024
 _DOC_BODY_BYTES = 64 * _MIB
 _AUDIO_BODY_BYTES = 205 * _MIB
 _SESSION_BODY_BYTES = 8 * 1024
+_EXAM_BODY_BYTES = 4 * _MIB
 
 _ROUTE_LIMITS = {
     "/api/v1/session": _SESSION_BODY_BYTES,
@@ -33,6 +34,7 @@ _ROUTE_LIMITS = {
     "/api/v1/upload-pdf": _DOC_BODY_BYTES,
     "/api/v1/upload-audio": _AUDIO_BODY_BYTES,
     "/api/v1/transcribe-audio": _AUDIO_BODY_BYTES,
+    "/api/v1/exam-intelligence/analyze": _EXAM_BODY_BYTES,
 }
 
 
