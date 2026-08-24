@@ -540,6 +540,10 @@ def quality_contract(question: str, config=None,
         # hamesha True. Ye flag isliye hai ki gate ise padh sake, badal na sake.
         "counter_search_required": True,
         "evidence_graph_required": mode != "QUICK",
+        # Every production research run builds evidence before drafting. This
+        # makes absence of its audit a release-blocking condition instead of an
+        # optional quality-context field that can disappear and fail open.
+        "evidence_first_required": True,
         # §5 — saboot ke zaroori raaste (evidence axes) khaali hone par jawab
         # adhoora hai. QUICK ka wada "turant jawab" hai (ek round, 3 axis
         # queries), isliye wahan ye kami ledger mein DIKHTI hai par status nahi
