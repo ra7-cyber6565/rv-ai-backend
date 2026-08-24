@@ -115,6 +115,7 @@ FOCUSED_PYTEST = (
     "tests/test_evidence_mutation_matrix.py",
     "tests/test_lenses.py",
     "tests/test_lens_independent_audit.py",
+    "tests/test_deployed_readonly_smoke.py",
     "tests/test_patents.py",
     "tests/test_live_zero_cost_gate.py",
     "tests/test_windows_launchers.py",
