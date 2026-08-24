@@ -201,8 +201,10 @@ class _FakeGemini:
     hi karta hai).
     """
 
-    def __init__(self, fail_after: int = 99):
+    def __init__(self, fail_after: int = 99, recovered_raw_error: bool = False):
         self.fail_after = fail_after
+        self.recovered_raw_error = recovered_raw_error
+        self.raw_error_recorded = False
         self.prompts = []
 
     def __call__(self, brain, prompt, label=""):
@@ -211,6 +213,15 @@ class _FakeGemini:
                 f"call budget ({brain.budget}) khatam — '{label}' skip hua")
         brain.calls_used += 1
         self.prompts.append((label, prompt))
+        if self.recovered_raw_error and not self.raw_error_recorded:
+            # Production shape: an earlier free model attempt failed, then a
+            # later candidate completed the same logical pass. The raw provider
+            # body remains in developer accounting but must not enter a COMPLETE
+            # run's answer/warnings.
+            brain.errors.append(
+                "analysis failed: ResourceExhausted: 429 grpc_status quota_id "
+                "GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+            self.raw_error_recorded = True
         if brain.calls_used > self.fail_after:
             brain.errors.append(
                 f"{label} failed: ResourceExhausted: 429 quota exceeded")
@@ -251,8 +262,10 @@ class _FakeGemini:
                 "## Source Relevance Check\nSources sawaal se match karte hain.\n")
 
 
-def _run(records, read_ok: bool, fail_after: int = 99, mode: str = "MAXIMUM"):
-    fake = _FakeGemini(fail_after=fail_after)
+def _run(records, read_ok: bool, fail_after: int = 99, mode: str = "MAXIMUM",
+         recovered_raw_error: bool = False):
+    fake = _FakeGemini(fail_after=fail_after,
+                       recovered_raw_error=recovered_raw_error)
     original = gemini_reasoning.GeminiReasoning.generate
     gemini_reasoning.GeminiReasoning.generate = \
         lambda self, prompt, label="": fake(self, prompt, label)
@@ -441,6 +454,22 @@ def test_healthy_run_status_is_complete():
                                            result["status_reason"])
     assert not result["missing_passes"], result["missing_passes"]
     assert "RESEARCH INCOMPLETE" not in result["answer"], "jhoothi warning lagi"
+
+
+def test_complete_recovered_run_keeps_raw_failure_private_but_auditable():
+    """Live regression: fallback success must not publish the failed model body."""
+    result, _ = _run(
+        _records(ON_TOPIC), read_ok=True, recovered_raw_error=True)
+    assert result["status"] == "COMPLETE", result["status"]
+    public = (result.get("answer", "") + " "
+              + " ".join(result.get("warnings") or [])).lower()
+    for raw in ("resourceexhausted", "grpc_status", "quota_id",
+                "generaterequestsperday"):
+        assert raw not in public, f"recovered COMPLETE public output leaked {raw}"
+    # Developer audit is retained outside the public answer. A recovered failure
+    # is not erased merely to make the release gate green.
+    structured = " ".join(result.get("technical_details") or []).lower()
+    assert "resourceexhausted" in structured and "quota_id" in structured
 
 
 def test_quick_mode_does_not_get_fake_incomplete_reasoning():

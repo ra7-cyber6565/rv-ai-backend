@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
@@ -26,13 +27,19 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from . import claim_verification as CV
 from .locator_policy import exact_locator_available, locator_key
 from .models import EvidencePack, SourceRecord
-from .source_prompt_guard import quote_untrusted
+from .source_prompt_guard import looks_instruction_like, quote_untrusted
 
 
 DEFAULT_SEGMENT_CHARS = 1200
 DEFAULT_SEGMENTS_PER_SOURCE = 2
 DEFAULT_MAX_SEGMENTS = 18
 MANIFEST_IDENTITY_VERSION = "p0b-id-2"
+
+_PUBLIC_SENTENCE_SPLIT = re.compile(r"(?<=[.!?।])\s+")
+_PUBLIC_MARKDOWN_INERT = str.maketrans({
+    "*": "∗", "_": "＿", "[": "［", "]": "］", "<": "‹",
+    ">": "›", "`": "ˋ", "#": "﹟",
+})
 
 
 def _normalise_text(value: object) -> str:
@@ -402,6 +409,102 @@ def _manifest_spans(manifest: Optional[EvidenceDraftManifest]) -> Sequence[Evide
     return list(getattr(manifest, "spans", None) or [])
 
 
+def _public_claim_sentence(question: str, passage: str) -> str:
+    """Choose one bounded, inert evidence sentence for a public critical claim.
+
+    The source passage is evidence, never executable formatting/instructions.
+    Instruction-like sentences are therefore excluded from deterministic public
+    claim drafting (they remain available in the private manifest for audit).
+    Markdown/citation metacharacters are rendered inert so a source cannot add a
+    fake heading, citation, or HTML block to the answer.
+    """
+    body = _normalise_text(passage)
+    if not body:
+        return ""
+    candidates = [
+        sentence.strip()
+        for sentence in _PUBLIC_SENTENCE_SPLIT.split(body)
+        if 40 <= len(sentence.strip()) <= 900
+        and not looks_instruction_like(sentence)
+    ]
+    if not candidates and len(body) >= 40 and not looks_instruction_like(body):
+        candidates = [body]
+    if not candidates:
+        return ""
+    ranked = sorted(
+        enumerate(candidates),
+        key=lambda item: (
+            float(CV._similarity(question, item[1])),
+            min(len(item[1]), 520),
+            -item[0],
+        ),
+        reverse=True,
+    )
+    chosen = ranked[0][1]
+    if len(chosen) > 520:
+        chosen = chosen[:520].rsplit(" ", 1)[0].rstrip() + "…"
+    return _normalise_text(chosen).translate(_PUBLIC_MARKDOWN_INERT)
+
+
+def build_critical_evidence_sections(
+    question: str,
+    manifest: Optional[EvidenceDraftManifest],
+    *,
+    max_claims: int = 2,
+) -> Dict[str, Any]:
+    """Draft critical answer/conclusion prose only from preselected strong spans.
+
+    This is the mechanical enforcement layer behind the prompt contract.  It is
+    intentionally conservative: copied source wording is labelled
+    ``SOURCE-REPORTED`` rather than promoted to a fact.  Claim-specific C and
+    same-source A-E still decide whether it becomes genuine support later.
+
+    Raw passages are returned only in the transient section bodies and are never
+    included in the compact ``audit`` member.
+    """
+    limit = max(1, min(4, int(max_claims or 2)))
+    rows: List[Tuple[EvidenceDraftSpan, str]] = []
+    used_sources: set[str] = set()
+    for span in list(getattr(manifest, "strong_eligible_spans", None) or []):
+        source_id = re.sub(r"[^A-Za-z0-9._-]", "", str(span.source_id or ""))[:40]
+        if not source_id or source_id in used_sources:
+            continue
+        sentence = _public_claim_sentence(question, span.passage)
+        if not sentence:
+            continue
+        rows.append((span, sentence))
+        used_sources.add(source_id)
+        if len(rows) >= limit:
+            break
+
+    claims = [
+        f"- [SOURCE-REPORTED] {sentence} [{re.sub(r'[^A-Za-z0-9._-]', '', span.source_id)[:40]}]"
+        for span, sentence in rows
+    ]
+    direct = "\n".join(claims)
+    conclusion = ""
+    if claims:
+        conclusion = (
+            "Preselected full-text evidence se sabse conservative nateeja:\n"
+            + claims[0]
+            + "\n\nIs line se aage ka pakka dava is evidence-first boundary ne nahi banaya."
+        )
+    return {
+        "available": bool(claims),
+        "direct_answer": direct,
+        "conclusion": conclusion,
+        "audit": {
+            "schema_version": "p0b-enforcement-1",
+            "available": bool(claims),
+            "claims_drafted": len(claims),
+            "preselected_span_ids": [span.span_id for span, _ in rows],
+            "source_ids": [span.source_id for span, _ in rows],
+            "manifest_sha256": getattr(manifest, "manifest_sha256", "") if manifest else "",
+            "source_text_exposed_in_audit": False,
+        },
+    }
+
+
 def audit_claims_against_manifest(
     verification: Optional[Mapping[str, Any]],
     manifest: Optional[EvidenceDraftManifest],
@@ -484,5 +587,6 @@ def audit_claims_against_manifest(
 
 __all__ = [
     "EvidenceDraftManifest", "EvidenceDraftSpan", "audit_claims_against_manifest",
-    "build_evidence_draft_manifest", "passage_sha256",
+    "build_critical_evidence_sections", "build_evidence_draft_manifest",
+    "passage_sha256",
 ]
