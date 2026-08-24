@@ -100,6 +100,12 @@ def _is_stop(word: str) -> bool:
     return low in _STOP or len(low) <= 2
 
 
+def is_stopword(word: str) -> bool:
+    """Public roop — doosre deterministic module (classics) isi list par chalein,
+    apni alag stop-list na banayein (do list ek din alag ho jaati hain)."""
+    return _is_stop(str(word or ""))
+
+
 def hyphenated_compounds(question: str) -> List[str]:
     """"psycho-cybernetics", "value-maxing" — hyphen khud concept ka signal hai."""
     text = fold_accents(question)
@@ -372,6 +378,25 @@ def morpheme_disciplines(question: str) -> Tuple[List[str], List[str]]:
             disciplines.extend(fields)
             families.extend(fams)
     return _unique(disciplines, limit=8), _unique(families, limit=6)
+
+
+def tradition_hits(question: str) -> List[str]:
+    """Sawaal ke apne wo shabd jo kisi granth/parampara marker se mile.
+
+    ``morpheme_disciplines`` marker se FIELD banata hai; ye function marker se
+    mila hua ASLI shabd wapas deta hai ("upanishadon", "bhagavadgita",
+    "talmud"), kyunki text-lane ki search query me user ka apna shabd hi kaam
+    aata hai — koi granth-naam ki list yahan nahi hai.
+    """
+    out: List[str] = []
+    for token in (w.strip("-") for w in tokens(question)):
+        if len(token) < 3:
+            continue
+        for marker, _fields, _fams in _TRADITION_MARKERS:
+            if _marker_hit(token, marker):
+                out.append(token)
+                break
+    return _unique(out, limit=6)
 
 
 # Framework ka HEAD NOUN. Ye scientific/analytic bhasha ka dhaancha hai, kisi

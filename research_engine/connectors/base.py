@@ -109,6 +109,35 @@ DISCOVERY_ALLOWED_HOSTS = frozenset({
     "openlibrary.org",
     "www.googleapis.com",
     "zenodo.org",
+    # Wikisource — public-domain mool text lane ka official MediaWiki action API.
+    # Har bhasha ka apna exact host hai (allowlist wildcard nahi leti), isliye
+    # sirf wahi hosts jo `classic_connector._KNOWN_LANGS` me hain.
+    "en.wikisource.org",
+    "sa.wikisource.org",
+    "hi.wikisource.org",
+    "mr.wikisource.org",
+    "bn.wikisource.org",
+    "ta.wikisource.org",
+    "te.wikisource.org",
+    "kn.wikisource.org",
+    "gu.wikisource.org",
+    "pa.wikisource.org",
+    "or.wikisource.org",
+    "ml.wikisource.org",
+    "as.wikisource.org",
+    "ne.wikisource.org",
+    "fa.wikisource.org",
+    "ar.wikisource.org",
+    "he.wikisource.org",
+    "el.wikisource.org",
+    "la.wikisource.org",
+    "de.wikisource.org",
+    "fr.wikisource.org",
+    "es.wikisource.org",
+    "it.wikisource.org",
+    "ru.wikisource.org",
+    "zh.wikisource.org",
+    "ja.wikisource.org",
 })
 
 

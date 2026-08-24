@@ -4,6 +4,9 @@ Source connectors (Spec Section 2, 3, 11, 16)
     WebConnector     Tavily -> Wikipedia -> DuckDuckGo
     PaperConnector   OpenAlex, arXiv, Crossref, DOAJ, PubMed, Semantic Scholar
     BookConnector    Internet Archive, Open Library, Google Books
+    ClassicTextConnector
+                     Wikisource (official MediaWiki action API) — public-domain
+                     mool text ka lane, catalogue nahi
     DatasetConnector Zenodo, data.gov (US), WHO GHO, World Bank, HuggingFace,
                      data.gov.in (key optional)
     PatentDiscoveryConnector
@@ -30,6 +33,11 @@ from .book_connector import (
     GoogleBooksConnector,
     InternetArchiveConnector,
     OpenLibraryConnector,
+)
+from .classic_connector import (
+    ClassicTextConnector,
+    WikisourceConnector,
+    wikisource_langs,
 )
 from .dataset_connector import (
     DataGovConnector,
@@ -76,6 +84,8 @@ __all__ = [
     "DOAJConnector", "PubMedConnector", "SemanticScholarConnector",
     "BookConnector", "InternetArchiveConnector", "OpenLibraryConnector",
     "GoogleBooksConnector",
+    # public-domain MOOL TEXT lane (granth/classic) — official Wikimedia API only
+    "ClassicTextConnector", "WikisourceConnector", "wikisource_langs",
     "DatasetConnector", "ZenodoConnector", "DataGovConnector", "WHOGhoConnector",
     "WorldBankConnector", "HuggingFaceDatasetsConnector", "DataGovInConnector",
     # patents — alag tier, kyunki patent legal document hai, science proof nahi
