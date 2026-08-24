@@ -300,6 +300,7 @@ def _project_isolation() -> AuditCheck:
     jobs = _read("api/job_routes.py")
     rag = _read("api/routes.py")
     exam = _read("api/exam_routes.py")
+    reading = _read("api/reading_routes.py")
     web = _read("web/index.html")
     limiter = _read("utils/request_guard.py")
 
@@ -320,6 +321,7 @@ def _project_isolation() -> AuditCheck:
         (rag, "require_project_access(", "RAG/upload namespace guard"),
         (exam, "require_project_access(request.project_id, x_project_token)",
          "exam-analysis namespace guard"),
+        (reading, "require_project_access(", "resumable-reading namespace guard"),
         (web, 'API+"/api/v1/session"', "web session creation"),
         (web, '"X-Project-Token":PROJECT.token', "web project bearer header"),
         (web, "async function projectPost", "web stale-session recovery wrapper"),
@@ -400,6 +402,7 @@ def run_audit() -> AuditReport:
         "api/job_routes.py",
         "api/session_routes.py",
         "api/exam_routes.py",
+        "api/reading_routes.py",
         "research_engine/orchestrator.py",
         "research_engine/source_discovery.py",
         "research_engine/content_fetcher.py",
@@ -417,6 +420,8 @@ def run_audit() -> AuditReport:
         "research_engine/multilingual_research.py",
         "research_engine/exam_intelligence.py",
         "docs/EXAM_INTELLIGENCE.md",
+        "research_engine/reading_sessions.py",
+        "docs/RESUMABLE_READING.md",
         "research_engine/patents.py",
         "research_engine/connectors/patent_connector.py",
         "scripts/run_live_zero_cost_gate.py",
@@ -454,6 +459,7 @@ def run_audit() -> AuditReport:
         "tests/test_advanced_discovery.py",
         "tests/test_specialist_research.py",
         "tests/test_exam_intelligence.py",
+        "tests/test_resumable_reading.py",
         "tests/test_patents.py",
         "tests/test_chat_resilience.py",
         "tests/test_live_zero_cost_gate.py",
@@ -471,6 +477,7 @@ def run_audit() -> AuditReport:
             "include_router",
             "reasoning_status",
             "include_router(exam_router",
+            "include_router(reading_router",
         ),
         _release_honesty(),
         _contains(
@@ -518,6 +525,15 @@ def run_audit() -> AuditReport:
             "CALIBRATED_ON_WALK_FORWARD_HISTORY",
             "APP-ORIGINAL EXAM HYPOTHESIS",
             "HEURISTIC STUDY PRIORITY — NOT PROBABILITY",
+            "ExclusiveProcessFileLock",
+        ),
+        _contains(
+            "research_engine/reading_sessions.py",
+            "class ReadingSessionStore",
+            "class ResumableReadingManager",
+            "pending_semantic_translation_review",
+            "text_extraction_is_not_comprehension",
+            "password_drm_paywall_bypass",
             "ExclusiveProcessFileLock",
         ),
         _contains(
