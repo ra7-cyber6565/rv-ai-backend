@@ -196,12 +196,25 @@ def _foundation_workflow_safe() -> AuditCheck:
     )
     if not main_push:
         missing.append("push trigger for main")
+    node24_actions = {
+        "actions/checkout": re.search(
+            r"actions/checkout@v(?:[5-9]|[1-9]\d+)\b", text
+        ),
+        "actions/setup-python": re.search(
+            r"actions/setup-python@v(?:[6-9]|[1-9]\d+)\b", text
+        ),
+    }
+    legacy_actions = [name for name, match in node24_actions.items() if not match]
+    if legacy_actions:
+        missing.append(
+            "Node 24-compatible action major(s): " + ", ".join(legacy_actions)
+        )
     invalid_job_env = "INFINITY_DATA_ROOT: ${{ runner." in text
     return AuditCheck(
         name="ci:foundation-workflow-valid-contexts",
         passed=bool(text) and not missing and not invalid_job_env,
         detail=(
-            "foundation workflow has valid PR + main-push triggers and Linux temp root"
+            "foundation workflow has valid triggers, Node 24 actions, and Linux temp root"
             if text and not missing and not invalid_job_env
             else f"missing={missing}; invalid_runner_context={invalid_job_env}"
         ),
