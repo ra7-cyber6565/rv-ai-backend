@@ -22,6 +22,7 @@ koi network, koi nayi dependency. Free tier par chalna hai.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -42,11 +43,75 @@ def stem(word: str) -> str:
     return w
 
 
-_WORD_RE = re.compile(r"[a-z0-9ऀ-ॿ][a-z0-9\-ऀ-ॿ]*")
+# ── tokenisation across scripts ──────────────────────────────────────────────
+#
+# PEHLE: `_WORD_RE = [a-z0-9ऀ-ॿ]...` — sirf English + Devanagari. Naapa gaya
+# nateeja: Bangla/Tamil/Telugu/Russian/Arabic/Chinese text par `tokens()` khaali
+# list deta tha, isliye `semantic.similarity()` 0.0 aata tha aur aisa source
+# relevance floor kabhi cross nahi kar sakta tha — chahe wo bilkul sahi ho.
+# Accented Latin bhi toot jaata tha: "méditation" → ['m', 'ditation'], yaani
+# English "meditation" se match hi nahi hota.
+#
+# AB: (1) baaki bade scripts word-character maane jaate hain, (2) Latin ke accent
+# fold ho jaate hain (é→e) — par SIRF Latin ke, kyunki Devanagari ki matra
+# (दि = द + ि) hataana shabd hi tod deta hai, (3) CJK ka koi space nahi hota
+# isliye har CJK character apna token banta hai, aur semantic.bigrams() usse
+# khud character-bigram bana leta hai.
+_LETTER_RANGES = (
+    "a-z0-9"
+    "ऀ-ॿ"      # devanagari
+    "ঀ-৿"      # bengali / assamese
+    "਀-੿"      # gurmukhi
+    "઀-૿"      # gujarati
+    "଀-୿"      # odia
+    "஀-௿"      # tamil
+    "ఀ-౿"      # telugu
+    "ಀ-೿"      # kannada
+    "ഀ-ൿ"      # malayalam
+    "඀-෿"      # sinhala
+    "Ѐ-ӿ"      # cyrillic
+    "Ͱ-Ͽ"      # greek
+    "֐-׿"      # hebrew
+    "؀-ۿ"      # arabic
+    "฀-๿"      # thai
+)
+_CJK_RANGES = (
+    "぀-ヿ"      # hiragana / katakana
+    "㐀-䶿"      # cjk ext a
+    "一-鿿"      # cjk unified
+    "가-힯"      # hangul
+)
+
+_WORD_RE = re.compile(
+    f"[{_CJK_RANGES}]|[{_LETTER_RANGES}][{_LETTER_RANGES}\\-]*"
+)
+
+
+def fold_accents(text: str) -> str:
+    """Latin accent hatao (é→e), baaki scripts ke combining marks chhodo.
+
+    Devanagari/Tamil/Arabic mein combining mark shabd ka hissa hai — usko
+    hataana matlab shabd tod dena. Isliye fold sirf tab hota hai jab base
+    character ASCII Latin ho.
+    """
+    raw = str(text or "")
+    if raw.isascii():
+        return raw
+    out: List[str] = []
+    base_is_latin = False
+    for ch in unicodedata.normalize("NFKD", raw):
+        if unicodedata.combining(ch):
+            if base_is_latin:
+                continue
+            out.append(ch)
+            continue
+        base_is_latin = "a" <= ch.lower() <= "z"
+        out.append(ch)
+    return unicodedata.normalize("NFC", "".join(out))
 
 
 def tokens(text: str) -> List[str]:
-    return _WORD_RE.findall((text or "").lower())
+    return _WORD_RE.findall(fold_accents(text).lower())
 
 
 def stems(text: str) -> Set[str]:

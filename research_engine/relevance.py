@@ -207,6 +207,46 @@ class RelevanceEngine:
         self.last_filter: Dict = {}
         self._topic_cache: Dict[str, List[str]] = {}
         self._domain_cache: Dict[str, object] = {}
+        # Cross-lingual scoring anchor (2026-08-23). Khaali = purana behaviour.
+        self.scoring_anchor: str = ""
+
+    # ── cross-lingual scoring anchor ─────────────────────────────────────────
+    #
+    # Naapa hua bug: `rank()` ko RAW user question milta hai
+    # (orchestrator.py se), aur poori scoring `semantic.similarity()` →
+    # `domain.tokens()` par chalti hai, yaani literal token overlap. Isliye
+    # Hinglish/Hindi sawaal par perfect English paper ka score gir jaata tha —
+    # naapa gaya: 'dimag tej kaise kare' par teen bilkul sahi English papers me
+    # se pehle ka score 0.0 aur ek chhoot gaya, jabki English phrasing par
+    # teeno 0.19–0.79 par rehte hain.
+    #
+    # Fix: sirf SCORING ke liye sawaal me lens/glossary se nikli English
+    # vocabulary jod dete hain (`research_engine.lenses.scoring_query`).
+    # Do baatein jaan-boojh kar aisi hain:
+    #   1. User ka asli sawaal kabhi replace nahi hota — sirf uske saath jodte
+    #      hain, taaki jo shabd usne khud likhe wo bhi count hote rahein.
+    #   2. Anchor khaali ho (pure English sawaal, ya lens ne kuch na diya) to
+    #      expanded query == original query, yaani ye change provably NO-OP hai.
+    #      Isi wajah se purane English benchmarks hil nahi sakte.
+    def set_scoring_anchor(self, anchor: str) -> None:
+        clean = re.sub(r"\s+", " ", str(anchor or "")).strip()[:240]
+        if clean == self.scoring_anchor:
+            return
+        self.scoring_anchor = clean
+        self._topic_cache.clear()
+        self._domain_cache.clear()
+
+    def expanded_query(self, query: str) -> str:
+        """Scoring ke liye query + English anchor. Anchor bina = bilkul same."""
+        raw = query or ""
+        anchor = self.scoring_anchor
+        if not anchor:
+            return raw
+        if not raw.strip():
+            return anchor
+        if anchor.casefold() in raw.casefold():
+            return raw
+        return f"{raw} {anchor}"
 
     # ── topic terms (query_builder se, ek hi jagah se) ───────────────────────
     def topic_of(self, query: str) -> List[str]:
@@ -217,6 +257,7 @@ class RelevanceEngine:
         dhoondein aur relevance kisi aur list se naapein, to jo mila usko "sahi
         hai" kehne ka koi aadhar nahi bachta.
         """
+        query = self.expanded_query(query)
         key = (query or "")[:600]
         cached = self._topic_cache.get(key)
         if cached is None:
@@ -233,6 +274,7 @@ class RelevanceEngine:
     _WIDE_TERMS = 40
 
     def wide_topic_of(self, query: str) -> List[str]:
+        query = self.expanded_query(query)
         key = "w:" + (query or "")[:600]
         cached = self._topic_cache.get(key)
         if cached is None:
@@ -338,6 +380,7 @@ class RelevanceEngine:
 
     def plan_of(self, query: str):
         """Sawaal ka domain plan (cached) — §2/§3/§4 sab isi se poochte hain."""
+        query = self.expanded_query(query)
         key = (query or "")[:600]
         plan = self._domain_cache.get(key)
         if plan is None:
@@ -358,10 +401,11 @@ class RelevanceEngine:
         bits = list(terms)
         for b in plan.focus_branches()[:3]:
             bits.extend(b.terms[:2])
-        return " ".join(bits) if bits else (query or "")[:200]
+        return " ".join(bits) if bits else (self.expanded_query(query) or "")[:200]
 
     def axes_of(self, query: str):
         """Sawaal ke evidence axes (cached) — §6 ka `required_axis` isse aata hai."""
+        query = self.expanded_query(query)
         key = "a:" + (query or "")[:600]
         got = self._domain_cache.get(key)
         if got is None:
@@ -373,10 +417,11 @@ class RelevanceEngine:
 
     def entities_of(self, query: str) -> List[str]:
         """Sawaal ne jin cheezon ka NAAM liya (Bullet Cluster, LIGO, LK-99…)."""
-        key = "e:" + (query or "")[:600]
+        expanded = self.expanded_query(query)
+        key = "e:" + (expanded or "")[:600]
         got = self._topic_cache.get(key)
         if got is None:
-            named = [e.lower() for e in axes_mod.named_entities(query, limit=8)]
+            named = [e.lower() for e in axes_mod.named_entities(expanded, limit=8)]
             got = named or self.topic_of(query)[:4]
             self._topic_cache[key] = got
         return got

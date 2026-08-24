@@ -281,6 +281,19 @@ class DeepResearchEngine:
             if sufficiency.get("sufficient") and not axis_gaps:
                 break
 
+            # Agla round shuru hone se PEHLE: jo sources ab tak ASLI ME mile,
+            # unse naye lens seekho — author (jo naam 2+ sources me aaya),
+            # venue se field, aur wo phrase jo 2+ ALAG sources me dohraya gaya.
+            # Ek bhi model call nahi (intel ki shart: "gimini ka queta bhi
+            # khatam na ho"). Ye sirf AGLI QUERIES badalta hai — scoring anchor
+            # nahi, warna ek hi run me round-1 aur round-2 ke score tulnaayog
+            # nahi rehte. Lens evidence NAHI hai: plan par `verified` False hi
+            # rehta hai.
+            try:
+                self.planner.absorb_corpus_lenses(question, pack.sources)
+            except Exception:
+                pass  # lens ek sudhaar hai, zaroorat nahi — pipeline na ruke
+
         if pack is None:      # koi round hi nahi chala (max_rounds=0 jaisa case)
             pack = self.evidence.build_pack(
                 question=question, doc_records=doc_records, external_records=[],
@@ -878,6 +891,19 @@ class DeepResearchEngine:
 
         # 1. plan
         plan = self.planner.plan(question, config)
+
+        # 1a. Scoring anchor. Hinglish/Devanagari sawaal par relevance scoring
+        # literal token overlap karti thi, isliye perfect English paper ka score
+        # 0.0 aata tha aur rank() zero source lautati thi (naapa gaya:
+        # 'दिमाग तेज कैसे करें' → 0 kept). Lens plan ka English/framework
+        # vocabulary yahan anchor ban kar scoring ko wo bhasha deta hai.
+        # Pure-English sawaal par anchor khaali hota hai, yaani wahan ye line
+        # bilkul no-op hai — purane benchmarks isliye nahi hilte.
+        try:
+            self.evidence.relevance.set_scoring_anchor(
+                plan.get("lens_scoring_query") or "")
+        except Exception:
+            pass  # anchor ek sudhaar hai, zaroorat nahi — isse pipeline na ruke
 
         # 2. documents (hamesha)
         self._track(job_id, "PROCESSING", "uploaded documents check ho rahe hain")

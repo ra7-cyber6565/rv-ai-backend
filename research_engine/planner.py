@@ -13,10 +13,11 @@ Poora module rule-based aur FREE hai — ek bhi Gemini call nahi.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
 from .depth import DepthConfig
 from .domain import detect as domain_detect
+from . import lenses as lens_mod
 from .local_language import normalize
 from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
@@ -105,6 +106,57 @@ class ResearchPlanner:
     # package import karna network ya key kuch nahi maangta — par har call par
     # naya object banana bekaar hai.
     _PATENT_FACADE = None
+
+    # ── open lens selection (2026-08-23) ─────────────────────────────────────
+    #
+    # `specialist_domains.detect_profiles()` ek CLOSED keyword list hai. Naapa
+    # gaya: intel ke 12 example sawaalon me se 10 par `specialist=False,
+    # domain=generic` — "psycho-cybernetics", "default mode network", "naval
+    # ravikant", "ramanujan", "einstein", "picasso" aur "ved puran rishi muni"
+    # tak. List me 500 shabd jodne se deewar khisakti hai, hatti nahi.
+    #
+    # Isliye planner ab har sawaal par lens plan banata hai (research_engine/
+    # lenses.py): "is sawaal par kaun se discipline / framework / thinker /
+    # source-family lagti hai". Deterministic raasta HAMESHA chalta hai (₹0,
+    # koi network nahi). `lens_generate` set ho to ek bounded model call bhi
+    # hoti hai; fail/quota par chup-chaap deterministic par gir jaata hai.
+    #
+    # Lens list EVIDENCE NAHI hai — sirf search plan aur scoring vocabulary.
+    lens_generate: Optional[Callable[..., str]] = None
+
+    def lens_plan(self, question: str, base_query: str = "") -> Dict:
+        """Cached lens plan. Ek sawaal par model call ek hi baar hoti hai."""
+        key = (question or "")[:600]
+        cached = getattr(self, "_lens_cache", None)
+        if cached and cached[0] == key:
+            return cached[1]
+        plan = lens_mod.build_lens_plan(
+            question, base_query or self.clean_query(question),
+            generate=self.lens_generate,
+            allow_model=self.lens_generate is not None,
+        )
+        self._lens_cache = (key, plan)
+        return plan
+
+    def absorb_corpus_lenses(self, question: str, records) -> Dict:
+        """Round ke baad: mile hue sources se naye lens seekho (₹0, model-free).
+
+        Ye "padhte-padhte seekhna" hai — jo author/venue/dohraye gaye phrase
+        ASLI sources me mile, wo agle round ki queries me chale jaate hain.
+        Scoring anchor JAAN-BOOJHKAR nahi badalta (ek run ke beech scoring
+        badalne se round-1 aur round-2 ke score tulnaayog nahi rehte), isliye
+        `plan()` ka `lens_scoring_query` jaisa tha waisa hi rehta hai.
+        """
+        key = (question or "")[:600]
+        cached = getattr(self, "_lens_cache", None)
+        base = cached[1] if (cached and cached[0] == key) else self.lens_plan(question)
+        try:
+            extra = lens_mod.lenses_from_sources(records, question=question)
+            merged = lens_mod.merge_corpus_lenses(base, extra)
+        except Exception:
+            return base  # lens ek sudhaar hai, zaroorat nahi
+        self._lens_cache = (key, merged)
+        return merged
 
     @property
     def _patent_providers(self):
@@ -326,8 +378,20 @@ class ResearchPlanner:
             if out:
                 return out[:4]
 
+        # ── generic sawaal: yahin closed list ki deewar dikhti thi ────────────
+        # Domain profile match nahi hua aur specialist list me bhi kuch nahi —
+        # pehle poore round 1 me SIRF `[base]` jaata tha, yaani "psycho-
+        # cybernetics self image" jaise sawaal ke liye ek hi andhi query. Ab
+        # lens plan se concept/framework/thinker wali queries bhi jaati hain.
+        # Lens kuch na de (pure English generic sawaal) to list bilkul pehle
+        # jaisi rehti hai — yaani ye change us case me no-op hai.
+        lens = self.lens_plan(question, base)
+        lens_qs = [q for q in lens_mod.lens_queries(lens, base, round_no=round_no,
+                                                   limit=4)
+                   if (q or "").strip().lower() != (base or "").strip().lower()]
+
         if round_no <= 1:
-            return [base]
+            return [base, *lens_qs][:4] if lens_qs else [base]
 
         queries = []
         fields = cls.get("relevant_fields", [])
@@ -343,7 +407,17 @@ class ResearchPlanner:
                 queries.append(f"{base} {fields[1]}")
             queries.append(f"{base} criticism limitations")
             queries.append(f"{base} contradictory findings")
-        return [q for q in queries if q][:4]
+        # Lens queries round 2+ me bhi jodte hain, par HAMESHA purani queries ke
+        # BAAD — taaki jo behaviour benchmark me naapa gaya tha wo pehle jaisa
+        # hi pehle number par rahe, aur lens sirf khaali jagah bhare.
+        merged: List[str] = []
+        seen_q = set()
+        for q in [*queries, *lens_qs]:
+            key = (q or "").strip().lower()
+            if q and key not in seen_q:
+                seen_q.add(key)
+                merged.append(q)
+        return merged[:4]
 
     # ── 5. connector plan ─────────────────────────────────────────────────────
     def connector_plan(self, cls: Dict, config: DepthConfig,
@@ -490,6 +564,7 @@ class ResearchPlanner:
         cls = self.classify(question)
         base_query = self.clean_query(question)
         specialist = build_specialist_plan(question, base_query)
+        lens = self.lens_plan(question, base_query)
         return {
             **cls,
             "topic_terms": self.topic_terms(question),
@@ -498,6 +573,11 @@ class ResearchPlanner:
             "connectors": self.connector_plan(cls, config, question),
             "depth": config.to_dict(),
             "specialist": specialist,
+            # Open lens plan — closed keyword list ke bahar ka raasta. Ye search
+            # plan hai, evidence NAHI (`verified: False`). Scoring anchor isi se
+            # banta hai, aur wahi cross-lingual relevance ka fix hai.
+            "lens": lens,
+            "lens_scoring_query": lens_mod.scoring_query(lens),
             # Prompt mein user ne jo CHEEZEIN saaf-saaf maangi hain (3 hypotheses,
             # mathematical model, second-order chain, red-team) — wo yahin plan ke
             # andar aa jaati hain, taaki prompt banane wale aur report banane wale
