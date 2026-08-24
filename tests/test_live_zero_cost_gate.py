@@ -53,6 +53,10 @@ def _result():
                 "critical_claims": 1,
                 "critical_claims_same_source_ae_passed": 1,
                 "claim_verification_achievement": True,
+                "critical_claim_coverage_complete": True,
+                "unsupported_critical_claims": 0,
+                "unverifiable_critical_claims": 0,
+                "critical_contradicted_claims": 0,
             },
             "evidence_first_audit": {
                 "evidence_first_required": True,
