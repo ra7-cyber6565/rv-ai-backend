@@ -204,7 +204,11 @@ class DeployedReadonlySmoke:
         if project_id and token:
             query = urlencode({"project_id": project_id})
             unauth = self._call("GET", f"/api/v1/reading-sessions?{query}")
-            self._check("missing_capability_rejected", unauth.status in {401, 403},
+            # Production deliberately returns the same 404 for a missing,
+            # malformed or wrong capability so callers cannot use this route
+            # as a project-namespace enumeration oracle. 401/403 remain valid
+            # for compatible deployments, but 404 is the hardened contract.
+            self._check("missing_capability_rejected", unauth.status in {401, 403, 404},
                         f"HTTP {unauth.status}")
             authorised = self._call(
                 "GET", f"/api/v1/reading-sessions?{query}",
