@@ -407,6 +407,44 @@ def test_candidates_prefer_listed_same_family_peer_before_other_family():
     gemini_model._seen = []
 
 
+def test_candidates_put_listed_stable_flash_lite_before_pro_and_preview():
+    """The bounded live cycle must reach an efficient listed fallback.
+
+    Google does not promise a resilience-friendly list order.  A Pro/preview
+    entry that happens to be listed earlier must not consume the final bounded
+    attempt while stable Flash-Lite models are available for generateContent.
+    """
+    gemini_model.forget_dead()
+    gemini_model._cache = "gemma-4-26b-a4b-it"
+    gemini_model._seen = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemma-4-26b-a4b-it",
+        "gemma-4-31b-it",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+    ]
+
+    class _NoNetworkGenai:
+        @staticmethod
+        def list_models():
+            raise AssertionError("cached candidate order must not make network call")
+
+    order = gemini_model.candidates(_NoNetworkGenai)
+    assert order[:4] == [
+        "gemma-4-26b-a4b-it",
+        "gemma-4-31b-it",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+    ], order
+    assert order.index("gemini-2.5-pro") > order.index("gemini-3.1-flash-lite")
+    assert order.index("gemini-3-flash-preview") > order.index("gemini-3.1-flash-lite")
+    gemini_model._cache = None
+    gemini_model._seen = []
+
+
 def test_dead_model_never_returned_by_candidates():
     gemini_model.forget_dead()
     gemini_model._cache = None

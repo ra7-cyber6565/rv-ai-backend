@@ -107,6 +107,38 @@ def test_c_uses_recorded_canonical_span_and_mutation_breaks_support():
     assert bad.supporting_source_id == ""
 
 
+def test_fulltext_source_badge_cannot_promote_its_display_snippet_to_ae_proof():
+    """D belongs to the canonical span, not the later-mutated SourceRecord."""
+    source = _source("S9", text=SUPPORT * 3, relevance=0.92, quality=0.88,
+                     read_level="full_text")
+    source.locator = "p.42 ¶3"
+    # No exact Passage exists: only the broad display snippet can drive C.
+    pack = EvidencePack(sources=[source], passages=[])
+    line = f"[ESTABLISHED FACT] {CLAIM} [S9]"
+    checked = CV.verify_claim(line, pack, claim_id="CL001", critical=True)
+
+    assert checked.status("C") == CV.PASS, checked.check("C").detail
+    assert checked.canonical_span["span_kind"] == "snippet"
+    assert checked.status("D") == CV.FAIL, checked.check("D").detail
+    assert checked.passes_ae is False
+    assert checked.supporting_source_id == ""
+
+
+def test_capture_time_snippet_passage_cannot_borrow_later_fulltext_depth():
+    source = _source("S9", text="", relevance=0.92, quality=0.88,
+                     read_level="full_text")
+    pack = EvidencePack(sources=[source], passages=[Passage(
+        source_id="S9", text=SUPPORT * 3, locator="search result ¶1",
+        provenance="retrieval_excerpt", read_level_at_capture="snippet",
+    )])
+    line = f"[ESTABLISHED FACT] {CLAIM} [S9]"
+    checked = CV.verify_claim(line, pack, claim_id="CL001", critical=True)
+
+    assert checked.status("C") == CV.PASS, checked.check("C").detail
+    assert checked.status("D") == CV.FAIL, checked.check("D").detail
+    assert checked.passes_ae is False
+
+
 def test_quality_context_carries_claim_id_locator_and_non_vacuous_achievement():
     pack = _passage_pack(SUPPORT)
     answer = (

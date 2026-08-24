@@ -22,6 +22,8 @@ import os
 from typing import Dict, List, Optional
 
 FALLBACKS: tuple = (
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
     "gemini-flash-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
@@ -29,6 +31,9 @@ FALLBACKS: tuple = (
 )
 
 _PREFER = (
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-2.5-flash-lite",
     "gemini-flash-latest",
     "gemini-2.5-flash",
     "gemini-2.0-flash",
@@ -199,7 +204,38 @@ def candidates(genai) -> List[str]:
     seen = _alive(_seen)
     family = (first.split("-", 1)[0].lower() + "-") if first else ""
     same_family = [name for name in seen if name.lower().startswith(family)]
-    for name in same_family + seen + _alive(list(FALLBACKS)):
+
+    # Provider list order is not a resilience policy.  In the live failure that
+    # exposed this, the first four listed entries were two quota-limited Gemma
+    # models followed by Flash and Pro names that returned 404.  Stable
+    # Flash-Lite endpoints were listed and generation-capable, but `_MAX_MODELS`
+    # cut the cycle off before either was tried.  Keep the configured model and
+    # one same-family peer first, then rank the remaining *listed* text models by
+    # the explicit efficiency preference above.  Preview/specialist/Pro entries
+    # remain last-resort candidates rather than consuming the bounded cycle.
+    prefer_index = {name: index for index, name in enumerate(_PREFER)}
+
+    def _rank(name: str) -> tuple:
+        low = name.lower()
+        exact = prefer_index.get(low)
+        if exact is not None:
+            return (0, exact, low)
+        if "flash-lite" in low or "flash_lite" in low:
+            return (1, 0 if "preview" not in low else 1, low)
+        if "flash" in low:
+            return (2, 0 if "preview" not in low else 1, low)
+        if low.startswith("gemma-"):
+            return (3, 0, low)
+        if "pro" in low:
+            return (5, 0 if "preview" not in low else 1, low)
+        return (4, 0 if "preview" not in low else 1, low)
+
+    same_family_peers = [name for name in same_family if name != first]
+    ranked_seen = sorted(
+        [name for name in seen if name != first and name not in same_family_peers],
+        key=_rank,
+    )
+    for name in same_family_peers[:1] + ranked_seen + _alive(list(FALLBACKS)):
         if name not in order:
             order.append(name)
     if not order:
