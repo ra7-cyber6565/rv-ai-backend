@@ -15,6 +15,8 @@ from __future__ import annotations
 import re
 from typing import Callable, Dict, List, Optional
 
+from . import classics as classics_mod
+from .connectors.classic_connector import wikisource_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
 from . import lenses as lens_mod
@@ -438,6 +440,14 @@ class ResearchPlanner:
             self.clean_query(question or cls.get("question") or ""),
         )
 
+        # Classic/mool-text lane ka faisla SABSE PEHLE hota hai, kyunki wo
+        # `books` tier ko bhi prabhavit karta hai (neeche). Poora detection
+        # deterministic hai — `classics.py` mein tradition marker + generic
+        # text-shabd ka reasoning, koi Gemini call nahi.
+        lane = classics_mod.lane_plan(question or cls.get("question") or "",
+                                      limit=4)
+        wants_primary_text = bool(lane.get("wants_primary_text"))
+
         papers: List[str] = []
         if config.use_papers:
             papers = ["openalex", "crossref"]
@@ -449,7 +459,15 @@ class ResearchPlanner:
                 papers.append("semantic_scholar")
 
         books: List[str] = []
-        if config.use_books or cls.get("needs_books"):
+        # `wants_primary_text` bhi book tier kholta hai. Wajah: mool text ka
+        # doosra asli raasta book catalogue hai — archive.org ka `_djvu.txt`
+        # sach mein full text deta hai aur open_library edition/saal batata hai,
+        # jispar `classics.copyright_stance()` ka faisla tikta hai. Aur ye signal
+        # `_BOOK_HINTS` keyword list se ZYADA bharosemand hai: "talmud aur torah
+        # me nyay ka niyam" par koi book-keyword hit nahi hota, phir bhi sawaal
+        # seedha granth ka mool paath maang raha hai. List par nirbhar rehna
+        # wahi galti thi jo lens layer mein pakdi gayi thi.
+        if config.use_books or cls.get("needs_books") or wants_primary_text:
             books = ["internet_archive", "open_library"]
             if high_depth:
                 books.append("google_books")
@@ -524,6 +542,42 @@ class ResearchPlanner:
         if prefer:
             papers.sort(key=lambda n: (prefer.index(n) if n in prefer else 99, n))
 
+        # ── classic / mool-text lane (task #84) ─────────────────────────────
+        # Do alag cheezein, dono deterministic (`classics.py`, koi Gemini call
+        # nahi):
+        #   classics        = public-domain granth/lekhan ka MOOL TEXT jo asli
+        #                     mein padha ja sakta hai (Wikisource official API).
+        #   summary_queries = copyright wali book ko ignore NAHI karna — uski
+        #                     summary/vyakhya/review aur lekhak ka apna free
+        #                     likha hua dhoondhna. Text nahi padha, ye report
+        #                     mein saaf likha jaata hai.
+        # Lane detection kisi granth/lekhak ki LIST se nahi hoti (tradition
+        # marker + generic text-shabd se hoti hai), isliye jo naam intel ne kabhi
+        # bataya hi nahi wo bhi isi raaste se aata hai. Galat andaaze ki keemat
+        # sirf 0-result queries hai — lens layer ka wahi rule.
+        classics_names: List[str] = []
+        classic_queries: List[str] = []
+        summary_queries: List[str] = []
+        classics_reason = "sawaal mein kisi mool text/granth ka ishara nahi mila"
+        if wants_primary_text:
+            # Depth is lane ko BAND nahi karti, sirf CHHOTI karti hai. Pehle gate
+            # `use_books or needs_books` tha, aur wo do tarah se jhoot bolta tha:
+            # QUICK mode mein keyword hit hone par lane chal jaati thi, jabki DEEP
+            # mein "talmud/torah" jaise saaf public-domain granth par band rehti
+            # thi. Ab paimana wahi hai jo asli chhat hai — `max_fulltext`: mool
+            # text lane ka maksad PADHNA hai, aur jitna padh hi nahi sakte utne
+            # candidate maangna sirf discovery budget kharch karna hai.
+            text_budget = 1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1 else 2
+            classic_queries = list(lane.get("classic_queries", []))[:text_budget]
+            summary_queries = list(lane.get("summary_queries", []))[:text_budget]
+            classics_names = ["wikisource" if code == "en"
+                              else f"wikisource_{code}"
+                              for code in wikisource_langs()]
+            classics_reason = (f"mool text lane chali (Wikisource official API, "
+                               f"{len(classic_queries)} query) + copyright wali "
+                               f"book ke liye summary lane "
+                               f"({len(summary_queries)} query)")
+
         return {
             "web": True,
             "papers": papers,
@@ -557,6 +611,21 @@ class ResearchPlanner:
                 specialist.get("official_archive_queries", [])),
             "book_queries": list(specialist.get("book_queries", [])),
             "legal_access_only": bool(specialist.get("legal_access_only", True)),
+            # Classic/mool-text lane — search PLAN hai, evidence nahi. Isliye
+            # `verified` yahan bhi False rehta hai: naam lena padhna nahi hai.
+            "classics": classics_names,
+            "classic_queries": classic_queries,
+            "summary_queries": summary_queries,
+            "classic_lane": {"wants_primary_text": bool(lane.get("wants_primary_text")),
+                             "works": list(lane.get("works", [])),
+                             "people": list(lane.get("people", [])),
+                             "traditions": list(lane.get("traditions", [])),
+                             "reasons": list(lane.get("reasons", [])),
+                             "method": lane.get("method", ""),
+                             "model_used": bool(lane.get("model_used")),
+                             "verified": False,
+                             "evidence_status": lane.get("evidence_status", ""),
+                             "note": classics_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────

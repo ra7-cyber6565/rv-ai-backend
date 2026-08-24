@@ -38,8 +38,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Callable, Dict, List, Optional, Tuple
 
-from .connectors import (BaseConnector, BookConnector, DatasetConnector,
-                         PaperConnector, PatentDiscoveryConnector, WebConnector)
+from .connectors import (BaseConnector, BookConnector, ClassicTextConnector,
+                         DatasetConnector, PaperConnector,
+                         PatentDiscoveryConnector, WebConnector)
 from .models import SourceRecord
 from .network_safety import public_error
 
@@ -57,6 +58,11 @@ class SourceDiscovery:
         # claim science jaisa dikhne lagta tha). Plan mein `patents` key na ho to
         # ye tier chalta hi nahi — planner hi decide karta hai kab zaroorat hai.
         self.patents = PatentDiscoveryConnector()
+        # Classic/mool-text tier bhi ALAG hai: book connectors CATALOGUE dete
+        # hain (kahan milegi), ye lane wo text deta hai jo ASLI ME padha ja
+        # sakta hai (public-domain granth, mahan logon ka apna likha). Plan mein
+        # `classics` key na ho to ye tier chalta hi nahi.
+        self.classics = ClassicTextConnector()
         self.max_workers = max_workers
 
     # ── task builders ────────────────────────────────────────────────────────
@@ -148,6 +154,45 @@ class SourceDiscovery:
                 tasks.append((connector.name,
                               self._single(connector, primary, max_per_connector)))
 
+        # Classic/mool text (task #84) — SIRF tab jab planner ne `classics` bhara
+        # ho. Query bhi planner ki `classic_queries` hoti hai, kyunki mool text
+        # dhoondhne ki bhasha aam web query se alag hai ("<naam> full text public
+        # domain"). Ek bhi query na ho to primary par gir jaata hai, taaki tier
+        # chup-chaap khaali na baithe.
+        classic_queries = []
+        seen_classic_queries = set()
+        for candidate in list(plan.get("classic_queries", []))[:2] or [primary]:
+            clean = str(candidate or "").strip()
+            key = clean.casefold()
+            if not clean or key in seen_classic_queries:
+                continue
+            seen_classic_queries.add(key)
+            classic_queries.append(clean)
+
+        for name in plan.get("classics", []):
+            connector = self.classics.by_name(name)
+            if connector:
+                for classic_query in classic_queries:
+                    tasks.append((connector.name,
+                                  self._single(connector, classic_query,
+                                               max_per_connector)))
+
+        # Copyright-likely book ka MOOL TEXT kabhi nahi laaya jaata (wo faisla
+        # `classics.copyright_stance()` ka hai, aur `content_fetcher` uspar rukta
+        # hai) — par use IGNORE bhi nahi karte. Uski summary/vyakhya/review aam
+        # web lane se dhoondhi jaati hai, alag query par, taaki report mein saaf
+        # rahe ki text nahi padha, sirf uske baare mein padha.
+        if plan.get("web", True):
+            seen_summary_queries = set()
+            for candidate in list(plan.get("summary_queries", []))[:2]:
+                clean = str(candidate or "").strip()
+                key = clean.casefold()
+                if not clean or key in seen_summary_queries:
+                    continue
+                seen_summary_queries.add(key)
+                tasks.append(("classic_summary_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
         return tasks
 
     def discover(
@@ -163,7 +208,10 @@ class SourceDiscovery:
         """
         queries: planner se aayi ek ya zyada search strings
         plan:    {"web": bool, "papers": [names], "books": [names],
-                  "datasets": [names], "patents": [names]}
+                  "datasets": [names], "patents": [names],
+                  "classics": [names], "classic_queries": [...],
+                  "summary_queries": [...]}
+
         budget_seconds: is round ki discovery ka wall-clock budget (depth config se)
         """
         tasks = self._tasks(queries, plan, max_per_connector, max_web)
