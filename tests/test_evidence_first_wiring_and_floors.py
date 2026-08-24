@@ -211,6 +211,49 @@ def test_full_text_run_reaches_non_vacuous_evidence_first_achievement():
     assert ctx.get("evidence_first_achievement") is True
 
 
+def test_pipeline_repairs_model_critical_claim_that_failed_predraft_boundary():
+    """Prompt ko ignore karne wala model final critical surface control nahi karta."""
+    class _UnsafeCriticalFake(PO._FakeGemini):
+        def __call__(self, brain, prompt, label=""):
+            text = super().__call__(brain, prompt, label)
+            if label != "synthesis":
+                return text
+            next_section = text.find("\n## Research se kya pata chala?")
+            assert next_section > 0, "synthesis fixture ka direct section nahi mila"
+            return (
+                "## Seedha jawab\n"
+                "- [SOURCE-REPORTED] Lunar basalt contains olivine crystals and "
+                "records ancient volcanic eruptions on the Moon [S1].\n\n"
+                + text[next_section + 1:]
+            )
+
+    fake = _UnsafeCriticalFake()
+    original = gemini_reasoning.GeminiReasoning.generate
+    gemini_reasoning.GeminiReasoning.generate = \
+        lambda self, prompt, label="": fake(self, prompt, label)
+    try:
+        engine = DeepResearchEngine(project_id="offline-test", enable_kg=False,
+                                    enable_memory=False)
+        engine.vectors = PO._FakeVectors()
+        engine.discovery.discover = PO._fake_discover(PO._records(PO.ON_TOPIC))
+        engine.reader.enrich = _full_text_reader
+        result = engine.research(PO.QUESTION, depth_mode="MAXIMUM")
+    finally:
+        gemini_reasoning.GeminiReasoning.generate = original
+
+    verification = result.get("verification") or {}
+    claim_checks = verification.get("claim_checks") or {}
+    audit = verification.get("evidence_first_audit") or {}
+    enforcement = audit.get("critical_draft_enforcement") or {}
+    assert enforcement.get("applied") is True, enforcement
+    assert int(enforcement.get("pre_enforcement_critical_claims") or 0) > int(
+        enforcement.get("pre_enforcement_same_source_ae_passed") or 0)
+    assert "Lunar basalt contains olivine" not in result.get("answer", "")
+    assert int(claim_checks.get("unsupported_critical_claims") or 0) == 0
+    assert int(audit.get("critical_claims_preselected_span_unmatched") or 0) == 0
+    assert audit.get("evidence_first_achievement") is True
+
+
 # ── GUARD 2: "same numbers, alag matlab" support nahi hai ────────────────────
 NUM_CLAIM = ("[ESTABLISHED FACT] LaH10 250 K par 170 GPa pressure mein "
              "superconductivity dikhata hai [S1].")

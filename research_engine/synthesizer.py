@@ -128,6 +128,83 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             return summary.replace("## Seedha jawab\n", f"## Seedha jawab\n{honesty}\n\n", 1)
         return f"## Seedha jawab\n{honesty}\n\n{summary}"
 
+    _STRONG_MODEL_LABEL = re.compile(
+        r"\[\s*(?:ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE)\s*\]",
+        re.IGNORECASE,
+    )
+
+    def bind_evidence_first_critical_sections(
+        self,
+        text: str,
+        *,
+        direct_answer: str,
+        conclusion: str,
+    ) -> tuple[str, Dict]:
+        """Replace only critical model sections with preselected evidence prose.
+
+        Prompt adherence is not a proof boundary.  When the orchestrator detects
+        an unsupported or post-hoc-supported critical draft, this method replaces
+        Direct Answer and Conclusion with deterministic preselected prose. Other
+        useful model sections remain intact. Remaining strong labels are lowered
+        to SOURCE-REPORTED and pass through A-E again, so a broad-context claim
+        cannot stay critical merely because the model used a confident label.
+        """
+        direct = str(direct_answer or "").strip()
+        final = str(conclusion or "").strip()
+        if not direct or not final:
+            return text or "", {
+                "applied": False,
+                "reason": "preselected_critical_prose_unavailable",
+                "replaced_sections": [],
+                "strong_labels_lowered": 0,
+            }
+        try:
+            found, leftover = self.split_model_sections(text or "")
+        except Exception:  # noqa: BLE001 - fail closed without losing the answer
+            return text or "", {
+                "applied": False,
+                "reason": "model_section_parse_failed",
+                "replaced_sections": [],
+                "strong_labels_lowered": 0,
+            }
+
+        replaced = []
+        if str(found.get(0, "") or "").strip():
+            replaced.append("direct_answer")
+        if str(found.get(8, "") or "").strip():
+            replaced.append("conclusion")
+        found[0] = direct
+        found[8] = final
+
+        lowered = 0
+        for key in list(found):
+            if key in (0, 8):
+                continue
+            value = str(found.get(key, "") or "")
+            value, count = self._STRONG_MODEL_LABEL.subn("[SOURCE-REPORTED]", value)
+            found[key] = value
+            lowered += count
+        leftover, count = self._STRONG_MODEL_LABEL.subn(
+            "[SOURCE-REPORTED]", str(leftover or "")
+        )
+        lowered += count
+
+        parts: List[str] = []
+        if leftover.strip():
+            parts.append(leftover.strip())
+        for key in sorted(k for k in found if isinstance(k, int)):
+            title = SECTION_TITLES[key] if 0 <= key < len(SECTION_TITLES) else str(key)
+            parts.append(f"## {title}\n{found[key]}".rstrip())
+        for key in [k for k in found if not isinstance(k, int)]:
+            parts.append(f"## {key}\n{found[key]}".rstrip())
+        rebound = "\n\n".join(part for part in parts if part.strip())
+        return rebound, {
+            "applied": True,
+            "reason": "critical_draft_failed_preselected_evidence_boundary",
+            "replaced_sections": replaced,
+            "strong_labels_lowered": lowered,
+        }
+
     @staticmethod
     def _is_partial_large_source(source) -> bool:
         total = int(getattr(source, "pages_total", 0) or 0)

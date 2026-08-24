@@ -56,3 +56,26 @@ def test_blank_manifest_does_not_add_fake_boundary():
     with_blank = _call_prompt(evidence_first_block="   ")
     legacy = _call_prompt()
     assert with_blank == legacy
+
+
+def test_integrated_synthesizer_mechanically_replaces_only_critical_sections():
+    synth = FinalSynthesizer()
+    raw = (
+        "## Seedha jawab\nModel direct draft [S8]\n\n"
+        "## Research se kya pata chala?\n"
+        "[FACT] Useful but not yet preselected model context [S8]\n\n"
+        "## Final conclusion\nModel conclusion draft [S8]\n"
+    )
+    rebound, audit = synth.bind_evidence_first_critical_sections(
+        raw,
+        direct_answer="- [SOURCE-REPORTED] Bound direct evidence [S1]",
+        conclusion="- [SOURCE-REPORTED] Bound conclusion evidence [S1]",
+    )
+    assert audit["applied"] is True
+    assert set(audit["replaced_sections"]) == {"direct_answer", "conclusion"}
+    assert "Model direct draft" not in rebound
+    assert "Model conclusion draft" not in rebound
+    assert "Useful but not yet preselected model context" in rebound
+    assert "[FACT]" not in rebound
+    assert "[SOURCE-REPORTED] Useful" in rebound
+    assert "Bound direct evidence" in rebound and "Bound conclusion evidence" in rebound

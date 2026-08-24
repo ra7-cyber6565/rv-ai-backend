@@ -39,7 +39,8 @@ from .critic import Critic
 from .depth import get_depth_config, quota_note
 from .evidence import EvidenceEngine
 from .evidence_drafting import (
-    audit_claims_against_manifest, build_evidence_draft_manifest,
+    audit_claims_against_manifest, build_critical_evidence_sections,
+    build_evidence_draft_manifest,
 )
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
@@ -61,7 +62,7 @@ from .requested import looks_like_math_model, quality_contract
 from .research_memory import ResearchMemory
 from .research_state import build_state as build_research_state
 from .research_state import inject_state_block, state_warnings
-from .run_status import INCOMPLETE, evaluate as evaluate_status
+from .run_status import COMPLETE, INCOMPLETE, evaluate as evaluate_status
 from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
 from .specialist_domains import build_evidence_lane_report
@@ -1173,6 +1174,79 @@ class DeepResearchEngine:
         # hua tha. Audit ka aankda kaam se kam nahi hona chahiye.
         label_report = merge_label_reports(strict_report, label_report)
 
+        # 6c-2. PROMPT ADHERENCE IS NOT ENFORCEMENT (live ₹0 gate, 2026-08-24).
+        # A recovered model can complete all reasoning passes yet still write its
+        # Direct Answer / Conclusion from broad pack context rather than the
+        # evidence manifest selected before drafting.  P0-B correctly caught that
+        # mismatch, but only after the answer was already written.  We now run a
+        # private preflight verification and, only when the critical draft is
+        # absent/unsupported/post-hoc, mechanically replace the two critical
+        # sections with conservative SOURCE-REPORTED prose from the immutable
+        # manifest.  Other model analysis is retained.  Nothing is promoted:
+        # the rebound text must pass the normal A-E + manifest audit again below.
+        critical_enforcement: Dict = {
+            "schema_version": "p0b-enforcement-1",
+            "applied": False,
+            "reason": "critical_draft_already_satisfied_boundary",
+            "replaced_sections": [],
+            "strong_labels_lowered": 0,
+        }
+        pre_claim_source = gemini_answer
+        view = getattr(self.synthesizer, "canonical_heading_view", None)
+        if callable(view):
+            try:
+                pre_claim_source = view(gemini_answer) or gemini_answer
+            except Exception:                                # noqa: BLE001
+                pre_claim_source = gemini_answer
+        pre_claim_checks = verify_claims(pre_claim_source, pack).to_dict()
+        pre_manifest_audit = audit_claims_against_manifest(
+            pre_claim_checks, passes.get("_evidence_first_manifest"))
+        pre_critical = int(pre_claim_checks.get("critical_claims") or 0)
+        pre_passed = int(
+            pre_claim_checks.get("critical_claims_same_source_ae_passed") or 0)
+        pre_unmatched = int(
+            pre_manifest_audit.get("critical_claims_preselected_span_unmatched") or 0)
+        strong_available = int(
+            pre_manifest_audit.get("preselected_strong_eligible_spans") or 0) > 0
+        boundary_failed = (
+            pre_critical == 0
+            or pre_passed < pre_critical
+            or pre_unmatched > 0
+            or pre_manifest_audit.get("evidence_first_achievement") is not True
+        )
+        if strong_available and boundary_failed:
+            drafted = build_critical_evidence_sections(
+                question, passes.get("_evidence_first_manifest"), max_claims=2)
+            binder = getattr(
+                self.synthesizer, "bind_evidence_first_critical_sections", None)
+            if drafted.get("available") and callable(binder):
+                gemini_answer, binding = binder(
+                    gemini_answer,
+                    direct_answer=drafted.get("direct_answer", ""),
+                    conclusion=drafted.get("conclusion", ""),
+                )
+                critical_enforcement = {
+                    **dict(drafted.get("audit") or {}),
+                    **dict(binding or {}),
+                    "pre_enforcement_critical_claims": pre_critical,
+                    "pre_enforcement_same_source_ae_passed": pre_passed,
+                    "pre_enforcement_preselected_unmatched": pre_unmatched,
+                }
+                if critical_enforcement.get("applied"):
+                    # The content changed, so label accounting must describe the
+                    # content that will actually reach the user, not the rejected
+                    # model draft.
+                    gemini_answer, strict_report = enforce_strict_labels(
+                        gemini_answer, pack)
+                    gemini_answer, depth_report = downgrade_labels(
+                        gemini_answer, pack, check_entailment=True)
+                    label_report = merge_label_reports(strict_report, depth_report)
+                    warnings.append(
+                        "Model ka critical answer/conclusion preselected evidence "
+                        "boundary poora nahi kar raha tha; engine ne use drafting se "
+                        "pehle chune exact full-text evidence se conservatively "
+                        "replace karke A-E check dobara chalaya.")
+
         # 6d. §13 / point 7 — paanch alag check (A–E) har labelled claim par.
         # Purana "citation verified" number sirf ye batata tha ki [S3] naam ka
         # source pack mein hai. Ye report usse ALAG hai: citation exists (A),
@@ -1200,6 +1274,7 @@ class DeepResearchEngine:
         claim_checks = verify_claims(claim_source_text, pack).to_dict()
         evidence_first_audit = audit_claims_against_manifest(
             claim_checks, passes.get("_evidence_first_manifest"))
+        evidence_first_audit["critical_draft_enforcement"] = critical_enforcement
         unmatched_preselected = int(
             evidence_first_audit.get("critical_claims_preselected_span_unmatched") or 0)
         if unmatched_preselected:
@@ -1406,6 +1481,19 @@ class DeepResearchEngine:
         # ka dosh nahi hai — warna banner galat wajah bata deta.
         technical_lines = list(run_status.technical) + round_error_details
 
+        # A provider/model may fail first and a later free fallback may still
+        # complete every planned pass. Keep those failures in the structured
+        # result (`technical_details` + sanitized `api_accounting.failure_events`)
+        # for developer audit, but do not re-inject raw provider bodies into a
+        # successful public answer.  Both channels used by `_audit_section` must
+        # be cleared: its explicit `technical_details` argument *and* the copy
+        # nested in `status`.
+        public_technical_lines = list(technical_lines)
+        public_status_dict = dict(status_dict)
+        if run_status.code == COMPLETE:
+            public_technical_lines = []
+            public_status_dict["technical_details"] = []
+
         # §1 — adhoore run par top label "VERIFIED" nahi ho sakta, chahe
         # citations theek hon. Grading already reasoning-gate lagata hai, ye
         # doosra taala hai taaki koi bhi raasta bacha na rah jaaye. Grader ki
@@ -1493,8 +1581,8 @@ class DeepResearchEngine:
             notes=engine_notes,
             usage_note=passes.get("usage_note", ""),
             requests=requests,
-            status=status_dict,
-            technical_details=technical_lines,
+            status=public_status_dict,
+            technical_details=public_technical_lines,
             api_accounting=passes.get("api_accounting") or {},
             claim_checks=claim_checks,
             hypothesis_plan=passes.get("hypothesis_plan") or {},
