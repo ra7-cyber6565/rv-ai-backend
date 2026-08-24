@@ -395,11 +395,18 @@ _CORPUS_ROWS = [
 
 
 def _corpus_records():
-    return [SourceRecord(title=title, url=f"https://example.org/c{i}",
-                         snippet=snippet, connector="openalex",
-                         source_type=SourceType.PAPER, authors=list(authors),
-                         venue=venue)
-            for i, (title, snippet, authors, venue) in enumerate(_CORPUS_ROWS)]
+    records = [SourceRecord(title=title, url=f"https://example.org/c{i}",
+                            snippet=snippet, connector="openalex",
+                            source_type=SourceType.PAPER, authors=list(authors),
+                            venue=venue)
+               for i, (title, snippet, authors, venue) in enumerate(_CORPUS_ROWS)]
+    # First two share Matthew Walker but represent different research families:
+    # different lead groups/methods. Corpus phrase repetition must count those
+    # families, not raw URLs or mirror-like papers from one lab.
+    records[0].methodology = "experimental"
+    records[1].authors = ["Robert Stickgold", "Matthew Walker"]
+    records[1].methodology = "observational"
+    return records
 
 
 def test_corpus_thinker_needs_two_sources():
@@ -429,6 +436,53 @@ def test_corpus_framework_needs_two_distinct_sources():
     # sirf ek hi source me aayi baat framework nahi banti
     assert not any("fishing" in phrase for phrase in phrases)
     assert not any("archival" in phrase for phrase in phrases)
+
+
+def test_corpus_framework_needs_two_independent_research_families():
+    rows = [
+        SourceRecord(
+            title=f"Single-lab report {index}: quantum dream resonance",
+            url=f"https://mirror{index}.example/paper",
+            doi=f"10.1234/same-lab-{index}",
+            snippet=("The quantum dream resonance protocol showed a repeated "
+                     "result in the same laboratory."),
+            authors=["Same Lab Author"],
+            methodology="observational",
+            source_type=SourceType.PAPER,
+        )
+        for index in range(3)
+    ]
+    phrases = L.repeated_phrases(rows, question="sleep and learning")
+    assert "quantum dream resonance" not in phrases
+    assert "dream resonance protocol" not in phrases
+    corpus = L.lenses_from_sources(rows, question="sleep and learning")
+    assert corpus["sources_seen"] == 3
+    assert corpus["independent_families_seen"] == 1
+
+    # A genuinely different lead group/method turns repetition into an
+    # independent corpus signal.
+    rows[-1].authors = ["Independent Group Author"]
+    rows[-1].methodology = "experimental"
+    assert "quantum dream resonance" in L.repeated_phrases(
+        rows, question="sleep and learning")
+
+
+def test_venue_ranking_counts_independent_families_not_same_lab_volume():
+    rows = [
+        SourceRecord(title=f"Echo {index}", url=f"https://z{index}.example/p",
+                     authors=["Same Lab Author"], methodology="observational",
+                     venue="Journal of Zeta Echo", source_type=SourceType.PAPER)
+        for index in range(3)
+    ]
+    rows.extend([
+        SourceRecord(title="Independent A", url="https://a.example/p",
+                     authors=["Alpha Author"], methodology="experimental",
+                     venue="Journal of Alpha Domain", source_type=SourceType.PAPER),
+        SourceRecord(title="Independent B", url="https://b.example/p",
+                     authors=["Beta Author"], methodology="observational",
+                     venue="Journal of Alpha Domain", source_type=SourceType.PAPER),
+    ])
+    assert L.venue_disciplines(rows)[0] == "alpha domain"
 
 
 def test_corpus_framework_trims_result_words_and_sub_phrases():
@@ -480,6 +534,7 @@ def test_corpus_lens_never_touches_scoring_or_verified():
     assert "not_citations" in merged["evidence_status"]
     assert merged["corpus_derived"] is True
     assert merged["corpus_sources_seen"] == 4
+    assert merged["corpus_independent_families_seen"] == 4
 
 
 def test_planner_scoring_anchor_survives_absorb():
@@ -545,4 +600,3 @@ def test_orchestrator_absorbs_corpus_lenses_between_rounds():
     # aakhri round ke baad absorb nahi hota (agla round hi nahi hai)
     assert seen["absorb"] == out["rounds_run"] - 1, seen["absorb"]
     assert seen["given"] == records
-

@@ -42,6 +42,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 from .domain import fold_accents, stem, tokens
 from .local_language import normalize
 from . import multilingual_research as ml
+from .quality_producers import research_family_key
 
 _MAX_ITEMS = 12
 _MAX_CHARS = 120
@@ -842,7 +843,9 @@ def venue_disciplines(records: Sequence[object], limit: int = 6) -> List[str]:
     counts: Dict[str, int] = {}
     shown: Dict[str, str] = {}
     order: Dict[str, int] = {}
+    families: Dict[str, set] = {}
     for index, record in enumerate(records or []):
+        family = research_family_key(record)
         for raw in (getattr(record, "venue", "") or "",
                     getattr(record, "publisher", "") or ""):
             words = [w for w in tokens(raw) if len(w) > 2
@@ -853,7 +856,13 @@ def venue_disciplines(records: Sequence[object], limit: int = 6) -> List[str]:
             if not phrase:
                 continue
             key = phrase.casefold()
-            counts[key] = counts.get(key, 0) + 1
+            # Three papers from one lab/method are one corpus voice for ranking;
+            # raw publication volume must not manufacture a dominant discipline.
+            seen = families.setdefault(key, set())
+            if family in seen:
+                continue
+            seen.add(family)
+            counts[key] = len(seen)
             shown.setdefault(key, phrase)
             order.setdefault(key, index)
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], order[kv[0]]))
@@ -884,11 +893,11 @@ def author_thinkers(records: Sequence[object], min_repeat: int = 2,
 
 def repeated_phrases(records: Sequence[object], question: str = "",
                      min_repeat: int = 2, limit: int = 8) -> List[str]:
-    """2-3 shabd ke wo phrase jo 2+ ALAG sources me aaye.
+    """2-3 shabd ke wo phrase jo 2+ independent research families me aaye.
 
-    Ek hi source ka dohraav nahi ginte — warna ek blog ka apna takiya-kalaam
-    "framework" ban jaata. Sawaal me pehle se maujood phrase bhi chhod dete hain
-    (usse nayi disha nahi milti).
+    Ek hi source ka dohraav ya ek hi group+method ke multiple papers nahi ginte
+    — warna ek lab/blog ka apna takiya-kalaam "field framework" ban jaata.
+    Sawaal me pehle se maujood phrase bhi chhod dete hain (nayi disha nahi milti).
 
     Do safai ki parat, dono probe se aayi hain:
       * kinare ke "nateeja" shabd hata dete hain — "reduced sustained attention"
@@ -900,9 +909,10 @@ def repeated_phrases(records: Sequence[object], question: str = "",
     """
     have = {word for word in tokens(question or "")}
     have |= {stem(word) for word in have}
-    counts: Dict[str, int] = {}
+    families: Dict[str, set] = {}
     shown: Dict[str, str] = {}
     for record in records or []:
+        family = research_family_key(record)
         text = f"{getattr(record, 'title', '') or ''}. " \
                f"{(getattr(record, 'snippet', '') or '')[:600]}"
         here: Dict[str, str] = {}
@@ -917,8 +927,9 @@ def repeated_phrases(records: Sequence[object], question: str = "",
                 phrase = " ".join(chunk)
                 here.setdefault(phrase.casefold(), phrase)
         for key, phrase in here.items():
-            counts[key] = counts.get(key, 0) + 1
+            families.setdefault(key, set()).add(family)
             shown.setdefault(key, phrase)
+    counts = {key: len(group_keys) for key, group_keys in families.items()}
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], -len(kv[0]), kv[0]))
     out: List[str] = []
     for key, count in ordered:
@@ -943,6 +954,7 @@ def lenses_from_sources(records: Sequence[object], question: str = "",
         "english_terms": [],
         "source_families": [],
         "sources_seen": len(rows),
+        "independent_families_seen": len({research_family_key(row) for row in rows}),
     }
 
 
@@ -966,6 +978,8 @@ def merge_corpus_lenses(plan: Dict, corpus: Dict) -> Dict:
         [*(plan.get("corpus_frameworks") or []), *(corpus.get("frameworks") or [])],
         limit=20)
     out["corpus_sources_seen"] = int(corpus.get("sources_seen") or 0)
+    out["corpus_independent_families_seen"] = int(
+        corpus.get("independent_families_seen") or 0)
     out["corpus_derived"] = True
     method = str(plan.get("method") or "deterministic")
     if "corpus" not in method:
