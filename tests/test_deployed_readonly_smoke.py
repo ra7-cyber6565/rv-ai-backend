@@ -65,7 +65,9 @@ class FakeDeployment:
             }, common)
         if method == "GET" and path == "/api/v1/reading-sessions":
             if headers.get("X-Project-Token") != self.token:
-                return _response(401, {"detail": "capability required"}, common)
+                # Match the production anti-enumeration contract: missing,
+                # malformed and wrong capabilities are indistinguishable.
+                return _response(404, {"detail": "Project session nahi mila"}, common)
             return _response(200, {"sessions": []}, common)
         if method == "OPTIONS" and path == "/api/v1/session":
             return _response(200, {}, {
@@ -134,4 +136,3 @@ def test_http_is_allowed_only_for_explicit_local_smoke():
     ) == "http://127.0.0.1:8000"
     with pytest.raises(ValueError):
         normalize_base_url("http://example.com", allow_http_local=True)
-
