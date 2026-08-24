@@ -32,6 +32,7 @@ from typing import Dict, Iterable, List, Optional, Sequence
 
 # §17 — "kitne hisaab kaam ke nikle" ka faisla ek hi jagah hota hai
 # (physics_checks), taaki audit aur ledger do alag ginti na dikhayein.
+from .models import normalize_doi
 from .physics_checks import usable_calculation_count
 
 # Counter ke naam ek jagah — audit, UI aur test ek hi shabd dekhein.
@@ -129,7 +130,7 @@ def research_family_key(source) -> str:
     method = (getattr(source, "methodology", "") or "unknown").strip().lower()
     if group:
         return f"{group}|method:{method}"
-    doi = (getattr(source, "doi", "") or "").strip().lower()
+    doi = normalize_doi(getattr(source, "doi", ""))
     if doi:
         return f"doi:{doi}"
     title = (getattr(source, "normalized_title", "") or

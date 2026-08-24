@@ -43,9 +43,12 @@ from .domain import fold_accents, stem, tokens
 from .local_language import normalize
 from . import multilingual_research as ml
 from .quality_producers import research_family_key
+from .source_prompt_guard import looks_instruction_like
 
 _MAX_ITEMS = 12
 _MAX_CHARS = 120
+CORPUS_LENS_POLICY_VERSION = "corpus-lens-audit-v1"
+CORPUS_LENS_RELEVANCE_FLOOR = 0.35
 
 # Sawaal ke dhaanche wale shabd — ye concept nahi hote.
 _STOP = {
@@ -79,6 +82,14 @@ _CONCEPT_SUFFIXES = (
 def _clean(value: object) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     return text[:_MAX_CHARS].strip()
+
+
+def _safe_corpus_label(value: object) -> bool:
+    """Corpus metadata may suggest searches, but can never supply commands."""
+    text = _clean(value)
+    if not text or looks_instruction_like(text):
+        return False
+    return not any(unicodedata.category(ch) in {"Cc", "Cf"} for ch in text)
 
 
 def _unique(values: Iterable[str], limit: int = _MAX_ITEMS) -> List[str]:
@@ -814,6 +825,7 @@ _PHRASE_EDGE_NOISE = {
     "degrades", "higher", "lower", "greater", "smaller", "larger", "significant",
     "significantly", "showed", "shows", "shown", "found", "finds", "measured",
     "measures", "predicted", "predicts", "observed", "observes", "associated",
+    "support", "supports", "supported", "supporting",
     "correlated", "using", "used", "based", "during", "across", "within",
     "overall", "however", "whether", "compared", "versus", "study", "studies",
     "paper", "papers", "article", "results", "result", "data", "evidence",
@@ -834,6 +846,19 @@ def _trim_edges(words: Sequence[str]) -> List[str]:
     return out
 
 
+def _venue_labels(record: object) -> List[str]:
+    """Deterministic venue/publisher labels used by selection and its audit."""
+    out: List[str] = []
+    for raw in (getattr(record, "venue", "") or "",
+                getattr(record, "publisher", "") or ""):
+        words = [w for w in tokens(raw) if len(w) > 2
+                 and w not in _VENUE_NOISE and not _is_stop(w)]
+        phrase = " ".join(words[:3])
+        if phrase and _safe_corpus_label(phrase):
+            out.append(phrase)
+    return _unique(out, limit=2)
+
+
 def venue_disciplines(records: Sequence[object], limit: int = 6) -> List[str]:
     """Venue/publisher naam se field ka anumaan (noise shabd hata kar).
 
@@ -846,15 +871,7 @@ def venue_disciplines(records: Sequence[object], limit: int = 6) -> List[str]:
     families: Dict[str, set] = {}
     for index, record in enumerate(records or []):
         family = research_family_key(record)
-        for raw in (getattr(record, "venue", "") or "",
-                    getattr(record, "publisher", "") or ""):
-            words = [w for w in tokens(raw) if len(w) > 2
-                     and w not in _VENUE_NOISE and not _is_stop(w)]
-            if not words:
-                continue
-            phrase = " ".join(words[:3])
-            if not phrase:
-                continue
+        for phrase in _venue_labels(record):
             key = phrase.casefold()
             # Three papers from one lab/method are one corpus voice for ranking;
             # raw publication volume must not manufacture a dominant discipline.
@@ -871,21 +888,24 @@ def venue_disciplines(records: Sequence[object], limit: int = 6) -> List[str]:
 
 def author_thinkers(records: Sequence[object], min_repeat: int = 2,
                     limit: int = 5) -> List[str]:
-    """Jo author 2+ mile hue sources me hai — us baat ka kendra."""
-    counts: Dict[str, int] = {}
+    """Jo author 2+ independent research families me hai — query clue only."""
+    families: Dict[str, set] = {}
     shown: Dict[str, str] = {}
     for record in records or []:
+        family = research_family_key(record)
         seen_here = set()
         for name in (getattr(record, "authors", None) or [])[:6]:
             clean = _clean(name)
-            if len(clean) < 4 or len(clean.split()) > 4:
+            if (len(clean) < 4 or len(clean.split()) > 4
+                    or not _safe_corpus_label(clean)):
                 continue
             key = clean.casefold()
             if key in seen_here:
                 continue
             seen_here.add(key)
-            counts[key] = counts.get(key, 0) + 1
+            families.setdefault(key, set()).add(family)
             shown.setdefault(key, clean)
+    counts = {key: len(values) for key, values in families.items()}
     ordered = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return _unique([shown[key] for key, count in ordered if count >= min_repeat],
                    limit=limit)
@@ -913,19 +933,24 @@ def repeated_phrases(records: Sequence[object], question: str = "",
     shown: Dict[str, str] = {}
     for record in records or []:
         family = research_family_key(record)
-        text = f"{getattr(record, 'title', '') or ''}. " \
-               f"{(getattr(record, 'snippet', '') or '')[:600]}"
         here: Dict[str, str] = {}
-        words = [w for w in (t.strip("-") for t in tokens(text)) if len(w) > 2]
-        for size in (2, 3):
-            for index in range(len(words) - size + 1):
-                chunk = _trim_edges(words[index:index + size])
-                if len(chunk) < 2 or any(_is_stop(word) for word in chunk):
-                    continue
-                if all(word in have or stem(word) in have for word in chunk):
-                    continue
-                phrase = " ".join(chunk)
-                here.setdefault(phrase.casefold(), phrase)
+        # Title aur snippet ko alag rakho: field boundary par bana hua
+        # ``title-last-word + snippet-first-word`` asli corpus phrase nahi hai.
+        for text in (getattr(record, "title", "") or "",
+                     (getattr(record, "snippet", "") or "")[:600]):
+            words = [w for w in (t.strip("-") for t in tokens(text))
+                     if len(w) > 2]
+            for size in (2, 3):
+                for index in range(len(words) - size + 1):
+                    chunk = _trim_edges(words[index:index + size])
+                    if len(chunk) < 2 or any(_is_stop(word) for word in chunk):
+                        continue
+                    if all(word in have or stem(word) in have for word in chunk):
+                        continue
+                    phrase = " ".join(chunk)
+                    if not _safe_corpus_label(phrase):
+                        continue
+                    here.setdefault(phrase.casefold(), phrase)
         for key, phrase in here.items():
             families.setdefault(key, set()).add(family)
             shown.setdefault(key, phrase)
@@ -941,20 +966,154 @@ def repeated_phrases(records: Sequence[object], question: str = "",
     return _unique(out, limit=limit)
 
 
+def _corpus_relevance_ran(records: Sequence[object]) -> bool:
+    return any(
+        float(getattr(row, "relevance_score", 0) or 0) > 0
+        or bool(getattr(row, "relevance_parts", None))
+        or bool(str(getattr(row, "rejected_reason", "") or "").strip())
+        for row in (records or [])
+    )
+
+
+def eligible_corpus_records(
+    records: Sequence[object],
+    *,
+    relevance_floor: float = CORPUS_LENS_RELEVANCE_FLOOR,
+) -> Tuple[List[object], Dict]:
+    """Filter corpus feedback and return a machine-readable exclusion receipt.
+
+    Corpus feedback is fail-closed: if relevance did not run, records stay out
+    and the receipt says ``NOT_CHECKED`` instead of pretending that zero means
+    a pass. Retractions, explicit rejection and proposition mismatch always fail.
+    """
+    rows = list(records or [])
+    relevance_ran = _corpus_relevance_ran(rows)
+    eligible: List[object] = []
+    excluded: List[Dict] = []
+    for index, row in enumerate(rows):
+        reasons: List[str] = []
+        if row is None:
+            reasons.append("missing_record")
+        if getattr(row, "retracted", None) is True:
+            reasons.append("retracted")
+        if str(getattr(row, "rejected_reason", "") or "").strip():
+            reasons.append("source_rejected")
+        parts = getattr(row, "relevance_parts", None) or {}
+        if parts.get("tests_proposition") is False:
+            reasons.append("does_not_test_question_proposition")
+        score = float(getattr(row, "relevance_score", 0) or 0)
+        if not relevance_ran:
+            reasons.append("relevance_not_checked")
+        elif score < float(relevance_floor):
+            reasons.append("below_corpus_lens_relevance_floor")
+        identity = any(str(getattr(row, name, "") or "").strip()
+                       for name in ("source_id", "doi", "url", "title"))
+        if not identity:
+            reasons.append("missing_source_identity")
+        if reasons:
+            excluded.append({
+                "source_id": str(getattr(row, "source_id", "") or f"row-{index + 1}"),
+                "reasons": list(dict.fromkeys(reasons)),
+            })
+        else:
+            eligible.append(row)
+    return eligible, {
+        "policy_version": CORPUS_LENS_POLICY_VERSION,
+        "query_plan_only": True,
+        "evidence_or_citation": False,
+        "relevance_status": "CHECKED" if relevance_ran else "NOT_CHECKED",
+        "relevance_floor": float(relevance_floor) if relevance_ran else None,
+        "relevance_floor_status": (
+            "provisional exploration floor; not a truth threshold"
+            if relevance_ran else "not applied because relevance did not run"
+        ),
+        "sources_seen": len(rows),
+        "sources_eligible": len(eligible),
+        "sources_excluded": excluded,
+        "scoring_anchor_frozen": True,
+    }
+
+
+def _candidate_lineage(
+    records: Sequence[object],
+    *,
+    disciplines: Sequence[str],
+    thinkers: Sequence[str],
+    frameworks: Sequence[str],
+) -> List[Dict]:
+    """Explain which independent families admitted every corpus lens."""
+    rows: List[Dict] = []
+    for kind, values in (("discipline", disciplines), ("thinker", thinkers),
+                         ("framework", frameworks)):
+        for value in values:
+            wanted = _clean(value).casefold()
+            families: Dict[str, List[str]] = {}
+            for index, record in enumerate(records or []):
+                if kind == "discipline":
+                    matched = wanted in {item.casefold()
+                                         for item in _venue_labels(record)}
+                elif kind == "thinker":
+                    matched = wanted in {
+                        _clean(name).casefold()
+                        for name in (getattr(record, "authors", None) or [])[:6]
+                    }
+                else:
+                    wanted_tokens = tokens(wanted)
+                    matched = False
+                    for text in (getattr(record, "title", "") or "",
+                                 (getattr(record, "snippet", "") or "")[:600]):
+                        words = [word.strip("-") for word in tokens(text)
+                                 if len(word.strip("-")) > 2]
+                        width = len(wanted_tokens)
+                        if width and any(words[pos:pos + width] == wanted_tokens
+                                         for pos in range(len(words) - width + 1)):
+                            matched = True
+                            break
+                if not matched:
+                    continue
+                family = research_family_key(record)
+                sid = str(getattr(record, "source_id", "") or f"row-{index + 1}")
+                families.setdefault(family, []).append(sid)
+            minimum = 1 if kind == "discipline" else 2
+            rows.append({
+                "kind": kind,
+                "value": value,
+                "independent_families": len(families),
+                "minimum_independent_families": minimum,
+                "independence_floor_met": len(families) >= minimum,
+                "supporting_source_ids": list(dict.fromkeys(
+                    sid for source_ids in families.values() for sid in source_ids
+                )),
+                "supporting_family_keys": sorted(families),
+            })
+    return rows
+
+
 def lenses_from_sources(records: Sequence[object], question: str = "",
                         min_repeat: int = 2) -> Dict:
     """Mile hue sources se naye lens. Koi model call nahi, koi network nahi."""
     rows = list(records or [])
+    eligible, audit = eligible_corpus_records(rows)
+    disciplines = venue_disciplines(eligible)
+    thinkers = author_thinkers(eligible, min_repeat=min_repeat)
+    frameworks = repeated_phrases(eligible, question=question,
+                                  min_repeat=min_repeat)
+    audit["candidate_lineage"] = _candidate_lineage(
+        eligible, disciplines=disciplines, thinkers=thinkers,
+        frameworks=frameworks)
     return {
-        "disciplines": venue_disciplines(rows),
-        "thinkers": author_thinkers(rows, min_repeat=min_repeat),
-        "frameworks": repeated_phrases(rows, question=question,
-                                       min_repeat=min_repeat),
+        "disciplines": disciplines,
+        "thinkers": thinkers,
+        "frameworks": frameworks,
         "concepts": [],
         "english_terms": [],
         "source_families": [],
         "sources_seen": len(rows),
         "independent_families_seen": len({research_family_key(row) for row in rows}),
+        "eligible_sources_seen": len(eligible),
+        "eligible_independent_families_seen": len(
+            {research_family_key(row) for row in eligible}),
+        "audit": audit,
     }
 
 
@@ -980,11 +1139,20 @@ def merge_corpus_lenses(plan: Dict, corpus: Dict) -> Dict:
     out["corpus_sources_seen"] = int(corpus.get("sources_seen") or 0)
     out["corpus_independent_families_seen"] = int(
         corpus.get("independent_families_seen") or 0)
+    out["corpus_eligible_sources_seen"] = int(
+        corpus.get("eligible_sources_seen") or 0)
+    out["corpus_eligible_independent_families_seen"] = int(
+        corpus.get("eligible_independent_families_seen") or 0)
+    out["corpus_lens_audit"] = dict(corpus.get("audit") or {})
     out["corpus_derived"] = True
     method = str(plan.get("method") or "deterministic")
     if "corpus" not in method:
         out["method"] = f"{method}_plus_corpus"
     out["verified"] = False
+    out["evidence_status"] = str(
+        plan.get("evidence_status")
+        or "search_plan_only__lens_names_are_not_citations_and_no_source_was_read"
+    )
     return out
 
 
@@ -1059,6 +1227,7 @@ def lens_summary(plan: Dict) -> Dict:
     if not isinstance(plan, dict):
         return {"lens_selected": False}
     counts = {key: len(plan.get(key) or []) for key in _LENS_KEYS}
+    audit = plan.get("corpus_lens_audit") or {}
     return {
         "lens_selected": any(counts.values()),
         "method": plan.get("method", "deterministic"),
@@ -1070,4 +1239,13 @@ def lens_summary(plan: Dict) -> Dict:
         "thinkers": list(plan.get("thinkers") or [])[:6],
         "verified": False,
         "evidence_status": plan.get("evidence_status", "search_plan_only"),
+        "corpus_audit": {
+            "policy_version": audit.get("policy_version"),
+            "relevance_status": audit.get("relevance_status"),
+            "sources_seen": audit.get("sources_seen"),
+            "sources_eligible": audit.get("sources_eligible"),
+            "sources_excluded": len(audit.get("sources_excluded") or []),
+            "candidate_lineage": list(audit.get("candidate_lineage") or []),
+            "scoring_anchor_frozen": audit.get("scoring_anchor_frozen"),
+        } if audit else None,
     }
