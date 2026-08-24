@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 
 from . import claim_verification as CV
+from .locator_policy import exact_locator_available, locator_key
 from .models import EvidencePack, SourceRecord
 from .source_prompt_guard import quote_untrusted
 
@@ -39,23 +40,14 @@ def _normalise_text(value: object) -> str:
     return " ".join(text.split()).strip()
 
 
-_GENERIC_LOCATOR_MARKERS = (
-    "exact page/section unavailable", "exact page ka pata nahi",
-    "locator unavailable", "locator unknown", "unknown locator",
-)
-
-
 def _locator_key(value: object) -> str:
     """Stable locator identity; whitespace-only formatting cannot spoof a mismatch."""
-    return "".join(_normalise_text(value).lower().split())
+    return locator_key(value)
 
 
 def _exact_locator_available(value: object) -> bool:
     """Strong preselection needs a concrete page/section/paragraph locator."""
-    locator = _normalise_text(value).lower()
-    if not locator:
-        return False
-    return not any(marker in locator for marker in _GENERIC_LOCATOR_MARKERS)
+    return exact_locator_available(value)
 
 
 def passage_sha256(value: object) -> str:

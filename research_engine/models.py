@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from .quality_signals import (
     METHODOLOGY_RANK,
@@ -60,6 +60,19 @@ READ_LEVEL_LABELS = {
     "claims": "patent ke claims (legal dawe) process hue",
     "full_text": "full text",
 }
+
+
+def normalize_doi(value: object) -> str:
+    """Canonical DOI identity across URL, ``doi:`` and case variants."""
+    raw = unquote(str(value or "")).strip().casefold()
+    if not raw:
+        return ""
+    raw = re.sub(r"^doi\s*:\s*", "", raw)
+    raw = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", raw)
+    raw = raw.split("#", 1)[0].split("?", 1)[0].strip()
+    if not raw.startswith("10.") or "/" not in raw:
+        return ""
+    return raw.rstrip(".,; ")
 
 
 # ── §9 — ACCESS DEPTH ka poora vocabulary (sirf ye paanch label allowed) ──────
@@ -319,8 +332,9 @@ class SourceRecord:
             family = self.patent_family_key
             if family:
                 return family
-        if self.doi:
-            return f"doi:{self.doi.lower()}"
+        doi = normalize_doi(self.doi)
+        if doi:
+            return f"doi:{doi}"
         if self.source_type == SourceType.DOCUMENT:
             return f"doc:{self.title.lower()}"
         return f"domain:{self.domain}" if self.domain else f"title:{self.normalized_title[:60]}"
