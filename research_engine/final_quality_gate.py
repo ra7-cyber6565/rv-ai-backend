@@ -620,6 +620,50 @@ class FinalQualityGate:
                 },
             )
 
+        # Achievement above is intentionally non-vacuous but minimal: one
+        # critical claim may satisfy it.  A production release has a stronger
+        # obligation — *every* critical claim on the Direct Answer / Conclusion
+        # surface must pass same-source A-E.  Keep this as a separate check so
+        # old consumers do not silently reinterpret the achievement field.
+        explicit_unverifiable = quality_context.get("unverifiable_critical_claims")
+        explicit_contradicted = quality_context.get("critical_contradicted_claims")
+        explicit_complete = quality_context.get("critical_claim_coverage_complete")
+        coverage_accounting_present = (
+            explicit_total is not None and explicit_passed is not None
+        )
+        if not achievement_required:
+            critical_coverage_ok = True
+        elif coverage_accounting_present:
+            critical_coverage_ok = (
+                _as_int(explicit_total) > 0
+                and _as_int(explicit_passed) == _as_int(explicit_total)
+                and unsupported == 0
+                and _as_int(explicit_unverifiable) == 0
+                and _as_int(explicit_contradicted) == 0
+                and (explicit_complete is None or _as_bool(explicit_complete))
+            )
+        else:
+            # Explicit legacy fixtures predate total/pass accounting.  They keep
+            # their old result; production quality_context always supplies it.
+            critical_coverage_ok = achievement_ok and unsupported == 0
+        state.check("verified_critical_claim_coverage_complete", critical_coverage_ok)
+        if not critical_coverage_ok:
+            state.issue(
+                "CRITICAL_CLAIM_COVERAGE_INCOMPLETE",
+                "claim_citation",
+                "critical",
+                "Not every critical claim passed same-source A-E verification.",
+                deduction=10,
+                hard_cap=40,
+                details={
+                    "critical_claims": explicit_total,
+                    "same_source_ae_passed": explicit_passed,
+                    "unsupported": unsupported,
+                    "unverifiable": explicit_unverifiable,
+                    "contradicted": explicit_contradicted,
+                },
+            )
+
         # P0-B — post-hoc citation fitting is not release-safe. Production
         # requires an independently supplied, complete and non-vacuous audit.
         # The contract, not an optional result field, decides whether absence is
