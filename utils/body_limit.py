@@ -10,6 +10,7 @@ body.
 The limits intentionally leave modest multipart overhead above the actual file
 caps in ``api.routes``:
 - documents/PDF: 60 MiB file -> 64 MiB HTTP body;
+- resumable reading PDF: 60 MiB file -> 64 MiB HTTP body;
 - audio/video: 200 MiB file -> 205 MiB HTTP body;
 - normal JSON/API POSTs: 256 KiB by default.
 
@@ -35,6 +36,7 @@ _ROUTE_LIMITS = {
     "/api/v1/upload-audio": _AUDIO_BODY_BYTES,
     "/api/v1/transcribe-audio": _AUDIO_BODY_BYTES,
     "/api/v1/exam-intelligence/analyze": _EXAM_BODY_BYTES,
+    "/api/v1/reading-sessions/start": _DOC_BODY_BYTES,
 }
 
 

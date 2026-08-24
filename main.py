@@ -20,6 +20,7 @@ from api.job_routes import router as job_router
 from api.archive_routes import router as archive_router
 from api.session_routes import router as session_router
 from api.exam_routes import router as exam_router
+from api.reading_routes import router as reading_router
 from knowledge.routes import router as knowledge_router
 from storage.provider_factory import provider_status
 from utils.body_limit import RequestBodyLimitMiddleware
@@ -146,6 +147,7 @@ app.include_router(agent_router, prefix="/api/v1", tags=["Agents"])
 app.include_router(job_router, prefix="/api/v1", tags=["Research Jobs"])
 app.include_router(archive_router, prefix="/api/v1", tags=["Archive"])
 app.include_router(exam_router, prefix="/api/v1", tags=["Exam Intelligence"])
+app.include_router(reading_router, prefix="/api/v1", tags=["Resumable Reading"])
 app.include_router(knowledge_router, prefix="/api/v1", tags=["Knowledge"])
 
 

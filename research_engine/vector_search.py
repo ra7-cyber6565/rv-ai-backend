@@ -9,6 +9,7 @@ Fayda: kal ChromaDB badal do, sirf ye file badlegi.
 """
 from __future__ import annotations
 
+import hashlib
 from typing import Dict, List, Optional
 
 from .models import SourceRecord, SourceType
@@ -70,7 +71,7 @@ class VectorSearch:
 
     # ── ingestion (Spec Section 3/4/5 — processing/ ko DB se jodta hai) ───────
     def ingest_chunks(self, chunks: List[Dict], filename: str,
-                      project_id: str) -> Dict:
+                      project_id: str, id_namespace: str = "") -> Dict:
         """
         processing/ se aaye chunks ko ChromaDB mein daalo.
 
@@ -108,7 +109,17 @@ class VectorSearch:
                     continue
                 documents.append(piece.strip())
                 metadatas.append({"source": filename, "page": locator})
-                ids.append(f"{filename}_{index}_{part_no}_{abs(hash(piece)) % 10**6}")
+                # Python's built-in hash is process-randomised and six digits
+                # are collision-prone across resumed book batches.  A stable
+                # namespace + locator + content digest makes retries and
+                # multi-session ingestion deterministic without exposing a
+                # raw project capability in the stored id.
+                identity = "\0".join((
+                    str(id_namespace or "one-shot"), filename, locator,
+                    str(part_no), piece,
+                ))
+                digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+                ids.append(f"chunk_{digest}")
 
         if not documents:
             report["error"] = "split ke baad kuch nahi bacha"
@@ -118,8 +129,9 @@ class VectorSearch:
             collection = pipeline.client.get_or_create_collection(
                 name=f"project_{project_id}")
             embeddings = pipeline.embedding_model.encode(documents).tolist()
-            collection.add(documents=documents, embeddings=embeddings,
-                           metadatas=metadatas, ids=ids)
+            write = collection.upsert if id_namespace else collection.add
+            write(documents=documents, embeddings=embeddings,
+                  metadatas=metadatas, ids=ids)
         except Exception as exc:
             self.last_error = f"{type(exc).__name__}: {exc}"
             report["error"] = f"ChromaDB write fail: {self.last_error}"
