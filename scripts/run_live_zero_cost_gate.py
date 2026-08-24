@@ -241,6 +241,33 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         f"({critical_same_source}/{critical_total} critical claim(s) passed same-source A-E)"
     )
 
+    critical_unsupported = int(
+        claim_checks.get("unsupported_critical_claims") or 0
+    )
+    critical_unverifiable = int(
+        claim_checks.get("unverifiable_critical_claims") or 0
+    )
+    critical_contradicted = int(
+        claim_checks.get("critical_contradicted_claims") or 0
+    )
+    critical_coverage_value = claim_checks.get(
+        "critical_claim_coverage_complete")
+    critical_coverage_ok = (
+        critical_total > 0
+        and critical_same_source == critical_total
+        and critical_unsupported == 0
+        and critical_unverifiable == 0
+        and critical_contradicted == 0
+        and critical_coverage_value is True
+    )
+    critical_coverage_detail = (
+        f"{critical_coverage_value} ({critical_same_source}/{critical_total} "
+        "critical claim(s) passed; "
+        f"unsupported={critical_unsupported}, "
+        f"unverifiable={critical_unverifiable}, "
+        f"contradicted={critical_contradicted})"
+    )
+
     evidence_first = verification.get("evidence_first_audit") or {}
     evidence_first_required = evidence_first.get("evidence_first_required") is True
     preselected_count = int(
@@ -257,6 +284,9 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     )
     preselection_complete = evidence_first.get("critical_claim_preselection_complete")
     evidence_first_achievement = evidence_first.get("evidence_first_achievement")
+    critical_enforcement = evidence_first.get("critical_draft_enforcement") or {}
+    enforcement_reason = _safe_identifier(
+        critical_enforcement.get("reason"), default="unreported")
     evidence_first_ok = (
         evidence_first_required
         and preselected_count > 0
@@ -287,6 +317,8 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         ("claim_gate", claim_gate_value is True, claim_gate_detail),
         ("claim_verification_achievement", claim_achievement_ok,
          claim_achievement_detail),
+        ("critical_claim_coverage", critical_coverage_ok,
+         critical_coverage_detail),
         ("evidence_first_achievement", evidence_first_ok, evidence_first_detail),
         ("three_hypotheses", len(hypotheses) >= 3,
          f"{len(hypotheses)} hypothesis/hypotheses"),
@@ -324,6 +356,10 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "critical_claims": critical_total,
             "critical_claims_same_source_ae_passed": critical_same_source,
             "claim_verification_achievement": bool(claim_achievement_ok),
+            "critical_claim_coverage_complete": bool(critical_coverage_ok),
+            "unsupported_critical_claims": critical_unsupported,
+            "unverifiable_critical_claims": critical_unverifiable,
+            "critical_contradicted_claims": critical_contradicted,
             "evidence_first_required": bool(evidence_first_required),
             "preselected_evidence_spans_count": preselected_count,
             "preselected_strong_eligible_spans": preselected_strong,
@@ -331,6 +367,14 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "critical_claims_preselected_span_unmatched": preselected_unmatched,
             "critical_claim_preselection_complete": preselection_complete is True,
             "evidence_first_achievement": bool(evidence_first_ok),
+            "critical_enforcement_applied": bool(
+                critical_enforcement.get("applied")),
+            "critical_enforcement_second_stage_applied": bool(
+                critical_enforcement.get("second_stage_applied")),
+            "critical_enforcement_reason": enforcement_reason,
+            "critical_enforcement_final_coverage_complete": bool(
+                critical_enforcement.get("final_coverage_complete") is True
+                or critical_coverage_ok),
             "discovery_status": str(discovery.get("status") or ""),
             "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest(),
             "failure_kind": _safe_identifier(
