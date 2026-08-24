@@ -1185,12 +1185,15 @@ class DeepResearchEngine:
         # manifest.  Other model analysis is retained.  Nothing is promoted:
         # the rebound text must pass the normal A-E + manifest audit again below.
         critical_enforcement: Dict = {
-            "schema_version": "p0b-enforcement-1",
+            "schema_version": "p0b-enforcement-2",
             "applied": False,
             "reason": "critical_draft_already_satisfied_boundary",
             "replaced_sections": [],
             "strong_labels_lowered": 0,
+            "second_stage_applied": False,
         }
+        drafted: Dict = {}
+        binder = None
         pre_claim_source = gemini_answer
         view = getattr(self.synthesizer, "canonical_heading_view", None)
         if callable(view):
@@ -1228,6 +1231,8 @@ class DeepResearchEngine:
                 critical_enforcement = {
                     **dict(drafted.get("audit") or {}),
                     **dict(binding or {}),
+                    "schema_version": "p0b-enforcement-2",
+                    "second_stage_applied": False,
                     "pre_enforcement_critical_claims": pre_critical,
                     "pre_enforcement_same_source_ae_passed": pre_passed,
                     "pre_enforcement_preselected_unmatched": pre_unmatched,
@@ -1246,6 +1251,95 @@ class DeepResearchEngine:
                         "boundary poora nahi kar raha tha; engine ne use drafting se "
                         "pehle chune exact full-text evidence se conservatively "
                         "replace karke A-E check dobara chalaya.")
+
+        # 6c-3. Targeted section replacement normally removes the unsupported
+        # surface while preserving useful model analysis.  Live evidence showed
+        # why that cannot be the last boundary: a malformed/duplicate heading
+        # can leave residual critical claims even though three rebound claims
+        # pass A-E.  Re-verify the *actual rebound text*.  If even one critical
+        # claim remains unsupported, unverifiable or contradicted, rebuild a
+        # canonical evidence-only surface and bind the same pre-draft evidence
+        # sections onto it.  This is deterministic, network-free and never
+        # promotes a claim; the ordinary A-E audit below still decides release.
+        post_target_text = gemini_answer
+        if callable(view):
+            try:
+                post_target_text = view(gemini_answer) or gemini_answer
+            except Exception:                                # noqa: BLE001
+                post_target_text = gemini_answer
+        post_target_checks = verify_claims(post_target_text, pack).to_dict()
+        post_target_audit = audit_claims_against_manifest(
+            post_target_checks, passes.get("_evidence_first_manifest"))
+        post_critical = int(post_target_checks.get("critical_claims") or 0)
+        post_passed = int(
+            post_target_checks.get("critical_claims_same_source_ae_passed") or 0)
+        post_unsupported = int(
+            post_target_checks.get("unsupported_critical_claims") or 0)
+        post_unverifiable = int(
+            post_target_checks.get("unverifiable_critical_claims") or 0)
+        post_contradicted = int(
+            post_target_checks.get("critical_contradicted_claims") or 0)
+        post_unmatched = int(
+            post_target_audit.get("critical_claims_preselected_span_unmatched") or 0)
+        critical_enforcement.update({
+            "post_targeted_critical_claims": post_critical,
+            "post_targeted_same_source_ae_passed": post_passed,
+            "post_targeted_unsupported": post_unsupported,
+            "post_targeted_unverifiable": post_unverifiable,
+            "post_targeted_contradicted": post_contradicted,
+            "post_targeted_preselected_unmatched": post_unmatched,
+        })
+        residual_critical_failure = (
+            post_critical == 0
+            or post_passed != post_critical
+            or post_unsupported > 0
+            or post_unverifiable > 0
+            or post_contradicted > 0
+            or post_unmatched > 0
+            or post_target_audit.get("evidence_first_achievement") is not True
+        )
+        if strong_available and residual_critical_failure:
+            if not drafted:
+                drafted = build_critical_evidence_sections(
+                    question, passes.get("_evidence_first_manifest"), max_claims=2)
+            if binder is None:
+                binder = getattr(
+                    self.synthesizer, "bind_evidence_first_critical_sections", None)
+            if drafted.get("available") and callable(binder):
+                from .local_reasoning import compose as compose_offline
+
+                evidence_only = compose_offline(
+                    question, pack, plan, contradiction_dicts,
+                    evidence_manifest=passes.get("_evidence_first_manifest"),
+                )
+                recovered_answer, recovery_binding = binder(
+                    evidence_only,
+                    direct_answer=drafted.get("direct_answer", ""),
+                    conclusion=drafted.get("conclusion", ""),
+                )
+                if recovery_binding.get("applied"):
+                    first_stage_applied = bool(critical_enforcement.get("applied"))
+                    gemini_answer = recovered_answer
+                    critical_enforcement.update({
+                        **dict(recovery_binding),
+                        "schema_version": "p0b-enforcement-2",
+                        "applied": True,
+                        "first_stage_applied": first_stage_applied,
+                        "second_stage_applied": True,
+                        "reason": "residual_critical_claims_after_targeted_rebind",
+                        "recovery_mode":
+                            "deterministic_preselected_evidence_surface",
+                    })
+                    gemini_answer, strict_report = enforce_strict_labels(
+                        gemini_answer, pack)
+                    gemini_answer, depth_report = downgrade_labels(
+                        gemini_answer, pack, check_entailment=True)
+                    label_report = merge_label_reports(strict_report, depth_report)
+                    warnings.append(
+                        "Targeted evidence rebind ke baad bhi critical claim coverage "
+                        f"{post_passed}/{post_critical} thi; engine ne final critical "
+                        "surface ko deterministic preselected full-text evidence se "
+                        "fail-closed rebuild karke A-E check dobara chalaya.")
 
         # 6d. §13 / point 7 — paanch alag check (A–E) har labelled claim par.
         # Purana "citation verified" number sirf ye batata tha ki [S3] naam ka
@@ -1274,6 +1368,25 @@ class DeepResearchEngine:
         claim_checks = verify_claims(claim_source_text, pack).to_dict()
         evidence_first_audit = audit_claims_against_manifest(
             claim_checks, passes.get("_evidence_first_manifest"))
+        critical_enforcement.update({
+            "final_critical_claims": int(
+                claim_checks.get("critical_claims") or 0),
+            "final_same_source_ae_passed": int(
+                claim_checks.get("critical_claims_same_source_ae_passed") or 0),
+            "final_unsupported": int(
+                claim_checks.get("unsupported_critical_claims") or 0),
+            "final_unverifiable": int(
+                claim_checks.get("unverifiable_critical_claims") or 0),
+            "final_contradicted": int(
+                claim_checks.get("critical_contradicted_claims") or 0),
+            "final_preselected_unmatched": int(
+                evidence_first_audit.get(
+                    "critical_claims_preselected_span_unmatched") or 0),
+            "final_coverage_complete": bool(
+                claim_checks.get("critical_claim_coverage_complete") is True
+                and evidence_first_audit.get("evidence_first_achievement") is True
+            ),
+        })
         evidence_first_audit["critical_draft_enforcement"] = critical_enforcement
         unmatched_preselected = int(
             evidence_first_audit.get("critical_claims_preselected_span_unmatched") or 0)
