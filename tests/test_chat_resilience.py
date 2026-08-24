@@ -198,7 +198,9 @@ def _browser_checks() -> None:
         'requestedMode==="MARATHON"?60:30' in page
         and "*60*1000" in page,
     )
-    check("stalled progress guard present", "6*60*1000" in page and "lastChange" in page)
+    check("stalled progress guard present",
+          'stallMinutes=requestedMode==="MARATHON"?10:6' in page
+          and "stallMs=stallMinutes*60*1000" in page and "lastChange" in page)
     check("single live progress writer", code.count("paintProgress(ui,p);") == 1)
 
     check("completed research process remains visible",

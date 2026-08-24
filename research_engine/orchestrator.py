@@ -60,6 +60,7 @@ from .requested import build_ledger, contract_ledger, delivery_evidence
 from .requested import looks_like_chain
 from .requested import looks_like_math_model, quality_contract
 from .research_memory import ResearchMemory
+from .research_assurance import build_research_assurance
 from . import concept_ledger
 from .research_state import build_state as build_research_state
 from .research_state import inject_state_block, state_warnings
@@ -161,6 +162,10 @@ class DeepResearchEngine:
         # §11 — jo queries sach mein chali, unka record. Consensus gate isse
         # dekhta hai ki opposition-side search hui thi ya nahi.
         queries_run: List[str] = []
+        # Per-round marginal yield. Ye source text/URL store nahi karta; sirf
+        # counts rakhta hai taaki MARATHON bounded saturation ko honestly report
+        # kar sake ("poora internet padh liya" kabhi nahi).
+        round_metrics: List[Dict] = []
 
         # §15 — kis round mein search khud crash hua. Ye insaani warning banti
         # hai; raw exception text sirf `round_error_details` mein jaata hai aur
@@ -223,6 +228,7 @@ class DeepResearchEngine:
             self._track(job_id, "DISCOVERING",
                         f"round {round_no}: {', '.join(queries)[:120]}")
 
+            previous_seen = set(seen_this_run)
             try:
                 found = self.discovery.discover(
                     queries=queries,
@@ -250,6 +256,7 @@ class DeepResearchEngine:
                                       "wajah technical details mein hai"})
                 found = {"records": [], "log": [], "connectors_searched": [],
                          "seen_urls": set()}
+            new_urls = set(found.get("seen_urls", set())) - previous_seen
             external.extend(found["records"])
             logs.extend(found["log"])
             connectors = sorted(set(connectors) | set(found["connectors_searched"]))
@@ -274,13 +281,29 @@ class DeepResearchEngine:
             # §5 — per-axis coverage har round ke baad naapte hain, aur agla
             # round isi par targeted hota hai.
             axis_records = axis_coverage(axes, pack.sources, searched=axis_queries)
-            axis_gaps = int(coverage_summary(axis_records).get("mandatory_missing") or 0)
+            round_axis_summary = coverage_summary(axis_records)
+            axis_gaps = int(round_axis_summary.get("mandatory_missing") or 0)
+            round_metrics.append({
+                "round": round_no,
+                "new_records": len(found.get("records") or []),
+                "new_unique_urls": len(new_urls),
+                "ranked_sources": len(pack.sources),
+                # Legacy adapters/tests may expose only `.sources`; metrics are
+                # auxiliary and must never make discovery fail. Production
+                # EvidencePack supplies both exact counters.
+                "independent_sources": int(getattr(
+                    pack, "independent_source_count", len(pack.sources)) or 0),
+                "on_topic_sources": int(getattr(
+                    pack, "on_topic_count", len(pack.sources)) or 0),
+                "mandatory_axes_missing": axis_gaps,
+            })
             if round_no >= config.max_rounds:
                 break
             # "Itne sources aa gaye" ab round rokne ki KAAFI wajah nahi hai —
             # pichhli baar 18 sources ke saath 7 zaroori raaste khaali the aur
             # loop pehle hi round mein "sufficient" keh kar ruk gaya tha.
-            if sufficiency.get("sufficient") and not axis_gaps:
+            if (sufficiency.get("sufficient") and not axis_gaps
+                    and not getattr(config, "require_all_rounds", False)):
                 break
 
             # Agla round shuru hone se PEHLE: jo sources ab tak ASLI ME mile,
@@ -316,6 +339,8 @@ class DeepResearchEngine:
             "axis_coverage": axis_records,
             "axis_queries": {k: list(v) for k, v in axis_queries.items()},
             "axis_summary": coverage_summary(axis_records),
+            "counter_search_performed": counter_search_done(axis_records),
+            "round_metrics": round_metrics,
         }
 
     # ── prior art honesty (₹0 patent batch, point 8) ─────────────────────────
@@ -1481,6 +1506,25 @@ class DeepResearchEngine:
             }
             technical_errors.append(
                 f"advanced discovery assessment: {type(exc).__name__}")
+        research_assurance = build_research_assurance(
+            config=config,
+            pack=pack,
+            discovered=discovered,
+            reading=reading,
+            passes=passes,
+            verification=verification,
+            discovery_analysis=discovery_analysis,
+        )
+        if (research_assurance.get("active")
+                and not research_assurance.get("target_met")):
+            percent = research_assurance.get("research_process_coverage_percent", 0)
+            target = research_assurance.get("target_percent", 0)
+            gaps = ", ".join(research_assurance.get("gaps") or [])
+            warnings.append(
+                f"MARATHON research-process coverage {percent}% rahi (target "
+                f"{target}%). Ye truth/success probability nahi hai."
+                + (f" Bachi process gaps: {gaps}." if gaps else "")
+            )
         coverage = pack.coverage_report()
         coverage["evidence_table"] = self.evidence.evidence_table(claims)
         coverage["independence"] = self.evidence.independence_report(pack)
@@ -1520,6 +1564,7 @@ class DeepResearchEngine:
             ],
         }
         coverage["specialist_research"] = specialist_report
+        coverage["research_assurance"] = research_assurance
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -1659,6 +1704,20 @@ class DeepResearchEngine:
                 f"raaste khaali hain"
                 + (f" ({labels})" if labels else "")
                 + ". Source ki ginti is kami ko nahi dhakti.")
+
+        # MARATHON ka 90% target sirf process coverage hai, phir bhi target
+        # miss hua ho to top VERIFIED/STRONG label dena misleading hoga. Useful
+        # answer bachta hai, par label MIXED rehta hai aur exact gaps structured
+        # `research_assurance` mein dikhte hain.
+        if (research_assurance.get("active")
+                and not research_assurance.get("target_met")
+                and any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))):
+            percent = research_assurance.get("research_process_coverage_percent", 0)
+            evidence_level = (
+                f"🟡 MIXED — MARATHON research-process coverage {percent}% rahi; "
+                "ye truth probability nahi hai aur process target poora nahi hua"
+            )
 
         # §17 — reasoning pass ne jo calculation records nikaale the wahi aage
         # jaate hain (ek hi jagah se: answer aur audit dono, warna do alag
@@ -1941,6 +2000,7 @@ class DeepResearchEngine:
             label_report=label_report,
             discovery=discovery_analysis,
             specialist_research=specialist_report,
+            research_assurance=research_assurance,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

@@ -905,6 +905,23 @@ Ab jawab likho:"""
         for extra in (self._reading_line(coverage), self._quality_line(coverage, pack)):
             if extra:
                 lines.append(extra)
+        assurance = coverage.get("research_assurance") or {}
+        if assurance.get("active"):
+            percent = assurance.get("research_process_coverage_percent", 0)
+            target = assurance.get("target_percent", 0)
+            state = ("target poora hua" if assurance.get("target_met")
+                     else "target poora nahi hua")
+            lines.append(
+                f"- MARATHON research-process coverage: {percent}% (target "
+                f"{target}%; {state}). Ye answer ki truth probability, trading "
+                f"profitability ya hypothesis success probability nahi hai."
+            )
+            saturation = assurance.get("saturation") or {}
+            if saturation.get("reason"):
+                lines.append(f"- Bounded saturation: {saturation['reason']}.")
+            gaps = assurance.get("gaps") or []
+            if gaps:
+                lines.append("- Process gaps: " + ", ".join(str(x) for x in gaps) + ".")
         return "\n".join(lines)
 
     # ── "aapne jo maanga tha" ka honest hisaab ───────────────────────────────
@@ -1378,4 +1395,3 @@ Ab jawab likho:"""
         lines.append("Inhe jodkar koi conclusion humne nahi nikala — wo kaam reasoning "
                      "pass ka tha, jo is baar poora nahi hua.")
         return "\n\n".join(lines)
-

@@ -1314,6 +1314,23 @@ Ab jawab likho:"""
         for extra in (self._reading_line(coverage), self._quality_line(coverage, pack)):
             if extra:
                 lines.append(extra)
+        assurance = coverage.get("research_assurance") or {}
+        if assurance.get("active"):
+            percent = assurance.get("research_process_coverage_percent", 0)
+            target = assurance.get("target_percent", 0)
+            state = ("target poora hua" if assurance.get("target_met")
+                     else "target poora nahi hua")
+            lines.append(
+                f"- MARATHON research-process coverage: {percent}% (target "
+                f"{target}%; {state}). Ye answer ki truth probability, trading "
+                f"profitability ya hypothesis success probability nahi hai."
+            )
+            saturation = assurance.get("saturation") or {}
+            if saturation.get("reason"):
+                lines.append(f"- Bounded saturation: {saturation['reason']}.")
+            gaps = assurance.get("gaps") or []
+            if gaps:
+                lines.append("- Process gaps: " + ", ".join(str(x) for x in gaps) + ".")
         # §5 — "kitne mile" ke baad hi "kaunsa saboot mila hi nahi". Ye lines
         # `evidence_axes.coverage_note()` se aati hain; axes naape na gaye hon to
         # ye block chhapta hi nahi (khaali heading/jhoothi tasalli se bachne ke liye).

@@ -60,7 +60,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
 const API="", IS_FILE=location.protocol==="file:";
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
-const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — multilingual books + official archives + alag evidence lanes. Background mein lamba chal sakta hai."};
+const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — 5 full rounds, multilingual books, source-derived thinkers, counter-evidence aur 90% research-process target. Ye truth/profit probability nahi hai."};
 let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
 const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
@@ -153,7 +153,7 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
-  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMs=6*60*1000;let lastChange=Date.now(),lastSignature="";
+  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMinutes=requestedMode==="MARATHON"?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
@@ -162,7 +162,7 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
     if(status.data.status==="completed")break;
     if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
     if(Date.now()>hardDeadline){friendly(el,"Research browser ki wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
-    if(Date.now()-lastChange>stallMs){friendly(el,"Research progress 6 minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.");restoreQuestion(question);return false;}
+    if(Date.now()-lastChange>stallMs){friendly(el,`Research progress ${stallMinutes} minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.`);restoreQuestion(question);return false;}
     await sleep(1200);
   }
   const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
