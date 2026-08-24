@@ -26,7 +26,7 @@ from __future__ import annotations
 import re
 from typing import Dict, List
 
-from .models import SourceRecord
+from .models import SourceRecord, normalize_doi
 
 _STOP = {
     "the", "a", "an", "of", "and", "or", "in", "on", "for", "to", "with",
@@ -110,6 +110,55 @@ class DeduplicationEngine:
         for name in cls._FILL_IF_NONE:
             if getattr(survivor, name, None) is None and getattr(dropped, name, None) is not None:
                 setattr(survivor, name, getattr(dropped, name))
+        return survivor
+
+    @classmethod
+    def merge_exact_duplicate(cls, survivor: SourceRecord,
+                              dropped: SourceRecord) -> SourceRecord:
+        """Merge confirmed URL/DOI identity without losing deepest access.
+
+        Title similarity is deliberately excluded: only an exact identity is
+        strong enough to move text/read-depth fields between records.
+        """
+        cls.merge_signals(survivor, dropped)
+        for name in (
+            "authors", "year", "publisher", "venue", "doi", "locator",
+            "connector", "doc_kind", "doc_kind_label", "doc_kind_confidence",
+        ):
+            current = getattr(survivor, name, None)
+            incoming = getattr(dropped, name, None)
+            if current in (None, "", []) and incoming not in (None, "", []):
+                setattr(survivor, name, incoming)
+
+        prefer_dropped = (
+            _depth_rank(dropped) > _depth_rank(survivor)
+            or (_depth_rank(dropped) == _depth_rank(survivor)
+                and _text_chars(dropped) > _text_chars(survivor))
+        )
+        if prefer_dropped:
+            for name in (
+                "snippet", "read_level", "full_text_chars", "full_text_available",
+                "pages_read", "pages_total", "locator",
+            ):
+                setattr(survivor, name, getattr(dropped, name, None))
+            if getattr(dropped, "read_note", ""):
+                survivor.read_note = str(dropped.read_note)
+
+        connectors = [
+            str(value or "").strip()
+            for value in (getattr(survivor, "connector", ""),
+                          getattr(dropped, "connector", ""))
+            if str(value or "").strip()
+        ]
+        note = (
+            "same DOI/URL ke duplicate records merge hue; sabse gehra available "
+            "text access rakha gaya"
+        )
+        if connectors:
+            note += f" ({', '.join(dict.fromkeys(connectors))})"
+        existing = str(getattr(survivor, "read_note", "") or "").strip()
+        if note not in existing:
+            survivor.read_note = f"{existing}; {note}" if existing else note
         return survivor
 
     # ── patent family collapse (₹0 patent batch, point 5 + 6) ────────────────
@@ -211,13 +260,13 @@ class DeduplicationEngine:
 
         for s in sources:
             url_key = (s.url or "").strip().rstrip("/").lower()
-            doi_key = (s.doi or "").strip().lower()
+            doi_key = normalize_doi(s.doi)
 
             if url_key and url_key in by_url:
-                self.merge_signals(by_url[url_key], s)
+                self.merge_exact_duplicate(by_url[url_key], s)
                 continue
             if doi_key and doi_key in by_doi:
-                self.merge_signals(by_doi[doi_key], s)
+                self.merge_exact_duplicate(by_doi[doi_key], s)
                 continue
 
             # TITLE RULE PATENTS PAR NAHI CHALTA — jaan-boojh kar.
@@ -234,6 +283,10 @@ class DeduplicationEngine:
             tokens = _title_tokens(s.title)
             if tokens and len(tokens) >= 3 and not is_patent:
                 twin = self._near_duplicate_of(tokens, kept_titles)
+                if twin is not None:
+                    twin_doi = normalize_doi(getattr(twin, "doi", ""))
+                    if doi_key and twin_doi and doi_key != twin_doi:
+                        twin = None
                 if twin is not None:
                     self.merge_signals(twin, s)
                     continue

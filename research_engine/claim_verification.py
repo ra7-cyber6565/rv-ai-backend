@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from .citation import labelled_claim_spans
+from .locator_policy import exact_locator_available
 from .models import ClaimType, EvidencePack, SourceRecord, label_to_claim_type
 
 CHECK_LABELS: Dict[str, str] = {
@@ -780,7 +781,8 @@ def claim_contradiction_from_spans(
         locator = str(span.get("locator") or "").strip()
         source_id = str(span.get("source_id") or "").strip()
         if (len(passage) < _MIN_TEXT_CHARS or not source_id
-                or not locator):
+                or span.get("span_kind") != "passage"
+                or not exact_locator_available(locator)):
             continue
         match = float(_similarity(body, passage))
         if match < _ENTAIL_SIM:
@@ -1076,6 +1078,8 @@ class VerificationReport:
         return bool(
             str((span or {}).get("source_id") or "").strip()
             and str((span or {}).get("locator") or "").strip()
+            and (span or {}).get("span_kind") == "passage"
+            and exact_locator_available((span or {}).get("locator"))
             and len(str((span or {}).get("passage") or "").strip()) >= _MIN_TEXT_CHARS
             and (span or {}).get("claim_stance") in ("SUPPORT", "OPPOSE")
             and (span or {}).get("source_stance") in ("SUPPORT", "OPPOSE")

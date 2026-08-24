@@ -398,7 +398,7 @@ def _corpus_records():
     records = [SourceRecord(title=title, url=f"https://example.org/c{i}",
                             snippet=snippet, connector="openalex",
                             source_type=SourceType.PAPER, authors=list(authors),
-                            venue=venue)
+                            venue=venue, relevance_score=0.8)
                for i, (title, snippet, authors, venue) in enumerate(_CORPUS_ROWS)]
     # First two share Matthew Walker but represent different research families:
     # different lead groups/methods. Corpus phrase repetition must count those
