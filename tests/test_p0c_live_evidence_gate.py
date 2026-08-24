@@ -22,6 +22,10 @@ def _base_result():
                 "critical_claims": 1,
                 "critical_claims_same_source_ae_passed": 1,
                 "claim_verification_achievement": True,
+                "critical_claim_coverage_complete": True,
+                "unsupported_critical_claims": 0,
+                "unverifiable_critical_claims": 0,
+                "critical_contradicted_claims": 0,
             },
             "evidence_first_audit": {
                 "evidence_first_required": True,
@@ -61,6 +65,7 @@ def test_complete_nonvacuous_preselected_fixture_passes_live_gate():
     assert evaluation["passed"] is True
     assert checks["claim_gate"]["passed"] is True
     assert checks["claim_verification_achievement"]["passed"] is True
+    assert checks["critical_claim_coverage"]["passed"] is True
     assert checks["evidence_first_achievement"]["passed"] is True
 
 
@@ -105,6 +110,27 @@ def test_same_source_claim_without_preselection_fails_live_release():
     assert evaluation["passed"] is False
 
 
+def test_partial_three_of_six_critical_coverage_fails_live_release():
+    """The live 3/6 incident must never be reported as a release PASS again."""
+    result = _base_result()
+    claims = result["verification"]["claim_checks"]
+    claims.update({
+        "critical_claims": 6,
+        "critical_claims_same_source_ae_passed": 3,
+        "claim_verification_achievement": True,
+        "critical_claim_coverage_complete": False,
+        "unsupported_critical_claims": 2,
+        "unverifiable_critical_claims": 1,
+        "critical_contradicted_claims": 0,
+    })
+    evaluation = live.evaluate_result(result)
+    checks = _checks(evaluation)
+    assert checks["claim_verification_achievement"]["passed"] is True
+    assert checks["critical_claim_coverage"]["passed"] is False
+    assert "3/6" in checks["critical_claim_coverage"]["detail"]
+    assert evaluation["passed"] is False
+
+
 def test_missing_p0b_audit_fails_closed_not_legacy_passes():
     result = _base_result()
     del result["verification"]["evidence_first_audit"]
@@ -127,6 +153,10 @@ def test_receipt_summary_contains_only_structural_evidence_metrics():
     assert summary["critical_claims"] == 1
     assert summary["critical_claims_same_source_ae_passed"] == 1
     assert summary["claim_verification_achievement"] is True
+    assert summary["critical_claim_coverage_complete"] is True
+    assert summary["unsupported_critical_claims"] == 0
+    assert summary["unverifiable_critical_claims"] == 0
+    assert summary["critical_contradicted_claims"] == 0
     assert summary["evidence_first_required"] is True
     assert summary["preselected_evidence_spans_count"] == 3
     assert summary["preselected_strong_eligible_spans"] == 2

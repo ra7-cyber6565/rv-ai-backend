@@ -254,6 +254,71 @@ def test_pipeline_repairs_model_critical_claim_that_failed_predraft_boundary():
     assert audit.get("evidence_first_achievement") is True
 
 
+def test_pipeline_second_stage_removes_residual_critical_claims_fail_closed():
+    """A lying/ineffective first binder cannot leave a partial 3/6 surface."""
+    class _UnsafeCriticalFake(PO._FakeGemini):
+        def __call__(self, brain, prompt, label=""):
+            text = super().__call__(brain, prompt, label)
+            if label != "synthesis":
+                return text
+            next_section = text.find("\n## Research se kya pata chala?")
+            assert next_section > 0
+            return (
+                "## Seedha jawab\n"
+                "- [SOURCE-REPORTED] Lunar basalt contains olivine crystals and "
+                "records ancient volcanic eruptions on the Moon [S1].\n\n"
+                + text[next_section + 1:]
+            )
+
+    fake = _UnsafeCriticalFake()
+    original = gemini_reasoning.GeminiReasoning.generate
+    gemini_reasoning.GeminiReasoning.generate = \
+        lambda self, prompt, label="": fake(self, prompt, label)
+    try:
+        engine = DeepResearchEngine(project_id="offline-test", enable_kg=False,
+                                    enable_memory=False)
+        engine.vectors = PO._FakeVectors()
+        engine.discovery.discover = PO._fake_discover(PO._records(PO.ON_TOPIC))
+        engine.reader.enrich = _full_text_reader
+        real_binder = engine.synthesizer.bind_evidence_first_critical_sections
+        binder_calls = {"count": 0}
+
+        def ineffective_once(text, *, direct_answer, conclusion):
+            binder_calls["count"] += 1
+            if binder_calls["count"] == 1:
+                return text, {
+                    "applied": True,
+                    "reason": "simulated_ineffective_targeted_rebind",
+                    "replaced_sections": ["direct_answer", "conclusion"],
+                    "strong_labels_lowered": 0,
+                }
+            return real_binder(
+                text, direct_answer=direct_answer, conclusion=conclusion)
+
+        engine.synthesizer.bind_evidence_first_critical_sections = ineffective_once
+        result = engine.research(PO.QUESTION, depth_mode="MAXIMUM")
+    finally:
+        gemini_reasoning.GeminiReasoning.generate = original
+
+    verification = result.get("verification") or {}
+    checks = verification.get("claim_checks") or {}
+    enforcement = (
+        (verification.get("evidence_first_audit") or {})
+        .get("critical_draft_enforcement") or {}
+    )
+    assert binder_calls["count"] == 2, binder_calls
+    assert enforcement.get("second_stage_applied") is True, enforcement
+    assert enforcement.get("recovery_mode") == \
+        "deterministic_preselected_evidence_surface"
+    assert checks.get("critical_claim_coverage_complete") is True, checks
+    assert int(checks.get("critical_claims") or 0) > 0
+    assert int(checks.get("critical_claims_same_source_ae_passed") or 0) == int(
+        checks.get("critical_claims") or 0)
+    assert int(checks.get("unsupported_critical_claims") or 0) == 0
+    assert int(checks.get("unverifiable_critical_claims") or 0) == 0
+    assert "Lunar basalt contains olivine" not in result.get("answer", "")
+
+
 # ── GUARD 2: "same numbers, alag matlab" support nahi hai ────────────────────
 NUM_CLAIM = ("[ESTABLISHED FACT] LaH10 250 K par 170 GPa pressure mein "
              "superconductivity dikhata hai [S1].")

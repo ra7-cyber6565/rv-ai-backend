@@ -521,6 +521,7 @@ TRISTATE_FIELDS: tuple = (
     "average_relevance", "critical_claim_spans_complete",
     "critical_contradiction_spans_complete",
     "critical_claims_same_source_ae_passed", "claim_verification_achievement",
+    "critical_claim_coverage_complete",
     "evidence_first_required", "critical_claim_preselection_complete",
     "critical_claims_preselected_span_unmatched", "evidence_first_achievement",
     "evidence_graph_complete", "counter_search_performed", "recovery_used",
@@ -672,6 +673,8 @@ def quality_context(pack=None, answer_text: str = "", verification=None,
             (vdict or {}).get("critical_claims_same_source_ae_passed"),
         "claim_verification_achievement":
             (vdict or {}).get("claim_verification_achievement"),
+        "critical_claim_coverage_complete":
+            (vdict or {}).get("critical_claim_coverage_complete"),
         "critical_claim_supporting_source_ids":
             (vdict or {}).get("sources_supporting_critical_claims"),
         "critical_claim_spans_complete":
