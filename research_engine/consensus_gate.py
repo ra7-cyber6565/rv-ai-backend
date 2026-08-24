@@ -37,6 +37,17 @@ patent wale pack mein consensus ke liye patent-ke-ALAWA sources ki ginti dekhi
 jaati hai. Jis pack mein patent hi nahi hai, us par ye shart lagti hi nahi (aur
 purane run/report ka behaviour waisa hi rehta hai).
 
+AATHVI SHART — SIRF TAB JUDTI HAI JAB PACK MEIN USER KA APNA UPLOADED DOCUMENT HO:
+
+  8. user ke documents ke alawa kaafi bahari sources hon
+
+Wajah wahi hai jo patent ki thi, doosre roop mein: user ne khud teen file di —
+ek hi book ke teen scan, ya usi book ka summary + apne notes — to purane
+counting rule mein wo teen "independent origin" ban jaate aur consensus ka
+darwaza khol dete. Un files ko PADHNA sach hai (aur wo answer mein poore label
+ke saath aati hain), par "kitni ALAG jagah se yahi baat mili" ka jawab wo nahi
+deti. Jis pack mein user ka document hi nahi hai, us par ye shart lagti hi nahi.
+
 Module jaan-boojh kar pure-Python hai (koi model, koi network) taaki offline
 test ho sake.
 """
@@ -57,7 +68,10 @@ MIN_INDEPENDENT = 3           # alag-alag origin
 # Patent wale pack mein: patent ke ALAWA itne sources chahiye, warna "sehmati"
 # asal mein patent claims ki ginti ban jaati hai (dekho module docstring, shart 7).
 MIN_SCIENCE_SOURCES = 3
-
+# User ke apne uploaded document wale pack mein: un documents ke ALAWA itne
+# sources chahiye (shart 8). Ek insaan ki di hui files aapas mein swatantra
+# nahi hoti — ek hi book ke teen scan ya usi ke notes ho sakte hain.
+MIN_OUTSIDE_USER_DOCS = 3
 # Opposition search hui ya nahi — ye nishaan query text mein dhoondte hain.
 # "critical" jaan-boojh kar list mein NAHI hai: "critical temperature" ek normal
 # superconductivity term hai, opposition search nahi. Aise false positive se gate
@@ -145,6 +159,30 @@ def _patent_split(pack) -> tuple:
                               getattr(s, "source_type", ""))) == "patent"]
     ids = {id(s) for s in patents}
     return patents, [s for s in sources if id(s) not in ids]
+
+
+def _user_document_split(pack) -> tuple:
+    """
+    (user_uploaded_docs, baaki_sources) — pack se, andaaze se nahi.
+
+    Naye pack ke paas `document_sources()` hai; purane/fake pack objects par
+    source_type == "document" dekh liya jaata hai (yahi wo type hai jo
+    `EvidenceEngine.records_from_retrieval()` user ke upload par lagata hai).
+    """
+    sources = list(getattr(pack, "sources", None) or [])
+    getter = getattr(pack, "document_sources", None)
+    user_docs = None
+    if callable(getter):
+        try:
+            user_docs = list(getter() or [])
+        except Exception:      # pragma: no cover - defensive
+            user_docs = None
+    if user_docs is None:
+        user_docs = [s for s in sources
+                     if str(getattr(getattr(s, "source_type", ""), "value",
+                                    getattr(s, "source_type", ""))) == "document"]
+    ids = {id(s) for s in user_docs}
+    return user_docs, [s for s in sources if id(s) not in ids]
 
 
 def _dedup_done(pack) -> bool:
@@ -309,5 +347,22 @@ def evaluate(pack, contradictions: Optional[Sequence] = None,
             f"'sehmati' nahi banti.",
             ok=(f"Patent ke alawa {len(science)} scientific source hain "
                 f"({len(patent_sources)} patent sirf context ke liye)."),
+        )
+
+    # 8. (SIRF user ke apne uploaded document wale pack par) bahar se bhi
+    # kaafi sources. Ek insaan ki di hui teen file "teen alag jagah" nahi hai —
+    # wo ek hi book ke teen scan ya usi ke notes ho sakti hain. Padhna sach
+    # hai, sehmati ka saboot nahi.
+    user_docs, outside = _user_document_split(pack)
+    if user_docs:
+        result.add(
+            "sources_beyond_user_documents",
+            len(outside) >= MIN_OUTSIDE_USER_DOCS,
+            f"Is pack mein {len(user_docs)} source user ka khud ka uploaded "
+            f"document hai par uske alawa sirf {len(outside)} source, chahiye "
+            f"{MIN_OUTSIDE_USER_DOCS}. Apni hi di hui copies se 'sehmati' nahi "
+            f"banti.",
+            ok=(f"User ke {len(user_docs)} document ke alawa {len(outside)} "
+                f"bahari source bhi hain."),
         )
     return result

@@ -25,7 +25,16 @@ header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:
 .stages{margin-top:6px}.strow{display:flex;gap:9px;padding:5px 0;border-bottom:1px dashed #f0f0f0;font-size:13px}.strow:last-child{border-bottom:0}.strow .mk{flex:0 0 18px;text-align:center}.strow .nm{font-weight:650}.strow .nt{color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}.strow.pend{color:var(--muted)}.strow.pend .nm{font-weight:600}.strow.now .nm{color:var(--brand)}
 .card{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin:8px 0}.card h5{margin:0 0 5px;font-size:13px}.kv{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
 .plain{line-height:1.66;overflow-wrap:anywhere}.plain p{margin:0 0 10px}.empty{color:var(--muted);font-size:13px;background:var(--soft);border:1px dashed var(--line);border-radius:10px;padding:10px 11px}
-footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
+footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 7px;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
+/* "Apni PDF/notes do" — file user ke apne private session mein jaati hai, aur
+   uska label answer mein alag rehta hai. Yahan koi capability URL mein nahi. */
+.attach{width:38px;height:38px;flex:0 0 auto;border:0;border-radius:11px;background:var(--soft);color:#4b5563;font-size:16px;cursor:pointer;margin-right:2px}.attach:hover{background:#eef2f7}.attach:disabled{opacity:.45;cursor:default}.attach .n{font-size:11px;font-weight:750;margin-left:1px}
+.docs{max-width:var(--max);margin:0 auto 8px;border:1px solid var(--line);background:var(--soft);border-radius:15px;padding:11px 13px}.dochead{display:flex;align-items:center;gap:8px;font-size:13px}.dochead .x{margin-left:auto;border:0;background:transparent;font-size:14px;color:var(--muted);cursor:pointer}
+.docnote{font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:5px}
+.docbtns{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.dbtn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 11px;font:inherit;font-size:12.5px;cursor:pointer}.dbtn:hover{border-color:var(--brand)}.dbtn.go{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:650}.dbtn:disabled{opacity:.45;cursor:default}
+.pastebox{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;margin-top:8px;font:inherit;font-size:13px;line-height:1.5;max-height:150px}
+.pname{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;font:inherit;font-size:12.5px;flex:1;min-width:150px}
+.doclist{margin-top:9px}.doc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:12.5px;overflow-wrap:anywhere}.doc b{font-weight:650}.doc .dm{color:var(--muted);font-size:11.5px;margin-top:2px}.doc.err{border-color:#f5c6c2;background:#fdeceb;color:#8a2018}.doc.err .dm{color:#8a2018}
 @media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
@@ -52,7 +61,19 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
   </section>
 </main></div>
 <footer>
-  <div class="composer"><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
+  <section class="docs" id="docs" hidden>
+    <div class="dochead"><strong>Tumhare diye documents</strong><button type="button" class="x" id="docsclose" title="Panel band karo" aria-label="Panel band karo">✕</button></div>
+    <div class="docnote" id="docnote">Copyright book ki poori copy internet se nahi laayi jaati — par tumhare paas jo PDF/notes/explanation already hai, wo yahan do to research usko padhegi. Ye file sirf is tab ki private session mein jaati hai, iska koi public link nahi banta, answer mein iska label alag rehta hai ("tumhara uploaded document"), aur akela uploaded document kisi baat ko VERIFIED nahi banata. Page refresh karne par session nayi ban jaati hai, tab files dobara deni hongi.</div>
+    <div class="docbtns">
+      <button type="button" class="dbtn" id="pickfile">File chuno (PDF, DOCX, TXT, MD, HTML, VTT, SRT)</button>
+      <button type="button" class="dbtn" id="pastetoggle">Explanation text paste karo</button>
+    </div>
+    <textarea class="pastebox" id="pastebox" rows="3" placeholder="Kisi book ka explanation, summary ya apne notes yahan paste karo…" hidden></textarea>
+    <div class="docbtns" id="pasteactions" hidden><input class="pname" id="pastename" type="text" maxlength="80" placeholder="Is text ka naam (jaise: geeta-explanation)"><button type="button" class="dbtn go" id="pastesend">Ye text do</button></div>
+    <input id="fileinput" type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.text,.html,.htm,.vtt,.srt">
+    <div class="doclist" id="doclist"></div>
+  </section>
+  <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
   <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
 </footer>
 <script>
@@ -122,6 +143,79 @@ async function projectPost(url,makePayload,timeoutMs=0){
   }
   throw new Error("project session recovery failed");
 }
+
+// ── "Apni PDF/notes do" ──────────────────────────────────────────────────────
+// Upload usi private session mein jaata hai jisme sawaal jaata hai, isliye
+// orchestrator._document_records() isi project ka vector collection padhta hai.
+// FormData par Content-Type browser khud boundary ke saath lagata hai, isliye
+// yahan projectHeaders() nahi — sirf capability header. Capability kabhi URL
+// mein nahi jaati, aur file kahin public nahi hoti.
+const DOC_EXT=[".pdf",".docx",".txt",".md",".markdown",".text",".html",".htm",".vtt",".srt"];
+const MAX_DOC_BYTES=60*1024*1024;
+const givenDocs=[];
+let uploading=false;
+const docs=$("#docs"),doclist=$("#doclist"),attach=$("#attach"),fileinput=$("#fileinput"),
+      pastebox=$("#pastebox"),pasteactions=$("#pasteactions"),pastename=$("#pastename");
+function docExt(name){const i=String(name||"").lastIndexOf(".");return i<0?"":String(name).slice(i).toLowerCase();}
+function renderDocs(){
+  doclist.innerHTML=givenDocs.map(d=>'<div class="doc'+(d.bad?" err":"")+'"><b>'+esc(d.name)+'</b><div class="dm">'+esc(d.state)+'</div></div>').join("");
+  const ready=givenDocs.filter(d=>d.ready).length;
+  attach.innerHTML="📎"+(ready?'<span class="n">'+esc(String(ready))+'</span>':"");
+  attach.title=ready?ready+" document diya hua hai":"Apni PDF/notes do";
+}
+async function uploadDoc(blob,name){
+  const entry={name:name,state:"Bheja ja raha hai…",ready:false,bad:false};
+  givenDocs.push(entry);renderDocs();
+  if(!DOC_EXT.includes(docExt(name))){entry.bad=true;entry.state="Ye format supported nahi hai. Supported: "+DOC_EXT.join(", ");renderDocs();return;}
+  if(!blob.size){entry.bad=true;entry.state="File khaali hai — padhne layak kuch nahi mila.";renderDocs();return;}
+  if(blob.size>MAX_DOC_BYTES){entry.bad=true;entry.state="File 60 MB se badi hai; chhote hisson mein do.";renderDocs();return;}
+  try{
+    let out={r:{ok:false,status:0},data:{},aborted:false};
+    for(let attempt=0;attempt<2;attempt++){
+      await ensureSession();
+      const fd=new FormData();
+      fd.append("file",blob,name);fd.append("project_id",PROJECT.id);fd.append("use_ocr","true");
+      out=await jsonFetch(API+"/api/v1/upload-document",{method:"POST",headers:{"X-Project-Token":PROJECT.token},body:fd},300000);
+      if(out.r.status!==404||attempt===1)break;
+      resetProjectSession();
+    }
+    const {r,data}=out;
+    if(!r.ok){entry.bad=true;entry.state=clientFailure(r.status,data,"Upload",out.aborted);renderDocs();return;}
+    const chunks=Number(data.chunks||0);
+    if(!chunks){entry.bad=true;entry.state="Process ho gayi, par padhne layak text nahi mila (scan-only ya khaali file). Research isko source nahi banayegi.";renderDocs();return;}
+    const notes=(Array.isArray(data.notes)?data.notes:[]).filter(Boolean).map(String);
+    entry.ready=true;
+    entry.state="Tayyar — "+chunks+" chunk"+(Number(data.chars_extracted||0)?" • "+Number(data.chars_extracted)+" characters":"")
+      +(data.kind?" • "+String(data.kind):"")+(notes.length?" • "+notes.join("; "):"")
+      +". Answer mein ye tumhare uploaded document ke label ke saath aayega.";
+  }catch(e){entry.bad=true;entry.state=clientFailure(0,{},"Upload");}
+  renderDocs();
+}
+async function uploadMany(items){
+  // Ek-ek karke, taaki upload rate limit aur backend OCR load na phate.
+  if(uploading||!items.length)return;
+  uploading=true;attach.disabled=true;
+  try{for(const it of items)await uploadDoc(it.blob,it.name);}
+  finally{uploading=false;attach.disabled=IS_FILE;}
+}
+attach.addEventListener("click",()=>{docs.hidden=!docs.hidden;});
+$("#docsclose").addEventListener("click",()=>{docs.hidden=true;});
+$("#pickfile").addEventListener("click",()=>{if(!IS_FILE)fileinput.click();});
+fileinput.addEventListener("change",()=>{
+  const items=Array.from(fileinput.files||[]).map(f=>({blob:f,name:f.name||"upload"}));
+  fileinput.value="";uploadMany(items);
+});
+$("#pastetoggle").addEventListener("click",()=>{
+  const show=pastebox.hidden;pastebox.hidden=!show;pasteactions.hidden=!show;if(show)pastebox.focus();
+});
+$("#pastesend").addEventListener("click",()=>{
+  const text=pastebox.value.trim();if(!text||IS_FILE)return;
+  const clean=String(pastename.value||"").trim().replace(/[^A-Za-z0-9 ._-]/g,"").trim().slice(0,60);
+  const base=clean||("pasted-note-"+(givenDocs.length+1));
+  const name=base.toLowerCase().endsWith(".txt")?base:base+".txt";
+  pastebox.value="";pastename.value="";
+  uploadMany([{blob:new Blob([text],{type:"text/plain"}),name:name}]);
+});
 
 async function runChat(message,el){thinking(el);try{let out={r:{ok:false,status:0},data:{},aborted:false};for(let attempt=0;attempt<2;attempt++){out=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}),55000);if(out.r.ok||![0,502,503,504].includes(Number(out.r.status||0))||attempt===1)break;await sleep(1500);}const {r,data}=out;if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat",out.aborted));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
 
@@ -305,7 +399,11 @@ function sourcesHtml(split,data){
   let out="";
   if(!list.length)out=emptyBox("Is run mein koi cited source record nahi mila.");
   else out=list.slice(0,60).map(s=>{const href=safeHttpUrl(s.url),url=href?esc(href):"",title=esc(String(s.title||s.url||"Source")),read=esc(String(s.access_depth||s.reading_level||""));
-    return '<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Kitna padha: '+read+'</div>':'')+(s.access_depth_note?'<div class="meta">'+esc(String(s.access_depth_note))+'</div>':'')+(s.patent_evidence_note?'<div class="meta">'+esc(String(s.patent_evidence_note))+'</div>':'')+'</div>';}).join("");
+    // User ka apna uploaded document: iska koi public link nahi hota, isliye
+    // anchor bhi nahi banta (chahe payload mein galti se url aa jaaye), aur
+    // label saaf likha jaata hai ki ye tumhari di hui copy hai.
+    const mine=String(s.source_type||"")==="document"||String(s.connector||"")==="user_pdf",link=mine?"":url;
+    return '<div class="src">'+(link?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+link+'">'+title+'</a>':'<strong>'+title+'</strong>')+(mine?'<div class="meta">Tumhara diya document — ye app ne internet se nahi laaya, iska koi public link nahi hai. Akela ye kisi baat ko VERIFIED ya "sab sehmat hain" nahi banata.</div>':'')+(read?'<div class="meta">Kitna padha: '+read+'</div>':'')+(s.access_depth_note?'<div class="meta">'+esc(String(s.access_depth_note))+'</div>':'')+(s.patent_evidence_note?'<div class="meta">'+esc(String(s.patent_evidence_note))+'</div>':'')+'</div>';}).join("");
   const raw=sectionHtml(split,TAB_SECTIONS.sources);
   return out+(raw?'<details class="process"><summary>Answer ka Sources section (jaisa likha gaya)</summary>'+raw+'</details>':"");
 }
@@ -313,7 +411,9 @@ function sourcesHtml(split,data){
 async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");const completed=mode==="QUICK"?await runChat(message,r):await runResearch(message,r);if(!completed&&history.length&&history[history.length-1]?.role==="user")history.pop();busy=false;send.disabled=false;input.focus();}
 function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);
 document.querySelectorAll(".modes button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.mode;$("#hint").textContent=HINT[mode];}));document.addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){input.value=c.dataset.q;resize();submit();}});
-if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");}
+if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");
+  attach.disabled=true;attach.title="File:// mode mein upload available nahi hai";
+  $("#docnote").textContent="Ye page file se khula hai, isliye document dena band hai. Backend server ke URL se page kholo.";}
 input.focus();
 </script>
 </body>

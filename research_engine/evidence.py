@@ -256,6 +256,19 @@ class EvidenceEngine:
         if check_reasoning and not pack.reasoning_complete:
             return (f"reasoning adhoora raha "
                     f"({pack.reasoning_done}/{pack.reasoning_planned} pass poore)")
+        # User ke apne uploaded document CORROBORATION nahi hain. Wo ek hi insaan
+        # ki di hui copies ho sakti hain — ek hi book ke teen scan, ya apne hi
+        # notes. Unko padhna sach hai (`full_text_read_count` unhe ginta hai),
+        # par "kitni alag jagah se yahi baat mili" ka jawab wo nahi dete. Isliye
+        # top label ke liye kam se kam DO alag BAHARI origin chahiye; user ke
+        # document sirf gehrai badhate hain, bharosa nahi.
+        external_keys = {s.independence_key for s in pack.sources
+                         if s.source_type != SourceType.DOCUMENT}
+        if len(external_keys) < 2:
+            uploaded = len(pack.document_sources())
+            return (f"sirf {len(external_keys)} bahari independent origin mila "
+                    f"({uploaded} source tumhara khud ka uploaded document hai) — "
+                    f"apni hi di hui copy se 'verified' nahi kaha ja sakta")
         claim_block = self._claim_boundary_reason(label_report, claim_checks)
         if claim_block:
             return claim_block
