@@ -249,13 +249,31 @@ class _MonkeyPatch:
 #
 # pytest ko import nahi kar sakte (sandbox mein install nahi hai), isliye uska
 # shape duck-type karte hain:
-#   marker   : func._pytestfixturefunction  (.scope / .params / .autouse / .name)
-#   asli fn  : func.__pytest_wrapped__.obj  (pytest <= 8.3.x)
-#              func._fixture_function       (pytest >= 8.4)
+#   marker   : func._pytestfixturefunction  (legacy wrapper shape)
+#              func._fixture_function_marker (pytest 9 FixtureFunctionDefinition)
+#              dono par .scope/.params/.autouse/.name
+#   asli fn  : func.__pytest_wrapped__.obj  (legacy wrapper)
+#              func._fixture_function       (pytest 9 FixtureFunctionDefinition)
 #              func.__wrapped__             (functools.wraps se)
 # Jo shape samajh na aaye (parametrized ya async fixture, dynamic scope) uska
 # test SKIP hota hai — naam aur wajah ke saath, chupaya nahi jaata.
-_FIXTURE_MARKER = "_pytestfixturefunction"
+_FIXTURE_MARKERS = ("_pytestfixturefunction", "_fixture_function_marker")
+
+
+def _fixture_marker(obj: Any) -> Any:
+    """Return fixture metadata for legacy pytest wrappers or pytest 9 definitions.
+
+    Pytest <=8-style wrappers expose ``_pytestfixturefunction``.  Pytest 9's
+    ``FixtureFunctionDefinition`` exposes ``_fixture_function_marker`` instead,
+    while the underlying callable is available as ``_fixture_function`` (already
+    handled by ``_unwrap_fixture`` below).  Keep both shapes: the zero-dependency
+    fake fixture probe still exercises the legacy contract.
+    """
+    for attr in _FIXTURE_MARKERS:
+        marker = getattr(obj, attr, None)
+        if marker is not None:
+            return marker
+    return None
 
 
 class _FixtureError(Exception):
@@ -306,7 +324,7 @@ def _collect_fixtures(module: Any) -> Dict[str, _FixtureDef]:
     """Module ke saare `@pytest.fixture` dhoondho (marker duck-typing se)."""
     found: Dict[str, _FixtureDef] = {}
     for order, (attr, obj) in enumerate(list(vars(module).items())):
-        marker = getattr(obj, _FIXTURE_MARKER, None)
+        marker = _fixture_marker(obj)
         if marker is None or not callable(obj):
             continue
         name = str(getattr(marker, "name", None) or attr)

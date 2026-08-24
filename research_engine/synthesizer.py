@@ -91,6 +91,25 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
         self.offline_reasoner = OfflineEvidenceReasoner()
         self.last_presentation_check: Dict = {}
 
+    def prompt(self, question: str, analysis: str, critique: str,
+               hypothesis_text: str, pack: EvidencePack, plan: Dict,
+               memory_note: str = "", evidence_first_block: str = "") -> str:
+        """Build the legacy human-first prompt, then seal the pre-draft contract.
+
+        P0-B builds the evidence manifest before model prose exists. The
+        orchestrator passes that exact block here during synthesis. Appending it
+        *after* the broad legacy source/context prompt keeps the preselection
+        contract as the final instruction boundary and avoids modifying the
+        Claude-owned formatter itself.
+        """
+        prompt = super().prompt(
+            question, analysis, critique, hypothesis_text, pack, plan, memory_note
+        )
+        block = str(evidence_first_block or "").strip()
+        if not block:
+            return prompt
+        return f"{prompt.rstrip()}\n\n{block}"
+
     def extractive_summary(self, question: str, pack: EvidencePack) -> str:
         """No-model fallback used by the orchestrator when every AI pass is empty.
 
