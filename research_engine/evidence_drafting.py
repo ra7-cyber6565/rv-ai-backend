@@ -38,6 +38,25 @@ def _normalise_text(value: object) -> str:
     return " ".join(text.split()).strip()
 
 
+_GENERIC_LOCATOR_MARKERS = (
+    "exact page/section unavailable", "exact page ka pata nahi",
+    "locator unavailable", "locator unknown", "unknown locator",
+)
+
+
+def _locator_key(value: object) -> str:
+    """Stable locator identity; whitespace-only formatting cannot spoof a mismatch."""
+    return "".join(_normalise_text(value).lower().split())
+
+
+def _exact_locator_available(value: object) -> bool:
+    """Strong preselection needs a concrete page/section/paragraph locator."""
+    locator = _normalise_text(value).lower()
+    if not locator:
+        return False
+    return not any(marker in locator for marker in _GENERIC_LOCATOR_MARKERS)
+
+
 def passage_sha256(value: object) -> str:
     """Stable hash used for audit; whitespace/control formatting is normalised."""
     return hashlib.sha256(_normalise_text(value).encode("utf-8")).hexdigest()
@@ -84,6 +103,7 @@ def _eligibility(
     passage: str,
     *,
     span_kind: str = "passage",
+    locator: str = "",
     passage_provenance: str = "",
     read_level_at_capture: str = "",
 ) -> Tuple[bool, List[str], Dict[str, str]]:
@@ -108,6 +128,9 @@ def _eligibility(
     # exact Passage record instead.
     if span_kind == "snippet":
         reasons.append("snippet_not_strong_evidence_span")
+
+    if span_kind == "passage" and not _exact_locator_available(locator):
+        reasons.append("exact_locator_missing")
 
     captured = (read_level_at_capture or "").strip().lower()
     if span_kind == "passage" and captured and captured != "full_text":
@@ -304,7 +327,8 @@ def build_evidence_draft_manifest(
     prepared: List[Tuple[Tuple[int, float, float, float], EvidenceDraftSpan]] = []
     for source, passage, locator, kind, score, provenance, captured_level in candidates:
         eligible, reasons, checks = _eligibility(
-            source, passage, span_kind=kind, passage_provenance=provenance,
+            source, passage, span_kind=kind, locator=locator,
+            passage_provenance=provenance,
             read_level_at_capture=captured_level)
         span = EvidenceDraftSpan(
             span_id="",
@@ -371,9 +395,14 @@ def audit_claims_against_manifest(
         locator = str(canonical.get("locator") or "")
         norm_claim = _normalise_text(passage)
         matched: Optional[EvidenceDraftSpan] = None
-        if source_id and norm_claim:
+        claim_locator_key = _locator_key(locator)
+        if source_id and norm_claim and _exact_locator_available(locator):
             for segment in spans:
                 if segment.source_id != source_id or not segment.strong_claim_eligible:
+                    continue
+                if not _exact_locator_available(segment.locator):
+                    continue
+                if _locator_key(segment.locator) != claim_locator_key:
                     continue
                 if norm_claim in _normalise_text(segment.passage):
                     matched = segment
