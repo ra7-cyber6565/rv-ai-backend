@@ -38,6 +38,24 @@ global literature completeness or real-world hypothesis success probability.
 Those claims remain prohibited. A hypothesis needs independent prospective
 tests/replication before any empirical success rate can be calculated.
 
+## Exact-revision live proof
+
+The normal live release gate remains backward-compatible and defaults to
+`MAXIMUM`. An operator with an explicitly confirmed zero-cost model layer can
+prove this MARATHON contract on a clean checkout with:
+
+```powershell
+.\RUN_LIVE_ZERO_COST_GATE.ps1 -Execute `
+  -DepthMode MARATHON `
+  -DataRoot "D:\InfinityResearchAI" `
+  -Receipt "D:\InfinityResearchAI\audit\live_marathon_gate_latest.json"
+```
+
+The sanitized receipt stores only the requested/reported mode, structural
+counts, process score/target/gaps, safe status identifiers and an answer hash.
+It never stores the question, answer, source text/URLs, credentials or private
+capability tokens.
+
 ## Saturation honesty
 
 The engine can report a bounded saturation signal when the last two configured

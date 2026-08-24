@@ -36,6 +36,7 @@ RAW_PUBLIC_TOKENS = (
     "traceback", "protobuf", "permissiondenied", "invalidargument",
     "generaterequestsperday", "<class", "api_key=",
 )
+LIVE_DEPTH_MODES = ("MAXIMUM", "MARATHON")
 
 
 def _truthy(value: object) -> bool:
@@ -181,11 +182,23 @@ def preflight(env: Mapping[str, str], *, validate_storage: bool = False) -> Dict
     }
 
 
-def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
+def evaluate_result(
+    result: Mapping[str, Any],
+    *,
+    required_depth_mode: str | None = None,
+) -> Dict[str, Any]:
+    requested_mode = str(required_depth_mode or "").upper().strip()
+    if requested_mode and requested_mode not in LIVE_DEPTH_MODES:
+        raise ValueError("unsupported live-gate depth mode")
     coverage = result.get("coverage") or {}
     verification = result.get("verification") or {}
     claim_checks = verification.get("claim_checks") or {}
     discovery = result.get("discovery") or {}
+    assurance = (
+        result.get("research_assurance")
+        or coverage.get("research_assurance")
+        or {}
+    )
     answer = str(result.get("answer") or "")
     warnings = " ".join(str(item) for item in (result.get("warnings") or []))
     public = (answer + " " + warnings).lower()
@@ -341,12 +354,78 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         ("human_review_required", discovery.get("human_review_required") is True,
          str(discovery.get("human_review_required"))),
     ]
+    if requested_mode:
+        reported_mode = str(coverage.get("mode") or "").upper().strip()
+        checks.insert(0, (
+            "depth_mode_matches",
+            reported_mode == requested_mode,
+            f"requested={requested_mode}, reported={reported_mode or 'missing'}",
+        ))
+
+    process_percent = float(
+        assurance.get("research_process_coverage_percent") or 0.0
+    )
+    process_target = int(assurance.get("target_percent") or 0)
+    mandatory_gaps = [
+        value for value in (
+            _safe_identifier(item) for item in (assurance.get("mandatory_gaps") or [])
+        ) if value
+    ][:16]
+    components = {
+        str(row.get("key") or ""): row
+        for row in (assurance.get("components") or [])
+        if isinstance(row, Mapping) and row.get("key")
+    }
+    all_rounds = components.get("all_search_rounds") or {}
+    not_probability = str(assurance.get("not_a_probability") or "").lower()
+    if requested_mode == "MARATHON":
+        checks.extend([
+            (
+                "marathon_process_target",
+                assurance.get("active") is True
+                and str(assurance.get("mode") or "").upper() == "MARATHON"
+                and process_target >= 90
+                and process_percent >= process_target
+                and assurance.get("target_met") is True
+                and not mandatory_gaps,
+                (
+                    f"{process_percent:.1f}%/{process_target}% target; "
+                    f"mandatory_gaps={len(mandatory_gaps)}"
+                ),
+            ),
+            (
+                "marathon_all_rounds",
+                all_rounds.get("mandatory") is True
+                and all_rounds.get("passed") is True
+                and int(all_rounds.get("achieved") or 0)
+                == int(all_rounds.get("target") or 0)
+                and int(all_rounds.get("target") or 0) >= 5,
+                (
+                    f"{int(all_rounds.get('achieved') or 0)}/"
+                    f"{int(all_rounds.get('target') or 0)} required rounds"
+                ),
+            ),
+            (
+                "marathon_not_a_probability",
+                all(token in not_probability for token in (
+                    "truth probability", "profitability", "success probability",
+                )),
+                "process coverage is explicitly not truth/profit/success probability",
+            ),
+            (
+                "marathon_no_exhaustiveness_or_success_claim",
+                assurance.get("global_exhaustiveness_claimed") is False
+                and assurance.get("hypothesis_success_probability_claimed") is False,
+                "no global exhaustion or hypothesis success-probability claim",
+            ),
+        ])
     rows = [{"name": name, "passed": bool(passed), "detail": detail}
             for name, passed, detail in checks]
     return {
         "passed": all(row["passed"] for row in rows),
         "checks": rows,
         "summary": {
+            "depth_mode": requested_mode or str(coverage.get("mode") or ""),
             "status": str(result.get("status") or ""),
             "sources": len(sources),
             "on_topic_sources": int(coverage.get("on_topic_sources") or 0),
@@ -378,6 +457,22 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
                 critical_enforcement.get("final_coverage_complete") is True
                 or critical_coverage_ok),
             "discovery_status": str(discovery.get("status") or ""),
+            "research_process_coverage_percent": process_percent,
+            "research_process_target_percent": process_target,
+            "research_process_target_met": assurance.get("target_met") is True,
+            "research_process_mandatory_gaps": mandatory_gaps,
+            "research_process_status": _safe_identifier(
+                assurance.get("status"), default=""
+            ),
+            "research_saturation_status": _safe_identifier(
+                (assurance.get("saturation") or {}).get("status"), default=""
+            ),
+            "global_exhaustiveness_claimed": (
+                assurance.get("global_exhaustiveness_claimed") is True
+            ),
+            "hypothesis_success_probability_claimed": (
+                assurance.get("hypothesis_success_probability_claimed") is True
+            ),
             "answer_sha256": hashlib.sha256(answer.encode("utf-8")).hexdigest(),
             "failure_kind": _safe_identifier(
                 result.get("failure_kind"), default="unclassified"
@@ -427,6 +522,7 @@ def _failure_receipt(
         "duration_seconds": round(time.time() - started, 2),
         "code_revision": str(ready.get("code_revision") or ""),
         "repository_clean": bool(ready.get("repository_clean") is True),
+        "depth_mode": str(ready.get("depth_mode") or ""),
         "zero_cost_preflight": dict(ready),
         "passed": False,
         "checks": [{
@@ -450,12 +546,15 @@ def _write_receipt_safely(path: Path, payload: Mapping[str, Any]) -> bool:
         return False
 
 
-def run_live() -> Dict[str, Any]:
+def run_live(depth_mode: str = "MAXIMUM") -> Dict[str, Any]:
     from research_engine.orchestrator import DeepResearchEngine
 
+    mode = str(depth_mode or "").upper().strip()
+    if mode not in LIVE_DEPTH_MODES:
+        raise ValueError("unsupported live-gate depth mode")
     project = f"live_gate_{int(time.time())}"
     engine = DeepResearchEngine(project_id=project, enable_kg=False, enable_memory=False)
-    return engine.research(LIVE_QUESTION, depth_mode="MAXIMUM", job_id=project)
+    return engine.research(LIVE_QUESTION, depth_mode=mode, job_id=project)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -465,6 +564,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--data-root",
         help="Explicit absolute runtime-data root (safe to pass; credentials still come only from private env).",
+    )
+    parser.add_argument(
+        "--depth-mode",
+        choices=LIVE_DEPTH_MODES,
+        default="MAXIMUM",
+        help="Bounded live research preset to prove (default: MAXIMUM).",
     )
     parser.add_argument("--receipt", help="Non-secret JSON receipt path.")
     args = parser.parse_args(argv)
@@ -476,6 +581,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     code = repository_identity(ROOT)
     ready["code_revision"] = str(code.get("revision") or "")
     ready["repository_clean"] = bool(code.get("clean") is True)
+    ready["depth_mode"] = args.depth_mode
     if not code.get("available"):
         ready["blockers"].append("current Git revision could not be verified")
     elif code.get("clean") is not True:
@@ -485,6 +591,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     for blocker in ready["blockers"]:
         print(f"- {blocker}")
     print(f"Model layers usable now: {ready['model_layers_usable_now']}")
+    print(f"Live depth mode: {args.depth_mode}")
     if not ready["ready"]:
         return 2
     if not args.execute:
@@ -494,7 +601,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     started = time.time()
     path = _receipt_path(args.receipt, os.environ)
     try:
-        result = run_live()
+        result = run_live(args.depth_mode)
     except Exception:  # noqa: BLE001 - raw provider exceptions must stay private
         receipt = _failure_receipt(
             ready=ready,
@@ -507,7 +614,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     try:
-        evaluation = evaluate_result(result)
+        evaluation = evaluate_result(
+            result,
+            required_depth_mode=args.depth_mode,
+        )
     except Exception:  # noqa: BLE001 - never leak unexpected result content
         receipt = _failure_receipt(
             ready=ready,
@@ -525,6 +635,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         "duration_seconds": round(time.time() - started, 2),
         "code_revision": str(ready.get("code_revision") or ""),
         "repository_clean": bool(ready.get("repository_clean") is True),
+        "depth_mode": args.depth_mode,
         "zero_cost_preflight": ready,
         "passed": evaluation["passed"],
         "checks": evaluation["checks"],
