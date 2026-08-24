@@ -299,6 +299,7 @@ def _project_isolation() -> AuditCheck:
     agent = _read("api/agent_routes.py")
     jobs = _read("api/job_routes.py")
     rag = _read("api/routes.py")
+    exam = _read("api/exam_routes.py")
     web = _read("web/index.html")
     limiter = _read("utils/request_guard.py")
 
@@ -317,6 +318,8 @@ def _project_isolation() -> AuditCheck:
         (agent, "require_project_access(request.project_id, x_project_token)", "chat/deep guard"),
         (jobs, "require_project_access(request.project_id, x_project_token)", "job-create guard"),
         (rag, "require_project_access(", "RAG/upload namespace guard"),
+        (exam, "require_project_access(request.project_id, x_project_token)",
+         "exam-analysis namespace guard"),
         (web, 'API+"/api/v1/session"', "web session creation"),
         (web, '"X-Project-Token":PROJECT.token', "web project bearer header"),
         (web, "async function projectPost", "web stale-session recovery wrapper"),
@@ -396,6 +399,7 @@ def run_audit() -> AuditReport:
         "main.py",
         "api/job_routes.py",
         "api/session_routes.py",
+        "api/exam_routes.py",
         "research_engine/orchestrator.py",
         "research_engine/source_discovery.py",
         "research_engine/content_fetcher.py",
@@ -411,6 +415,8 @@ def run_audit() -> AuditReport:
         "research_engine/advanced_discovery.py",
         "research_engine/specialist_domains.py",
         "research_engine/multilingual_research.py",
+        "research_engine/exam_intelligence.py",
+        "docs/EXAM_INTELLIGENCE.md",
         "research_engine/patents.py",
         "research_engine/connectors/patent_connector.py",
         "scripts/run_live_zero_cost_gate.py",
@@ -447,6 +453,7 @@ def run_audit() -> AuditReport:
         "tests/test_unverified_semantics.py",
         "tests/test_advanced_discovery.py",
         "tests/test_specialist_research.py",
+        "tests/test_exam_intelligence.py",
         "tests/test_patents.py",
         "tests/test_chat_resilience.py",
         "tests/test_live_zero_cost_gate.py",
@@ -463,6 +470,7 @@ def run_audit() -> AuditReport:
             "protect_free_quota",
             "include_router",
             "reasoning_status",
+            "include_router(exam_router",
         ),
         _release_honesty(),
         _contains(
@@ -502,6 +510,15 @@ def run_audit() -> AuditReport:
             '"original_preserved": True',
             '"paywall_or_copyright_bypass": False',
             "Glossary-assisted search is not full-text translation",
+        ),
+        _contains(
+            "research_engine/exam_intelligence.py",
+            "class ExamIntelligenceEngine",
+            "expanding-window temporal holdout",
+            "CALIBRATED_ON_WALK_FORWARD_HISTORY",
+            "APP-ORIGINAL EXAM HYPOTHESIS",
+            "HEURISTIC STUDY PRIORITY — NOT PROBABILITY",
+            "ExclusiveProcessFileLock",
         ),
         _contains(
             "research_engine/planner.py",
