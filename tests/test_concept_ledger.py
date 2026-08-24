@@ -645,7 +645,57 @@ def test_save_leaves_no_temp_file_behind():
         store = led(path)
         store.learn("muqaddimah", G.KIND_WORK, lane=G.LANE_PRIMARY)
         assert store.save() is True
-        assert os.listdir(store.directory) == [os.path.basename(store.path)]
+        names = os.listdir(store.directory)
+        assert os.path.basename(store.path) in names
+        assert not any(name.startswith("ledger_") for name in names)
+
+
+def test_two_stale_workers_merge_different_concepts_instead_of_last_writer_wins():
+    """Purana bug: doosre worker ka save pehle worker ka naam mita deta tha."""
+    with tmpdir() as path:
+        first, second = led(path), led(path)
+        assert first.load()["concepts"] == {}
+        assert second.load()["concepts"] == {}       # dono stale snapshot
+        first.learn("muqaddimah", G.KIND_WORK, lane=G.LANE_PRIMARY)
+        second.learn("zohar", G.KIND_WORK, lane=G.LANE_PRIMARY)
+        assert first.save() is True
+        assert second.save() is True
+        assert set(led(path).load()["concepts"]) == {"muqaddimah", "zohar"}
+
+
+def test_two_stale_workers_merge_counts_for_the_same_concept():
+    """Merge sirf keys ka nahi; confirmation count bhi lost-update safe hai."""
+    with tmpdir() as path:
+        first, second = led(path), led(path)
+        first.load()
+        second.load()
+        first.learn("muqaddimah", G.KIND_WORK, lane=G.LANE_PRIMARY)
+        second.learn("muqaddimah", G.KIND_WORK, lane=G.LANE_PRIMARY)
+        assert first.save() is True
+        assert second.save() is True
+        entry = led(path).load()["concepts"]["muqaddimah"]
+        assert entry["seen"] == 2
+        assert entry["lanes"][G.LANE_PRIMARY] == 2
+
+
+def test_cached_reader_refreshes_after_another_worker_saves():
+    """Long-running Railway worker ko doosre worker ki nayi memory dikhe."""
+    with tmpdir() as path:
+        reader, writer = led(path), led(path)
+        assert reader.hints("muqaddimah me sabhyata")["concepts"] == []
+        teach(writer, "muqaddimah")
+        assert writer.save() is True
+        assert reader.hints("muqaddimah me sabhyata")["concepts"]
+
+
+def test_single_huge_token_cannot_break_the_byte_bound():
+    with tmpdir() as path:
+        store = led(path)
+        result = store.learn("x" * (G.MAX_CONCEPT_CHARS + 1), G.KIND_WORK,
+                             lane=G.LANE_PRIMARY)
+        assert result["stored"] is False
+        assert result["reason"] == "too_long"
+        assert store.load()["concepts"] == {}
 
 
 def test_ledger_stays_bounded_and_keeps_the_names_it_saw_most():

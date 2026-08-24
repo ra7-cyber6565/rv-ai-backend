@@ -35,11 +35,13 @@ import json
 import os
 import re
 import tempfile
+import threading
 import time
 from typing import Dict, Iterable, List, Optional, Sequence
 
 from . import classics as CL
 from . import lenses as L
+from utils.process_lock import ExclusiveProcessFileLock, ProcessLockError
 
 
 # ── shabdkosh: entry me kya-kya reh sakta hai ────────────────────────────────
@@ -58,6 +60,12 @@ LANES = (LANE_PRIMARY, LANE_SUMMARY)
 MIN_CONFIRM = 2
 # Ledger file bandhi hui rehni chahiye (laptop/Railway dono par).
 MAX_CONCEPTS = 800
+# ``MAX_CONCEPTS`` akela byte-bound nahi hai: ek bahut lamba title poori JSON
+# file ko phula sakta tha. Dono limits milkar laptop/Railway store ko bounded
+# rakhte hain, bina kisi normal multilingual kriti/vyakti naam ko kaate.
+MAX_CONCEPT_CHARS = 160
+MAX_LEDGER_BYTES = 2 * 1024 * 1024
+MAX_PENDING_EVENTS = MAX_CONCEPTS * 4
 _MAX_ORIGINS = 6
 _MAX_HINTS = 6
 _MAX_WORDS_IN_CONCEPT = 4
@@ -123,6 +131,8 @@ def admission_reason(concept: object) -> str:
     words = [w for w in re.split(r"\s+", text) if w]
     if len(words) > _MAX_WORDS_IN_CONCEPT:
         return "too_many_words"
+    if len(text) > MAX_CONCEPT_CHARS:
+        return "too_long"
     if len(text) < _MIN_CONCEPT_LEN:
         return "too_short"
     if re.search(r"https?://|www\.", text, re.I):
@@ -287,21 +297,41 @@ class ConceptLedger:
         self.directory = os.path.abspath(directory or _default_dir())
         self.filename = filename or "concepts.json"
         self._data: Optional[Dict] = None
+        # Ek process ke threads ko serialise karta hai; alag processes ke liye
+        # neeche OS-backed ``ExclusiveProcessFileLock`` hai.
+        self._thread_lock = threading.RLock()
+        # ``learn`` ke baad ke sirf naye increments. Save latest on-disk JSON
+        # par in events ko replay karta hai, isliye stale worker kisi doosre
+        # worker ka concept/count overwrite nahi kar sakta.
+        self._pending_events: List[Dict] = []
+        self._pending_clear = False
+        self._disk_signature: Optional[tuple[int, int]] = None
 
     @property
     def path(self) -> str:
         safe = re.sub(r"[^A-Za-z0-9_.-]", "_", self.filename)
         return os.path.join(self.directory, safe)
 
+    @property
+    def lock_path(self) -> str:
+        return f"{self.path}.lock"
+
     def _blank(self) -> Dict:
         return {"version": SCHEMA_VERSION, "concepts": {}}
 
-    def load(self) -> Dict:
-        """File corrupt/gayab ho to khaali ledger — research kabhi nahi rukti."""
-        if self._data is not None:
-            return self._data
+    def _fingerprint(self) -> Optional[tuple[int, int]]:
+        try:
+            stat = os.stat(self.path)
+            return int(stat.st_mtime_ns), int(stat.st_size)
+        except OSError:
+            return None
+
+    def _read_disk(self) -> Dict:
+        """Bounded, sanitised disk read. Koi error ho to khaali ledger."""
         data = self._blank()
         try:
+            if os.path.getsize(self.path) > MAX_LEDGER_BYTES:
+                return data
             with open(self.path, "r", encoding="utf-8") as handle:
                 raw = json.load(handle)
             if isinstance(raw, dict) and isinstance(raw.get("concepts"), dict):
@@ -313,8 +343,26 @@ class ConceptLedger:
                 data = {"version": SCHEMA_VERSION, "concepts": clean}
         except Exception:
             data = self._blank()
-        self._data = data
         return data
+
+    def load(self) -> Dict:
+        """File corrupt/gayab ho to khaali ledger — research kabhi nahi rukti.
+
+        Shared instance ab file ko hamesha ke liye cache nahi karta. Kisi doosre
+        worker ne save kiya ho to fingerprint badalte hi taaza data reload hota
+        hai. Apne pending events ke dauran reload nahi hota; save unhe latest
+        disk state par merge karega.
+        """
+        with self._thread_lock:
+            current = self._fingerprint()
+            if self._data is not None:
+                if self._pending_events or self._pending_clear:
+                    return self._data
+                if current == self._disk_signature:
+                    return self._data
+            self._data = self._read_disk()
+            self._disk_signature = current
+            return self._data
 
     def _sanitise(self, key: str, entry: object) -> Optional[Dict]:
         """Disk se aaya entry apne hi schema me laao.
@@ -362,30 +410,93 @@ class ConceptLedger:
                         reverse=True)
         return dict(ranked[:MAX_CONCEPTS])
 
-    def save(self) -> bool:
-        """Atomic likhai. Na likh paaye to False — exception bahar nahi jaati."""
-        data = self.load()
-        data["concepts"] = self._prune(dict(data.get("concepts") or {}))
+    def _apply_event(self, data: Dict, event: Dict) -> None:
+        """Ek pehle-se-validated learning event ko ``data`` par lagao."""
+        text = event["concept"]
+        concepts = data.setdefault("concepts", {})
+        entry = concepts.get(_key(text))
+        if not entry:
+            entry = {"concept": text, "kinds": {}, "lanes": {}, "origins": [],
+                     "first_seen": event["date"], "last_seen": event["date"],
+                     "seen": 0, "verified": False}
+            concepts[_key(text)] = entry
+        kind = event["kind"]
+        entry["kinds"][kind] = int(entry["kinds"].get(kind, 0)) + 1
+        lane = event.get("lane") or ""
+        if lane:
+            entry["lanes"][lane] = int(entry["lanes"].get(lane, 0)) + 1
+        origin = event.get("origin") or ""
+        if origin:
+            tag = str(origin)[:60]
+            if tag not in entry["origins"]:
+                entry["origins"] = ([*entry["origins"], tag])[-_MAX_ORIGINS:]
+        entry["seen"] = int(entry.get("seen") or 0) + 1
+        entry["last_seen"] = event["date"]
+        entry["verified"] = False
+
+    def _write_atomic(self, data: Dict) -> None:
+        os.makedirs(self.directory, exist_ok=True)
+        handle, tmp = tempfile.mkstemp(prefix="ledger_", suffix=".json",
+                                       dir=self.directory)
         try:
-            os.makedirs(self.directory, exist_ok=True)
-            handle, tmp = tempfile.mkstemp(prefix="ledger_", suffix=".json",
-                                           dir=self.directory)
+            with os.fdopen(handle, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            if os.path.getsize(tmp) > MAX_LEDGER_BYTES:
+                raise ValueError("concept ledger exceeds bounded byte limit")
+            os.replace(tmp, self.path)
+        finally:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+
+    def _acquire_process_lock(self) -> Optional[ExclusiveProcessFileLock]:
+        """Chhota bounded retry: contention data-loss nahi, sirf deferred save."""
+        lock = ExclusiveProcessFileLock(self.lock_path)
+        for attempt in range(25):
             try:
-                with os.fdopen(handle, "w", encoding="utf-8") as stream:
-                    json.dump(data, stream, ensure_ascii=False, indent=2)
-                    stream.flush()
-                    os.fsync(stream.fileno())
-                os.replace(tmp, self.path)
+                lock.acquire()
+                return lock
+            except ProcessLockError:
+                if attempt == 24:
+                    return None
+                time.sleep(0.02)
+            except Exception:
+                # Read-only/broken runtime root: ledger fail-safe rehta hai;
+                # caller ko False milta hai, research answer nahi rukta.
+                return None
+        return None                                                    # pragma: no cover
+
+    def save(self) -> bool:
+        """Cross-process merge + atomic replace; failure par pending events bachte hain."""
+        with self._thread_lock:
+            self.load()
+            lock = self._acquire_process_lock()
+            if lock is None:
+                return False
+            try:
+                latest = self._blank() if self._pending_clear else self._read_disk()
+                for event in self._pending_events:
+                    self._apply_event(latest, event)
+                latest["concepts"] = self._prune(
+                    dict(latest.get("concepts") or {}))
+                self._write_atomic(latest)
+                self._data = latest
+                self._pending_events.clear()
+                self._pending_clear = False
+                self._disk_signature = self._fingerprint()
+                return True
+            except Exception:
+                return False
             finally:
-                if os.path.exists(tmp):
-                    os.remove(tmp)
-            return True
-        except Exception:
-            return False
+                lock.release()
 
     def clear(self) -> bool:
-        self._data = self._blank()
-        return self.save()
+        with self._thread_lock:
+            self._data = self._blank()
+            self._pending_events.clear()
+            self._pending_clear = True
+            return self.save()
 
     def stats(self) -> Dict:
         concepts = self.load().get("concepts") or {}
@@ -415,26 +526,16 @@ class ConceptLedger:
         if lane and lane not in LANES:
             return {"stored": False, "reason": "unknown_lane", "concept": text}
 
-        concepts = self.load().setdefault("concepts", {})
-        entry = concepts.get(_key(text))
-        if not entry:
-            entry = {"concept": text, "kinds": {}, "lanes": {}, "origins": [],
-                     "first_seen": _today(), "last_seen": _today(), "seen": 0,
-                     "verified": False}
-            concepts[_key(text)] = entry
-        entry["kinds"][kind] = int(entry["kinds"].get(kind, 0)) + 1
-        if lane:
-            entry["lanes"][lane] = int(entry["lanes"].get(lane, 0)) + 1
-        if origin:
-            tag = str(origin)[:60]
-            if tag not in entry["origins"]:
-                entry["origins"] = ([*entry["origins"], tag])[-_MAX_ORIGINS:]
-        entry["seen"] = int(entry.get("seen") or 0) + 1
-        entry["last_seen"] = _today()
-        # Ye line jaan-boojhkar HAR baar chalti hai: file me kuch bhi likha ho,
-        # chalte ledger me verified ka ek hi maan hai.
-        entry["verified"] = False
-        return {"stored": True, "reason": "", "concept": text}
+        with self._thread_lock:
+            if len(self._pending_events) >= MAX_PENDING_EVENTS:
+                return {"stored": False, "reason": "pending_capacity",
+                        "concept": text}
+            event = {"concept": text, "kind": kind, "lane": lane,
+                     "origin": str(origin)[:60], "date": _today()}
+            data = self.load()
+            self._apply_event(data, event)
+            self._pending_events.append(event)
+            return {"stored": True, "reason": "", "concept": text}
 
     # ── sawaal se seekhna ───────────────────────────────────────────────────
     def observe_question(self, question: str) -> Dict:
