@@ -169,6 +169,8 @@ class ClaimCheck:
     source_checks: List[Dict] = field(default_factory=list)
     canonical_span: Dict = field(default_factory=dict)
     supporting_source_id: str = ""
+    # Exact source span that triggered an opposite stance; never source-wide.
+    contradiction_span: Dict = field(default_factory=dict)
 
     def check(self, key: str) -> Optional[Check]:
         for c in self.checks:
@@ -183,7 +185,7 @@ class ClaimCheck:
     @property
     def genuine(self) -> bool:
         """Sirf C pass hone par hi "asli support" — spec ka rule."""
-        return self.status("C") == PASS
+        return self.status("C") == PASS and not self.contradicted
 
     @property
     def passes_ae(self) -> bool:
@@ -304,10 +306,13 @@ class ClaimCheck:
                 "access_depth": self.access_depth_label,
                 "access_depth_check": self.access_depth,
                 "contradicted": bool(self.contradicted),
+                "contradiction_span": (dict(self.contradiction_span)
+                                       if self.contradiction_span else {}),
                 "evidence_spans": [dict(s) for s in self.spans],
                 "canonical_evidence_span": dict(self.canonical_span) if self.canonical_span else {},
                 "supporting_source_id": self.supporting_source_id,
-                "same_source_ae_passed": self.passes_ae,
+                "same_source_ae_passed": bool(self.passes_ae and not self.contradicted),
+                "verified_support": bool(self.passes_ae and not self.contradicted),
                 "source_checks": [dict(row) for row in self.source_checks],
                 "checks": [c.to_dict() for c in self.checks]}
 
@@ -749,44 +754,63 @@ def check_e(records: Sequence[SourceRecord]) -> Check:
 
 
 # ── §8: "source ne ULTA kaha" — support se alag baat ─────────────────────────
-def claim_contradicted(line: str, records: Sequence[SourceRecord],
-                       pack: Optional[EvidencePack] = None) -> Tuple[bool, str]:
-    """
-    True = cited source is claim ke ULTA keh raha hai.
+def claim_contradiction_from_spans(
+        line: str, spans: Sequence[Dict]) -> Tuple[bool, str, Dict]:
+    """Detect an opposite stance only on an explicit claim-level span.
 
-    Ye asli dark-matter failure ka ilaaj hai: S11 (NFW halo fit) ko "dark matter
-    ki zaroorat nahi" ke support mein cite kar diya gaya tha. Token overlap zyada
-    tha, isliye check C khush ho gaya. Ab stance bhi dekhi jaati hai — same topic
-    par ulta stance milte hi claim CONTRADICTED ho jaata hai, "supported" nahi.
-
-    Jaan-boojh kar tang rakha gaya hai (jhoothi contradiction bhi ek jhooth hai):
-    claim ka apna stance saaf SUPPORT/OPPOSE ho, source ka text kaafi bada ho,
-    aur dono ek hi baat par ho (similarity floor) — tabhi True.
+    Source-wide concatenation is forbidden here: a distant paragraph must not
+    bleed into the canonical passage selected for this claim. The same existing
+    semantic floor is retained, and a positive result carries exact provenance.
     """
     body = claim_body(line)
-    if len(body) < 20 or not records:
-        return False, ""
+    if len(body) < 20 or not spans:
+        return False, "", {}
     try:
         from .contradiction import ContradictionEngine
         engine = ContradictionEngine()
     except Exception:                       # pragma: no cover - defensive
-        return False, ""
+        return False, "", {}
     claim_stance, _ = engine.stance(body)
     if claim_stance not in ("SUPPORT", "OPPOSE"):
-        return False, ""
-    for record in records:
-        text = source_text(record, pack)
-        if len(text) < _MIN_TEXT_CHARS:
+        return False, "", {}
+
+    for raw_span in spans:
+        span = dict(raw_span or {})
+        passage = str(span.get("passage") or "").strip()
+        locator = str(span.get("locator") or "").strip()
+        source_id = str(span.get("source_id") or "").strip()
+        if (len(passage) < _MIN_TEXT_CHARS or not source_id
+                or not locator):
             continue
-        if _similarity(body, text) < _ENTAIL_SIM:
-            continue                        # ek hi baat par nahi hain
-        stance, cues = engine.stance(text)
-        if stance in ("SUPPORT", "OPPOSE") and stance != claim_stance:
-            cue = ", ".join(cues[:3])
-            return True, (f"{record.source_id} ka text is claim ke ulta hai "
-                          f"(claim={claim_stance}, source={stance}"
-                          + (f"; ishaara: {cue}" if cue else "") + ")")
-    return False, ""
+        match = float(_similarity(body, passage))
+        if match < _ENTAIL_SIM:
+            continue
+        source_stance, cues = engine.stance(passage)
+        if source_stance not in ("SUPPORT", "OPPOSE") or source_stance == claim_stance:
+            continue
+        audit = dict(span)
+        audit.update({
+            "claim_stance": claim_stance,
+            "source_stance": source_stance,
+            "stance_cues": list(cues[:3]),
+            "claim_match": round(match, 4),
+        })
+        where = f" ({locator})" if locator else ""
+        cue = ", ".join(cues[:3])
+        reason = (f"{source_id} ke exact claim-level evidence span{where} ka "
+                  f"stance is claim ke ulta hai (claim={claim_stance}, "
+                  f"source={source_stance}"
+                  + (f"; ishaara: {cue}" if cue else "") + ")")
+        return True, reason, audit
+    return False, "", {}
+
+
+def claim_contradicted(line: str, records: Sequence[SourceRecord],
+                       pack: Optional[EvidencePack] = None) -> Tuple[bool, str]:
+    """Backward-compatible wrapper, now grounded to selected exact spans."""
+    spans = evidence_spans(line, records, pack, max_spans=max(1, len(records)))
+    contradicted, reason, _span = claim_contradiction_from_spans(line, spans)
+    return contradicted, reason
 
 
 # ── ek claim = A..E + ek verdict ─────────────────────────────────────────────
@@ -809,8 +833,6 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None,
     cc.section = section
     cc.critical = bool(cc.strong_label if critical is None else critical)
     cc.spans = evidence_spans(line, records, pack, max_spans=max(3, len(records)))
-    contradicted, contra_why = claim_contradicted(line, records, pack)
-    cc.contradicted = contradicted
 
     paths: List[Tuple[Dict, List[Check]]] = []
     for record in records:
@@ -859,9 +881,19 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None,
     chosen_source_id = str(chosen_path.get("source_id") or "")
     cc.checks = chosen_checks
     cc.canonical_span = dict(chosen_path.get("canonical_span") or {})
+    contradiction_candidates = [
+        dict(path.get("canonical_span") or {})
+        for path, _checks in paths
+        if path.get("canonical_span")
+    ]
+    contradicted, contra_why, contradiction_span = claim_contradiction_from_spans(
+        line, contradiction_candidates
+    )
+    cc.contradicted = contradicted
+    cc.contradiction_span = dict(contradiction_span or {})
     if cc.status("C") == PASS:
         cc.best_source = chosen_source_id
-    if chosen_path.get("passes_ae"):
+    if chosen_path.get("passes_ae") and not cc.contradicted:
         cc.supporting_source_id = chosen_source_id
 
     # Preserve latest-main named audit labels on the exact selected source path.
@@ -874,6 +906,9 @@ def verify_claim(line: str, pack: Optional[EvidencePack] = None,
         cc.quality_label = _quality_label_of(label_src)
 
     if contradicted:
+        # Keep raw source_checks for audit, but do not expose contradicted proof
+        # as accepted supporting evidence.
+        cc.supporting_source_id = ""
         cc.verdict = CITED_ONLY
         cc.reason = contra_why
         return cc
@@ -957,19 +992,23 @@ class VerificationReport:
 
     @property
     def strong_claims_passed(self) -> int:
-        return len([claim for claim in self.strong_claims if claim.passes_ae])
+        return len([claim for claim in self.strong_claims
+                    if claim.passes_ae and not claim.contradicted])
 
     @property
     def strong_claims_failed(self) -> int:
-        return len([claim for claim in self.strong_claims if not claim.passes_ae])
+        return len([claim for claim in self.strong_claims
+                    if not claim.passes_ae or claim.contradicted])
 
     @property
     def same_source_ae_passed(self) -> int:
-        return len([claim for claim in self.claims if claim.passes_ae])
+        return len([claim for claim in self.claims
+                    if claim.passes_ae and not claim.contradicted])
 
     @property
     def critical_same_source_ae_passed(self) -> int:
-        return len([claim for claim in self.critical_claims if claim.passes_ae])
+        return len([claim for claim in self.critical_claims
+                    if claim.passes_ae and not claim.contradicted])
 
     @property
     def claim_verification_achievement(self) -> bool:
@@ -1028,6 +1067,30 @@ class VerificationReport:
                 if c.result == CLAIM_UNVERIFIABLE]
 
     @property
+    def critical_contradicted(self) -> List[ClaimCheck]:
+        return [c for c in self.critical_claims if c.contradicted]
+
+    @staticmethod
+    def _exact_contradiction_span(span: Dict) -> bool:
+        """A contradiction record needs attributable, inspectable opposite text."""
+        return bool(
+            str((span or {}).get("source_id") or "").strip()
+            and str((span or {}).get("locator") or "").strip()
+            and len(str((span or {}).get("passage") or "").strip()) >= _MIN_TEXT_CHARS
+            and (span or {}).get("claim_stance") in ("SUPPORT", "OPPOSE")
+            and (span or {}).get("source_stance") in ("SUPPORT", "OPPOSE")
+            and (span or {}).get("claim_stance") != (span or {}).get("source_stance")
+        )
+
+    @property
+    def critical_contradiction_spans_complete(self) -> Optional[bool]:
+        """None = no critical contradiction; otherwise all need exact provenance."""
+        if not self.critical_contradicted:
+            return None
+        return all(self._exact_contradiction_span(c.contradiction_span)
+                   for c in self.critical_contradicted)
+
+    @property
     def critical_without_spans(self) -> List[ClaimCheck]:
         return [c for c in self.critical_claims if not c.has_spans]
 
@@ -1054,9 +1117,13 @@ class VerificationReport:
                 "entailment": cc.entailment_label,
                 "access_depth": cc.access_depth_label,
                 "source_quality": cc.source_quality_label,
+                "contradicted": bool(cc.contradicted),
+                "contradiction_span": (dict(cc.contradiction_span)
+                                       if cc.contradiction_span else {}),
                 "evidence_spans": [dict(s) for s in cc.spans],
                 "supporting_source_id": cc.supporting_source_id,
-                "same_source_ae_passed": cc.passes_ae,
+                "same_source_ae_passed": bool(cc.passes_ae and not cc.contradicted),
+                "verified_support": bool(cc.passes_ae and not cc.contradicted),
                 "canonical_span": dict(cc.canonical_span) if cc.canonical_span else {},
                 "spans": [dict(s) for s in cc.spans],
                 "spans_present": cc.has_spans,
@@ -1068,6 +1135,8 @@ class VerificationReport:
         out: List[str] = []
         for cc in self.claims:
             if critical_only and not cc.critical:
+                continue
+            if cc.contradicted:
                 continue
             sid = cc.supporting_source_id if cc.passes_ae else ""
             if sid and sid not in out:
@@ -1092,6 +1161,9 @@ class VerificationReport:
                 # §8 — claim-level results, spans aur critical accounting
                 "result_counts": self.result_counts(),
                 "contradicted_claims": self.contradicted,
+                "critical_contradicted_claims": len(self.critical_contradicted),
+                "critical_contradiction_spans_complete":
+                    self.critical_contradiction_spans_complete,
                 "critical_claims": len(self.critical_claims),
                 "unsupported_critical_claims": len(self.unsupported_critical),
                 "unverifiable_critical_claims": len(self.unverifiable_critical),
@@ -1212,7 +1284,7 @@ def verify_answer(text: str, pack: Optional[EvidencePack] = None,
                           section=section)
         report.claims.append(cc)
         covered.append((start, end))
-        if cc.strong_label and not cc.passes_ae:
+        if cc.strong_label and (not cc.passes_ae or cc.contradicted):
             report.overclaims.append(cc)
         if len(report.claims) >= max_claims:
             break

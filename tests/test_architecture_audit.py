@@ -40,6 +40,60 @@ def test_architecture_audit_wires_cross_domain_and_network_safety_into_release_g
     assert gate["passed"] is True, gate["detail"]
 
 
+def test_foundation_workflow_audit_rejects_missing_main_push_trigger(
+        monkeypatch, tmp_path):
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "foundation-tests.yml").write_text(
+        "name: Foundation tests\n\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    branches: [main]\n"
+        "  push:\n"
+        "    branches: [chatgpt-upload-safety]\n\n"
+        "jobs:\n"
+        "  offline-regression:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    env:\n"
+        "      INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data\n"
+        "    steps:\n"
+        "      - run: python scripts/run_foundation_gate.py\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    result = audit._foundation_workflow_safe()
+    assert result.passed is False
+    assert "push" in result.detail and "main" in result.detail
+
+
+def test_foundation_workflow_audit_rejects_node20_action_majors(
+        monkeypatch, tmp_path):
+    workflow = tmp_path / ".github" / "workflows"
+    workflow.mkdir(parents=True)
+    (workflow / "foundation-tests.yml").write_text(
+        "name: Foundation tests\n\n"
+        "on:\n"
+        "  pull_request:\n"
+        "    branches: [main]\n"
+        "  push:\n"
+        "    branches: [main]\n\n"
+        "jobs:\n"
+        "  offline-regression:\n"
+        "    runs-on: ubuntu-latest\n"
+        "    env:\n"
+        "      INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v4\n"
+        "      - uses: actions/setup-python@v5\n"
+        "      - run: python scripts/run_foundation_gate.py\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(audit, "ROOT", tmp_path)
+    result = audit._foundation_workflow_safe()
+    assert result.passed is False
+    assert "Node 24" in result.detail
+
+
 def test_order_check_fails_when_verification_moves_before_discovery(monkeypatch, tmp_path):
     target = tmp_path / "pipeline.py"
     target.write_text("verify()\ndiscover()\nsynthesize()\n", encoding="utf-8")
