@@ -238,7 +238,9 @@ def test_ledger_store_is_project_isolated_bounded_and_returns_latest(tmp_path):
 def test_corrupt_exam_ledger_fails_closed_instead_of_erasing_history(tmp_path):
     store = ExamLedgerStore(root=tmp_path)
     path = store._path("project-one")
-    path.parent.mkdir(parents=True)
+    # pytest's ``tmp_path`` already exists; keep this setup portable across
+    # local and GitHub-hosted runners while still creating missing parents.
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("{not valid json", encoding="utf-8")
     with pytest.raises(ExamDataError, match="corrupted"):
         store.save("project-one", {"analysis_id": "A1"})
