@@ -26,9 +26,11 @@ Package layout:
     synthesizer.py            FinalSynthesizer
     orchestrator.py           DeepResearchEngine
 
-Heavy modules lazily import so ``import research_engine`` remains cheap. A tiny
-pure-Python domain ambiguity guard is installed immediately because every later
-planner/relevance/connector caller must share the same domain decision.
+Most heavy modules lazily import so ``import research_engine`` remains cheap.
+Small deterministic routing/guard modules may preload the planner, but perform no
+network or model calls. A pure-Python domain ambiguity guard is installed
+immediately because every later planner/relevance/connector caller must share
+the same domain decision.
 
 The reasoning router is also installed at package-import time, but performs NO
 network call then. It simply replaces the exported ``GeminiReasoning`` class
@@ -81,6 +83,12 @@ from .result_coverage_gate import install as _install_result_coverage_gate
 _install_result_coverage_gate()
 
 from .depth import DepthConfig, get_depth_config, quota_note
+
+# Relevant banned/censored/controversial books are a research lane, not a truth
+# shortcut.  The deterministic wrapper only adds bounded legal-access search
+# directions and synthesis rules; it never marks a source verified/relevant.
+from .controversial_texts import install as _install_controversial_text_lane
+_install_controversial_text_lane()
 
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
