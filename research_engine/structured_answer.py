@@ -13,9 +13,10 @@ with model knowledge or speculation.
 """
 from __future__ import annotations
 
+import copy
 import re
 import unicodedata
-from typing import Dict, List, Sequence
+from typing import Any, Dict, List, Mapping, Sequence
 
 _MAX_ITEMS = 24
 _MAX_TITLE_CHARS = 120
@@ -187,3 +188,197 @@ def coverage(question: str, answer: str) -> Dict:
         "missing": missing,
         "note": "outline delivery audit only; not evidence/truth verification",
     }
+
+
+def _as_mapping(value: Any) -> Dict:
+    if isinstance(value, Mapping):
+        return dict(value)
+    to_dict = getattr(value, "to_dict", None)
+    if callable(to_dict):
+        converted = to_dict()
+        return dict(converted) if isinstance(converted, Mapping) else {}
+    return {}
+
+
+def _append_unique(values: Any, extra: Sequence[str]) -> List[str]:
+    out: List[str] = []
+    for item in list(values or []) + list(extra or []):
+        text = str(item or "").strip()
+        if text and text not in out:
+            out.append(text)
+    return out
+
+
+def _partial_reason(audit: Mapping[str, Any]) -> str:
+    total = int(audit.get("items_total") or 0)
+    covered = int(audit.get("items_covered") or 0)
+    missing = [str(x) for x in (audit.get("missing") or []) if str(x).strip()]
+    reason = (
+        f"Long structured question ke {covered}/{total} required high-level parts "
+        "cover hue"
+    )
+    if missing:
+        reason += "; missing: " + ", ".join(missing[:6])
+        if len(missing) > 6:
+            reason += f" (+{len(missing) - 6} aur)"
+    return reason + "."
+
+
+def _merge_requested_ledger(response: Dict, audit: Mapping[str, Any], reason: str) -> None:
+    ledger = _as_mapping(response.get("requested_ledger"))
+    if not ledger:
+        ledger = {"any_requested": True, "items": [], "unmet": [], "lines": [], "banner": ""}
+    item = {
+        "what": "Long structured question outline coverage",
+        "got": f"{int(audit.get('items_covered') or 0)}/{int(audit.get('items_total') or 0)}",
+        "ok": False,
+        "why": reason,
+    }
+    items = [dict(x) for x in (ledger.get("items") or []) if isinstance(x, Mapping)]
+    items = [x for x in items if x.get("what") != item["what"]]
+    items.append(item)
+    unmet = [dict(x) for x in (ledger.get("unmet") or []) if isinstance(x, Mapping)]
+    unmet = [x for x in unmet if x.get("what") != item["what"]]
+    unmet.append(item)
+    ledger["any_requested"] = True
+    ledger["items"] = items
+    ledger["unmet"] = unmet
+    response["requested_ledger"] = ledger
+
+
+def _merge_contract_ledger(response: Dict, audit: Mapping[str, Any], reason: str) -> None:
+    ledger = _as_mapping(response.get("contract_ledger"))
+    if not ledger:
+        return
+    item = {
+        "key": "structured_outline",
+        "what": "User ke high-level structured answer parts",
+        "got": f"{int(audit.get('items_covered') or 0)}/{int(audit.get('items_total') or 0)}",
+        "ok": False,
+        "unknown": False,
+        "mandatory": True,
+        "why": reason,
+    }
+    items = [dict(x) for x in (ledger.get("items") or []) if isinstance(x, Mapping)]
+    items = [x for x in items if x.get("key") != "structured_outline"]
+    items.append(item)
+    failed = [dict(x) for x in (ledger.get("failed") or []) if isinstance(x, Mapping)]
+    failed = [x for x in failed if x.get("key") != "structured_outline"]
+    failed.append(item)
+    mandatory = [dict(x) for x in (ledger.get("mandatory_missing") or [])
+                 if isinstance(x, Mapping)]
+    mandatory = [x for x in mandatory if x.get("key") != "structured_outline"]
+    mandatory.append(item)
+    ledger["items"] = items
+    ledger["failed"] = failed
+    ledger["mandatory_missing"] = mandatory
+    ledger["answer_complete"] = False
+    ledger["verified_allowed"] = False
+    if str(ledger.get("result_state") or "").upper() != "INSUFFICIENT_EVIDENCE":
+        ledger["result_state"] = "PARTIAL"
+    response["contract_ledger"] = ledger
+
+
+def _merge_research_state(response: Dict, reason: str) -> None:
+    state = _as_mapping(response.get("research_state"))
+    if not state:
+        return
+    if str(state.get("answer_state") or "").upper() == "COMPLETE":
+        state["answer_state"] = "PARTIAL"
+    reasons = _as_mapping(state.get("reasons"))
+    reasons["answer_state"] = reason
+    state["reasons"] = reasons
+    explain = _as_mapping(state.get("explain"))
+    if explain:
+        explain["answer_state"] = "kuch zaroori hissa nahi ban paaya"
+        state["explain"] = explain
+    state["verified_allowed"] = False
+    response["research_state"] = state
+
+
+def enforce_result(result: Any) -> Dict:
+    """Fail closed at the result boundary when a long answer skips user parts.
+
+    This changes *answer completeness only*.  It never upgrades/downgrades the
+    scientific evidence state, never invents missing content and never turns the
+    outline audit into claim verification.  Repeated calls are idempotent.
+    """
+    response = copy.deepcopy(_as_mapping(result))
+    if not response:
+        return response
+    question = str(response.get("question") or "")
+    answer = str(response.get("answer") or "")
+    try:
+        audit = coverage(question, answer)
+    except Exception:
+        # The detector is pure/deterministic.  If it ever fails after a prompt
+        # clearly activated structured mode, silence would be fail-open.  Keep
+        # the error private and conservatively mark delivery as incomplete.
+        if not requires_structured_coverage(question):
+            return response
+        audit = {
+            "required": True,
+            "items_total": len(extract_outline(question)),
+            "items_covered": 0,
+            "complete": False,
+            "covered": [],
+            "missing": [],
+            "audit_error": True,
+            "note": "outline delivery audit failed closed; not evidence/truth verification",
+        }
+
+    if not audit.get("required"):
+        return response
+
+    coverage_map = _as_mapping(response.get("coverage"))
+    coverage_map["structured_answer"] = dict(audit)
+    response["coverage"] = coverage_map
+    if audit.get("complete") is True:
+        return response
+
+    reason = _partial_reason(audit)
+    if audit.get("audit_error"):
+        reason = "Long structured answer ka mandatory coverage audit complete nahi ho saka; result ko complete nahi maana gaya."
+
+    missing = [str(x) for x in (audit.get("missing") or []) if str(x).strip()]
+    if audit.get("audit_error") and not missing:
+        missing = ["Structured answer coverage audit"]
+    response["missing_sections"] = _append_unique(response.get("missing_sections"), missing)
+
+    warning = "Structured answer incomplete: " + reason
+    response["warnings"] = _append_unique(response.get("warnings"), [warning])
+
+    original_status = str(response.get("status") or "").strip().upper()
+    if original_status == "COMPLETE":
+        response["status"] = "PARTIAL"
+        response["status_reason"] = reason
+        marker = "**PARTIAL — STRUCTURED COVERAGE**"
+        if marker not in answer:
+            total = int(audit.get("items_total") or 0)
+            covered_count = int(audit.get("items_covered") or 0)
+            banner = (
+                f"> ⚠️ {marker}\n"
+                f"> Long structured question ke {covered_count}/{total} required "
+                "high-level parts cover hue. Kuch requested parts missing hain; "
+                "`missing_sections`/coverage audit dekhein. Is result ko full answer "
+                "na maanein.\n\n"
+            )
+            response["answer"] = banner + answer
+    elif original_status == "PARTIAL" and not str(response.get("status_reason") or "").strip():
+        response["status_reason"] = reason
+    # RESEARCH INCOMPLETE / FAILED ko kabhi less-severe PARTIAL mein upgrade mat karo.
+
+    _merge_requested_ledger(response, audit, reason)
+    _merge_contract_ledger(response, audit, reason)
+    _merge_research_state(response, reason)
+    response["structured_answer_enforced"] = True
+    return response
+
+
+__all__ = [
+    "coverage",
+    "enforce_result",
+    "extract_outline",
+    "prompt_rule",
+    "requires_structured_coverage",
+]
