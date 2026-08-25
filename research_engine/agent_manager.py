@@ -17,6 +17,7 @@ import threading
 from typing import Dict, List, Optional
 
 from .orchestrator import DeepResearchEngine
+from .structured_answer import enforce_result as enforce_structured_answer_release
 
 _MAX_HISTORY = 30
 
@@ -46,13 +47,19 @@ class AgentManager:
         with self._lock:
             return sorted(self._engines)
 
-    # ── research ─────────────────────────────────────────────────────────────
+    # ── research ──────────────────────────────────────────────────────────────
     def research(self, question: str, project_id: str = "default",
                  depth_mode: str = "DEEP", custom: Optional[Dict] = None,
                  job_id: Optional[str] = None) -> Dict:
         engine = self.get(project_id)
-        result = engine.research(question, depth_mode=depth_mode, custom=custom,
-                                 job_id=job_id or project_id)
+        raw_result = engine.research(question, depth_mode=depth_mode, custom=custom,
+                                     job_id=job_id or project_id)
+        # Final delivery boundary for both synchronous /ask and durable
+        # /research-jobs.  It changes only structured answer completeness: a
+        # long user-authored outline cannot leave this manager as COMPLETE when
+        # one of its required high-level parts is missing. Evidence truth gates
+        # remain separate and untouched.
+        result = enforce_structured_answer_release(raw_result)
         self._remember(project_id, result)
         return result
 
