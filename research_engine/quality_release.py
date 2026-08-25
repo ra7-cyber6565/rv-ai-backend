@@ -21,6 +21,7 @@ import re
 from typing import Any, Dict, Mapping, Optional
 
 from .final_quality_gate import CONTRACT_VERSION, evaluate_final_quality
+from .structured_answer import enforce_result as enforce_structured_answer_release
 
 
 _SOURCE_ID_RE = re.compile(r"\[S(\d+)\]", re.IGNORECASE)
@@ -156,10 +157,16 @@ def enforce_quality_release(
 ) -> Dict[str, Any]:
     """Return an independently gated copy of a completed research result."""
     original = _mapping(result)
-    response = copy.deepcopy(original)
+    # Long user-authored outlines are a delivery contract.  Apply that
+    # deterministic guard before the general quality evaluator so an old or
+    # recovered COMPLETE result cannot bypass the new 19/19-style hard block.
+    response = enforce_structured_answer_release(original)
+    structured_changed = response != original
 
     prior = _mapping(response.get("quality_gate"))
-    if response.get("quality_enforced") is True and prior.get("contract_version") == CONTRACT_VERSION:
+    if (response.get("quality_enforced") is True
+            and prior.get("contract_version") == CONTRACT_VERSION
+            and not structured_changed):
         return response
 
     response["quality_context"] = _prepare_quality_context(
@@ -168,7 +175,11 @@ def enforce_quality_release(
         progress_snapshot=progress_snapshot,
     )
     report = evaluate_final_quality(response, response.get("quality_contract"))
-    repairs = []
+    repairs = list(response.get("quality_repairs") or [])
+
+    def repair(name: str) -> None:
+        if name not in repairs:
+            repairs.append(name)
 
     if not report.get("verified_allowed"):
         evidence_level = str(response.get("evidence_level") or "")
@@ -176,19 +187,19 @@ def enforce_quality_release(
             response["evidence_level"] = (
                 "⚠️ UNCONFIRMED — final quality gate blocked stronger release"
             )
-            repairs.append("evidence_level_downgraded")
+            repair("evidence_level_downgraded")
 
         answer = str(response.get("answer") or "")
         updated, changed = _downgrade_badges(answer)
         if changed:
             response["answer"] = updated
-            repairs.append("answer_verified_badge_downgraded")
+            repair("answer_verified_badge_downgraded")
 
     current_status = str(response.get("status") or "").strip().upper()
     if not report.get("answer_complete") and current_status == "COMPLETE":
         response["status"] = "PARTIAL"
         response["status_reason"] = _quality_reason(report)
-        repairs.append("answer_status_downgraded_to_partial")
+        repair("answer_status_downgraded_to_partial")
 
     response["quality_gate"] = report
     response["quality_repairs"] = repairs
