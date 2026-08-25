@@ -42,7 +42,11 @@ def _result():
         "status": "COMPLETE",
         "answer": "Human-first cited answer [S1] without provider diagnostics.",
         "sources": [{"source_id": "S1"}, {"source_id": "S2"}, {"source_id": "S3"}],
-        "coverage": {"on_topic_sources": 3, "full_text_sources_read": 1},
+        "coverage": {
+            "mode": "MAXIMUM",
+            "on_topic_sources": 3,
+            "full_text_sources_read": 1,
+        },
         "invalid_citations": [],
         "citations": [{"source_id": "S1"}],
         "verification": {
@@ -79,6 +83,35 @@ def _result():
             "human_review_required": True,
         },
     }
+
+
+def _marathon_result():
+    result = _result()
+    result["coverage"]["mode"] = "MARATHON"
+    result["research_assurance"] = {
+        "active": True,
+        "mode": "MARATHON",
+        "research_process_coverage_percent": 100.0,
+        "target_percent": 90,
+        "target_met": True,
+        "status": "PROCESS_TARGET_MET",
+        "mandatory_gaps": [],
+        "components": [{
+            "key": "all_search_rounds",
+            "mandatory": True,
+            "passed": True,
+            "achieved": 5,
+            "target": 5,
+        }],
+        "saturation": {"status": "BOUNDED_STOP_WITH_OPEN_LEADS"},
+        "not_a_probability": (
+            "Ye research-process coverage hai; answer ki truth probability, "
+            "trading profitability ya real-world hypothesis success probability nahi."
+        ),
+        "global_exhaustiveness_claimed": False,
+        "hypothesis_success_probability_claimed": False,
+    }
+    return result
 
 
 def test_preflight_blocks_when_no_confirmed_model_layer_exists():
@@ -174,7 +207,7 @@ def test_live_exception_writes_sanitized_failure_receipt(tmp_path, monkeypatch, 
         OPENROUTER_API_KEY="configured-free-key-not-printed",
     )
 
-    def crash():
+    def crash(_depth_mode):
         raise RuntimeError(secret)
 
     monkeypatch.setattr(live_gate, "load_local_env", lambda: None)
@@ -213,12 +246,119 @@ def test_live_exception_writes_sanitized_failure_receipt(tmp_path, monkeypatch, 
     assert "configured-free-key-not-printed" not in serialized
 
 
+def test_main_forwards_marathon_and_records_bounded_process_receipt(
+    tmp_path, monkeypatch, capsys,
+):
+    data_root = tmp_path / "live-data"
+    receipt = tmp_path / "audit" / "marathon.json"
+    env = _env(
+        INFINITY_DATA_ROOT=str(data_root),
+        INFINITY_MIN_FREE_GB="1",
+        OPENROUTER_API_KEY="configured-free-key-not-printed",
+    )
+    seen = []
+    monkeypatch.setattr(live_gate, "load_local_env", lambda: None)
+    monkeypatch.setattr(
+        live_gate, "run_live",
+        lambda depth_mode: seen.append(depth_mode) or _marathon_result(),
+    )
+    monkeypatch.setattr(
+        live_gate,
+        "repository_identity",
+        lambda _root: {
+            "available": True,
+            "revision": "2a21a6fbcb0771be746766dad3c6a511a7c3ec5e",
+            "clean": True,
+        },
+    )
+    with patch.dict(os.environ, env, clear=True):
+        return_code = live_gate.main([
+            "--execute",
+            "--depth-mode", "MARATHON",
+            "--data-root", str(data_root),
+            "--receipt", str(receipt),
+        ])
+
+    output = capsys.readouterr().out
+    body = json.loads(receipt.read_text(encoding="utf-8"))
+    assert return_code == 0
+    assert seen == ["MARATHON"]
+    assert body["passed"] is True
+    assert body["depth_mode"] == "MARATHON"
+    assert body["zero_cost_preflight"]["depth_mode"] == "MARATHON"
+    assert body["summary"]["research_process_target_met"] is True
+    assert body["contains_answer_or_source_text"] is False
+    assert body["contains_credentials"] is False
+    assert "configured-free-key-not-printed" not in output
+    assert "configured-free-key-not-printed" not in json.dumps(body)
+
+
 def test_healthy_live_result_passes_all_checks_without_storing_answer():
     report = evaluate_result(_result())
     assert report["passed"] is True
     assert all(row["passed"] for row in report["checks"])
     assert "answer" not in report["summary"]
     assert len(report["summary"]["answer_sha256"]) == 64
+
+
+def test_marathon_live_result_requires_auditable_process_target():
+    report = evaluate_result(
+        _marathon_result(), required_depth_mode="MARATHON",
+    )
+    assert report["passed"] is True
+    names = {row["name"] for row in report["checks"]}
+    assert {
+        "depth_mode_matches", "marathon_process_target",
+        "marathon_all_rounds", "marathon_not_a_probability",
+        "marathon_no_exhaustiveness_or_success_claim",
+    }.issubset(names)
+    summary = report["summary"]
+    assert summary["depth_mode"] == "MARATHON"
+    assert summary["research_process_coverage_percent"] == 100.0
+    assert summary["research_process_target_percent"] == 90
+    assert summary["research_process_target_met"] is True
+    assert summary["research_process_mandatory_gaps"] == []
+    assert "answer" not in summary
+
+
+@pytest.mark.parametrize("mutation", [
+    "missing_assurance", "target_missed", "rounds_incomplete",
+    "probability_boundary_missing", "exhaustiveness_claimed",
+])
+def test_marathon_live_gate_fails_closed_on_process_proof_gap(mutation):
+    result = _marathon_result()
+    assurance = result["research_assurance"]
+    if mutation == "missing_assurance":
+        result.pop("research_assurance")
+    elif mutation == "target_missed":
+        assurance["research_process_coverage_percent"] = 89.9
+        assurance["target_met"] = False
+        assurance["mandatory_gaps"] = ["legal_full_text"]
+    elif mutation == "rounds_incomplete":
+        assurance["components"][0].update(
+            {"passed": False, "achieved": 4},
+        )
+    elif mutation == "probability_boundary_missing":
+        assurance["not_a_probability"] = "process coverage only"
+    else:
+        assurance["global_exhaustiveness_claimed"] = True
+
+    report = evaluate_result(result, required_depth_mode="MARATHON")
+    assert report["passed"] is False
+    assert any(
+        row["name"].startswith("marathon_") and not row["passed"]
+        for row in report["checks"]
+    )
+
+
+def test_requested_live_depth_mode_must_match_result():
+    report = evaluate_result(_result(), required_depth_mode="MARATHON")
+    row = next(
+        item for item in report["checks"]
+        if item["name"] == "depth_mode_matches"
+    )
+    assert row["passed"] is False
+    assert report["passed"] is False
 
 
 def test_unassessed_claim_gate_fails_closed():

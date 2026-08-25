@@ -211,6 +211,7 @@ provider/network call and never upgrades an idea to a proven fact.
 | Task | Owner | Status | Files | Commit |
 |---|---|---|---|---|
 | Feature-branch push | ChatGPT | available through connected GitHub workflow | — | — |
+| MARATHON exact-revision live gate | ChatGPT | CODE COMPLETE / OPERATOR KEY REQUIRED | `scripts/run_live_zero_cost_gate.py`, `RUN_LIVE_ZERO_COST_GATE.ps1` | — |
 | Railway mein confirmed-free model key + live MAXIMUM test | User/local setup | pending | Railway Variables | — |
 | Android `RetrofitClient.kt` ka `BASE_URL` Railway URL par | User/local setup | optional | `InfinityResearchAI/.../RetrofitClient.kt` | — |
 | Real full pytest | ChatGPT | PASS — 633/633 on final post-merge tree | — | — |

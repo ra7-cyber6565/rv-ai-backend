@@ -55,6 +55,21 @@ spend path:
 Required result: `LIVE ZERO-COST GATE: PASS`. Keep the sanitized receipt. Never
 paste API keys into a command, receipt, chat, GitHub issue or commit.
 
+To prove the deeper MARATHON contract on the exact release revision, opt in
+explicitly. This runs all five bounded search rounds and additionally requires
+the auditable research-process target, mandatory-axis/full-text/counter-search
+coverage and the no-probability boundary:
+
+```powershell
+.\RUN_LIVE_ZERO_COST_GATE.ps1 -Execute `
+  -DepthMode MARATHON `
+  -DataRoot "D:\InfinityResearchAI" `
+  -Receipt "D:\InfinityResearchAI\audit\live_marathon_gate_latest.json"
+```
+
+`90%` in this receipt is process-checklist coverage, never answer truth,
+trading profitability, global literature exhaustion or hypothesis success.
+
 ## 4. Deployed zero-model smoke
 
 The deployment URL is not stored in the repository. Preflight makes no request:
