@@ -303,6 +303,85 @@ def test_reject_reason_is_written_in_plain_words() -> None:
           "Traceback" not in detail and "Error" not in detail, detail)
 
 
+def test_anchor_cannot_switch_the_domain_plan() -> None:
+    """Axis ke saath FIELD ka faisla bhi insaan ke sawaal se hona chahiye.
+
+    Naapa hua rissav (2026-08-25): `plan_of` bhi `expanded_query` se jaata tha,
+    isliye anchor me doosre field ki vocabulary aane par poora domain badal
+    jaata tha — asli rotation-curve paper `DOMAIN_MISMATCH` par 0.7224 se **0.0**
+    gir gaya tha, aur superconductivity ka paper 0.5362 par bach gaya tha.
+    """
+    print("\n[11] anchor field (domain plan) nahi badal sakta")
+    question = ("Dark matter ka asli saboot kya hai aur galaxy rotation curves "
+                "kya kehti hain?")
+    rival = ("superconductivity critical temperature meissner effect cooper "
+             "pairs resistivity transition ambient pressure hydride")
+    real = SourceRecord(
+        title="Flat rotation curves of 175 spiral galaxies imply a dark matter halo",
+        url="https://arxiv.org/abs/2101.00002", connector="arxiv",
+        source_type=SourceType.PAPER, peer_reviewed=True,
+        snippet=("We measure rotation velocities of 220 km/s at 20 kpc in 175 "
+                 "spiral galaxies and find the mass discrepancy grows with "
+                 "radius."))
+    decoy = SourceRecord(
+        title=("Resistivity transition and Meissner effect in a hydride "
+               "superconductor at 250 K"),
+        url="https://arxiv.org/abs/2101.00003", connector="arxiv",
+        source_type=SourceType.PAPER, peer_reviewed=True,
+        snippet=("We report a critical temperature of 250 K under 170 GPa with "
+                 "a sharp resistivity drop."))
+
+    engine = R.RelevanceEngine()
+    engine.set_scoring_anchor(rival)
+    check("rival anchor ke saath bhi field sawaal wala hi rehta hai",
+          engine.plan_of(question).key == R.RelevanceEngine().plan_of(question).key,
+          engine.plan_of(question).key)
+    value, code = _score(real, question, rival)
+    check("asli rotation-curve paper zinda rehta hai",
+          value > 0.5 and code is None, f"{value} {code}")
+    value, code = _score(decoy, question, rival)
+    check("doosre field ka paper anchor ke bal par nahi ghusta",
+          value == 0.0 and code == "DOMAIN_MISMATCH", f"{value} {code}")
+
+
+def test_anchor_still_gives_a_devanagari_question_its_field() -> None:
+    print("\n[12] Devanagari sawaal ko anchor ab bhi field de sakta hai")
+    hindi = ("डार्क मैटर के सबूत क्या हैं और घूमती हुई आकाशगंगाओं से "
+             "क्या पता चलता है?")
+    engine = R.RelevanceEngine()
+    check("bina anchor koi field profile match nahi hota",
+          engine.plan_of(hindi).is_known is False, engine.plan_of(hindi).key)
+    helped = R.RelevanceEngine()
+    helped.set_scoring_anchor("dark matter rotation curves gravitational lensing")
+    plan = helped.plan_of(hindi)
+    check("anchor ke saath field mil jaata hai", plan.is_known is True, plan.key)
+    check("rescue ke baad bhi plan ka sawaal insaan ka hi hai",
+          plan.question == hindi, plan.question[:60])
+
+
+def test_app_words_never_become_the_search_query() -> None:
+    """`DomainPlan.question` aage seedha search query banta hai (unknown field
+    par `search_intents()` usi ko query bana deta hai). Isliye anchor ke shabd
+    plan ke sawaal me nahi ghus sakte — warna live wali `all:"har hypothesis"` /
+    `all:"source-reported"` jaisi junk query banti hai."""
+    print("\n[13] app ke contract shabd search query nahi ban sakte")
+    hindi = ("डार्क मैटर के सबूत क्या हैं और घूमती हुई आकाशगंगाओं से "
+             "क्या पता चलता है?")
+    for question, tag in ((hindi, "Devanagari (field unknown)"),
+                          (PROMPT, "asli DM prompt")):
+        engine = R.RelevanceEngine()
+        engine.set_scoring_anchor(CONTRACT_ANCHOR)
+        plan = engine.plan_of(question)
+        check(f"{tag}: plan ka sawaal insaan ka hai",
+              plan.question == question, plan.question[-70:])
+        queries = " ".join(str(i.get("query") or "")
+                           for i in plan.search_intents()).lower()
+        bad = [w for w in ("hypothesis", "falsification", "counterevidence",
+                           "confidence", "limitations") if w in queries]
+        check(f"{tag}: search query me contract shabd nahi", not bad,
+              f"{bad} | {queries[:90]}")
+
+
 def main() -> int:
     print("=" * 70)
     print("ANCHOR SCOPE — app ke shabd research target nahi bante")
@@ -317,6 +396,9 @@ def main() -> int:
     test_unknown_verdict_does_not_rescue_a_number_free_web_page()
     test_pages_that_earn_their_place_are_not_touched()
     test_reject_reason_is_written_in_plain_words()
+    test_anchor_cannot_switch_the_domain_plan()
+    test_anchor_still_gives_a_devanagari_question_its_field()
+    test_app_words_never_become_the_search_query()
     print("\n" + "=" * 70)
     print(f"PASS: {PASS}   FAIL: {FAIL}")
     print("=" * 70)

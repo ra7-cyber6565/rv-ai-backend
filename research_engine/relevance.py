@@ -13,6 +13,7 @@ Ye sab free/offline hai — koi API call nahi.
 """
 from __future__ import annotations
 
+import dataclasses
 import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -543,12 +544,40 @@ class RelevanceEngine:
     _STRICT_FLOOR = 0.22
 
     def plan_of(self, query: str):
-        """Sawaal ka domain plan (cached) — §2/§3/§4 sab isi se poochte hain."""
-        query = self.expanded_query(query)
-        key = (query or "")[:600]
+        """
+        Sawaal ka domain plan (cached) — §2/§3/§4 sab isi se poochte hain.
+
+        Field ka faisla INSAAN ke sawaal se hota hai, app ke banaye anchor se
+        nahi — wahi niyam jo `axes_of` par hai. Naapa hua rissav (2026-08-25):
+        anchor me doosre field ki vocabulary aa jaaye to `detect(expanded)` poora
+        field badal deta tha. Dark-matter sawaal + superconductivity wala anchor
+        par ek asli rotation-curve paper `DOMAIN_MISMATCH` par **0.7224 se 0.0**
+        gir gaya, aur superconductivity ka paper 0.5362 par bach gaya. Yaani app
+        ke apne shabd asli evidence ko bahar phenk sakte the.
+
+        Anchor sirf JOD sakta hai: agar RAW sawaal ka koi field profile match hi
+        na ho (Hindi/Devanagari sawaal) aur anchor ke saath match ho jaaye, tab
+        anchored plan liya jaata hai — #81 ka cross-lingual faayda bacha rehta
+        hai.
+
+        Us rescue me bhi plan ka `question` INSAAN ka sawaal hi rehta hai (sirf
+        field profile/focus anchor se aata hai). Wajah naapi hui hai:
+        `DomainPlan.question` aage `search_intents()` (unknown field par seedha
+        search query), `subject_anchors()` aur `anchor_phrase()` chalata hai —
+        anchored text rakhne se app ke apne contract shabd asli search query ban
+        jaate the (live `all:"har hypothesis"` / `all:"source-reported"` wali
+        family).
+        """
+        raw = query or ""
+        expanded = self.expanded_query(raw)
+        key = (expanded or "")[:600]
         plan = self._domain_cache.get(key)
         if plan is None:
-            plan = domain_mod.detect(query)
+            plan = domain_mod.detect(raw)
+            if expanded != raw and not plan.is_known:
+                anchored = domain_mod.detect(expanded)
+                if anchored.is_known:
+                    plan = dataclasses.replace(anchored, question=raw)
             if len(self._domain_cache) > 16:
                 self._domain_cache.clear()
             self._domain_cache[key] = plan
