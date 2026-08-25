@@ -69,12 +69,21 @@ hai.
 
 ## 4. Phone ke app me PC ka server
 
-Android app me server URL ki screen abhi nahi bani (wo #107 hai). Aaj do raste
-hain:
+Android app me ab **"Server" screen ban gayi hai** (upar right side ka "Server"
+button). Wahan apne PC ka URL daal do — jaise `http://192.168.1.5:8000` — aur
+"Jaanch lo" se dekh lo ki wo chal raha hai. Us screen par:
+
+* tumhaara server **pehle** jaata hai, cloud uska backup ban jaata hai;
+* PC band ho jaye to app khud cloud par chala jaata hai aur chat me ek baar saaf
+  bata deta hai ki PC par upload ki hui files cloud par nahi hain;
+* "Jaanch lo" sirf `/health` maarta hai — koi research, koi API quota nahi;
+* "Hatao (cloud par)" sirf URL hataata hai, kuch delete nahi hota.
+
+Do aur raste bhi khule hain:
 
 * Phone ke **browser** me `http://192.168.x.y:8000` kholo — wahi website hai.
-* Emulator par app chala rahe ho to app ke code se
-  `ServerConfig.setUserBase("http://10.0.2.2:8000")`.
+* Emulator par app chala rahe ho to URL `http://10.0.2.2:8000` daalo (ya code se
+  `ServerConfig.setUserBase("http://10.0.2.2:8000")`).
 
 App me `http://` sirf local pate par khulta hai (`10.0.2.2`, `localhost`,
 `127.0.0.1`). Apna LAN IP daalna ho to Android project ki
