@@ -73,6 +73,13 @@ from .models import (
 from .source_prompt_guard import install as _install_source_prompt_guard
 _install_source_prompt_guard()
 
+# Prompt-level structured coverage is useful but not enforcement.  Install a
+# final serialization gate so a long explicit outline cannot leave the engine
+# as COMPLETE when one of the user's high-level requested parts is absent.
+# This is delivery-only: it never upgrades evidence/truth/confidence.
+from .result_coverage_gate import install as _install_result_coverage_gate
+_install_result_coverage_gate()
+
 from .depth import DepthConfig, get_depth_config, quota_note
 
 __all__ = [
