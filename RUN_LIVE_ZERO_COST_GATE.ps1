@@ -2,7 +2,9 @@
 param(
     [switch]$Execute,
     [string]$DataRoot = "D:\InfinityResearchAI",
-    [string]$Receipt = ""
+    [string]$Receipt = "",
+    [ValidateSet("MAXIMUM", "MARATHON")]
+    [string]$DepthMode = "MAXIMUM"
 )
 
 $ErrorActionPreference = "Stop"
@@ -28,7 +30,9 @@ if (Test-Path -LiteralPath $venvPython -PathType Leaf) {
 $gateArguments = @(
     "scripts\run_live_zero_cost_gate.py",
     "--data-root",
-    $DataRoot
+    $DataRoot,
+    "--depth-mode",
+    $DepthMode.ToUpperInvariant()
 )
 if ($Execute) {
     $gateArguments += "--execute"

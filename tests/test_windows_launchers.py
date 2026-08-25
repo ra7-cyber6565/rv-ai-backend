@@ -29,6 +29,8 @@ def test_powershell_live_launcher_passes_only_non_secret_arguments():
     assert '"--data-root"' in lowered
     assert '"--execute"' in lowered
     assert '"--receipt"' in lowered
+    assert '"--depth-mode"' in lowered
+    assert '[validateset("maximum", "marathon")]' in lowered
     assert "gemini_api_key" not in lowered
     assert "groq_api_key" not in lowered
     assert "openrouter_api_key" not in lowered

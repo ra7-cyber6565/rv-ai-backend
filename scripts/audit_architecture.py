@@ -644,6 +644,9 @@ def run_audit() -> AuditReport:
             "inspect_zero_cost_config",
             "has_model_layer_usable_now",
             "def evaluate_result(",
+            "LIVE_DEPTH_MODES",
+            '"marathon_process_target"',
+            '"--depth-mode"',
             "live_research_execution_failed",
             '"--data-root"',
             '"contains_credentials": False',
@@ -652,6 +655,8 @@ def run_audit() -> AuditReport:
             "RUN_LIVE_ZERO_COST_GATE.ps1",
             "$PSScriptRoot",
             '"--data-root"',
+            '"--depth-mode"',
+            '[ValidateSet("MAXIMUM", "MARATHON")]',
             "$gateExitCode",
         ),
         _contains(
