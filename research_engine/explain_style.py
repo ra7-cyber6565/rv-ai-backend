@@ -31,6 +31,8 @@ from __future__ import annotations
 import re
 from typing import Dict
 
+from .structured_answer import prompt_rule as structured_prompt_rule
+
 # Devanagari block. Sirf isi se "Hindi" maan lena kaafi nahi — Hinglish prompt
 # mein bhi ek-do Devanagari shabd ghus sakte hain, isliye neeche ratio dekhte hain.
 _DEVANAGARI = re.compile(r"[ऀ-ॿ]")
@@ -209,9 +211,12 @@ def word_choice_rule(question: str) -> str:
 
 
 def style_block(question: str, section_titles=None) -> str:
-    """Bhasha + samjhane ka tarika + shabd chunav (+ heading rule)."""
+    """Bhasha + simple teaching + long-outline coverage (+ heading rule)."""
     parts = [language_rule(question), PLAIN_STYLE_RULES,
              word_choice_rule(question)]
+    structured = structured_prompt_rule(question)
+    if structured:
+        parts.append(structured)
     if section_titles:
         parts.append(heading_rule(section_titles))
     return "\n\n".join(parts)
