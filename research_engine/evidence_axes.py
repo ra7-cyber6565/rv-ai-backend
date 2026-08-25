@@ -26,7 +26,7 @@ import re
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Sequence, Set, Tuple
 
-from .domain import count_hits, matched, stems
+from .domain import count_hits, matched, stems, tokens
 
 # ── axis status (sirf ye chaar) ───────────────────────────────────────────────
 AXIS_COVERED = "COVERED"            # kam se kam 1 relevant source
@@ -359,23 +359,120 @@ _ENTITY_STOP = {
 }
 _PAIR_STOP = {"Dark Matter", "Deep Research", "App Original"}
 
+# ── kaun sa ALL-CAPS shabd research target NAHI hai ───────────────────────────
+# Naapa hua defect (2026-08-25, live run): intel ke sawaal me likha tha "Label
+# everything: ESTABLISHED, SOURCE-REPORTED, INFERENCE, SPECULATION", "Agar RAM ya
+# timeout ki dikkat ho to bata do" aur "DRM ya paywall bypass mat karna". Sab
+# ALL-CAPS the, isliye `named_entities` ne inhe MANDATORY evidence axis bana
+# diya — aur audit me user ko jhoothi shortfall dikhi:
+# "12 naam se maange gaye target → 10/12 par kaam hua — in par kuch nahi mila:
+# SPECULATION, DRM". Ye naam nahi the; ek app ki apni label-bhasha thi, doosri
+# user ki PABANDI thi.
+#
+# Ilaaj do general niyam se — koi nayi topic list nahi:
+#
+#   A. App ki APNI bhasha kabhi target nahi hoti. Ye vocabulary pehle se ek
+#      jagah likhi hai (`models._LABEL_TO_CLAIM`, `ClaimType`, `run_status` ke
+#      status, aur `query_builder._META` ka research-process vocabulary), isliye
+#      wahin se DERIVE karte hain. Naya label jodne par ye parat khud badh
+#      jaati hai — dobara haath se likhna nahi padta.
+#
+#   B. Jis vaakya me user ne MANA kiya hai, us vaakya ke naam pabandi hain,
+#      target nahi. Ye vyakaran ka cue hai, topic ka nahi ("mat", "don't",
+#      "avoid", "bypass"), isliye kal ke "VPN mat use karna" par bhi chalega.
+#
+# `CIA` jaan-boojh kar BACHTA hai: wo "declassified intelligence programs
+# including CIA remote viewing" me hai — koi mana nahi, koi label nahi. Yaani
+# sahi target girta nahi, sirf label aur pabandi girti hai.
+_CONSTRAINT_CUE_RE = re.compile(
+    r"(?:\bmat\b|\bnahi\s+(?:karna|kehna|chahiye|bhejna)\b|\bdon'?t\b|"
+    r"\bdo\s+not\b|\bnever\b|\bavoid\b|\bbypass\b|\bबिना\b|\bमत\b)",
+    re.IGNORECASE)
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?।])\s+|\n+")
+
+
+def _derived_label_vocab() -> Set[str]:
+    """
+    App ki apni label/status/process bhasha — DERIVE ki hui, haath se likhi
+    nahi. Import lazy aur fail-safe hai: koi module na mile to ye parat chup-chaap
+    kam kaam karti hai, poora axis system girta nahi.
+    """
+    global _LABEL_VOCAB_CACHE
+    if _LABEL_VOCAB_CACHE is not None:
+        return _LABEL_VOCAB_CACHE
+    vocab: Set[str] = set()
+
+    def _feed(word: object) -> None:
+        text = str(word or "").strip().upper()
+        if len(text) >= 3:
+            vocab.add(text)
+        for part in re.split(r"[\s\-_]+", text):
+            if len(part) >= 3:
+                vocab.add(part)
+
+    try:                                          # claim labels + claim types
+        from .models import ClaimType, _LABEL_TO_CLAIM
+        for key in _LABEL_TO_CLAIM:
+            _feed(key)
+        for member in ClaimType:
+            _feed(member.value)
+    except Exception:
+        pass
+    try:                                          # run status vocabulary
+        from . import run_status
+        for name in ("COMPLETE", "PARTIAL", "INCOMPLETE"):
+            _feed(getattr(run_status, name, ""))
+    except Exception:
+        pass
+    try:                                          # research-process vocabulary
+        from .query_builder import _META
+        for word in _META:
+            _feed(word)
+    except Exception:
+        pass
+    _LABEL_VOCAB_CACHE = vocab
+    return vocab
+
+
+_LABEL_VOCAB_CACHE: Optional[Set[str]] = None
+
+
+def _constraint_sentences(text: str) -> List[str]:
+    """Wo vaakya jinme user ne kuch MANA kiya hai."""
+    return [s for s in _SENTENCE_SPLIT_RE.split(text or "")
+            if _CONSTRAINT_CUE_RE.search(s)]
+
 
 def named_entities(question: str, limit: int = 8) -> List[str]:
     """
     Sawaal mein liye gaye khaas naam (LIGO, Planck, Bullet Cluster, XENONnT...).
-    Andaza nahi lagate — sirf wahi jo TEXT mein likhe hain.
+    Andaza nahi lagate — sirf wahi jo TEXT mein likhe hain, aur sirf wo jo app
+    ki apni label-bhasha ya user ki pabandi nahi hain (upar ka note dekho).
     """
     text = question or ""
+    label_vocab = _derived_label_vocab()
+    banned = _constraint_sentences(text)
+
+    def _only_in_constraints(name: str) -> bool:
+        if not banned:
+            return False
+        hits = [s for s in _SENTENCE_SPLIT_RE.split(text) if name in s]
+        return bool(hits) and all(s in banned for s in hits)
+
     out: List[str] = []
     for match in _ACRONYM_RE.findall(text):
         name = match.strip()
         if name.upper() in _ENTITY_STOP or len(name) < 3:
+            continue
+        if name.upper() in label_vocab or _only_in_constraints(name):
             continue
         if name not in out:
             out.append(name)
     for match in _PROPER_PAIR_RE.findall(text):
         name = " ".join(match.split())
         if name in _PAIR_STOP or name in out:
+            continue
+        if name.upper() in label_vocab or _only_in_constraints(name):
             continue
         out.append(name)
     return out[:limit]
@@ -392,15 +489,73 @@ def _entity_axis(name: str) -> Axis:
                 entity=name)
 
 
-def axis_set_for(question: str) -> Tuple[str, Tuple[Axis, ...]]:
-    """(set_key, axes) — sabse zyada trigger hits wala set. Warna generic."""
-    bag = stems(question or "")
-    best_key, best_axes, best_hits = "generic", (), 0
+# ── set ka faisla: ek shabd se poora curated set nahi milta ───────────────────
+# Naapa hua defect (2026-08-25, intel ke 819-word human-agency mega-question par):
+# sawaal me `cosmology` shabd EK baar aaya tha — wo bhi lens-list ke andar
+# ("quantum mechanics, 'frequency/vibration' claims and cosmology") — aur purana
+# `hits > best_hits` (best_hits = 0 se shuru) us ek hit par poora 15-axis
+# `dark_matter` set de deta tha. Nateeja naapa gaya: 18 axes me 17 MISSING,
+# queries jaise `all:"dark matter" AND all:"attention" AND all:"recoil"`,
+# relevance gate ne 305 source `required_axis` par reject kiye, bache 40
+# source (copula preprints, earthquake ground motion, LNG terminal, LiDAR),
+# avg relevance 0.46 < 0.65 floor → contract fail → PARTIAL. Yaani PARTIAL
+# literature ki kami nahi, is misroute ka nateeja tha.
+#
+# Ye theek wahi bimaari hai jo `domain_focus_guard` `domain.detect()` ke liye
+# sambhalta hai ("vibration" → strict ENGINEERING), isliye paimana bhi wahi
+# rakha gaya hai: ek akela nishaan lambe sawaal me ittefaq hai, saboot nahi.
+#
+# Do keemat jaan-boojh kar aise toli gayi hain:
+#   * `generic` par gir jaana SASTA hai — mechanism/quantitative/replication/
+#     counter_evidence axes phir bhi lagte hain (dekho `axes_for`, wahan
+#     `curated` khaali hone par wo do axes wapas aa jaate hain). Yaani sirf
+#     field ke ready-made raaste nahi milte, research band nahi hoti.
+#   * galat curated set MEHNGA hai — upar naapa hua 17/18 MISSING.
+# Isliye shak hone par generic.
+_INCIDENTAL_SET_MIN_TOKENS = 40
+# Do alag trigger = set ka dawa tikta hai. Chhote sawaal ("LK-99 ka Tc?") me
+# ek hi shabd poora topic hota hai, isliye wahan ek hit kaafi hai.
+_MIN_SET_SIGNALS = 2
+
+
+def axis_set_verdict(question: str) -> Dict[str, object]:
+    """
+    Kaun sa curated axis set chuna gaya aur KYUN — audit ke liye padha ja sakne
+    wala faisla. `axis_set_for()` isi par khada hai (do jagah do niyam nahi).
+    """
+    text = question or ""
+    bag = stems(text)
+    token_count = len(tokens(text))
+    best_key, best_axes, best_hits, best_terms = "generic", (), 0, []
     for key, triggers, axes in AXIS_SETS:
         hits = count_hits(triggers, bag)
         if hits > best_hits:
             best_key, best_axes, best_hits = key, axes, hits
-    return best_key, best_axes
+            best_terms = matched(triggers, bag)
+
+    detail: Dict[str, object] = {
+        "set": best_key, "axes": best_axes, "hits": best_hits,
+        "matched_triggers": best_terms, "tokens": token_count,
+    }
+    if best_hits == 0:
+        detail["reason"] = "kisi curated set ka koi trigger nahi mila"
+        return detail
+    if best_hits < _MIN_SET_SIGNALS and token_count >= _INCIDENTAL_SET_MIN_TOKENS:
+        only = ", ".join(best_terms) or "—"
+        detail.update(set="generic", axes=(), demoted=True, reason=(
+            f"{token_count}-token sawaal me '{best_key}' set ka sirf ek nishaan "
+            f"({only}) mila — ek shabd se poora sawaal is field ka nahi ban jaata"))
+        return detail
+    detail["reason"] = (f"'{best_key}' set ka dawa tikta hai ({best_hits} nishaan, "
+                        f"{token_count} token)")
+    return detail
+
+
+def axis_set_for(question: str) -> Tuple[str, Tuple[Axis, ...]]:
+    """(set_key, axes) — sabse zyada trigger hits wala set, par ek akela
+    incidental hit lambe sawaal par set nahi jitata. Warna generic."""
+    verdict = axis_set_verdict(question)
+    return str(verdict["set"]), tuple(verdict["axes"])       # type: ignore[arg-type]
 
 
 def axes_for(question: str, limit: int = 18) -> List[Axis]:
