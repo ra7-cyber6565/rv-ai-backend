@@ -96,6 +96,14 @@ from .depth import DepthConfig, get_depth_config, quota_note
 from .controversial_texts import install as _install_controversial_text_lane
 _install_controversial_text_lane()
 
+# Stress-test hardening: long multi-domain questions get facet-wise evidence
+# axes, distinctive proposition relevance, same-proposition contradiction
+# checks, substantive section coverage, conservative hypothesis confidence and
+# a stricter synthesis contract.  This layer is deterministic and can only
+# reject/downgrade/require more evidence; it never upgrades a truth claim.
+from .advanced_research_quality import install as _install_advanced_research_quality
+_install_advanced_research_quality()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
