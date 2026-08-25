@@ -1,0 +1,44 @@
+# Infinity Research AI — SLIM install (chhote free host ke liye, jaise Render free)
+#
+#     pip install -r requirements-slim.txt
+#
+# Yeh `requirements.txt` ki JAGAH nahi leta. Poora (primary) host — jaise Railway
+# — hamesha `requirements.txt` hi use karega, aur usme kuch nahi badla gaya.
+# Yeh file sirf UN hosts ke liye hai jahan 512 MB RAM aur chhota build space hai.
+#
+# Kya nikaala gaya aur KYUN
+# ------------------------
+#   chromadb              ~200 MB
+#   sentence-transformers  torch ke saath ~900 MB, aur MiniLM model load hote hi
+#                          ~300 MB RAM
+#
+# Yeh dono sirf EK lane chalate hain: tumhaari apni upload ki hui PDF/notes ka
+# vector search (`rag/pipeline.py`). Poora research pipeline — search, relevance,
+# facet gate, claim verification, hypothesis, audit — inke bina bilkul waisa hi
+# chalta hai, kyunki `research_engine/vector_search.py` inhe LAZY import karta
+# hai aur na milne par khaali context deta hai (koi crash nahi, koi jhootha
+# jawab nahi).
+#
+# Iska seedha matlab, saaf-saaf: is host par tumhaari khud ki upload ki hui PDF
+# se search BAND rahegi. Baaki sab chalega. Yeh feature "hataya" nahi gaya —
+# primary host par jaisa hai waisa hi hai; yeh sirf chhote backup host ki
+# imaandaar seema hai.
+#
+# Version pins base file se HUBAHU same rakhe gaye hain, taaki dono host ek hi
+# code par ek hi tarah chalein.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+pydantic==2.10.5
+httpx==0.28.1
+beautifulsoup4==4.15.0
+lxml==5.3.0
+requests==2.32.3
+google-generativeai==0.8.3
+python-dotenv==1.0.1
+PyMuPDF==1.25.2
+Pillow==11.1.0
+scipy==1.15.1
+sympy==1.13.3
+numpy==2.2.2
+tiktoken==0.8.0

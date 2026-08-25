@@ -1,10 +1,22 @@
+# Render free web service — BACKUP host.
+#
+# Primary host (Railway) ka setup isse bilkul nahi badalta. Yeh file sirf ek
+# doosri jagah par WAHI code chalati hai, taaki Railway ka free credit khatam
+# hone par app band na ho.
+#
+# Do cheezein jaan-boojh kar aisi hain:
+#   1. buildCommand `requirements-slim.txt` padhta hai — Render free par 512 MB
+#      RAM hai, aur torch/chromadb wahan OOM kar dete hain. Slim file ke andar
+#      likha hai ki kya nikla aur uska seedha asar kya hai.
+#   2. healthCheckPath `/health` hai — Cloudflare Worker isi ko dekh kar tay
+#      karta hai ki primary zinda hai ya backup par jaana hai.
 services:
   - type: web
     name: rv-ai-backend
     env: python
     region: oregon
     plan: free
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: "pip install -r requirements-slim.txt"
     startCommand: "uvicorn main:app --host 0.0.0.0 --port $PORT"
     envVars:
       - key: PYTHON_VERSION

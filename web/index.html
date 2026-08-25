@@ -78,7 +78,11 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
 </footer>
 <script>
 "use strict";
-const API="", IS_FILE=location.protocol==="file:";
+let API="";const IS_FILE=location.protocol==="file:";
+// Failover: agar aage Cloudflare Worker laga hai to wo /__rv/failover.json par
+// backup server ka URL batata hai. Na mile to yeh sab chup rehta hai aur page
+// bilkul pehle jaisa chalta hai — yeh sirf ek extra parat hai.
+const FAILOVER={backup:"",active:false,announced:false};
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
 const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — 5 full rounds, multilingual books, source-derived thinkers, counter-evidence aur 90% research-process target. Ye truth/profit probability nahi hai."};
@@ -105,7 +109,47 @@ function clientFailure(status,data,area="Request",aborted=false){
 }
 function restoreQuestion(message){if(!input.value.trim()){input.value=message;resize();}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
+// ── failover parat ──────────────────────────────────────────────────────────
+// Primary server jawab hi na de (network error ya gateway 502/503/504) tabhi
+// backup par jaate hain. App ne khud 500 diya to NAHI jaate — wo request andar
+// tak chali thi, usko dobara bhejna ek kaam do baar kara sakta hai.
+const DEAD_GATEWAY=[0,502,503,504];
+function backupUrl(url){
+  if(!FAILOVER.backup)return "";
+  const text=String(url||"");
+  if(text.indexOf(FAILOVER.backup)===0)return "";
+  if(text.charAt(0)==="/")return FAILOVER.backup+text;
+  try{const u=new URL(text,location.origin);return FAILOVER.backup+u.pathname+u.search;}catch(_){return "";}
+}
+function announceFailover(){
+  if(FAILOVER.announced)return;FAILOVER.announced=true;
+  answer(row("rv"),"Primary server ne jawab nahi diya, isliye main backup server par chala gaya hoon. Chhote sawaal turant chalenge. Agar koi lamba research (DEEP/MAX/MARATHON) beech mein tha to wo backup par maujood nahi hai — usko dobara bhejna padega. Backup par tumhaari khud upload ki hui PDF ka search band rehta hai; baaki sab chalta hai.");
+}
+function switchToBackup(){
+  if(!FAILOVER.backup||FAILOVER.active)return;
+  FAILOVER.active=true;API=FAILOVER.backup;resetProjectSession();announceFailover();
+}
+async function loadFailoverInfo(){
+  if(IS_FILE)return;
+  const {r,data}=await jsonFetch("/__rv/failover.json",{},4000);
+  if(!r.ok)return;
+  const backup=safeHttpUrl(data&&data.backup);
+  if(!backup)return;
+  const trimmed=backup.charAt(backup.length-1)==="/"?backup.slice(0,-1):backup;
+  if(trimmed.indexOf(location.origin)===0)return;   // khud ko backup nahi manna
+  FAILOVER.backup=trimmed;
+}
 async function jsonFetch(url,opts={},timeoutMs=0){
+  const first=await jsonFetchOnce(url,opts,timeoutMs);
+  if(first.aborted||first.r.ok||DEAD_GATEWAY.indexOf(Number(first.r.status||0))<0)return first;
+  const alt=backupUrl(url);
+  if(!alt)return first;
+  const second=await jsonFetchOnce(alt,opts,timeoutMs);
+  if(second.aborted||(!second.r.ok&&Number(second.r.status||0)===0))return first;
+  switchToBackup();
+  return second;
+}
+async function jsonFetchOnce(url,opts={},timeoutMs=0){
   const ctrl=("AbortController" in window)?new AbortController():null;let timer=null;
   if(ctrl&&timeoutMs>0)timer=setTimeout(()=>ctrl.abort(),timeoutMs);
   try{
@@ -415,6 +459,8 @@ if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. Fil
   attach.disabled=true;attach.title="File:// mode mein upload available nahi hai";
   $("#docnote").textContent="Ye page file se khula hai, isliye document dena band hai. Backend server ke URL se page kholo.";}
 input.focus();
+// Backup ka pata background mein le aao — fail ho to kuch nahi badalta.
+loadFailoverInfo();
 </script>
 </body>
 </html>
