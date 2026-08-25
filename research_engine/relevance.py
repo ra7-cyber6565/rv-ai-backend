@@ -21,8 +21,10 @@ from .dedup import DeduplicationEngine
 from .models import SourceRecord, SourceType
 from .quality_signals import STRONG_METHODOLOGY, WEAK_METHODOLOGY, enrich_record
 from .query_builder import topic_terms
+from .query_builder import is_generic_word as _is_generic_word
 from . import domain as domain_mod
 from . import evidence_axes as axes_mod
+from . import facets as facets_mod
 from . import semantic
 from .source_kind import classify as classify_kind
 
@@ -79,6 +81,30 @@ def _hits(terms: List[str], text: str) -> int:
     if not low:
         return 0
     return sum(1 for t in terms if _stem(t) in low)
+
+
+# Sawaal ka shabd aur source ka shabd ek hi cheez ke do roop hote hain:
+# "hermeticism" vs "hermetic", "neuroplasticity" vs "neuroplastic",
+# "investigation" vs "investigated". Substring match ek taraf chalta hai
+# (chhota shabd bade text me), isliye lambe term ka SUFFIX kaat kar uski jad
+# nikaali jaati hai. Jad kam se kam 6 akshar ki rakhi gayi hai taaki
+# "information" se "inform" jaisa dhilaa match na bane, aur ye SIRF facet
+# matching me use hoti hai — purana global lexical/semantic scoring bilkul
+# waisa hi rehta hai, isliye purane benchmark hil nahi sakte.
+_ROOT_SUFFIXES = ("ically", "ations", "ation", "ities", "ical", "ism", "ist",
+                  "ity", "ness", "ance", "ence", "ment", "tion", "sion",
+                  "ing", "ers", "er", "ed", "al", "ic")
+_ROOT_MIN = 6
+
+
+def _root(term: str) -> str:
+    low = (term or "").lower()
+    if len(low) < _ROOT_MIN + 2:
+        return ""
+    for suffix in _ROOT_SUFFIXES:
+        if low.endswith(suffix) and len(low) - len(suffix) >= _ROOT_MIN:
+            return low[: len(low) - len(suffix)]
+    return ""
 
 
 # ── §6 (2026-08-22): "topic ke aas-paas" vs "sawaal ko test karta hai" ──────
@@ -207,6 +233,8 @@ class RelevanceEngine:
         self.last_filter: Dict = {}
         self._topic_cache: Dict[str, List[str]] = {}
         self._domain_cache: Dict[str, object] = {}
+        # sawaal ke hisse (facets) — bounded cache, poori tarah deterministic
+        self._facet_cache: Dict[str, Tuple] = {}
         # Cross-lingual scoring anchor (2026-08-23). Khaali = purana behaviour.
         self.scoring_anchor: str = ""
 
@@ -235,6 +263,7 @@ class RelevanceEngine:
         self.scoring_anchor = clean
         self._topic_cache.clear()
         self._domain_cache.clear()
+        self._facet_cache.clear()
 
     def expanded_query(self, query: str) -> str:
         """Scoring ke liye query + English anchor. Anchor bina = bilkul same."""
@@ -283,6 +312,141 @@ class RelevanceEngine:
                 self._topic_cache.clear()
             self._topic_cache[key] = cached
         return cached
+
+    # ── §F3 facet scoring: "ek source poore sawaal ka jawab nahi hota" ────────
+    #
+    # Naapa hua defect (2026-08-24, intel ke 1617-token Grand-Unified sawaal):
+    # `topic_of()` poore sawaal se top-8 shabd nikaalta hai, aur us sawaal ke
+    # top-8 nikle — model, consciousness, reality, theories, behaviour, human,
+    # life, attention. Yaani sirf DHAANCHA; ek bhi shabd aisa nahi jo kisi hisse
+    # ko alag karta ho (dopamine, individuation, Nash, entropy, freemasonry,
+    # remote viewing, decoherence, hedonic). Nateeja: 15 me se 11 bilkul sahi
+    # sources ka relevance 0.000.
+    #
+    # Asli baat: aisa sawaal 15-20 alag research sawaalon ka jhund hai. Dopamine
+    # ka paper poore jhund se match nahi karega — wo EK hisse ka gehra jawab
+    # hai. Isliye score do tarah se naapa jaata hai aur BEHTAR wala liya jaata
+    # hai: (a) poora sawaal (purana tarika, bilkul waisa hi), (b) sawaal ka
+    # sabse achha match karta HISSA (facets.py, deterministic, zero Gemini).
+    #
+    # Inflation na ho isliye teen pehre:
+    #   1. facets sirf lambe (60+ token) multi-hisse sawaal par bante hain —
+    #      chhote sawaal par `facets.build()` khaali deta hai, yaani ye poora
+    #      raasta provably NO-OP hai aur purane benchmarks hil nahi sakte.
+    #   2. ek facet GINA hi nahi jaata jab tak uske KAM SE KAM DO ALAG shabd
+    #      source me na milein (AND-of-two-signals) — aur wo do shabd "gate ke
+    #      layak" hone chahiye: poora shabd mila ho (root-guess nahi) aur aam
+    #      shabd na ho. Naapa gaya kyun: gearbox-vibration ka paper f15 se
+    #      ['based', 'interpretation', 'vibration'] par match ho kar 0.355 pa
+    #      gaya tha — jisme 'based' aam shabd hai aur 'interpretation' sirf
+    #      snippet ke boilerplate ("should not be interpreted") se root-guess
+    #      par mila tha. Ek hi asli shabd ('vibration') bacha, aur wo aam shabd
+    #      hai jo bilkul alag field me bhi aata hai.
+    #      Chhoot sirf ek jagah: agar facet ka koi STRONG shabd (sirf usi hisse
+    #      ka, 11+ akshar, concept-jaisa — "hermeticism", "neuroplasticity")
+    #      poora mil jaaye, to wo akela hi kaafi hai; aisa shabd ittefaq se
+    #      kisi doosre field ke source me nahi aata.
+    #   3. facet score par discount lagta hai — hissa poore sawaal ke barabar
+    #      nahi maana jaata.
+    # Aur ye lift kisi HARD REJECT ke baad nahi lagti: jo source domain gate,
+    # subject gate ya no-data gate se gir gaya, wo gira hi rehta hai.
+    _FACET_MIN_TERMS = 2
+    _FACET_DENOM = 4
+    _FACET_DISCOUNT = 0.90
+    _FACET_PHRASE_BONUS = 0.10
+
+    def facets_of(self, query: str) -> Tuple:
+        key = "fc:" + (query or "")[:600]
+        cached = self._facet_cache.get(key)
+        if cached is None:
+            cached = facets_mod.build(self.expanded_query(query))
+            if len(self._facet_cache) > 16:
+                self._facet_cache.clear()
+            self._facet_cache[key] = cached
+        return cached
+
+    @staticmethod
+    def _facet_terms_found(terms: Tuple[str, ...], text: str) -> List[str]:
+        low = (text or "").lower()
+        if not low:
+            return []
+        out: List[str] = []
+        for term in terms:
+            if _stem(term) in low:
+                out.append(term)
+                continue
+            root = _root(term)
+            if root and root in low:
+                out.append(term)
+        return out
+
+    @staticmethod
+    def _facet_exact_found(terms: Tuple[str, ...], text: str) -> List[str]:
+        """Sirf wo shabd jo POORE mile — `_root()` ka andaaza nahi.
+
+        Root-guess match ("interpretation" ← "interpreted") padhne me madad
+        karta hai, par wo saboot ke layak nahi: wahi guess research snippet ke
+        aam boilerplate se lag jaata hai.
+        """
+        low = (text or "").lower()
+        if not low:
+            return []
+        return [t for t in terms if _stem(t) in low]
+
+    def _facet_gate_ok(self, facet, exact_all: List[str]) -> bool:
+        """Kya ye hissa is source par 'mila' kehne layak hai?"""
+        solid = [t for t in exact_all
+                 if not _is_generic_word(t) and not facets_mod.is_discourse_word(t)]
+        if len(solid) >= self._FACET_MIN_TERMS:
+            return True
+        strong = set(getattr(facet, "strong", ()) or ())
+        return any(t in strong for t in exact_all)
+
+    def facet_match(self, s: SourceRecord, query: str,
+                    title: str = "", body: str = "") -> Dict:
+        """Sabse achha match karta hissa — {score, key, label, terms, ...}."""
+        pack = self.facets_of(query)
+        if not pack:
+            return {}
+        title = title or (s.title or "")
+        body = body or (s.snippet or "")
+        best: Dict = {}
+        for facet in pack:
+            in_title = self._facet_terms_found(facet.terms, title)
+            in_body = self._facet_terms_found(facet.terms, body)
+            found = {t for t in in_title} | {t for t in in_body}
+            if not found:
+                continue
+            title_exact = self._facet_exact_found(facet.terms, title)
+            exact_all = sorted(set(title_exact)
+                               | set(self._facet_exact_found(facet.terms, body)))
+            # Pehra 2: do alag SAAF shabd, ya title me ek STRONG shabd.
+            if not self._facet_gate_ok(facet, exact_all):
+                continue
+            denom = max(self._FACET_MIN_TERMS,
+                        min(len(facet.terms), self._FACET_DENOM))
+            lexical = min(1.0, (min(len(in_title) / denom, 1.0) * 0.65)
+                          + (min(len(in_body) / denom, 1.0) * 0.35))
+            focus = facet.query(limit=6)
+            sem = min(1.0, (semantic.similarity(focus, title) * 0.6)
+                      + (semantic.similarity(focus, body) * 0.4))
+            score = (lexical * 0.55) + (sem * 0.45)
+            low_all = f"{title} {body}".lower()
+            phrase_hit = next((p for p in facet.phrases
+                               if len(p.split()) >= 2 and p.lower() in low_all), "")
+            if phrase_hit:
+                score = min(1.0, score + self._FACET_PHRASE_BONUS)
+            score = round(min(max(score, 0.0), 1.0), 4)
+            if score > best.get("score", 0.0):
+                best = {"score": score, "key": facet.key, "label": facet.label,
+                        "terms": sorted(found), "matched_terms": len(found),
+                        "phrase": phrase_hit, "lexical": round(lexical, 4),
+                        "semantic": round(sem, 4), "weight": facet.weight}
+        if not best:
+            return {"score": 0.0, "key": "", "label": "", "terms": [],
+                    "matched_terms": 0, "facet_count": len(pack)}
+        best["facet_count"] = len(pack)
+        return best
 
     # ── quality (Spec Section 7) ──────────────────────────────────────────────
     def score_quality(self, s: SourceRecord) -> float:
@@ -775,11 +939,24 @@ class RelevanceEngine:
                 "bhi naap ya statistic nahi, aur sawaal ki baat bhi test nahi "
                 "karta — ye evidence nahi, raay hai")
 
+        # ── §F3: poora sawaal vs sawaal ka ek HISSA — behtar wala liya jaata hai
+        # Yahan (saare hard reject ke BAAD) jaan-boojh kar hai: gira hua source
+        # facet se zinda nahi hota, sirf bacha hua source apne asli hisse ka
+        # poora credit paata hai.
+        facet = self.facet_match(s, query, title, body)
+        facet_lift = 0.0
+        if facet.get("score", 0.0) > 0.0:
+            facet_lift = round(min(1.0, facet["score"] * self._FACET_DISCOUNT), 4)
+            if facet_lift > score:
+                score = facet_lift
+
         s.relevance_parts = {
             "lexical": round(lexical, 4), "semantic": round(sem, 4),
             "anchor": round(anchor, 4), "branch": round(branch, 4),
             "kind": kind or "unknown", "final": score,
             "domain": plan.key,
+            "facet": (facet or None),
+            "facet_lift": facet_lift,
             "tests_proposition": prop["tests_proposition"],
             "proposition_why": prop["why"],
             "checks": prop["dimensions"],

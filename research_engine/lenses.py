@@ -473,6 +473,70 @@ _POSSESSIVE = {"ke", "ki", "ka", "kaa", "kii", "kee"}
 _BEFORE_NAME = ("according to", "as per", "as told by", "in the words of")
 
 
+# Abstract naam ke suffix — vyakti ke naam me ye nahi aate ("Manifestation",
+# "Reality", "Adaptation" naam nahi hain). Ye bhasha ka dhaancha hai, kisi
+# field/vyakti ki list nahi.
+_NOT_A_NAME_SUFFIXES = _CONCEPT_SUFFIXES + (
+    "ity", "ties", "ment", "ments", "ness", "tion", "sion", "logy", "ing",
+)
+# "the Divine Spark" — determiner ke baad ka bada-akshar phrase CONCEPT hota
+# hai, vyakti nahi. Vyakti ke naam ke aage "the/a/this" nahi lagta.
+_DETERMINERS = {"the", "a", "an", "this", "that", "these", "those", "its",
+                "our", "their", "his", "her", "your", "my"}
+
+
+def _person_name_from_run(name: str, raw: str, at_line_start: bool,
+                          prev_word: str = "", possessive: bool = False) -> str:
+    """Bada-akshar wale run me se ASLI vyakti ka naam — na mile to khaali string.
+
+    Naapi hui bimari (intel ke Grand-Unified sawaal par): thinker list me
+    "Human Reality", "Strategy Problem Suppose", "Inner Reality Examine" jaise
+    tukde aa rahe the — ye sawaal ke HEADING hain, kisi insaan ka naam nahi.
+    Faisla poori tarah dhaanche se hota hai (koi naam-list nahi):
+
+      1. **Case-consistency** — asli naam sawaal me kabhi chhote akshar me nahi
+         aata. "Human", "Reality", "Evidence" wahi sawaal me lowercase bhi
+         milte hain, isliye wo aam shabd hain. (Naapa gaya: Carl/Jung/Neville/
+         Goddard/Naval/Ravikant ka lowercase count 0; Human 6, Evidence 7.)
+      2. framework ka head noun ("State", "Model", "Theory") naam nahi hota,
+      3. abstract suffix ("-ation", "-ity", "-ment") wala shabd naam nahi hota,
+      4. line ke shuru me likha aur aage lowercase vaakya na hone wala run
+         HEADING hai ("Final Challenge" + newline),
+      5. determiner ke baad ka run concept hai ("the Divine Spark"),
+      6. teen-shabd ka run: teesra shabd kriti-jaisa ho to pehle do shabd naam
+         maane jaate hain ("Marcus Aurelius Meditations" → "Marcus Aurelius"),
+         warna poora run heading/concept hai ("New World Order").
+    """
+    words = [w for w in name.split() if w]
+    if at_line_start:
+        return ""
+    if prev_word.casefold() in _DETERMINERS and not possessive:
+        return ""      # "the Divine Spark" — concept, vyakti nahi
+    if len(words) == 3 and not possessive:
+        # "Marcus Aurelius Meditations" = naam + KRITI. Teesra shabd concept/
+        # kriti jaisa ho (plural ya abstract suffix) to pehle do shabd naam hain;
+        # warna poora run heading/concept hai ("New World Order").
+        third = words[2].casefold()
+        work_like = third.endswith(_NOT_A_NAME_SUFFIXES) or (
+            third.endswith("s") and not third.endswith("ss"))
+        if not work_like or third in _FRAMEWORK_HEADS:
+            return ""
+        words = words[:2]
+    elif len(words) not in (2, 3):
+        return ""
+    folded = fold_accents(raw)
+    for word in words:
+        low = word.casefold()
+        if _is_stop(low) or low in _FRAMEWORK_HEADS:
+            return ""
+        if low.endswith(_NOT_A_NAME_SUFFIXES):
+            return ""
+        # Wahi shabd sawaal me chhote akshar me bhi likha hai → aam shabd hai.
+        if re.search(rf"(?<![A-Za-z]){re.escape(low)}(?![A-Za-z])", folded):
+            return ""
+    return " ".join(words)
+
+
 def thinker_candidates(question: str) -> List[str]:
     """Sambhavit vyakti ke naam — bina kisi naam-list ke.
 
@@ -515,13 +579,99 @@ def thinker_candidates(question: str) -> List[str]:
 
     # Capitalised naam-run: jab user bade akshar likhta hai to wo pakka signal
     # hai. intel chhote akshar likhta hai, isliye ye sirf extra hai — iske bharose
-    # kuch nahi chhoda gaya.
-    for match in re.findall(r"\b[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,}){1,2}\b",
-                            fold_accents(raw)):
-        if not any(_is_stop(part) for part in match.split()):
-            out.append(match)
+    # kuch nahi chhoda gaya. Har run `_person_name_from_run()` se guzarta hai,
+    # warna sawaal ke heading (“Final Challenge”, “Mandatory Evidence Standard”)
+    # thinker ban jaate the.
+    folded_raw = fold_accents(raw)
+    for match in re.finditer(r"\b[A-Z][a-z]{2,}(?:[ ]+[A-Z][a-z]{2,}){1,2}\b",
+                             folded_raw):
+        run = [w for w in match.group(0).split() if w]
+        # Vaakya ke shuru ka bada-akshar wala nirdesh ("Explain Marcus
+        # Aurelius Meditations") run me ghus jaata hai — usse chheel do, warna
+        # poora run stopword ki wajah se gir jaata tha aur asli naam bhi chala
+        # jaata tha.
+        dropped = ""
+        while run and _is_stop(run[0]):
+            dropped = run.pop(0)
+        while run and _is_stop(run[-1]):
+            run.pop()
+        if len(run) < 2:
+            continue
+        text = " ".join(run)
+        line_head = folded_raw.rfind("\n", 0, match.start()) + 1
+        prefix = folded_raw[line_head:match.start()]
+        tail = folded_raw[match.end():]
+        # Heading tab maana jaata hai jab run line ke shuru me ho AUR uske aage
+        # chhote akshar wala vaakya na chale. "Jean Paul Sartre's idea of..."
+        # line ke shuru me hai par vaakya hai — wo naam hi rehna chahiye.
+        at_line_start = (not re.search(r"[A-Za-z]", prefix) and not dropped
+                         and not re.match(r"['’]?s?[ ,]+[a-z]", tail))
+        prev = re.findall(r"[A-Za-z']+", prefix)
+        possessive = bool(re.match(r"['’]s\b", tail))
+        name = _person_name_from_run(
+            text, folded_raw, at_line_start,
+            prev_word=dropped or (prev[-1] if prev else ""),
+            possessive=possessive)
+        if name:
+            out.append(name)
 
     return _unique(out, limit=6)
+
+
+# Kisi bhi search term me chhote shabd sirf JODNE wale hote hain ("Tao of
+# Physics", "gita aur vedanta"). Akela "X"/"Y" jod nahi, sawaal ka placeholder
+# hai. Ye set public hai taaki classics isi paribhasha ko istemaal kare — do
+# jagah do paribhasha rakhne se hi purane defect paida hote hain.
+TERM_CONNECTORS = frozenset({
+    "of", "the", "a", "an", "and", "in", "on", "to", "for", "or", "vs",
+    "ka", "ke", "ki", "se", "me", "aur", "va", "evam", "de", "del", "du",
+    "la", "le", "el", "von", "der", "das", "ibn", "al", "bin",
+})
+_TERM_SENTENCE_MARKS = ".;:!?"
+_TERM_SPLIT_MARKS = ("/", "\\", ",", "(", ")", "[", "]", "|")
+_TERM_MAX_WORDS = 6
+
+
+def is_search_term_safe(term: str) -> bool:
+    """Ye string search term / concept ban sakti hai — ya sawaal ka tukda hai?
+
+    Naapi hui bimari (intel ke Grand-Unified sawaal par): ``concepts`` me
+    ``'CIA investigated X'``, ``'CIA proved X.'`` aur ``'consciousness-and'``
+    aa rahe the. Pehla-doosra prohibition-vaakya ka tukda hai (quote ke andar
+    likha tha), teesra adhoora hyphen-jod. Faisla sirf dhaanche se:
+
+      1. vaakya ka nishaan (``.`` ``;`` ``?``) → term nahi, vaakya hai,
+      2. slash/comma/bracket wala jod ("frequency/vibration") → do alag shabd
+         hain, ek term nahi; dono alag se pehle hi list me aate hain,
+      3. 6 se zyada shabd → term nahi,
+      4. 3 se chhota shabd jo connector bhi nahi ("X", "Y") → placeholder,
+      5. hyphen-jod ka koi hissa stopword ho ("consciousness-and") → adhoora,
+      6. kam se kam ek 3+ akshar wala apna shabd hona chahiye.
+
+    Ye jaan-boojh kar UDAAR hai: "dopamine-driven", "zero-sum", "self-image"
+    jaise asli concept isme se paas hote hain.
+    """
+    clean = _clean(term)
+    if not clean or any(mark in clean for mark in _TERM_SENTENCE_MARKS):
+        return False
+    if any(bad in clean for bad in _TERM_SPLIT_MARKS):
+        return False
+    words = [w for w in clean.split() if w]
+    if not words or len(words) > _TERM_MAX_WORDS:
+        return False
+    own = 0
+    for word in words:
+        pieces = [p for p in re.split(r"[-–—]", word.strip("'\"“”‘’()[]")) if p]
+        for piece in pieces:
+            low = piece.casefold()
+            if len(piece) < 3 and low not in TERM_CONNECTORS:
+                return False
+            if _is_stop(low):
+                if len(pieces) > 1:
+                    return False
+                continue
+            own += 1
+    return own >= 1
 
 
 def deterministic_lenses(question: str) -> Dict:
@@ -534,10 +684,15 @@ def deterministic_lenses(question: str) -> Dict:
     nahi chalti, isliye anjaan topic bhi lens paata hai — aur quota kharch 0.
     """
     concepts = _unique([
-        *quoted_phrases(question),
-        *hyphenated_compounds(question),
-        *suffix_concepts(question),
-        *content_phrases(question),
+        term for term in (
+            *quoted_phrases(question),
+            *hyphenated_compounds(question),
+            *suffix_concepts(question),
+            *content_phrases(question),
+        )
+        # Sawaal ka tukda concept nahi hota — "CIA investigated X" jaisi cheez
+        # yahin ruk jaati hai, warna wo scoring anchor aur query dono me jaati.
+        if is_search_term_safe(term)
     ], limit=_MAX_ITEMS + 6)
     disciplines, families = morpheme_disciplines(question)
     thinkers = thinker_candidates(question)
@@ -552,9 +707,11 @@ def deterministic_lenses(question: str) -> Dict:
         "concepts": concepts,
         "english_terms": english_vocabulary(question),
         "disciplines": disciplines,
-        "frameworks": _unique([*framework_phrases(question),
-                               *hyphenated_compounds(question),
-                               *suffix_concepts(question)]),
+        "frameworks": _unique([
+            term for term in (*framework_phrases(question),
+                              *hyphenated_compounds(question),
+                              *suffix_concepts(question))
+            if is_search_term_safe(term)]),
         "thinkers": thinkers,
         "source_families": families,
         "method": "deterministic",

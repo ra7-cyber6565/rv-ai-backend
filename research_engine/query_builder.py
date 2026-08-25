@@ -331,6 +331,17 @@ _PLURAL_SAFE = {"species", "series", "analysis", "basis", "physics", "news",
                 "process", "access", "class", "less", "cross", "loss"}
 
 
+def is_generic_word(word: str) -> bool:
+    """Kya ye shabd itna aam hai ki iska match akela saboot nahi maana jaaye?
+
+    Yahi `_GENERIC` set hai jise query_builder aadha wazan deta hai. Doosre
+    module (relevance ka facet gate) isi ek hi paribhasha par chalein, warna
+    "generic shabd" ki do alag-alag list ban jaati hain.
+    """
+    low = str(word or "").strip().casefold()
+    return bool(low) and low in _GENERIC
+
+
 def _canon(term: str) -> str:
     """
     Ek shabd ka ANDAR ka roop (grouping key): Devanagari -> English, plural ->

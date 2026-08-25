@@ -50,6 +50,12 @@ from __future__ import annotations
 # pure Python and has no heavy dependency/network side effect.
 from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
 
+# Focus guard sc-guard ke BAAD lagti hai (isliye ye sabse bahar ki parat hai):
+# ek-do ittefaqiya shabd se poora multi-domain sawaal kisi ek strict field ka
+# nahi ban jaata. Naapa gaya: 1617-token sawaal "economics" (strict) ban gaya
+# tha aur 15 me se 13 sahi sources hard-reject ho gaye the.
+from . import domain_focus_guard as _domain_focus_guard  # noqa: F401
+
 # Preserve Claude's Gemini implementation as the primary, but let every normal
 # import (including orchestrator's direct module import) see the resilient
 # subclass. reasoning_router captures the original class before this assignment;

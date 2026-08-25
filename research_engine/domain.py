@@ -114,26 +114,94 @@ def tokens(text: str) -> List[str]:
     return _WORD_RE.findall(fold_accents(text).lower())
 
 
-def stems(text: str) -> Set[str]:
+class StemBag(set):
+    """Stem-set + un stems ka KRAM (sequence).
+
+    Kyun zaroori hai (naapa gaya 2026-08-24): `phrase_hit` sirf set-membership
+    dekhta tha, yaani multi-word anchor ke shabd text me KAHIN BHI ho to hit
+    maan liya jaata tha. Chhote title/snippet par ye theek chalta hai (60 token
+    ke andar do shabd asal me paas-paas hi hote hain), par lambe text par ye
+    provably jhooth bolta hai: intel ke 1617-token wale sawaal me
+    "theories of language" aur "causal model" alag-alag jagah the, aur cs_ml ka
+    anchor "language model" HIT ho gaya — usi ek jhoothe hit se poora sawaal
+    "computer science / machine learning" (strict) ban gaya aur 15 me se 13
+    sahi sources HARD REJECT ho gaye.
+
+    Isliye `stems()` ab set ke saath token-kram bhi laata hai, aur `phrase_hit`
+    lambe text par paas-paas hone ki shart lagata hai. Chhote text par purana
+    behaviour bilkul waisa hi rehta hai (regression 0), aur jo caller apna
+    saada `set` deta hai uska raasta bhi nahi badalta.
+    """
+
+    __slots__ = ("seq",)
+
+    def __init__(self, values: Sequence[str] = (), seq: Sequence[str] = ()):
+        super().__init__(values)
+        self.seq: Tuple[str, ...] = tuple(seq)
+
+
+# Itne token tak set-membership aur paas-paas hona practically ek hi baat hai;
+# is se bade text par hi proximity ki shart lagti hai. Ye chhat hi purane
+# measured benchmarks (superconductivity 156, cross-domain 649) ko hilne se
+# rokti hai — unke sawaal aur sources isse chhote hain.
+_PROXIMITY_MIN_TOKENS = 80
+# Do shabd ke anchor ke liye ±5 token ki dhheel — "temperature at which the
+# critical transition" jaisa asli likhawat pakda rahe, par 900 token door ka
+# ittefaq na chale.
+_PROXIMITY_SLACK = 3
+
+
+def stems(text: str) -> "StemBag":
     out: Set[str] = set()
+    seq: List[str] = []
     for tok in tokens(text):
-        out.add(stem(tok))
+        root = stem(tok)
+        out.add(root)
+        seq.append(root)
         if "-" in tok:                      # "room-temperature" → room, temperature
             for part in tok.split("-"):
                 if len(part) > 2:
-                    out.add(stem(part))
-    return out
+                    piece = stem(part)
+                    out.add(piece)
+                    seq.append(piece)
+    return StemBag(out, seq)
+
+
+def _parts_near(parts: Sequence[str], seq: Sequence[str]) -> bool:
+    """Kya `parts` ke saare stem ek chhoti window ke andar aate hain?"""
+    window = len(parts) + _PROXIMITY_SLACK
+    where: Dict[str, List[int]] = {}
+    for index, root in enumerate(seq):
+        if root in parts and len(where.setdefault(root, [])) < 64:
+            where[root].append(index)
+    if len(where) < len(set(parts)):
+        return False
+    pivot = min(where, key=lambda p: len(where[p]))
+    for index in where[pivot]:
+        low, high = index - window, index + window
+        if all(any(low <= pos <= high for pos in where[part])
+               for part in where):
+            return True
+    return False
 
 
 def phrase_hit(phrase: str, bag: Set[str]) -> bool:
     """
     Multi-word anchor ('critical temperature') tab hit hai jab uske SAARE
-    shabd source mein hon. Single word ke liye seedha lookup.
+    shabd source mein hon — aur lambe text mein PAAS-PAAS bhi hon (`StemBag`).
+    Single word ke liye seedha lookup.
     """
     parts = [stem(p) for p in phrase.split() if p]
     if not parts:
         return False
-    return all(p in bag for p in parts)
+    if not all(p in bag for p in parts):
+        return False
+    if len(set(parts)) < 2:
+        return True
+    seq = getattr(bag, "seq", ())
+    if len(seq) <= _PROXIMITY_MIN_TOKENS:
+        return True                          # chhota text — purana behaviour
+    return _parts_near(parts, seq)
 
 
 def count_hits(needles: Sequence[str], bag: Set[str]) -> int:

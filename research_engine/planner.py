@@ -20,6 +20,7 @@ from . import concept_ledger as ledger_mod
 from .connectors.classic_connector import wikisource_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
+from . import facets as facets_mod
 from . import lenses as lens_mod
 from .local_language import normalize
 from .patents import patent_intent
@@ -328,6 +329,53 @@ class ResearchPlanner:
         """
         return topic_terms(question, limit=limit)
 
+    # Ek bade sawaal ke kitne hisse EK round me dhoondhe jaayein. Ye seema
+    # zaroori hai: 23 facet ka matlab 23 query nahi ho sakta (provider budget
+    # aur ₹0 shart). Isliye har round apne hisse leta hai aur agla round agle
+    # hisse — MARATHON ke 4 round me ~16 hisse cover ho jaate hain.
+    FACET_QUERIES_PER_ROUND = 4
+    # Depth ke hisaab se chhat — QUICK par fan-out nahi hona chahiye (wahan
+    # jawab turant chahiye), gehre mode me poore sawaal ko cover karna hai.
+    _FACET_ROUND_BUDGET = {"QUICK": 1, "STANDARD": 2, "DEEP": 3,
+                           "MAXIMUM": 4, "MARATHON": 4}
+
+    def facet_round_budget(self, cls: Optional[Dict] = None) -> int:
+        """Is round me kitni facet queries — depth se, warna default."""
+        depth = ((cls or {}).get("depth") or {})
+        name = str(depth.get("name") or "").strip().upper()
+        return self._FACET_ROUND_BUDGET.get(name, self.FACET_QUERIES_PER_ROUND)
+
+    def facet_search_queries(self, question: str, round_no: int = 1,
+                             limit: int = 0) -> List[str]:
+        """Bade sawaal ke HAR HISSE ki apni query — round ke hisaab se ghoomti.
+
+        Naapa hua kaaran: 1600-token sawaal ek topic nahi, 15-20 alag research
+        sawaal hai. Ek blended query ("model consciousness reality human") us
+        jhund ke kisi bhi hisse ko theek se nahi dhoondhti — measured: 15 sahi
+        sources me se 11 ka relevance 0.000. Ab har hisse ki apni query jaati
+        hai, aur wo query `facets.py` ke andar hi nishedh-line/placeholder se
+        saaf ho chuki hoti hai ("CIA investigated X CIA proved X." jaisa kachra
+        query nahi banta).
+
+        Chhote sawaal par `facets.build()` khaali hota hai (MIN_QUESTION_TOKENS),
+        isliye ye method wahan bilkul NO-OP hai — purana behaviour jaisa ka
+        waisa.
+        """
+        per_round = max(1, int(limit or self.FACET_QUERIES_PER_ROUND))
+        try:
+            queries = facets_mod.facet_queries(question or "",
+                                               limit=facets_mod.MAX_FACETS,
+                                               terms=5)
+        except Exception:
+            return []
+        if not queries:
+            return []
+        start = (max(1, int(round_no or 1)) - 1) * per_round
+        if start >= len(queries):
+            # Facet khatam — dobara shuru se (round 5+ par bhi kuch to jaaye).
+            start = start % len(queries)
+        return queries[start:start + per_round]
+
     def search_queries(self, question: str, cls: Optional[Dict] = None,
                        round_no: int = 1) -> List[str]:
         """
@@ -344,7 +392,29 @@ class ResearchPlanner:
         hydride superconductivity", ...). Round 2/3 ke liye branch-wise queries
         rotate hoti hain, aur ye sab DETERMINISTIC hai: reasoning model band ho
         to bhi discovery refine hoti rehti hai.
+
+        Iske UPAR ek parat: agar sawaal khud bahut bada hai (kai hisson wala),
+        to base queries ke BAAD us round ke facet queries bhi jaati hain. Purani
+        queries apni usi jagah par rehti hain — isliye chhote sawaal par ye
+        badlaav no-op hai aur naapa gaya benchmark behaviour nahi badalta.
         """
+        base_qs = self._base_search_queries(question, cls=cls, round_no=round_no)
+        facet_qs = self.facet_search_queries(
+            question, round_no=round_no, limit=self.facet_round_budget(cls))
+        if not facet_qs:
+            return base_qs
+        out: List[str] = []
+        seen = set()
+        for query in [*base_qs, *facet_qs]:
+            key = (query or "").strip().lower()
+            if query and key not in seen:
+                seen.add(key)
+                out.append(query)
+        return out
+
+    def _base_search_queries(self, question: str, cls: Optional[Dict] = None,
+                             round_no: int = 1) -> List[str]:
+        """Pehle jo `search_queries` thi, wahi — bilkul waisi hi (4 ki chhat)."""
         cls = cls or self.classify(question)
         base = self.clean_query(question)
         specialist_qs = specialist_queries(question, base, round_no=round_no, limit=4)

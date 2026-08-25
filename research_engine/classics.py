@@ -224,6 +224,135 @@ def _words(question: str) -> List[str]:
     return [w.strip("-") for w in L.tokens(question) if w.strip("-")]
 
 
+# "<naam> ke/ki/ka <text-shabd>" ka jodne wala shabd. Ye naam ka hissa nahi hai,
+# par ise dekhte hi ruk jaana bhi galat hai — isliye peeche dekhte waqt EK
+# joiner laangha jaata hai. (Probe me pakda gaya: "bhagavad gita ke chapter 2 me
+# kya likha hai" par ek bhi kriti-naam nahi banta tha, kyunki "ke" par look-back
+# turant ruk jaata tha.)
+_JOINERS = {"ke", "ki", "ka", "kaa", "kii", "kee", "of", "wala", "wali", "wale",
+            "vala", "vali", "vale"}
+# Kitab ke ANDAR ke hisse ka naam. Ye kriti ke naam ke saath jod dene par naam
+# bigad jaata hai ("bhagavad gita chapter"), isliye jod me ye shaamil nahi hote.
+_DIVISION_WORDS = {
+    "chapter", "chapters", "adhyay", "adhyaya", "verse", "verses", "shlok",
+    "shloka", "shlokas", "canto", "page", "pages", "edition", "volume",
+    "translation", "translations", "anuvad", "anuvaad", "excerpt", "passage",
+}
+_WORK_MAX_WORDS = 5
+_WORK_SENTENCE_MARKS = ".;:!?"
+_WORK_MIN_PIECE = 3
+# Kriti ke naam me chhote shabd sirf JODNE wale hote hain ("Tao of Physics").
+# Paribhasha EK hi jagah rehti hai — lenses me — warna do jagah do niyam ban
+# jaate hain. (Note: bhasha ki stopword list me "x" bhi hai, isliye placeholder
+# check connector-set se hota hai; usi wajah se pehle 'CIA investigated X'
+# kriti ban kar list me aa gaya tha.)
+_TITLE_CONNECTORS = L.TERM_CONNECTORS
+# Naam ke shuru se sirf FUNCTION shabd hatte hain ("The Tao of Physics book" →
+# "tao of physics"). Naam ka hissa ban jaane wale particle ("ibn", "al", "von",
+# "de") NAHI hatte — warna "ibn khaldun" ka naam "khaldun" reh jaata hai.
+_NAME_PARTICLES = {"ibn", "al", "bin", "von", "der", "das", "de", "del", "du",
+                   "la", "le", "el", "va", "evam"}
+_LEADING_STRIP = set(_TITLE_CONNECTORS) - _NAME_PARTICLES
+
+
+def is_work_like_name(name: str) -> bool:
+    """Ye string kisi KRITI ka naam ban sakti hai — dhaanche se, list se nahi.
+
+    Naapi hui bimari (intel ke Grand-Unified sawaal par): works list me
+    ``['CIA investigated X', 'CIA proved X.', 'life-biology',
+    'consciousness-and', 'long-term']`` aa raha tha — ye sawaal ke
+    prohibition-vaakya aur aam hyphen-jode hain, kisi granth ke naam nahi.
+    Faisla sirf bhasha ke dhaanche se hota hai. Pehli parat sabhi search terms
+    par lagti hai (``lenses.is_search_term_safe``: vaakya ka nishaan, 3 se
+    chhota placeholder "X", adhoora hyphen-jod "consciousness-and"), aur uske
+    upar KRITI ke apne niyam:
+
+      1. slash/comma wala naam kriti ka naam nahi ("frequency/vibration"),
+      2. 5 se zyada shabd → wo vaakya hai,
+      3. sawaal-shabd ("kya", "what") kriti ke naam me nahi aata,
+      4. sab shabd aam text-shabd hon ("granth chapter") → naam nahi; kam se kam
+         ek apna shabd chahiye.
+    """
+    clean = _clean(name)
+    if not L.is_search_term_safe(clean):
+        return False
+    if any(bad in clean for bad in ("/", "\\", ",", "(", ")", "[", "]")):
+        return False
+    parts = [p for p in clean.split() if p]
+    if not parts or len(parts) > _WORK_MAX_WORDS:
+        return False
+    own = 0
+    for part in parts:
+        for piece in [x for x in re.split(r"[-–—]", part.strip("'\"")) if x]:
+            low = piece.casefold()
+            if is_question_word(low):
+                return False
+            if L.is_stopword(low) or is_generic_text_word(low):
+                continue
+            own += 1
+    return own >= 1
+
+
+def _title_like(name: str) -> bool:
+    """Naam TITLE-CASE me likha hai (do ya zyada bade akshar wale shabd)?
+
+    Lambe English sawaal me kriti ka naam bade akshar me aata hai
+    ("Psycho-Cybernetics"), aur concept chhote akshar me ("life-biology").
+    Ye cue tabhi kaam aata hai jab koi text-shabd paas me na ho.
+    """
+    alpha = re.findall(r"[A-Za-z]+", str(name or ""))
+    content = [w for w in alpha if not L.is_stopword(w.casefold())]
+    caps = [w for w in content if w[:1].isupper()]
+    return len(caps) >= 2 and len(caps) == len(content)
+
+
+def _near_text_cue(question: str, name: str, window: int = 3) -> bool:
+    """Naam ke aas-paas (±3 shabd) koi text-shabd ya "asli text" cue hai?
+
+    Hinglish me kriti ka naam chhote akshar me aata hai, isliye title-case cue
+    nahi milta — par cue paas me hota hai: "psycho-cybernetics BOOK ka saransh".
+    Summary-cue ("explain", "samjhao") jaan-boojh kar bahar hai: lambe sawaal me
+    wo har jagah hota hai. (Naapa gaya: intel ke Grand-Unified sawaal me
+    "self-image" ke 3 shabd ke andar "explain" tha, isliye ek concept kriti ban
+    kar list me aa gaya tha.)
+    """
+    words = _words(question)
+    target = _words(name)
+    if not target or len(target) > len(words):
+        return False
+    span = len(target)
+    for start in range(len(words) - span + 1):
+        if words[start:start + span] != target:
+            continue
+        near = (words[max(0, start - window):start]
+                + words[start + span:start + span + window])
+        for word in near:
+            if word in _TEXT_WORDS or word in _READ_CUES:
+                return True
+    return False
+
+
+# Quote ke andar ka phrase blank karne ke liye — wahi quote-chihn jo
+# ``lenses.quoted_phrases`` dhoondta hai.
+_QUOTE_SPAN_RE = re.compile(r"[\"'“‘][^\"'”’]{3,60}[\"'”’]")
+
+
+def _quoted_only(question: str, phrase: str) -> bool:
+    """Ye phrase sirf quote ke andar hai, bahar kahin nahi?
+
+    Quote do kaam karta hai: kriti ka naam ("vigyan bhairav") aur zor dene wala
+    scare-quote ("reality"). Farq dhaanche se: kriti ka naam sawaal me sirf ek
+    baar, quote ke andar aata hai; aam shabd bahar bhi bar-bar aata hai.
+    (Naapa gaya: intel ke Q1 me "reality" quote ke bahar kai baar hai.)
+    """
+    clean = _clean(phrase)
+    if not clean:
+        return False
+    outside = _QUOTE_SPAN_RE.sub(" ", str(question or ""))
+    pattern = r"(?<![A-Za-z])" + re.escape(clean.casefold()) + r"(?![A-Za-z])"
+    return not re.search(pattern, _clean(outside).casefold())
+
+
 def text_intent(question: str) -> Dict:
     """Sawaal ko text-lane chahiye ya nahi — poori wajah ke saath.
 
@@ -277,8 +406,11 @@ def work_candidates(question: str, limit: int = 5) -> List[str]:
     people = L.thinker_candidates(question)
     text_words = [w for w in words if w in _TEXT_WORDS]
 
-    out: List[str] = []
-    out += L.quoted_phrases(question)
+    out: List[tuple] = []          # (naam, needs_cue?) — cue = title/text-shabd
+    for phrase in L.quoted_phrases(question):
+        # Quote ke andar ka naam jo sawaal me kahin aur nahi aata, wo khud hi
+        # cue hai — usse aur saboot maangna Hinglish sawaalon ko maar deta hai.
+        out.append((phrase, not _quoted_only(question, phrase)))
     # "book raja yoga", "granth vigyan bhairav" — text-shabd ke TURANT BAAD aane
     # wale 1-2 shabd aksar kriti ka naam hote hain. Stop-word par ruk jaate hain,
     # isliye "notebooks me kya tha" se kuch nahi banta.
@@ -295,34 +427,85 @@ def work_candidates(question: str, limit: int = 5) -> List[str]:
                 break
             tail.append(follow)
         if tail:
-            out.append(" ".join(tail))
+            out.append((" ".join(tail), False))
         # Hinglish aksar ulta chalti hai — naam PEHLE, text-shabd BAAD me
-        # ("muqaddimah granth", "gita granth me"). Isliye peeche ke 1-2 shabd
-        # bhi dekhe jaate hain, wahi rukne ke niyam ke saath. (Probe: "muqaddimah
-        # granth me ..." par pehle ek bhi kriti-naam nahi banta tha.)
+        # ("muqaddimah granth", "nagarjuna ke mool granth"). Isliye peeche ke
+        # shabd bhi dekhe jaate hain, wahi rukne ke niyam ke saath — bas joiner
+        # ("ke/ki/ka/of") aur modifier-cue ("mool", "asli", "original") laangh
+        # kar. (Probe: "nagarjuna ke mool granth me kya likha hai" par pehle
+        # naam ki jagah sirf "granth" bachta tha.)
         lead: List[str] = []
-        for back in reversed(words[max(0, index - 2):index]):
-            if (L.is_stopword(back) or back in _TEXT_WORDS
-                    or back in _READ_CUES or back in _SUMMARY_CUES
-                    or back in _QUESTION_WORDS):
+        skipped = 0
+        for back in reversed(words[max(0, index - 4):index]):
+            if not lead and skipped < 2 and (
+                    back in _JOINERS or back in _READ_CUES
+                    or back in _SUMMARY_CUES):
+                skipped += 1
+                continue
+            if (back in _TEXT_WORDS or back in _READ_CUES
+                    or back in _SUMMARY_CUES or back in _QUESTION_WORDS):
                 break
+            if L.is_stopword(back) and (not lead
+                                        or back not in _TITLE_CONNECTORS):
+                break        # naam connector se shuru nahi hota
             lead.insert(0, back)
+            if len(lead) >= 3:
+                break
+        while len(lead) > 1 and lead[0] in _LEADING_STRIP:
+            lead.pop(0)     # "The Tao of Physics book" → "tao of physics"
         if lead:
-            out.append(" ".join(lead))
-    out += L.hyphenated_compounds(question)
+            out.append((" ".join(lead), False))
+    for compound in L.hyphenated_compounds(question):
+        out.append((compound, True))
+    joined_people: set = set()
     for person in people[:2]:
         person_tail = person.split()[-1].casefold()
         for word in _uniq(text_words, limit=2):
             # "ramanujan ke notebooks" → "ramanujan notebooks". Agar text-shabd
-            # naam ka hissa hi hai to dobara nahi jodna.
-            if word.casefold() == person_tail:
+            # naam ka hissa hi hai to dobara nahi jodna, aur dhaanche wale
+            # shabd ("chapter", "verse", "page") kriti ka naam nahi bante —
+            # "bhagavad gita chapter" search karne ka koi fayda nahi.
+            if word.casefold() == person_tail or word.casefold() in _DIVISION_WORDS:
                 continue
-            out.append(f"{person} {word}")
-    kept = _uniq(out, limit=limit)
+            out.append((f"{person} {word}", False))
+            joined_people.add(person.casefold())
+        # "Marcus Aurelius Meditations", "Carl Jung Red Book" — naam ke turant
+        # baad bada-akshar wala shabd aksar KRITI ka naam hota hai, chahe wo
+        # kisi text-shabd ki list me na ho. (Probe: "Explain Marcus Aurelius
+        # Meditations key ideas ..." par pehle ek bhi kriti-naam nahi banta tha.)
+        for tail_word in re.findall(
+                re.escape(person) + r"[  ]+([A-Z][a-z]{2,})", str(question or "")):
+            low = tail_word.casefold()
+            if (L.is_stopword(low) or low in _QUESTION_WORDS
+                    or low in _READ_CUES or low in _SUMMARY_CUES
+                    or low in _DIVISION_WORDS or low in _TEXT_WORDS):
+                continue
+            out.append((f"{person} {tail_word}", False))
+
+    # Do parat ki chhanni: (1) har naam dhaanche se kriti-jaisa hona chahiye,
+    # (2) jo naam kisi cue ke bina mila (quote / hyphen-jod) usko title-case ya
+    # paas ka text-shabd dikhana padta hai — warna wo sawaal ka concept hai,
+    # kriti nahi ("divine spark", "life-biology", "CIA investigated X").
+    names: List[str] = []
+    for name, weak in out:
+        if not is_work_like_name(name):
+            continue
+        if weak and not (_title_like(name) or _near_text_cue(question, name)):
+            continue
+        # Akela vyakti ka naam KRITI nahi hai. Uska jodi hui shakal ("ibn
+        # khaldun granth") pehle hi ban gayi hai, isliye bare naam ko dobara
+        # work list me nahi bhejte — warna ek hi cheez ki do query jaati hai.
+        if name.casefold() in joined_people:
+            continue
+        names.append(name)
+    kept = _uniq(names, limit=limit)
     for hit in L.tradition_hits(question):
         # Akela marker-shabd sabse aakhir me, aur tab hi jab wo kisi lambe
-        # candidate ke andar mojood na ho ("raja yoga" ke baad akela "yoga" nahi).
+        # candidate ke andar mojood na ho ("raja yoga" ke baad akela "yoga" nahi)
+        # aur khud aam text-shabd na ho ("granth" kisi kriti ka naam nahi hai).
         low = hit.casefold()
+        if not is_work_like_name(hit):
+            continue
         if any(f" {low} " in f" {name.casefold()} " for name in kept):
             continue
         kept.append(hit)
