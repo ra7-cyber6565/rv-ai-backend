@@ -568,12 +568,38 @@ class RelevanceEngine:
         return " ".join(bits) if bits else (self.expanded_query(query) or "")[:200]
 
     def axes_of(self, query: str):
-        """Sawaal ke evidence axes (cached) — §6 ka `required_axis` isse aata hai."""
-        query = self.expanded_query(query)
-        key = "a:" + (query or "")[:600]
+        """
+        Sawaal ke evidence axes (cached) — §6 ka `required_axis` isse aata hai.
+
+        Axis chunaav INSAAN ke sawaal se hota hai, app ke banaye anchor se nahi.
+        Naapa hua rissav (2026-08-25, dark-matter acceptance benchmark): lens
+        anchor us prompt ki instruction-poonchh se bana tha ("har hypothesis
+        observations calculation limitations counterevidence falsification
+        confidence"). Wo anchor sawaal ke saath jud kar ek EXTRA facet bana deta
+        tha (3 -> 4), aur 4-facet par upar wali parat curated 17 dark-matter
+        axes ki jagah keyword-facet axes rakh deti hai. Nateeja: exoplanet ka
+        TESS paper `required_axis` "facet_f2 (calculation)" par ok ho gaya,
+        proposition verdict False se True hua, SUBJECT_MISSING ka hard reject
+        chala hi nahi, aur wo paper 0.000 se **0.438** par pack me ghus gaya
+        (uncited 2 -> 3). Yaani app ke apne shabd research target ban gaye.
+
+        Anchor ka asli kaam (cross-lingual scoring) bacha rehta hai: agar RAW
+        sawaal par koi field-set hi nahi milta aur anchor ke saath milta hai
+        (Hindi/Devanagari sawaal, English curated trigger), to anchor wali list
+        hi use hoti hai. Yaani anchor sirf JOD sakta hai, curated axes ki jagah
+        le nahi sakta.
+        """
+        raw = query or ""
+        expanded = self.expanded_query(raw)
+        key = "a:" + expanded[:600]
         got = self._domain_cache.get(key)
         if got is None:
-            got = tuple(axes_mod.axes_for(query))
+            got = tuple(axes_mod.axes_for(raw))
+            if expanded != raw:
+                raw_set, _ = axes_mod.axis_set_for(raw)
+                anchored_set, _ = axes_mod.axis_set_for(expanded)
+                if raw_set == "generic" and anchored_set != "generic":
+                    got = tuple(axes_mod.axes_for(expanded))
             if len(self._domain_cache) > 24:
                 self._domain_cache.clear()
             self._domain_cache[key] = got
@@ -926,11 +952,22 @@ class RelevanceEngine:
         # differently" cite ho gaya tha. Ye subject anchor test PASS kar jaata
         # hai (usme "galaxy" aur "dark matter" dono likha hai) — isliye rule A
         # se nahi rukta. Rukta hai yahan: peer-review nahi, web page hai, poore
-        # title+snippet mein ek bhi naap/statistic nahi, aur proposition-test
-        # False. Sarkari report, dataset ya standard page in shartein paar kar
-        # leta hai kyunki usme number hote hain.
+        # title+snippet mein ek bhi naap/statistic nahi, aur proposition-test ne
+        # HAAN nahi kaha. Sarkari report, dataset ya standard page in shartein
+        # paar kar leta hai kyunki usme number hote hain.
+        #
+        # `is not True` (pehle `is False` tha) — 2026-08-25 ka naapa hua rissav:
+        # jab axis list keyword-match wale facet axes se bharti hai, to
+        # `required_axis` ok ho jaata hai aur tri-state verdict False se **None**
+        # ("poora faisla lene ke liye kaafi jankari nahi mili") ho jaata hai.
+        # Purani shart sirf False dekhti thi, isliye "A blog opinion:
+        # consciousness is just neuroplasticity vibes" (koi number nahi,
+        # peer-review nahi) 0.0 se **0.3122** par zinda ho gaya aur average
+        # relevance mein ginne laga. Ab niyam ka matlab wahi hai jo likha hai:
+        # bina naap wale non-peer-reviewed web page ko sirf SAAF "HAAN, ye
+        # sawaal ki baat test karta hai" bacha sakta hai — "pata nahi" nahi.
         if (s.source_type == SourceType.WEB and s.peer_reviewed is not True
-                and prop["tests_proposition"] is False
+                and prop["tests_proposition"] is not True
                 and not _MEASURE_RE.search(both_low)
                 and not _STAT_RE.search(both_low)):
             return _hard_reject(
