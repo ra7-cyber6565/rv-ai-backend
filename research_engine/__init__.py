@@ -127,6 +127,14 @@ _install_final_stress_hardening()
 from .source_family_query_fairness import install as _install_source_family_query_fairness
 _install_source_family_query_fairness()
 
+# A searched/retrieved source is still only a candidate. Required specialist
+# lanes count as covered only when their candidates pass relevance, access-depth
+# and source-role qualification (plus proposition support for empirical lanes).
+# Weak candidates remain visible but can only downgrade/block COMPLETE; this
+# gate never upgrades truth, source quality, confidence, novelty or reading depth.
+from .specialist_lane_quality import install as _install_specialist_lane_quality
+_install_specialist_lane_quality()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
