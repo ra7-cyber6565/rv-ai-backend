@@ -735,9 +735,22 @@ class GeminiReasoning:
         # ban jaata hai, isliye purane callers bhi chalte rehte hain.
         from .requested import prompt_block
         from .specialist_domains import prompt_block as specialist_prompt_block
+        from .lenses import reasoning_block as lens_reasoning_block
 
         extras = prompt_block(plan.get("requests") if isinstance(plan, dict) else None)
         specialist_rules = specialist_prompt_block(plan if isinstance(plan, dict) else {})
+        # OPEN LENS (closed keyword list ke bahar). `specialist_domains` ki list
+        # band hai — `'game theory se faisla kaise lein'` par wo khaali deti hai,
+        # jabki `lenses.framework_phrases()` grammar se 'game theory' pakad leta
+        # hai. Pehle wo naam sirf search query aur relevance anchor tak jaata
+        # tha, reasoning prompt me ek shabd bhi nahi — isliye app us framework
+        # par sochta hi nahi tha. Ab jaata hai, par "search plan only, NOT
+        # evidence" tail ke saath. Khaali lens par ye "" rehta hai, isliye
+        # bina-lens wale sawaal ka prompt byte-identical rehta hai (purane
+        # benchmark provably no-op).
+        lens_text = lens_reasoning_block(
+            (plan.get("lens") if isinstance(plan, dict) else None) or {})
+        lens_rules = f"\n{lens_text}\n" if lens_text else ""
         # PATENT RULE sirf tab jaata hai jab pack mein sach mein patent ho —
         # warna har normal sawaal ke prompt mein bekaar tokens jaate.
         patent_rules = ""
@@ -763,7 +776,7 @@ RETRIEVED SOURCES (sirf inhi ka istemal karo):
 
 {LABEL_RULE_PROMPT}
 {patent_rules}
-{specialist_rules}
+{specialist_rules}{lens_rules}
 
 {style}
 

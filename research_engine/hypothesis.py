@@ -1019,6 +1019,19 @@ class HypothesisEngine:
         count = max(1, min(int(count or 2), 6))
         blocks = "\n\n".join(self._format_block(i) for i in range(1, count + 1))
         gate_block = self._gate_block(gate)
+        # Lens block yahan sabse zyada zaroori hai: hypothesis banane ka kaam hi
+        # "kaunsa dhaancha lagaun" par tika hai. Pehle framework ka naam sirf
+        # search query tak jaata tha, isliye app ke paas apni soch me lagane ke
+        # liye koi ozaar nahi hota tha. Khaali lens par "" — tab prompt bilkul
+        # purana rehta hai.
+        lens_block = ""
+        try:
+            from .lenses import reasoning_block as lens_reasoning_block
+            lens_text = lens_reasoning_block(
+                (plan.get("lens") if isinstance(plan, dict) else None) or {})
+            lens_block = f"\n{lens_text}\n" if lens_text else ""
+        except Exception:          # pragma: no cover - lens layer optional hai
+            lens_block = ""
 
         return f"""Tum ek Hypothesis Generator ho. Tumhara kaam NAYI possibility
 propose karna hai — literature ka summary dohrana nahi.
@@ -1030,7 +1043,7 @@ CURRENT EVIDENCE-BASED ANALYSIS:
 {gap_block}
 SOURCES (sirf inhi ko cite karo, [S#] format mein):
 {pack.to_prompt_block(max_chars_per_source=500)}
-{gate_block}
+{gate_block}{lens_block}
 Rules — ye tod'ne par output reject ho jaayega:
 1. Hypothesis ko FACT ki tarah mat likho. Har hypothesis ka status
    "{STATUS}" hai.

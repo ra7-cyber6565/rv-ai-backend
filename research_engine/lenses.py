@@ -458,6 +458,12 @@ _HONORIFICS = {
     "dr", "prof", "professor", "sir", "swami", "acharya", "rishi", "maharishi",
     "guru", "shri", "sri", "pandit", "maharshi", "bhagwan", "saint", "mahatma",
     "srila", "lama", "imam", "rabbi", "father",
+    # Devanagari roop. Kyun: intel ke sawaal Hindi script me bhi aate hain
+    # ("रिचर्ड फाइनमैन की theory kya kehti hai" par pehle thinker list KHAALI
+    # aati thi — naapa gaya 2026-08-26). Ye bhasha ka dhaancha hai, kisi vyakti
+    # ki list nahi.
+    "डॉ", "डॉक्टर", "प्रोफेसर", "श्री", "स्वामी", "आचार्य", "ऋषि", "महर्षि",
+    "गुरु", "पंडित", "संत", "महात्मा", "भगवान", "श्रीमद्",
 }
 # "<naam> ke/ki/ka <ye cheez>" — Hinglish possessive ke baad aane wale shabd.
 _OWNED_THINGS = {
@@ -467,8 +473,17 @@ _OWNED_THINGS = {
     "research", "paper", "papers", "law", "laws", "equation", "equations",
     "quote", "quotes", "teaching", "teachings", "upadesh", "method", "tarika",
     "philosophy", "darshan", "lecture", "lectures", "diary", "letters",
+    # Devanagari roop — wahi shabd, doosri script.
+    "किताब", "किताबें", "पुस्तक", "पुस्तकें", "थ्योरी", "सिद्धांत", "सिद्धान्त",
+    "सूत्र", "नियम", "विचार", "काम", "शोध", "पेपर", "समीकरण", "फॉर्मूला",
+    "उपदेश", "तरीका", "दर्शन", "ग्रंथ", "लेख", "डायरी", "पत्र", "व्याख्यान",
+    "खोज", "प्रयोग",
 }
-_POSSESSIVE = {"ke", "ki", "ka", "kaa", "kii", "kee"}
+_POSSESSIVE = {"ke", "ki", "ka", "kaa", "kii", "kee",
+               # Devanagari possessive. Dhyaan: `_is_stop()` 2 akshar tak ke
+               # shabd ko stop maanta hai, isliye "की" naam ke CHUNK me nahi
+               # aata — wo sirf marker ka kaam karta hai, aur yahi chahiye.
+               "का", "की", "के", "कि"}
 # "according to X", "as per X", "X ne kaha"
 _BEFORE_NAME = ("according to", "as per", "as told by", "in the words of")
 
@@ -537,17 +552,50 @@ def _person_name_from_run(name: str, raw: str, at_line_start: bool,
     return " ".join(words)
 
 
-def thinker_candidates(question: str) -> List[str]:
-    """Sambhavit vyakti ke naam — bina kisi naam-list ke.
+def _name_chunk(window: List[str]) -> List[str]:
+    """Naam ke tukde me se sirf naam wale shabd — jodne wala kann bacha kar.
 
-    Teen tarah ke cue: (1) honorific ke baad ka naam, (2) Hinglish possessive
-    "<naam> ke/ki/ka book|theory|formula...", (3) "according to <naam>" aur
-    capitalised naam-run. Ye SIRF search lens hai — plan par ``verified`` hamesha
-    False rehta hai, aur in naamon se koi claim nahi banti.
+    Naapi hui bimari (2026-08-26): ``'leonardo da vinci ke notebook me kya likha
+    hai'`` par thinker ``['vinci']`` aata tha. Wajah: ``_is_stop()`` do akshar
+    tak ke shabd ko stop maanta hai, isliye "da" gir jaata tha aur uske saath
+    "leonardo" bhi kat jaata tha. Ab connector kann (``TERM_CONNECTORS``: da,
+    de, van, von, ibn, al ...) tab rakha jaata hai jab wo do rakhe hue shabdon
+    ke BEECH me ho — kinare par ho to phir bhi girta hai.
+    """
+    keep: List[str] = []
+    for pos, word in enumerate(window):
+        if not word or word in _OWNED_THINGS:
+            continue
+        if not _is_stop(word):
+            keep.append(word)
+            continue
+        if keep and word.casefold() in TERM_CONNECTORS:
+            later = [w for w in window[pos + 1:]
+                     if w and not _is_stop(w) and w not in _OWNED_THINGS]
+            if later:
+                keep.append(word)
+    return keep
+
+
+def _thinker_scan(question: str) -> Tuple[List[str], List[str]]:
+    """(sab candidate, sirf CONFIDENT candidate) — dono ek hi chalan me.
+
+    **Kyun do list:** possessive cue (``"<X> ki theory"``) se nikla naam SEARCH
+    ke liye theek hai (galat nikle to sirf 0 result), par reasoning prompt me
+    naam likhna alag baat hai. Naapa gaya (2026-08-26): ``'physics ki theory kya
+    hai'`` → ``['physics']``, ``'market ka niyam'`` → ``['market']``,
+    ``'company ke research paper'`` → ``['company']``. Morphology se inhe
+    "einstein" se alag karna MUMKIN NAHI hai (``morpheme_disciplines('physics')``
+    = ``[]``, ``('einstein')`` = ``[]`` — dono khaali), aur capitalisation par
+    bharosa nahi kiya ja sakta kyunki intel chhote akshar me likhta hai.
+    Isliye faisla nahi liya jaata — inhe search me rakha jaata hai aur prompt se
+    bahar. Confident sirf teen pakke cue se banta hai: honorific, "according to
+    X", aur capitalised run jo ``_person_name_from_run()`` paas kare.
     """
     raw = str(question or "")
     words = [w.strip("-") for w in tokens(raw)]
     out: List[str] = []
+    sure: List[str] = []
 
     for index, word in enumerate(words):
         if word in _HONORIFICS:
@@ -555,12 +603,17 @@ def thinker_candidates(question: str) -> List[str]:
                      if w and not _is_stop(w) and w not in _HONORIFICS]
             if chunk:
                 out.append(" ".join(chunk))
+                sure.append(" ".join(chunk))
         if word in _POSSESSIVE and index >= 1:
             nxt = words[index + 1] if index + 1 < len(words) else ""
             if nxt in _OWNED_THINGS:
+                # Window aam taur par 2 shabd ka hai. Sirf tab teen hota hai jab
+                # beech ka shabd connector kann ho ("leonardo DA vinci") — yaani
+                # baaki har sawaal par output bilkul pehle jaisa rehta hai.
                 start = max(0, index - 2)
-                chunk = [w for w in words[start:index]
-                         if w and not _is_stop(w) and w not in _OWNED_THINGS]
+                if index >= 3 and words[index - 2].casefold() in TERM_CONNECTORS:
+                    start = max(0, index - 3)
+                chunk = _name_chunk(words[start:index])
                 if chunk:
                     out.append(" ".join(chunk))
 
@@ -576,6 +629,7 @@ def thinker_candidates(question: str) -> List[str]:
             chunk = [w for w in tail[:2] if not _is_stop(w)]
             if chunk:
                 out.append(" ".join(chunk))
+                sure.append(" ".join(chunk))
 
     # Capitalised naam-run: jab user bade akshar likhta hai to wo pakka signal
     # hai. intel chhote akshar likhta hai, isliye ye sirf extra hai — iske bharose
@@ -614,8 +668,28 @@ def thinker_candidates(question: str) -> List[str]:
             possessive=possessive)
         if name:
             out.append(name)
+            sure.append(name)
 
-    return _unique(out, limit=6)
+    return _unique(out, limit=6), _unique(sure, limit=6)
+
+
+def thinker_candidates(question: str) -> List[str]:
+    """Sambhavit vyakti ke naam — bina kisi naam-list ke.
+
+    Teen tarah ke cue: (1) honorific ke baad ka naam, (2) Hinglish possessive
+    "<naam> ke/ki/ka book|theory|formula...", (3) "according to <naam>" aur
+    capitalised naam-run. Ye SIRF search lens hai — plan par ``verified`` hamesha
+    False rehta hai, aur in naamon se koi claim nahi banti.
+
+    Reasoning prompt ke liye ``confident_thinkers()`` istemaal hoti hai (wajah
+    ``_thinker_scan`` ke docstring me naapi hui hai).
+    """
+    return _thinker_scan(question)[0]
+
+
+def confident_thinkers(question: str) -> List[str]:
+    """Sirf pakke cue wale naam — yahi reasoning prompt me jaate hain."""
+    return _thinker_scan(question)[1]
 
 
 # Kisi bhi search term me chhote shabd sirf JODNE wale hote hain ("Tao of
@@ -626,6 +700,11 @@ TERM_CONNECTORS = frozenset({
     "of", "the", "a", "an", "and", "in", "on", "to", "for", "or", "vs",
     "ka", "ke", "ki", "se", "me", "aur", "va", "evam", "de", "del", "du",
     "la", "le", "el", "von", "der", "das", "ibn", "al", "bin",
+    # Naam ke beech aane wale kann. "da" (leonardo DA vinci), "van" (van
+    # gogh), "di", "dos", "ter", "bint" — inke bina naam do tukdon me toot
+    # jaata hai. Naapa gaya defect: 'leonardo da vinci ke notebook' par
+    # thinker sirf ['vinci'] aa raha tha.
+    "da", "van", "di", "dos", "des", "della", "delle", "ter", "bint",
 })
 _TERM_SENTENCE_MARKS = ".;:!?"
 _TERM_SPLIT_MARKS = ("/", "\\", ",", "(", ")", "[", "]", "|")
@@ -695,7 +774,7 @@ def deterministic_lenses(question: str) -> Dict:
         if is_search_term_safe(term)
     ], limit=_MAX_ITEMS + 6)
     disciplines, families = morpheme_disciplines(question)
-    thinkers = thinker_candidates(question)
+    thinkers, thinkers_sure = _thinker_scan(question)
     if thinkers:
         # Vyakti ka naam mila to unka apna likha hua/uspar hui study dhoondhni
         # chahiye — ye source family hai, koi claim nahi.
@@ -713,6 +792,9 @@ def deterministic_lenses(question: str) -> Dict:
                               *suffix_concepts(question))
             if is_search_term_safe(term)]),
         "thinkers": thinkers,
+        # Reasoning prompt sirf ISE dekhta hai. Possessive-cue wala guess
+        # (physics/market/company) search me rehta hai, prompt me nahi.
+        "thinkers_confident": thinkers_sure,
         "source_families": families,
         "method": "deterministic",
     }
@@ -851,6 +933,13 @@ def _merge(base: Dict, extra: Dict) -> Dict:
     limits = {
         "concepts": _MAX_ITEMS + 6, "english_terms": 14, "disciplines": 6,
         "frameworks": 10, "thinkers": 6, "source_families": 6,
+        # `thinkers_confident` yahan hona ZAROORI hai: `_merge` sirf inhi keys
+        # ko aage bhejta hai, isliye key chhoot jaati to model wale raaste par
+        # (`build_lens_plan` me `plan = _merge(determ, parsed)`) confident list
+        # chup-chaap gayab ho jaati. Aur `extra` (model) me ye key kabhi nahi
+        # hoti — yaani model ka bataya naam confident nahi banta, jo sahi hai:
+        # wo bhi ek guess hai.
+        "thinkers_confident": 6,
     }
     out: Dict = {}
     for key, limit in limits.items():
@@ -1318,6 +1407,19 @@ def merge_corpus_lenses(plan: Dict, corpus: Dict) -> Dict:
     out["corpus_frameworks"] = _unique(
         [*(plan.get("corpus_frameworks") or []), *(corpus.get("frameworks") or [])],
         limit=20)
+    # Corpus se aaye AUTHOR aur VENUE-discipline alag rakhe jaate hain. Ye
+    # sources ke metadata se aaye hain (2+ alag source me repeat), yaani grammar
+    # ke guess se zyada pukka — isliye reasoning prompt me ye "jo sach me mila"
+    # section me jaate hain, aur `thinkers_confident` me bhi jud jaate hain.
+    out["corpus_thinkers"] = _unique(
+        [*(plan.get("corpus_thinkers") or []), *(corpus.get("thinkers") or [])],
+        limit=8)
+    out["corpus_disciplines"] = _unique(
+        [*(plan.get("corpus_disciplines") or []),
+         *(corpus.get("disciplines") or [])], limit=8)
+    out["thinkers_confident"] = _unique(
+        [*(plan.get("thinkers_confident") or []), *(corpus.get("thinkers") or [])],
+        limit=8)
     out["corpus_sources_seen"] = int(corpus.get("sources_seen") or 0)
     out["corpus_independent_families_seen"] = int(
         corpus.get("independent_families_seen") or 0)
@@ -1402,6 +1504,109 @@ def prompt_block(plan: Dict) -> str:
         f"status={plan.get('model_status', 'not_attempted')})"
     )
     return "\n".join([head, *lines, method, tail])
+
+
+# ── reasoning parat: lens ko SOCHNE ka ozaar banao, evidence NAHI ────────────
+#
+# Kyun ye alag function hai (aur `prompt_block` ko chhua nahi gaya):
+# `prompt_block` sirf lens ke NAAM ginwaata hai. Naapa gaya defect (2026-08-26):
+# `'game theory se faisla kaise lein'` par `specialist_domains.detect_profiles()`
+# khaali `[]` deta hai, aur `framework_phrases()` `['game theory']` pakad leta
+# hai — par wo naam sirf search query (`planner.py`) aur relevance anchor
+# (`orchestrator.py`) tak jaata tha. Reasoning prompt me lens ka ek shabd bhi
+# nahi jaata tha, kyunki `prompt_block()` ko production me koi import hi nahi
+# karta tha (sirf test). Natija: app us framework par SOCHNE ka nirdesh kabhi
+# nahi paata tha — wo use tabhi lagata jab retrieved source khud uska naam le.
+#
+# Isliye ye block do cheezein karta hai jo `prompt_block` nahi karta:
+#   1. framework ko "analytical tool" batata hai — jahan sach me fit ho wahan
+#      lagao, aur jahan fit NA ho wahan saaf likho ki fit nahi hota.
+#   2. question-derived guess (`frameworks`) aur corpus-derived (`corpus_*`,
+#      jo 2+ ALAG padhe hue sources me repeat hua) ko ALAG dikhata hai — dono
+#      ka bharosa ek jaisa nahi hai, aur prompt me use gaddha karna jhooth hota.
+_TOOL_RULE = (
+    "HOW TO USE THESE LENSES (ye niyam tod'na = output reject):\n"
+    "- Framework/theory ke naam ko OZAAR ki tarah lagao: agar sawaal par wo "
+    "dhaancha sach me fit hota hai to uske hisaab se analysis karo (kya "
+    "variables, kya trade-off, kya prediction nikalta hai).\n"
+    "- Agar fit NAHI hota, to zabardasti mat lagao — ek line me saaf likho ki "
+    "ye lens is sawaal par lagta nahi, aur kyun.\n"
+    "- Lens ka naam kabhi apne aap me proof nahi hai. 'Game theory kehti hai' "
+    "likhna mana hai jab tak koi retrieved source wo baat na kahe. Framework se "
+    "nikla apna nateeja [INFERENCE] hai, source se aaya nateeja [SOURCE-REPORTED] "
+    "ya [ESTABLISHED].\n"
+    "- Kisi vyakti (thinker) ke naam ke saath koi quote ya claim mat jodo jo "
+    "source me nahi hai."
+)
+
+
+def reasoning_block(plan: Dict) -> str:
+    """Reasoning prompt ke liye lens block — naam + istemal ka niyam + honesty.
+
+    ``plan`` yahan LENS dict hai (``planner.plan()`` ka ``plan["lens"]``), poora
+    research plan nahi. Khaali/galat input par khaali string, taaki purane
+    callers aur bina-lens wale sawaal ka prompt byte-identical rahe.
+
+    **Gate (naapne ke baad rakha gaya):** block sirf tab jaata hai jab sach me
+    SOCHNE ka koi ozaar mila ho — framework, discipline, thinker, ya corpus se
+    aaya naam. Sirf ``concepts`` par ye nahi chalta, kyunki concept phrases
+    sawaal ke apne shabd hote hain: `'kesar ka ilaaj'` par wo `kesar, ilaaj`
+    deta hai, jo prompt me pehle se maujood sawaal ka dohraav hai. Bina is gate
+    ke ye block har sawaal ke prompt me ~1100 extra characters daal deta tha
+    (naapa gaya: 4 me se 4 sawaal), yaani tokens kharch hote aur bina-lens wale
+    sawaalon ka prompt bhi badal jaata — dono bekaar.
+    """
+    if not isinstance(plan, dict):
+        return ""
+    tool_keys = ("frameworks", "disciplines", "thinkers_confident",
+                 "corpus_frameworks", "corpus_thinkers", "corpus_disciplines")
+    if not any(plan.get(key) for key in tool_keys):
+        return ""
+    rows = [
+        ("Disciplines", plan.get("disciplines")),
+        ("Frameworks / concepts", plan.get("frameworks")),
+        # `thinkers` NAHI — `thinkers_confident`. Wajah `_thinker_scan` me naapi
+        # hui hai: possessive cue se 'physics', 'market', 'company' bhi thinker
+        # ban jaate hain, aur prompt me un naamon ke saath koi claim jud jaana
+        # jhooth banane ka seedha raasta hai.
+        ("Thinkers (documented work only)", plan.get("thinkers_confident")),
+        ("English search vocabulary", plan.get("english_terms")),
+    ]
+    lines = [f"- {label}: {', '.join(values)}"
+             for label, values in rows if values]
+    if not lines:
+        return ""
+    head = "LENS PLAN (search plan only, NOT evidence):"
+    method = (
+        f"Selected by: {plan.get('method', 'deterministic')} "
+        f"(model_used={bool(plan.get('model_used'))}, "
+        f"status={plan.get('model_status', 'not_attempted')})"
+    )
+    tail = (
+        "These lens names were selected before reading anything. They are NOT "
+        "citations and do NOT show that any thinker said this. Every claim must "
+        "still come from a source that was actually retrieved and read."
+    )
+    parts = ["\n".join([head, *lines, method, tail])]
+    corpus_rows = [
+        ("Frameworks/phrases repeated across retrieved sources",
+         plan.get("corpus_frameworks")),
+        ("Authors named by 2+ retrieved sources", plan.get("corpus_thinkers")),
+        ("Disciplines implied by the venues actually found",
+         plan.get("corpus_disciplines")),
+    ]
+    corpus_lines = [f"- {label}: {', '.join(values)}"
+                    for label, values in corpus_rows if values]
+    if corpus_lines:
+        parts.append("\n".join([
+            "FROM WHAT WAS ACTUALLY RETRIEVED (still not a claim, only a pattern):",
+            *corpus_lines,
+            "Ye naam padhe gaye sources me dohraye gaye the. Iska matlab sirf ye "
+            "hai ki is topic me ye baar-baar aata hai — iska matlab ye NAHI ki "
+            "wo baat sahi hai.",
+        ]))
+    parts.append(_TOOL_RULE)
+    return "\n\n".join(parts)
 
 
 def lens_summary(plan: Dict) -> Dict:
