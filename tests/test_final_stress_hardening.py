@@ -79,6 +79,19 @@ def test_required_specialist_lanes_are_machine_auditable():
     assert out["required_lane_coverage_complete"] is False
 
 
+def test_installed_specialist_report_exposes_missing_required_lanes():
+    from research_engine import specialist_domains as sd
+
+    question = "Compare CIA declassified consciousness documents with Jung and scholarly criticism."
+    specialist = sd.build_specialist_plan(question, question)
+    plan = {"specialist": specialist}
+    report = sd.build_evidence_lane_report(question, plan, SimpleNamespace(sources=[]))
+    assert report["active"] is True
+    assert report["required_lanes"]
+    assert report["missing_required_lanes"] == report["required_lanes"]
+    assert report["required_lane_coverage_complete"] is False
+
+
 def test_missing_specialist_lane_blocks_evidence_first_completion():
     result = {
         "answer": "A sourced answer [S1].",
@@ -96,6 +109,30 @@ def test_missing_specialist_lane_blocks_evidence_first_completion():
     assert item["mandatory"] is True
     # Evaluation works on a copy: caller's ledger remains untouched.
     assert result["requested_ledger"]["unmet"] == []
+
+
+def test_installed_final_gate_reports_specialist_lane_failure():
+    from research_engine.final_quality_gate import FinalQualityGate
+
+    result = {
+        "answer": "A sourced answer [S1].",
+        "status": "COMPLETE",
+        "quality_contract": {"evidence_first_required": True},
+        "requested_ledger": {"unmet": []},
+        "specialist_research": {
+            "active": True,
+            "missing_required_lanes": ["official_document_record"],
+        },
+    }
+    report = FinalQualityGate().evaluate(result).to_dict()
+    requested = [issue for issue in report["issues"] if issue["code"] == "REQUESTED_DELIVERABLE_MISSING"]
+    assert requested
+    assert any(
+        item.get("key") == "specialist_source_family_coverage"
+        for issue in requested
+        for item in issue.get("details", {}).get("unmet", [])
+    )
+    assert report["answer_complete"] is False
 
 
 def test_missing_specialist_lane_does_not_gate_non_evidence_first_answer():
@@ -141,3 +178,11 @@ def test_ordinary_calculation_does_not_require_model_sensitivity():
     }
     out = _augment_for_final_gate(result)
     assert out["requested_ledger"]["unmet"] == []
+
+
+def test_shipped_ui_distinguishes_worker_finished_from_answer_complete():
+    import main
+
+    html = main._website_html()
+    assert '"COMPLETE":"Research run finished"' in html
+    assert '"COMPLETE":"Research complete"' not in html
