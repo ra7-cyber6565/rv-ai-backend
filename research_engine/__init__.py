@@ -104,6 +104,13 @@ _install_controversial_text_lane()
 from .advanced_research_quality import install as _install_advanced_research_quality
 _install_advanced_research_quality()
 
+# Keep the legacy outline-delivery API stable while preserving PR #51's stricter
+# semantic coverage as a separate evidence-first production gate. This avoids
+# false 0/N coverage on fully surfaced answers without letting heading-only
+# stress-test answers pass as substantively complete.
+from .advanced_semantic_coverage import install as _install_advanced_semantic_coverage
+_install_advanced_semantic_coverage()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
