@@ -45,6 +45,7 @@ from .claim_labels import LABEL_RULE_PROMPT
 from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
+from .lab import lab_limits, lab_report_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
@@ -1476,7 +1477,8 @@ Ab jawab likho:"""
                        technical_details: Optional[List[str]] = None,
                        api_accounting: Optional[Dict] = None,
                        claim_checks: Optional[Dict] = None,
-                       missing_sections: Optional[List[str]] = None) -> str:
+                       missing_sections: Optional[List[str]] = None,
+                       lab_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1592,6 +1594,11 @@ Ab jawab likho:"""
         tail: List[str] = [f"- {l}" for l in limits[:4]]
         if note:
             tail.append(f"- {note}")
+        # #116 — LAB ki seema NAAPI hui hai: kitne test pass/fail hue aur kaunsa
+        # test data ke bina chala hi nahi. Ye line general disclaimer nahi hai,
+        # isliye ye us run ke asli nateeje se banti hai.
+        for lab_line in lab_limits(lab_report)[:4]:
+            tail.append(f"- {lab_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1840,7 +1847,8 @@ Ab jawab likho:"""
                  api_accounting: Optional[Dict] = None,
                  claim_checks: Optional[Dict] = None,
                  hypothesis_plan: Optional[Dict] = None,
-                 calculations: Optional[List[Dict]] = None) -> str:
+                 calculations: Optional[List[Dict]] = None,
+                 lab_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1882,6 +1890,13 @@ Ab jawab likho:"""
                                                        reasons, pack,
                                                        hypothesis_plan)
                 parts.append(engine_text)
+                # #116 — LAB stage ka apna nateeja usi section ke andar, ek
+                # `###` block me. Ye model ka text nahi hai: ye app ne KHUD
+                # chalaye hue test ka record hai, aur iske bina "hypothesis
+                # UNTESTED" hi dikhta reh jaata tha.
+                lab_text = lab_report_section(lab_report)
+                if lab_text:
+                    parts.append(lab_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -1895,7 +1910,8 @@ Ab jawab likho:"""
                     technical_details=technical_details,
                     api_accounting=api_accounting,
                     claim_checks=claim_checks,
-                    missing_sections=missing_sections)
+                    missing_sections=missing_sections,
+                    lab_report=lab_report)
                 parts.append(engine_text)
             else:
                 if index == 1:

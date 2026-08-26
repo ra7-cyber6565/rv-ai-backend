@@ -1076,5 +1076,13 @@ class ResearchResult:
     # Banane wala module: research_engine/research_state.py
     research_state: Dict = field(default_factory=dict)
 
+    # #116 — LAB stage ka record: app ne apni hi hypothesis par kaunse
+    # computable test KHUD chalaye aur kya nikla. Khaali dict ka matlab
+    # "stage chala hi nahi" hai — "sab pass ho gaya" nahi. Isme koi bhi
+    # verdict real-world proof nahi hai (`real_world_experiment_pending`
+    # hamesha True aata hai), aur `TESTED_PASS` ka matlab sirf "app ke
+    # andar ka hisaab mila" hai. Banane wala module: research_engine/lab.py
+    lab: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

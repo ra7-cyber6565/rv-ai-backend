@@ -45,6 +45,7 @@ from .evidence_drafting import (
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
+from . import lab
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -604,6 +605,10 @@ class DeepResearchEngine:
                # mila. Ye farak hi wo jhooth rokta hai jisme report "numeric
                # sanity check passed" likh deti thi bina koi calculation ke.
                "calculations": None, "calculations_done": None,
+               # #116 — LAB stage ka record: app ne apni hypothesis par KHUD
+               # kaunsa test chalaya (₹0, bina internet, bina model-written
+               # code). Khaali dict matlab stage chala hi nahi.
+               "lab": {},
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -846,6 +851,14 @@ class DeepResearchEngine:
                 calculations_done=out["calculations_done"])
             out["hypotheses"] = [h.to_dict() for h in parsed]
             out["errors"].extend(self.hypotheses.honesty_check(parsed))
+            # #116 LAB — hypothesis ban gayi, ab app usko KHUD test karta hai.
+            # Ye stage additive hai: dicts padhi jaati hain, purani keys
+            # (confidence band, validation, novelty) chhui nahi jaati; lab ka
+            # nateeja unke SAATH `lab`/`lab_verdict` key me jodta hai. Koi
+            # Gemini call nahi, koi network nahi, kharcha ₹0.
+            out["lab"] = lab.run_lab(question, out["hypotheses"], pack=pack)
+            out["hypotheses"] = lab.merge_into_hypotheses(out["hypotheses"],
+                                                          out["lab"])
         # Maangi thi 3, mili 1 — ye chup-chaap nahi jaana chahiye. Aur wajah bhi
         # sahi honi chahiye: agar evidence hi patla tha to ilzaam quota par mat
         # daalo (gate ki asli ginti saath jaati hai).
@@ -1764,6 +1777,10 @@ class DeepResearchEngine:
             # dikhta hai (formula, inputs+units, assumptions, result, aur teen
             # alag check). Khaali/None hone par section chhapta hi nahi.
             calculations=calc_records,
+            # #116 — LAB stage ka apna record. Ye hypothesis section ke andar
+            # `###` block banata hai aur audit ki limits me NAAPI hui line
+            # jodta hai ("kitne pass/fail, kaunsa test data ke bina ruk gaya").
+            lab_report=passes.get("lab") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2017,6 +2034,10 @@ class DeepResearchEngine:
             quality_context=quality_ctx,
             contract_ledger=c_ledger,
             research_state=state_dict,
+            # #116 — LAB ka structured record UI/API ke liye. Text parse
+            # karne ki zaroorat na pade (wahi galti pehle audit ke numbers
+            # me do alag ginti laayi thi). Stage na chale to khaali dict.
+            lab=passes.get("lab") or {},
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────
