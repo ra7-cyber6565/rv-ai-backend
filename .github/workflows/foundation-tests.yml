@@ -46,6 +46,21 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
+      # Pin the stress-test failures as an explicit release-critical gate. The
+      # full Foundation runner below still executes the complete tests/ suite;
+      # this named stage makes regressions in research semantics immediately
+      # visible instead of hiding them inside a large aggregate pytest failure.
+      - name: Run advanced research quality regression gate
+        run: |
+          pytest -q \
+            tests/test_advanced_research_quality.py \
+            tests/test_evidence_axis_guard.py \
+            tests/test_advanced_semantic_coverage.py \
+            tests/test_final_stress_hardening.py \
+            tests/test_source_family_query_fairness.py \
+            tests/test_controversial_text_lane.py \
+            tests/test_ui_hygiene.py
+
       # Keep CI and the user's Windows laptop on exactly the same release gate.
       # The runner itself compiles sources, runs focused integration tests,
       # test_research_engine.py, every standalone tests/test_*.py file, and the
