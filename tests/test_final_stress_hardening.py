@@ -57,6 +57,55 @@ def test_occult_profile_does_not_make_unrelated_book_traditional():
     assert _advanced_source_lane(traditional, keys) == "traditional_belief_text"
 
 
+def test_secret_society_allegation_uses_canonical_lane_key():
+    from research_engine import specialist_domains as sd
+
+    source = _source(
+        source_type="web",
+        title="New World Order allegation",
+        snippet="The source claimed that a secret plot controls institutions.",
+    )
+    lane = _advanced_source_lane(source, ["secret_societies_history"])
+    assert lane == "allegation_or_conspiracy_claim"
+    assert lane in sd.LANES
+
+
+def test_conspiracy_profile_allegation_uses_canonical_lane_key():
+    from research_engine import specialist_domains as sd
+
+    source = _source(
+        source_type="web",
+        title="Cover-up claim",
+        snippet="An allegation of a hidden agenda is repeated without independent corroboration.",
+    )
+    lane = _advanced_source_lane(source, ["conspiracy_claims"])
+    assert lane == "allegation_or_conspiracy_claim"
+    assert lane in sd.LANES
+
+
+def test_philosophy_metaphysics_key_can_classify_traditional_text_from_source_content():
+    source = _source(
+        source_type="book",
+        title="Mystical metaphysics",
+        snippet="A spiritual and mystical historical tradition.",
+    )
+    assert _advanced_source_lane(source, ["philosophy_metaphysics"]) == "traditional_belief_text"
+
+
+def test_representative_advanced_lane_outputs_are_defined_lane_keys():
+    from research_engine import specialist_domains as sd
+
+    cases = [
+        (_source(source_type="dataset", title="Measured dataset"), ["mind_cognition"]),
+        (_source(source_type="paper", title="Conceptual review"), ["jung_depth_psychology"]),
+        (_source(source_type="book", title="Historical monograph"), ["jung_depth_psychology"]),
+        (_source(source_type="document", title="Historical letter"), ["jung_depth_psychology"]),
+        (_source(source_type="web", title="Conspiracy allegation"), ["conspiracy_claims"]),
+    ]
+    for source, profiles in cases:
+        assert _advanced_source_lane(source, profiles) in sd.LANES
+
+
 def test_required_specialist_lanes_are_machine_auditable():
     report = {
         "active": True,
@@ -186,3 +235,4 @@ def test_shipped_ui_distinguishes_worker_finished_from_answer_complete():
     html = main._website_html()
     assert '"COMPLETE":"Research run finished"' in html
     assert '"COMPLETE":"Research complete"' not in html
+    assert 'COMPLETE:"Research complete"' not in html
