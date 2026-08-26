@@ -1,4 +1,5 @@
 import os
+import re
 
 # .env must be loaded BEFORE storage routing. Otherwise a laptop setting such as
 # INFINITY_DATA_ROOT=D:\InfinityResearchAI would be seen too late and caches
@@ -13,7 +14,7 @@ STORAGE_STATUS = configure_process_storage()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
@@ -182,11 +183,35 @@ def _runtime_safety_status() -> dict:
     }
 
 
+def _website_html() -> str:
+    """Return the shipped client with an honest terminal-stage label.
+
+    `COMPLETE` is an internal lifecycle stage meaning the worker stopped and a
+    result is available. It is not proof that the result status is COMPLETE;
+    the final quality gate may correctly downgrade it to PARTIAL. Keep the
+    internal stage key for polling compatibility while making the user-facing
+    label describe only what is actually known.
+
+    The client historically used an unquoted JavaScript object key (`COMPLETE:`)
+    while an early hardening patch expected a quoted JSON-style key. Accept both
+    forms and harmless whitespace so presentation honesty cannot silently regress
+    because the HTML formatter changes.
+    """
+    with open(INDEX_HTML, "r", encoding="utf-8") as handle:
+        html = handle.read()
+    return re.sub(
+        r'''["']?COMPLETE["']?\s*:\s*["']Research complete["']''',
+        '"COMPLETE":"Research run finished"',
+        html,
+        count=1,
+    )
+
+
 @app.get("/")
 def website():
     """RV AI website — same origin as the API."""
     if os.path.exists(INDEX_HTML):
-        return FileResponse(INDEX_HTML, media_type="text/html")
+        return HTMLResponse(_website_html())
     return api_info()
 
 

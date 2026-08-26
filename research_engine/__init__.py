@@ -111,6 +111,14 @@ _install_advanced_research_quality()
 from .advanced_semantic_coverage import install as _install_advanced_semantic_coverage
 _install_advanced_semantic_coverage()
 
+# Final stress-test closure: classify specialist evidence lanes from each source
+# itself (not from unrelated active facets), expose missing required source
+# families, fail COMPLETE closed when evidence-first specialist lanes are empty,
+# and require sensitivity/scenario analysis for explicit optimization/simulation
+# models. This layer only tightens completion; it never upgrades evidence.
+from .final_stress_hardening import install as _install_final_stress_hardening
+_install_final_stress_hardening()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
