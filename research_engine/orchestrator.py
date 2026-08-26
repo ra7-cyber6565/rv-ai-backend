@@ -50,6 +50,7 @@ from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
 from .planner import ResearchPlanner
+from . import rejects
 from . import quality_producers as quality
 from .evidence_axes import axes_for
 from .evidence_axes import coverage as axis_coverage
@@ -609,6 +610,10 @@ class DeepResearchEngine:
                # kaunsa test chalaya (₹0, bina internet, bina model-written
                # code). Khaali dict matlab stage chala hi nahi.
                "lab": {},
+               # #117 — reject ledger: kaunsi hypothesis aage nahi badhi aur
+               # kis NAAP par. Khaali dict matlab ledger bana hi nahi (yaani
+               # hypothesis stage hi nahi chala) — "kuch reject nahi hua" nahi.
+               "rejects": {},
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -835,8 +840,12 @@ class DeepResearchEngine:
         if out["calculations"]:
             out["errors"].extend(physics_checks.calculation_warnings(calc_records))
         if out["hypothesis_raw"]:
+            # #117 — parse ke gire hue blocks ka naapa hua record. Pehle ye
+            # chup-chaap gir jaate the (cap se bahar / statement hi nahi).
+            parse_rejects: list = []
             parsed = self.hypotheses.parse(out["hypothesis_raw"],
-                                           max_count=hypothesis_count)
+                                           max_count=hypothesis_count,
+                                           rejects=parse_rejects)
             # §13-§18 — parse ke baad ka deterministic record: stable ID,
             # provenance (kaunse facts + kaunsa gap), mechanism, closest prior
             # work, novelty status (sirf whitelist ke labels), structured
@@ -859,6 +868,17 @@ class DeepResearchEngine:
             out["lab"] = lab.run_lab(question, out["hypotheses"], pack=pack)
             out["hypotheses"] = lab.merge_into_hypotheses(out["hypotheses"],
                                                           out["lab"])
+            # #117 REJECT LEDGER — "weak ko hatao, par naapi hui wajah ke saath".
+            # Ye stage kuch DELETE nahi karti: hypothesis apni jagah rehti hai,
+            # uske saath `rejected` + wajah + naap + "wapas kab aa sakti hai"
+            # jud jaata hai. LAB ka fail aur safety/testability ki kami yahin
+            # ek jagah jama hoti hai. Koi Gemini call nahi, ₹0.
+            out["rejects"] = rejects.build_ledger(
+                out["hypotheses"], parse_records=parse_rejects,
+                requested=asked_count, gate=out.get("hypothesis_gate"))
+            out["hypotheses"] = rejects.apply_to_hypotheses(out["hypotheses"],
+                                                            out["rejects"])
+            out["errors"].extend(out["rejects"].get("warnings") or [])
         # Maangi thi 3, mili 1 — ye chup-chaap nahi jaana chahiye. Aur wajah bhi
         # sahi honi chahiye: agar evidence hi patla tha to ilzaam quota par mat
         # daalo (gate ki asli ginti saath jaati hai).
@@ -1781,6 +1801,10 @@ class DeepResearchEngine:
             # `###` block banata hai aur audit ki limits me NAAPI hui line
             # jodta hai ("kitne pass/fail, kaunsa test data ke bina ruk gaya").
             lab_report=passes.get("lab") or {},
+            # #117 — reject ledger. Isse answer me alag `###` block banta hai
+            # ("kya hataya, kis naap par, wapas kab aa sakti hai") aur audit me
+            # ginti wali line jaati hai. Khaali hone par kuch chhapta nahi.
+            reject_report=passes.get("rejects") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2038,6 +2062,9 @@ class DeepResearchEngine:
             # karne ki zaroorat na pade (wahi galti pehle audit ke numbers
             # me do alag ginti laayi thi). Stage na chale to khaali dict.
             lab=passes.get("lab") or {},
+            # #117 — reject ledger bhi structured hi jaata hai, taaki UI ko
+            # answer ka text parse karke "kya hataya" na dhoondhna pade.
+            rejects=passes.get("rejects") or {},
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

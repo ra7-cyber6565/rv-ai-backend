@@ -46,6 +46,7 @@ from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
 from .lab import lab_limits, lab_report_section
+from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
@@ -442,6 +443,15 @@ Ab jawab likho:"""
                 # bhi usi hypothesis ki baat ho sake.
                 head = f"### {hid} — {title}"
             body: List[str] = [head]
+            # #117 — jo hypothesis reject hui, uska nishaan card ke sabse UPAR.
+            # Card mitaya nahi jaata (record rehna chahiye), par padhne wale ko
+            # pehli line me hi pata chalna chahiye ki ise aage nahi badhaya ja
+            # raha, aur KIS NAAP par. Poori tafseel `###` reject block me hai.
+            if h.get("rejected"):
+                reason = str(h.get("reject_reason") or "").strip()
+                body.append(f"> ❌ **REJECT — aage nahi badhaya:** {reason}")
+                if h.get("reject_reopen_if"):
+                    body.append(f"> Wapas kab aa sakti hai: {h['reject_reopen_if']}")
             # §13/§2 — sabse pehle ye saaf ho jaana chahiye ki ye APP ka apna
             # idea hai, kisi source ka claim nahi. Pichhli report mein ye baat
             # neeche dabi rehti thi, isliye log ise "research finding" samajh
@@ -1478,7 +1488,8 @@ Ab jawab likho:"""
                        api_accounting: Optional[Dict] = None,
                        claim_checks: Optional[Dict] = None,
                        missing_sections: Optional[List[str]] = None,
-                       lab_report: Optional[Dict] = None) -> str:
+                       lab_report: Optional[Dict] = None,
+                       reject_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1599,6 +1610,11 @@ Ab jawab likho:"""
         # isliye ye us run ke asli nateeje se banti hai.
         for lab_line in lab_limits(lab_report)[:4]:
             tail.append(f"- {lab_line}")
+        # #117 — reject ki ginti bhi audit me. "Kitni hataayi, kis wajah se,
+        # kitni bina naap ke nikli" — teesri line hi wo bug pakadti hai jisme
+        # koi hypothesis chup-chaap gir jaaye.
+        for reject_line in reject_limits(reject_report)[:4]:
+            tail.append(f"- {reject_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1848,7 +1864,8 @@ Ab jawab likho:"""
                  claim_checks: Optional[Dict] = None,
                  hypothesis_plan: Optional[Dict] = None,
                  calculations: Optional[List[Dict]] = None,
-                 lab_report: Optional[Dict] = None) -> str:
+                 lab_report: Optional[Dict] = None,
+                 reject_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1897,6 +1914,11 @@ Ab jawab likho:"""
                 lab_text = lab_report_section(lab_report)
                 if lab_text:
                     parts.append(lab_text)
+                # #117 — reject-list usi section me: kaunsi hypothesis aage nahi
+                # badhi, aur KIS NAAP par. Pehle drop chup-chaap hota tha.
+                reject_text = reject_section(reject_report)
+                if reject_text:
+                    parts.append(reject_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -1911,7 +1933,8 @@ Ab jawab likho:"""
                     api_accounting=api_accounting,
                     claim_checks=claim_checks,
                     missing_sections=missing_sections,
-                    lab_report=lab_report)
+                    lab_report=lab_report,
+                    reject_report=reject_report)
                 parts.append(engine_text)
             else:
                 if index == 1:

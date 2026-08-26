@@ -1400,7 +1400,8 @@ Format exactly aise:
             return None
         return exp
 
-    def parse(self, text: str, max_count: Optional[int] = None) -> List[Hypothesis]:
+    def parse(self, text: str, max_count: Optional[int] = None,
+              rejects: Optional[List[Dict]] = None) -> List[Hypothesis]:
         """
         Model ke text se hypotheses nikaalo.
 
@@ -1415,6 +1416,11 @@ Format exactly aise:
         report mein teen hypotheses chhap jaati thi — gate ka faisla kaagaz par
         reh jaata tha. Ab explicit cap ki izzat hoti hai (1 bhi), aur cap na
         bheja jaaye to purana default 3 hi rehta hai.
+
+        #117: cap se bahar wale blocks aur "statement hi nahi mila" wale blocks
+        pehle CHUP-CHAAP gir jaate the. Ab `rejects` list do (optional, purane
+        caller waise hi chalte hain) to har gire hue block ka naapa hua record
+        milta hai — `rejects.py` usse answer ka reject-section banata hai.
         """
         if not text or not text.strip():
             return []
@@ -1423,9 +1429,21 @@ Format exactly aise:
         cap = max(1, asked) if asked > 0 else 3
         blocks = _H_SPLIT_RE.split(text)
         chunks = [b for b in blocks[1:] if b and b.strip()] if len(blocks) > 1 else [text]
+        log: List[Dict] = rejects if isinstance(rejects, list) else []
 
         out: List[Hypothesis] = []
-        for chunk in chunks[:cap]:
+        for position, chunk in enumerate(chunks, 1):
+            if position > cap:
+                # Cap se bahar. Naap saath jaati hai: kitni aayi, kitni allowed.
+                log.append({
+                    "reason_code": "over_evidence_cap",
+                    "statement": self._chunk_statement(chunk),
+                    "index": position,
+                    "measured": {"model_ne_bheji": len(chunks),
+                                 "cap_allowed": cap,
+                                 "block_number": position},
+                })
+                continue
             h = Hypothesis()
             for key, value in _fields(chunk):
                 if key == "statement":
@@ -1472,7 +1490,36 @@ Format exactly aise:
                 h.statement = next((l for l in lines if len(l) > 25), "")
             if h.statement:
                 out.append(h)
+            else:
+                # #117 — yahi wo chup-chaap drop tha. Ab naap saath jaati hai:
+                # block me kitni line thi aur sabse lambi line kitni chhoti thi
+                # (25 char ki hadd isi jagah lagti hai).
+                block_lines = [l.strip("-*# ").strip()
+                               for l in chunk.splitlines() if l.strip()]
+                longest = max((len(l) for l in block_lines), default=0)
+                log.append({
+                    "reason_code": "no_statement_in_block",
+                    "statement": "",
+                    "index": position,
+                    "measured": {"block_chars": len(chunk.strip()),
+                                 "lines": len(block_lines),
+                                 "sabse_lambi_line_chars": longest,
+                                 "kam_se_kam_chahiye_chars": 26},
+                })
         return out
+
+    @staticmethod
+    def _chunk_statement(chunk: str) -> str:
+        """Gire hue block ki pehchan ke liye ek line — reject record me dikhti hai."""
+        for line in (chunk or "").splitlines():
+            clean = line.strip("-*# ").strip()
+            if clean.lower().startswith("statement:"):
+                return clean.split(":", 1)[1].strip()
+        for line in (chunk or "").splitlines():
+            clean = line.strip("-*# ").strip()
+            if len(clean) > 25:
+                return clean
+        return ""
 
     # ── §13-§18: hypothesis ka poora record (deterministic, LLM ke bina) ─────
     # §2 — in domains me risk/safety check chhodna allowed nahi hai.

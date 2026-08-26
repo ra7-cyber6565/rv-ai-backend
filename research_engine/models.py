@@ -1084,5 +1084,13 @@ class ResearchResult:
     # andar ka hisaab mila" hai. Banane wala module: research_engine/lab.py
     lab: Dict = field(default_factory=dict)
 
+    # #117 — reject ledger: kaunsi hypothesis aage nahi badhi aur kis NAAP par
+    # (LAB ka fail, safety risks ki kami, ya "na test plan na prediction"), plus
+    # "wapas kab aa sakti hai". Khaali dict matlab ledger bana hi nahi — "kuch
+    # reject nahi hua" NAHI. Kisi bhi record me `is_disproved` hamesha False
+    # rehta hai: reject app ka faisla hai, duniya ka nahi.
+    # Banane wala module: research_engine/rejects.py
+    rejects: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)
