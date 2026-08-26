@@ -91,6 +91,42 @@ const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),inp
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function htmlText(s){return esc(s).split(/\n{2,}/).map(p=>"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");}
 function safeHttpUrl(raw){const text=String(raw??"").trim();if(!text)return "";try{const u=new URL(text,location.origin);return (u.protocol==="http:"||u.protocol==="https:")?u.href:"";}catch(_){return "";}}
+// #113 — backend ki kai list dict ki list hoti hai (contract ledger ka
+// mandatory_missing = {key, what, got, why, ...}). Seedha join karne par browser
+// "[object Object]" chhaap deta tha, jisse user ko kuch bhi pata nahi chalta.
+// Isliye wahi field padhte hain jo backend likhta hai (what -> key), aur naam na
+// mile to record ka JSON dikhate hain — chupate nahi.
+const LABEL_KEYS=["what","key","label","title","name","id","reason","note","query"];
+function labelOf(item){
+  if(item===null||item===undefined)return "";
+  if(typeof item!=="object")return String(item).trim();
+  for(const k of LABEL_KEYS){const v=item[k];if(v!==null&&v!==undefined&&typeof v!=="object"&&String(v).trim())return String(v).trim();}
+  try{const j=JSON.stringify(item);return (j&&j!=="{}"&&j!=="[]")?j.slice(0,160):"";}catch(_){return "";}
+}
+function labelList(list,limit){const cap=Math.max(1,Number(limit||10)),out=[];
+  for(const item of (Array.isArray(list)?list:[])){const text=labelOf(item);if(text&&out.indexOf(text)<0)out.push(text);}
+  return out.length>cap?out.slice(0,cap).concat(["+"+(out.length-cap)+" aur"]):out;}
+function joinLabels(list,limit){return labelList(list,limit).join(", ");}
+// #113 — answer ke text mein source link markdown ("[Title](https://…)") ya khule
+// URL ki tarah aate hain. Pehle sirf escape hota tha, isliye woh click hi nahi
+// hote the aur bracket wala kachra dikhta tha. Kram source card wala hi hai:
+// escape PEHLE, phir sirf safeHttpUrl se paas hua http/https URL anchor banta hai
+// — isliye javascript: URL yahan se bhi nahi nikal sakti. Ek hi pass chalta hai,
+// isliye bane hue anchor ke andar dobara anchor nahi banta.
+const LINK_RE=/\[([^\]\n<>]{1,200})\]\((https?:\/\/[^\s<>"')]{1,600})\)|(https?:\/\/[^\s<>"')]{1,600})/g;
+function unesc(s){return String(s??"").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&");}
+function anchorHtml(labelHtml,escapedUrl){const raw=unesc(escapedUrl);if(/["'\s<>]/.test(raw))return "";const href=safeHttpUrl(raw);return href?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+esc(href)+'">'+labelHtml+'</a>':"";}
+function linkify(html){return String(html??"").replace(LINK_RE,(whole,label,mdUrl,bare)=>{
+  if(mdUrl){const md=anchorHtml(label,mdUrl);return md||whole;}
+  const raw=String(bare||""),clean=raw.replace(/[.,;:!?]+$/,""),tail=raw.slice(clean.length);
+  const one=anchorHtml(clean,clean);
+  return one?one+tail:whole;});}
+// #113 — kuch source ka title sirf punctuation hota hai ("—", "…", "***"). Woh
+// naam nahi hai; aisi soorat mein saaf http/https URL dikhate hain, aur woh bhi
+// na ho to "Source" — kachra ya javascript: jaisi URL label nahi banti.
+function hasWordChar(s){return /[\p{L}\p{N}]/u.test(String(s??""));}
+function sourceTitle(s){const t=String((s&&s.title)||"").trim();if(hasWordChar(t))return t;
+  const u=safeHttpUrl((s&&s.url)||"");return hasWordChar(u)?u:"Source";}
 function down(){scroll.scrollTop=scroll.scrollHeight;}
 function row(role){const w=$("#welcome");if(w)w.remove();const el=document.createElement("div");el.className="msg "+role;el.innerHTML='<div class="av">'+(role==="user"?"You":"IR")+'</div><div class="body"><div class="txt"></div></div>';thread.appendChild(el);down();return el.querySelector(".txt");}
 function thinking(el){el.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';}
@@ -333,7 +369,7 @@ function splitAnswer(text){const src=String(text||""),re=/^##[ \t]+(.+?)[ \t]*$/
   if(!marks.length)return {lead:src.trim(),blocks:[]};
   const blocks=marks.map((mk,i)=>({key:sectionKey(mk.title),title:mk.title,body:src.slice(mk.bodyAt,i+1<marks.length?marks[i+1].start:src.length).trim()}));
   return {lead:src.slice(0,marks[0].start).trim(),blocks};}
-function rich(text){return htmlText(text).replace(/\*\*([^*<>]{1,300}?)\*\*/g,"<strong>$1</strong>");}
+function rich(text){return linkify(htmlText(text).replace(/\*\*([^*<>]{1,300}?)\*\*/g,"<strong>$1</strong>"));}
 function sectionHtml(split,keys){let out="";for(const b of split.blocks)if(keys.includes(b.key))out+='<h4>'+esc(b.title)+'</h4><div class="plain">'+rich(b.body||"(is section mein kuch likha nahi gaya.)")+'</div>';return out;}
 function emptyBox(text){return '<div class="empty">'+esc(text)+'</div>';}
 // Duplicate recovery footer live run mein do baar chhap gaya tha. Bilkul same
@@ -364,13 +400,13 @@ function claimsHtml(data){
   const cc=((data.verification||{}).claim_checks)||null;
   if(!cc||!Array.isArray(cc.claims))return emptyBox("Claim-level verification ka record nahi hai — matlab check chala hi nahi. Ise \"kuch galat nahi mila\" na padhein.");
   if(!cc.claims.length)return emptyBox("Koi labelled + cited claim nahi mila, isliye claim-by-claim check chala hi nahi.");
-  return cc.claims.slice(0,40).map(c=>'<div class="card"><h5>'+esc(String(c.result||c.verdict_label||"—"))+(c.critical?" • critical claim":"")+'</h5><div class="plain">'+rich(String(c.claim||""))+'</div>'+(c.result_why?'<div class="kv">'+esc(c.result_why)+'</div>':'')+(c.reason?'<div class="kv">'+esc(c.reason)+'</div>':'')+'<div class="kv">Cited: '+(Array.isArray(c.cited_ids)&&c.cited_ids.length?esc(c.cited_ids.join(", ")):"koi source cite nahi hua")+'</div></div>').join("");
+  return cc.claims.slice(0,40).map(c=>'<div class="card"><h5>'+esc(String(c.result||c.verdict_label||"—"))+(c.critical?" • critical claim":"")+'</h5><div class="plain">'+rich(String(c.claim||""))+'</div>'+(c.result_why?'<div class="kv">'+esc(c.result_why)+'</div>':'')+(c.reason?'<div class="kv">'+esc(c.reason)+'</div>':'')+'<div class="kv">Cited: '+(Array.isArray(c.cited_ids)&&c.cited_ids.length?esc(joinLabels(c.cited_ids,20)):"koi source cite nahi hua")+'</div></div>').join("");
 }
 function contraHtml(data){
   const list=Array.isArray(data.contradictions)?data.contradictions:[],counter=(data.quality_context||{}).counter_search_performed;
   const head=counter===true?"":emptyBox(counter===false?"Counter-side (against) search is run mein nahi chali — isliye \"koi contradiction nahi\" ka matlab \"dhoonda hi nahi\" hai.":"Counter-side search ka record nahi mila (chali ya nahi, pata nahi).");
   if(!list.length)return head+emptyBox("Koi valid contradiction record nahi mila.");
-  return head+list.slice(0,25).map(c=>'<div class="card"><h5>'+esc(String(c.type||"contradiction"))+(c.severity?" • "+esc(String(c.severity)):"")+'</h5><div class="plain">'+rich(String(c.summary||""))+'</div>'+(c.source_a_claim?'<div class="kv">A: '+esc(String(c.source_a_claim))+'</div>':'')+(c.source_b_claim?'<div class="kv">B: '+esc(String(c.source_b_claim))+'</div>':'')+(Array.isArray(c.sources)&&c.sources.length?'<div class="kv">Sources: '+esc(c.sources.join(", "))+'</div>':'')+(c.note?'<div class="kv">'+esc(String(c.note))+'</div>':'')+'</div>').join("");
+  return head+list.slice(0,25).map(c=>'<div class="card"><h5>'+esc(String(c.type||"contradiction"))+(c.severity?" • "+esc(String(c.severity)):"")+'</h5><div class="plain">'+rich(String(c.summary||""))+'</div>'+(c.source_a_claim?'<div class="kv">A: '+esc(String(c.source_a_claim))+'</div>':'')+(c.source_b_claim?'<div class="kv">B: '+esc(String(c.source_b_claim))+'</div>':'')+(Array.isArray(c.sources)&&c.sources.length?'<div class="kv">Sources: '+esc(joinLabels(c.sources,20))+'</div>':'')+(c.note?'<div class="kv">'+esc(String(c.note))+'</div>':'')+'</div>').join("");
 }
 function labHtml(split,data){
   const list=Array.isArray(data.hypotheses)?data.hypotheses:[];
@@ -386,16 +422,37 @@ function auditHtml(split,data){
   const gate=data.quality_gate||{},led=data.contract_ledger||{};
   const bits=[];
   if(data.evidence_level)bits.push("Top label: "+data.evidence_level);
-  if(data.status)bits.push("Run status: "+data.status+(data.status_reason?" — "+data.status_reason:""));
-  if(led.result_state)bits.push("Contract ledger: "+led.result_state+(Array.isArray(led.mandatory_missing)&&led.mandatory_missing.length?" (missing: "+led.mandatory_missing.join(", ")+")":""));
+  const status=String(data.status||"").trim(),ledState=String(led.result_state||"").trim();
+  const why=data.status_reason?" — "+data.status_reason:"";
+  const missing=Array.isArray(led.mandatory_missing)&&led.mandatory_missing.length?" (missing: "+joinLabels(led.mandatory_missing)+")":"";
+  // #113 — run status aur contract-ledger ka state bahut baar bilkul same hota
+  // hai ("PARTIAL"), aur do line likhne se ek hi baat do baar dikhti thi. Barabar
+  // hon to ek line, DONO naam usi line par — taaki ye chhupa na rahe ki ye do
+  // alag naap hain. Alag hon to alag line, warna farq gayab ho jaata.
+  if(status&&ledState&&status.toUpperCase()===ledState.toUpperCase())bits.push("Run status + contract ledger: "+status+why+missing);
+  else{if(status)bits.push("Run status: "+status+why);if(ledState)bits.push("Contract ledger: "+ledState+missing);}
   if(gate.verified_allowed!==undefined)bits.push("Final quality gate: VERIFIED allowed = "+(gate.verified_allowed?"haan":"nahi"));
-  if(Array.isArray(data.quality_repairs)&&data.quality_repairs.length)bits.push("Gate repairs: "+data.quality_repairs.join(", "));
+  if(Array.isArray(data.quality_repairs)&&data.quality_repairs.length)bits.push("Gate repairs: "+joinLabels(data.quality_repairs));
   if(bits.length)out+='<h4>Release checks</h4>'+bits.map(b=>'<div class="kv">'+esc(b)+'</div>').join("");
   const warn=[];for(const w of (Array.isArray(data.warnings)?data.warnings:[]))if(w&&!warn.includes(String(w)))warn.push(String(w));
   if(warn.length)out+='<h4>Warnings ('+warn.length+')</h4>'+warn.map(w=>'<div class="kv">• '+esc(w)+'</div>').join("");
   const tech=Array.isArray(data.technical_details)?data.technical_details:[];
   if(tech.length)out+='<details class="process"><summary>Technical details (developer ke liye — jawab ka hissa nahi)</summary><div class="log">'+esc(tech.join("\n"))+'</div></details>';
   return out;
+}
+// #113 — "PARTIAL" ek hi screen par kai jagah chhap raha tha. State-bar mein
+// answer_state apni wajah ke saath pehle se hota hai, isliye neeche ki note sirf
+// tab dikhati hai jab woh kuch NAYA kehti hai (alag label, ya alag wajah). Poora
+// record Audit tab mein waisa hi rehta hai — kuch chhupta nahi.
+function statusNote(data){
+  const status=String((data&&data.status)||"").trim();
+  if(!status||status.toUpperCase()==="COMPLETE")return "";
+  const st=(data&&data.research_state&&typeof data.research_state==="object")?data.research_state:{};
+  const reason=String((data&&data.status_reason)||"").trim();
+  const shown=String(st.answer_state||"").trim().toUpperCase();
+  const shownWhy=String(((st.reasons||{}).answer_state)||((st.explain||{}).answer_state)||"").trim();
+  if(shown===status.toUpperCase()&&(!reason||reason===shownWhy))return "";
+  return "Run status: "+status+(reason?" — "+reason:"");
 }
 function processHtml(data){
   const p=data.research_progress||{};
@@ -432,7 +489,7 @@ function renderResearch(el,data){
     box.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
     box.querySelectorAll(".pane").forEach(p=>p.classList.toggle("on",p.dataset.pane===t.dataset.pane));});
   el.innerHTML="";el.appendChild(box);
-  if(data.status&&String(data.status).toUpperCase()!=="COMPLETE")note(el,"Run status: "+data.status+(data.status_reason?" — "+data.status_reason:""));
+  const sNote=statusNote(data);if(sNote)note(el,sNote);
   down();
 }
 
@@ -442,7 +499,7 @@ function sourcesHtml(split,data){
   const list=Array.isArray(data.sources)?data.sources:[];
   let out="";
   if(!list.length)out=emptyBox("Is run mein koi cited source record nahi mila.");
-  else out=list.slice(0,60).map(s=>{const href=safeHttpUrl(s.url),url=href?esc(href):"",title=esc(String(s.title||s.url||"Source")),read=esc(String(s.access_depth||s.reading_level||""));
+  else out=list.slice(0,60).map(s=>{const href=safeHttpUrl(s.url),url=href?esc(href):"",title=esc(sourceTitle(s)),read=esc(String(s.access_depth||s.reading_level||""));
     // User ka apna uploaded document: iska koi public link nahi hota, isliye
     // anchor bhi nahi banta (chahe payload mein galti se url aa jaaye), aur
     // label saaf likha jaata hai ki ye tumhari di hui copy hai.

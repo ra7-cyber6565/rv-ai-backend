@@ -270,6 +270,18 @@ MIN_AVERAGE_RELEVANCE_STATUS = (
     "provisional — ye number benchmark corpus par calibrate hona hai, koi "
     "universal sachchai nahi hai")
 
+
+def relevance_floor_note() -> str:
+    """Floor ke status ka SAMJHANE wala hissa (em-dash ke baad ka).
+
+    #113: report mein pehle `MIN_AVERAGE_RELEVANCE_STATUS.split('—')[0]` jaata
+    tha, isliye line "ye floor abhi provisional hai (provisional)" ban jaati thi —
+    ek hi shabd do baar, aur asli wajah gayab. Wajah wapas laate hain; em-dash na
+    ho to poora text bhejte hain (chupana nahi).
+    """
+    parts = [p.strip() for p in MIN_AVERAGE_RELEVANCE_STATUS.split("—", 1)]
+    return parts[1] if len(parts) > 1 and parts[1] else MIN_AVERAGE_RELEVANCE_STATUS
+
 # ── calculation kab sach mein maangi gayi hai ────────────────────────────────
 # Sirf "number" dikhne par nahi: "2024 mein" ek saal hai, calculation nahi.
 _CALC_RES = tuple(re.compile(p, re.IGNORECASE) for p in (
@@ -738,8 +750,8 @@ def contract_ledger(contract: Optional[Dict], delivered: Optional[Dict] = None,
         avg = float(avg)
         add("average_relevance", f"Average relevance ≥ {min_rel:.2f}",
             f"{avg:.2f}", avg >= min_rel,
-            (f"{avg:.2f} < {min_rel:.2f} — ye floor abhi provisional hai "
-             f"({MIN_AVERAGE_RELEVANCE_STATUS.split('—')[0].strip()})")
+            (f"{avg:.2f} < {min_rel:.2f} — ye floor abhi provisional hai: "
+             f"{relevance_floor_note()}")
             if avg < min_rel else "")
 
     # 7. §5 — saboot ke zaroori raaste (evidence axes). Ye item hi wo taala hai
