@@ -56,3 +56,14 @@ jobs:
           python scripts/run_foundation_gate.py \
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
+
+      # Keep the machine-readable stage/tail report even when the strict gate
+      # fails. This is diagnostics only: it never changes pass/fail semantics.
+      - name: Upload foundation receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-gate-receipt-${{ github.run_id }}
+          path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
+          if-no-files-found: error
+          retention-days: 1
