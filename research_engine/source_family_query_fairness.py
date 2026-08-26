@@ -19,7 +19,7 @@ or true, and all existing fail-closed lane/quality gates remain authoritative.
 """
 from __future__ import annotations
 
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 _INSTALLED = False
 
@@ -122,7 +122,7 @@ def source_family_schedule(question: str, rounds: int = 5,
         rows.append({"round": round_no, "queries": queries})
 
     scheduled = _unique(
-        item["lane"] for row in rows for item in row["queries"],
+        (item["lane"] for row in rows for item in row["queries"]),
         limit=100,
     )
     missing = [lane for lane in lanes if lane not in set(scheduled)]
@@ -241,7 +241,8 @@ def install() -> None:
     def official_archive_queries(question: str, base_query: str,
                                  limit: int = 3) -> List[str]:
         return _archive_queries(
-            sd, original_archive, question, base_query, limit=limit)
+            sd, original_archive, question, base_query, limit=limit,
+        )
 
     def build_specialist_plan(question: str, base_query: str) -> Dict:
         return _build_plan(sd, original_build, question, base_query)
