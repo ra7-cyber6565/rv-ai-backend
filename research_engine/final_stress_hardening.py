@@ -89,9 +89,15 @@ def _advanced_source_lane(source: Any, active_profile_keys: Sequence[str]) -> st
     """Classify by this source's evidence role, not another active question lane.
 
     The previous implementation made every paper empirical when a giant prompt
-    merely contained the mind/cognition profile.  That is a question-level
+    merely contained the mind/cognition profile. That is a question-level
     leakage bug: a historical/Jung review paper is not made empirical by the
     existence of a neuroscience facet elsewhere in the same question.
+
+    Returned lane keys must come from ``specialist_domains.LANES``. In
+    particular, allegation material uses the canonical
+    ``allegation_or_conspiracy_claim`` key; otherwise a real conspiracy/secret-
+    society source could be retrieved yet still appear as a missing required
+    lane in the final audit.
     """
     from . import specialist_domains as sd
 
@@ -111,13 +117,13 @@ def _advanced_source_lane(source: Any, active_profile_keys: Sequence[str]) -> st
             return "empirical_science"
         return "scholarly_interpretation"
     if kind == "book":
-        if keys & {"esotericism_occult_history", "metaphysics"} and _TRADITION_RE.search(text):
+        if keys & {"esotericism_occult_history", "philosophy_metaphysics"} and _TRADITION_RE.search(text):
             return "traditional_belief_text"
         return "primary_historical_text"
     if kind == "document":
         return "primary_historical_text"
-    if keys & {"conspiracy_claims", "secret_societies"} and _ALLEGATION_RE.search(text):
-        return "allegation_claim"
+    if keys & {"conspiracy_claims", "secret_societies_history"} and _ALLEGATION_RE.search(text):
+        return "allegation_or_conspiracy_claim"
     return "secondary_context"
 
 
@@ -198,7 +204,7 @@ def _augment_for_final_gate(result: Any, contract: Any = None) -> Any:
 
     if raw_contract.get("math_model_required"):
         answer = str(data.get("answer") or "")
-        # Existing gates already reject missing/incomplete calculations.  This
+        # Existing gates already reject missing/incomplete calculations. This
         # extra requirement applies only once a model-like answer exists, so a
         # missing model is not double-counted under two different errors.
         if _MATH_MODEL_RE.search(answer) and not _SENSITIVITY_RE.search(answer):
