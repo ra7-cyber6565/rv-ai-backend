@@ -119,6 +119,14 @@ _install_advanced_semantic_coverage()
 from .final_stress_hardening import install as _install_final_stress_hardening
 _install_final_stress_hardening()
 
+# A giant multi-profile question must not spend the bounded specialist-query
+# budget only on the first profiles in the taxonomy. Rotate explicit source
+# families across rounds and scope archive/book leads to the profile that asked
+# for them. This is search planning only; scheduled queries never count as
+# evidence until normal relevance/verification gates accept retrieved sources.
+from .source_family_query_fairness import install as _install_source_family_query_fairness
+_install_source_family_query_fairness()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
