@@ -11,13 +11,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import research_engine  # noqa: F401,E402  # installs quality hardening
 from research_engine import advanced_research_quality as Q  # noqa: E402
+from research_engine.advanced_semantic_coverage import substantive_coverage  # noqa: E402
 from research_engine.contradiction import ContradictionEngine  # noqa: E402
 from research_engine.evidence_axes import axes_for  # noqa: E402
 from research_engine.hypothesis import (CONF_VERY_LOW, Hypothesis,
                                         HypothesisEngine)  # noqa: E402
 from research_engine.models import SourceRecord, SourceType  # noqa: E402
 from research_engine.relevance import RelevanceEngine  # noqa: E402
-from research_engine.structured_answer import coverage  # noqa: E402
 
 
 BIG_Q = """### 1. Brain, Attention and Behaviour
@@ -147,7 +147,7 @@ def test_heading_only_answer_fails_substantive_structured_coverage():
             (5, "Information, Cosmology and Long-term Agency"),
         ]
     )
-    audit = coverage(BIG_Q, answer)
+    audit = substantive_coverage(BIG_Q, answer)
     assert audit["required"] is True
     assert audit["surface_complete"] is True
     assert audit["complete"] is False
@@ -170,7 +170,7 @@ def test_substantive_sections_need_evidence_or_uncertainty_signal():
             (5, "Information, Cosmology and Long-term Agency"),
         ]
     )
-    audit = coverage(BIG_Q, answer)
+    audit = substantive_coverage(BIG_Q, answer)
     assert audit["complete"] is True
     assert audit["items_covered"] == 5
 
