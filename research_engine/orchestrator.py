@@ -50,6 +50,7 @@ from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
 from .planner import ResearchPlanner
+from . import query_hygiene
 from . import rejects
 from . import quality_producers as quality
 from .evidence_axes import axes_for
@@ -184,6 +185,9 @@ class DeepResearchEngine:
         axes = axes_for(question)
         axis_queries: Dict[str, List[str]] = {}
         axis_records: List[Dict] = []
+        # #112 — jo query junk hone ki wajah se nahi bheji gayi, uska naapa hua
+        # record. Khaali rehna hi normal haalat hai.
+        query_drops: List[Dict] = []
         # §5 — har round mein kitni axis queries? Pehle ye 3 par fix thi, aur
         # dark-matter jaise sawaal par 17 mandatory axes × 3 round × 3 query ka
         # matlab tha ki 8 axes par ek bhi query jaati hi nahi thi (report unhe
@@ -224,6 +228,15 @@ class DeepResearchEngine:
                     queries.append(query)
                     axis_queries.setdefault(rung["axis_id"], []).append(query)
 
+            # #112 — GATE: junk/meta-instruction query provider tak na jaaye.
+            # Naapa hua defect: "ache se dhyaan se kaam kro ok jldi kro ...
+            # superconductivity ..." par base query `"kaam ache dhyaan jaldi abb
+            # suru adwance"` banti thi — ek bhi topic shabd nahi — aur wahi
+            # string round 2/3 me steering words ke saath dobara jaati thi.
+            # Planner ab base saaf deta hai; ye gate doosri deewar hai, aur jo
+            # query rok di gayi uska naap `query_drops` me likha jaata hai
+            # (chup-chaap drop nahi — #117 ka wahi niyam).
+            queries = query_hygiene.filter_queries(queries, query_drops)
             for q in queries:
                 if q and q not in queries_run:
                     queries_run.append(q)
@@ -333,6 +346,8 @@ class DeepResearchEngine:
             "connectors": connectors, "sufficiency": sufficiency,
             "urls": sorted(seen_this_run - seen),
             "queries": queries_run,
+            # #112 — kaunsi query junk hone ki wajah se ROKI gayi, naap ke saath.
+            "query_drops": query_drops,
             "round_errors": round_errors,
             "round_error_details": round_error_details,
             # §5 ka record — axes khud, per-axis coverage, aur kis axis par
@@ -1008,6 +1023,16 @@ class DeepResearchEngine:
         if sufficiency and not sufficiency.get("sufficient"):
             for reason in sufficiency.get("reasons", [])[:3]:
                 warnings.append(f"Evidence limit: {reason}")
+
+        # #112 — junk/meta shabd ki wajah se koi query ROKI gayi to ye chuppi
+        # me nahi jaayega. Line me ginti aur naap dono hote hain, taaki "search
+        # kam hui" ka asli kaaran dikhe (aur baad me ye list khaali honi chahiye
+        # — bhari list matlab query banane wala hissa abhi bhi kachra bana raha
+        # hai).
+        query_drops = [d for d in (discovered.get("query_drops") or [])
+                       if isinstance(d, dict)]
+        for line in query_hygiene.drop_lines(query_drops):
+            warnings.append(line)
 
         # 3a-bis. §5 — EVIDENCE AXIS COVERAGE ka insaani bayaan.
         #

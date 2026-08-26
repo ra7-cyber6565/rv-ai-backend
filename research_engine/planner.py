@@ -25,6 +25,7 @@ from . import lenses as lens_mod
 from .local_language import normalize
 from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
+from . import query_hygiene
 from .requested import parse_requests
 from .specialist_domains import (
     build_specialist_plan,
@@ -301,6 +302,15 @@ class ResearchPlanner:
            hai"): iska purana filler-strip raasta pehle se theek kaam karta hai,
            isliye use CHHEDA NAHI GAYA. Naya scoring chhote sawaal par lagane ki
            koi zaroorat nahi thi, aur risk tha ki asli shabd ud jaaye.
+
+        #112 (2026-08-26): dono raaston ke BAAD ek gate lagta hai. Naapa hua
+        defect — "ache se dhyaan se kaam kro ok jldi kro or abb kaam suru kro
+        ... superconductivity ..." par ye function `"kaam ache dhyaan jaldi abb
+        suru adwance"` deta tha: ek bhi topic shabd nahi. Aur yahi string har
+        axis query ka base banti thi (orchestrator ka `axis_base`), isliye ek
+        galti poore round me phailti thi. Ab: junk shabd hatte hain, aur agar
+        phir bhi koi topic shabd na bache to topic-scoring wala raasta liya
+        jaata hai. Query kabhi khaali nahi hoti.
         """
         if is_instruction_prompt(question):
             topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
@@ -312,6 +322,9 @@ class ResearchPlanner:
             q = q.replace(" " + phrase + " ", " ")
         tokens = [t for t in re.findall(r"[\w\-']+", q) if t not in _FILLER_WORDS]
         cleaned = " ".join(tokens).strip()
+        # #112 — junk + bache hue function shabd hatao, par query ko khaali mat
+        # karo (tidy_query khud ye shart dekhta hai).
+        cleaned = query_hygiene.tidy_query(cleaned)
         # Kabhi khaali query mat bhejo — warna search 0 results dega
         if len(cleaned) < 3:
             cleaned = (question or "").strip()
@@ -320,6 +333,12 @@ class ResearchPlanner:
             topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
             cleaned = topic if len(topic) >= 3 else \
                 cleaned[:_MAX_QUERY_CHARS].rsplit(" ", 1)[0]
+        # #112 ka gate: is base par poora round chalta hai, isliye ek topic
+        # shabd hona ANIVARY hai. Na ho to topic-scoring wala raasta lo.
+        if query_hygiene.is_junk_query(cleaned):
+            topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
+            if len(topic) >= 3 and not query_hygiene.is_junk_query(topic):
+                return topic
         return cleaned
 
     def topic_terms(self, question: str, limit: int = 8) -> List[str]:
