@@ -1,10 +1,10 @@
 """Fail-closed quality gate for explicitly requested causal / second-order chains.
 
 The synthesis prompt asks the model to label each causal arrow, but prompt text is
-not enforcement.  A long answer could mention the requested chain once and still
-leave individual links unsupported or epistemically ambiguous.  This module adds
-a deterministic post-answer audit for questions that explicitly contain an arrow
-chain (for example ``biology -> environment -> culture``).
+not enforcement. A long answer could mention the requested chain once and still
+leave individual links unsupported or epistemically ambiguous. This module adds
+a deterministic post-answer audit for questions that explicitly request a causal
+or second-order arrow chain (for example ``biology -> environment -> culture``).
 
 For every requested edge the final answer must:
 
@@ -16,21 +16,22 @@ For every requested edge the final answer must:
 
 INFERENCE/SPECULATION/UNKNOWN are valid outcomes: the gate checks honesty and
 requested delivery, not whether every causal link is already scientifically
-settled.  It never upgrades evidence or confidence and performs no model/network
+settled. It never upgrades evidence or confidence and performs no model/network
 call.
 """
 from __future__ import annotations
 
 import re
 import unicodedata
-from typing import Dict, Iterable, List, Sequence, Tuple
+from typing import Dict, Iterable, List, Tuple
 
 _INSTALLED = False
 _ARROW_RE = re.compile(r"\s*(?:→|->|⇒|⟶)\s*")
 _CIT_RE = re.compile(r"\[S\d{1,3}(?:[^\]]{0,40})?\]", re.IGNORECASE)
 _CUE_RE = re.compile(
     r"\b(?:causal(?:\s+model|\s+chain)?|second[- ]order|cause[- ]effect|"
-    r"which\s+links?|har\s+arrow|each\s+arrow|chain)\b",
+    r"which\s+links?|har\s+arrow|each\s+arrow|causal\s+links?|causal\s+arrows?|"
+    r"chain\s+of\s+causation)\b",
     re.IGNORECASE,
 )
 _STATUS_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
@@ -70,6 +71,32 @@ def _node_key(value: str) -> str:
     return " ".join(text.split())
 
 
+def _clean_chain_parts(raw_line: str) -> List[str]:
+    """Strip prose prefixes/suffixes without changing the ordered node names."""
+    raw_parts = list(_ARROW_RE.split(raw_line))
+    if not raw_parts:
+        return []
+    cleaned: List[str] = []
+    for index, raw in enumerate(raw_parts):
+        value = raw
+        # Common natural-language form: "Causal chain: exposure → habit → outcome".
+        # The cue before ':' describes the contract, not the first node.
+        if index == 0 and ":" in value:
+            prefix, suffix = value.rsplit(":", 1)
+            if suffix.strip() and _CUE_RE.search(prefix):
+                value = suffix
+        # Common trailing form: "... → outcome: explain uncertainty".  Text after
+        # the colon belongs to the instruction, not the last node.
+        if index == len(raw_parts) - 1 and ":" in value:
+            node, suffix = value.split(":", 1)
+            if node.strip() and len(_node_key(node)) >= 2 and len(suffix.split()) >= 2:
+                value = node
+        node = _clean_node(value)
+        if 1 < len(_node_key(node)) <= 100:
+            cleaned.append(node)
+    return cleaned
+
+
 def extract_requested_chain(question: str) -> List[str]:
     """Return the longest explicit ordered arrow chain in the question."""
     candidates: List[List[str]] = []
@@ -77,8 +104,7 @@ def extract_requested_chain(question: str) -> List[str]:
     for raw_line in raw_question.splitlines():
         if len(_ARROW_RE.findall(raw_line)) < 2:
             continue
-        parts = [_clean_node(part) for part in _ARROW_RE.split(raw_line)]
-        parts = [part for part in parts if 1 < len(_node_key(part)) <= 100]
+        parts = _clean_chain_parts(raw_line)
         if 3 <= len(parts) <= 24:
             candidates.append(parts)
     if not candidates:
@@ -91,9 +117,10 @@ def requires_causal_chain_audit(question: str) -> bool:
     chain = extract_requested_chain(question)
     if len(chain) < 3:
         return False
-    # Four or more explicit nodes are unambiguously a chain request.  Three-node
-    # arrows require a causal/chain cue to avoid policing incidental notation.
-    return len(chain) >= 4 or bool(_CUE_RE.search(str(question or "")))
+    # Arrow notation is also used for software/data pipelines and workflows.
+    # Require an explicit causal/second-order/link-evidence cue instead of
+    # policing every multi-node arrow diagram as a scientific causal claim.
+    return bool(_CUE_RE.search(str(question or "")))
 
 
 def _status(text: str) -> str:
@@ -119,7 +146,7 @@ def _edge_window(answer: str, left: str, right: str) -> str:
         if li >= 0 and ri > li:
             return line[:1200]
 
-    # Fallback for wrapped prose.  Bound the span so labels/citations from a far
+    # Fallback for wrapped prose. Bound the span so labels/citations from a far
     # away paragraph cannot satisfy this edge.
     start = 0
     while True:
@@ -189,7 +216,8 @@ def audit_causal_chain(question: str, answer: str) -> Dict:
         "note": (
             "requested causal chain delivery audit: every arrow needs an explicit "
             "epistemic status; ESTABLISHED/EVIDENCE/SOURCE-REPORTED arrows also "
-            "need a citation. This is not itself truth verification."
+            "need a citation. Existing claim-verification remains authoritative "
+            "for whether that citation actually supports the claim."
         ),
     }
 
