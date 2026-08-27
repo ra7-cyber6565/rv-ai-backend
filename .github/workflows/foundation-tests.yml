@@ -18,13 +18,11 @@ concurrency:
 
 jobs:
   offline-regression:
-    # Public-repository standard GitHub-hosted runner; no larger/paid runner.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       ZERO_COST_ONLY: "true"
       RATE_LIMIT_ENABLED: "true"
-      # `runner` context is not valid in jobs.<job_id>.env; this job is Linux-only.
       INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data
       GEMINI_API_KEY: ""
       GEMINI_ZERO_COST_CONFIRMED: "false"
@@ -46,8 +44,6 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      # Pin research-semantic and maturity failures as explicit release-critical
-      # gates. The full Foundation runner below still executes the complete suite.
       - name: Run advanced research quality regression gate
         run: |
           pytest -q \
@@ -67,21 +63,18 @@ jobs:
             tests/test_statistical_validation.py \
             tests/test_formal_logic.py \
             tests/test_holdout_vault.py \
-            tests/test_scientist_society.py
+            tests/test_holdout_vault_hardening.py \
+            tests/test_scientist_society.py \
+            tests/test_research_capsule.py \
+            tests/test_procedural_memory.py \
+            tests/test_knowledge_watch.py
 
-      # Keep CI and the user's Windows laptop on exactly the same release gate.
-      # The runner itself compiles sources, runs focused integration tests,
-      # test_research_engine.py, every standalone tests/test_*.py file, and the
-      # offline superconductivity Benchmark V2. It continues after individual
-      # failures so one run exposes the complete failure set, then exits nonzero.
       - name: Run strict zero-cost foundation gate
         run: |
           python scripts/run_foundation_gate.py \
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
 
-      # Keep the machine-readable stage/tail report even when the strict gate
-      # fails. This is diagnostics only: it never changes pass/fail semantics.
       - name: Upload foundation receipt
         if: always()
         uses: actions/upload-artifact@v4
