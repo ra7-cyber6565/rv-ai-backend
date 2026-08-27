@@ -205,6 +205,19 @@ FORBIDDEN_NOVELTY_PHRASES = (
     "nayi khoj hai", "breakthrough discovery", "proven novel", "definitely novel",
 )
 
+# #114 — inkaar pakadne ke chhote auzaar. Window chhoti aur punctuation par
+# rukne wali hai, taaki "nahi" doosre vaakya se udhaar na liya ja sake.
+_NOVELTY_LEFT = 48
+_NOVELTY_RIGHT = 36
+_NOVELTY_BOUNDARY = re.compile("[.,;:!?|()\n—–\"]")
+_NOVELTY_NEGATORS = re.compile(
+    r"\bnot\b|\bno\b|\bnever\b|n't\b|\bcannot\b|\bcan not\b|\bwithout\b|"
+    r"\bnahin?\b|\bnhi\b|\bmat\b|\bbina\b|\binkaar\b", re.IGNORECASE)
+_NOVELTY_FALSE_DENIAL = (
+    "no doubt", "not only", "not just", "no question", "without doubt",
+    "without question", "shak nahi", "sandeh nahi", "doubt nahi",
+)
+
 # Prior-art similarity thresholds (deterministic, token-overlap based).
 _PRIOR_DUP = 0.80      # itna match = wahi kaam pehle se hai
 _PRIOR_CLOSE = 0.55    # itna match = chhota-sa fark, minor modification
@@ -274,10 +287,67 @@ def known_idea_hits(*texts: str) -> List[Dict]:
     return hits
 
 
+def _novelty_negator_in(window: str) -> bool:
+    """Is chhoti window me asli inkaar hai ya nahi (#114)."""
+    clean = window
+    # "no doubt" / "shak nahi" me negator hai par wo daawe ko nahi kaatta —
+    # ulta pakka karta hai. Aise span ko pehle hata dete hain, warna
+    # "Isme koi shak nahi, ye 100% new hai" cleared ho jaata (guard kamzor).
+    for phrase in _NOVELTY_FALSE_DENIAL:
+        if phrase in clean:
+            clean = clean.replace(phrase, " " * len(phrase))
+    return bool(_NOVELTY_NEGATORS.search(clean))
+
+
+def _novelty_negated(low: str, start: int, end: int) -> bool:
+    """
+    Ek occurrence ke aas-paas inkaar likha hai kya.
+
+    Window jaan-boojh kar chhoti hai aur punctuation par ruk jaati hai: isse
+    "Ye purana nahi hai, ye 100% new hai." me comma ke us paar ka `nahi`
+    phrase ko bacha nahi paata — yaani jhooth phir bhi pakda jaata hai.
+    """
+    left = low[max(0, start - _NOVELTY_LEFT):start]
+    ends = [m.end() for m in _NOVELTY_BOUNDARY.finditer(left)]
+    if ends:
+        left = left[ends[-1]:]
+    right = low[end:end + _NOVELTY_RIGHT]
+    stop = _NOVELTY_BOUNDARY.search(right)
+    if stop:
+        right = right[:stop.start()]
+    return _novelty_negator_in(left) or _novelty_negator_in(right)
+
+
 def forbidden_novelty_phrases(*texts: str) -> List[str]:
-    """Jo shabd kabhi nahi likhne chahiye — mile to naam le kar lautao."""
-    blob = " ".join((t or "") for t in texts).lower()
-    return [p for p in FORBIDDEN_NOVELTY_PHRASES if p in blob]
+    """
+    Jo shabd kabhi nahi likhne chahiye — mile to naam le kar lautao.
+
+    #114 — pehle ye seedha substring check tha, isliye imaandaar INKAAR bhi
+    "banned" gina jaata tha ("Ye idea 100% new nahi hai", "This is not 100%
+    new"). Ab har occurrence ke aas-paas ki chhoti window dekhi jaati hai:
+    phrase saaf hota hai sirf tab jab uski HAR jagah inkaar ke saath ho. Ek
+    jagah bina inkaar mila to phrase banned hi rehta hai (guard dheela nahi
+    hua). Aur agar phrase sirf do field jodne se bana hai, to bharosa nahi —
+    wo bina shart banned hai.
+    """
+    fields = [(t or "").lower() for t in texts]
+    blob = " ".join(fields)
+    out: List[str] = []
+    for phrase in FORBIDDEN_NOVELTY_PHRASES:
+        if phrase not in blob:
+            continue
+        in_field = False
+        all_denied = True
+        for low in fields:
+            at = low.find(phrase)
+            while at != -1:
+                in_field = True
+                if not _novelty_negated(low, at, at + len(phrase)):
+                    all_denied = False
+                at = low.find(phrase, at + 1)
+        if not in_field or not all_denied:
+            out.append(phrase)
+    return out
 
 
 def closest_prior_work(statement: str, sources: Optional[Sequence] = None,

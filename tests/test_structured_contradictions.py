@@ -31,9 +31,11 @@ from research_engine.consensus_gate import CONSENSUS_UNAVAILABLE   # noqa: E402
 from research_engine.contradiction import (CONTRA_GENERIC_CONFIDENCE,  # noqa: E402
                                            CONTRA_NO_OPPOSITE,
                                            CONTRA_NO_PROPOSITION,
+                                           CONTRA_NOT_EVALUATED,
                                            CONTRA_REJECT_CODES,
                                            CONTRA_REJECT_WHY,
                                            CONTRA_TOPIC_MISMATCH,
+                                           CONTRA_WEAK_QUESTION_LINK,
                                            CONTRA_YEAR_ONLY,
                                            METHOD_CMP_COMPARED,
                                            METHOD_CMP_SAME_LEVEL,
@@ -74,11 +76,18 @@ def _detect(*sources: SourceRecord, question: str = _Q):
 # --- reject codes: ginne-layak, free-text nahi -------------------------------
 
 def test_five_reject_codes_each_carry_their_own_reason():
-    assert len(CONTRA_REJECT_CODES) == 5
-    assert len(set(CONTRA_REJECT_CODES)) == 5
+    # #114 ne do naye code jode (scope aur kamzor question-link), isliye 5 se 7.
+    # Ginti badhi hai — koi purana code hataya nahi gaya.
+    assert len(CONTRA_REJECT_CODES) == 7
+    assert len(set(CONTRA_REJECT_CODES)) == 7
     for code in CONTRA_REJECT_CODES:
         assert len(CONTRA_REJECT_WHY[code].strip()) > 30, code
-    assert len({v.strip() for v in CONTRA_REJECT_WHY.values()}) == 5
+    assert len({v.strip() for v in CONTRA_REJECT_WHY.values()}) == 7
+    for old in (CONTRA_YEAR_ONLY, CONTRA_TOPIC_MISMATCH, CONTRA_NO_OPPOSITE,
+                CONTRA_GENERIC_CONFIDENCE, CONTRA_NO_PROPOSITION):
+        assert old in CONTRA_REJECT_CODES, old
+    assert CONTRA_NOT_EVALUATED in CONTRA_REJECT_CODES
+    assert CONTRA_WEAK_QUESTION_LINK in CONTRA_REJECT_CODES
 
 
 def test_year_only_reason_denies_that_newer_means_correct():

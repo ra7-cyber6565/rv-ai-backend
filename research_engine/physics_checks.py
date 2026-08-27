@@ -559,6 +559,20 @@ _UNCERT_PREFIX_RE = re.compile(
 
 CALC_TOLERANCE = 0.05        # 5% — rounding ("9.2e10") allowed, galti nahi
 
+# #114 — jo block record nahi bana, wo chupke se gayab na ho. Har chhode gaye
+# block ka reason code + Hinglish wajah rakhte hain (reject-list ka hi niyam).
+CALC_SKIP_NO_MATH = "NO_REAL_MATH"
+CALC_SKIP_REPORTED_NUMBER = "REPORTED_NUMBER_ONLY"
+CALC_SKIP_CODES = (CALC_SKIP_NO_MATH, CALC_SKIP_REPORTED_NUMBER)
+CALC_SKIP_WHY = {
+    CALC_SKIP_NO_MATH: ("Is block mein '=' tha par koi asli formula nahi mila "
+                        "(citation ya prose line thi), isliye ise hisaab nahi "
+                        "maana gaya."),
+    CALC_SKIP_REPORTED_NUMBER: ("Ye sirf source se padhe hue number the "
+                                "(jaise Tc = 250 K), na formula tha na naam se "
+                                "likha nateeja — isliye ye apna hisaab nahi hai."),
+}
+
 
 @dataclass
 class CalculationRecord:
@@ -727,6 +741,36 @@ def _blocks_with_math(text: str) -> List[str]:
     return [c for c in chunks if _FORMULA_HINT.search(c) and re.search(r"\d", c)]
 
 
+def _formula_symbols_ok(rhs: str, block: str) -> bool:
+    """
+    RHS ke shabd asli symbol hain ya prose/citation — #114 ka pehla taala.
+
+    Live report mein "S2 = arXiv preprint me Tc" aur "S1 = Feynman Lectures Vol 2"
+    ko formula maan liya gaya tha (kyunki `=` tha aur RHS mein space tha), aur
+    usse ek nakli CalculationRecord ban jaata tha. Formula ke symbol chhote
+    hote hain (M, v, r, rho) ya block mein unki value di hoti hai. Isliye har
+    alphabetic token in teen mein se ek hona chahiye:
+      * 3 ya kam letters ka symbol (v, r, G, rho, Tc), YA
+      * jaana-maana constant (G, c, h …), YA
+      * usi block mein `naam = number` se define kiya gaya naam.
+    Ek bhi token in teenon se bahar (arXiv, preprint, Feynman, Lectures) →
+    ye formula nahi hai. Guard sirf prose kaatta hai; asli formula ke symbol
+    isse nahi rukte (unke naam chhote hote hain ya value block mein hoti hai).
+    """
+    assigned = {m.group(1).strip().lower() for m in _ASSIGN_RE.finditer(block)}
+    tokens = re.findall(r"[A-Za-z][A-Za-z0-9_]*", rhs)
+    if not tokens:
+        return False
+    for token in tokens:
+        low = token.lower()
+        if low in assigned or low in KNOWN_CONSTANTS:
+            continue
+        if len(re.findall(r"[A-Za-z]", token)) <= 3:
+            continue
+        return False
+    return True
+
+
 def _pick_formula(block: str) -> str:
     """Sabse pehla symbolic formula ('M = v^2 r / G') — number wala nahi."""
     best = ""
@@ -746,7 +790,11 @@ def _pick_formula(block: str) -> str:
         letters = len(re.findall(r"[A-Za-z]", rhs))
         if letters < 1:
             continue
-        if not re.search(r"[*/^×·÷+\-]|\s", rhs):
+        # #114 — prose/citation ko formula banne se roko.
+        if not _formula_symbols_ok(rhs, block):
+            continue
+        if (not re.search(r"[*/^×·÷+\-]", rhs)
+                and len(re.findall(r"[A-Za-z][A-Za-z0-9_]*", rhs)) < 2):
             continue                        # "x = y" ko formula nahi maanenge
         candidate = f"{lhs} = {rhs}"
         if len(candidate) > len(best):
@@ -798,13 +846,18 @@ def _expr_from_formula(formula: str, inputs: Dict[str, float],
 
 
 def extract_calculations(answer: str, question: str = "",
-                         evidence_text: str = "") -> List[CalculationRecord]:
+                         evidence_text: str = "",
+                         skips: Optional[List[Dict]] = None
+                         ) -> List[CalculationRecord]:
     """
     §17 — jawab ke andar se calculation ka poora record nikaalo.
 
     Kuch bhi "banaya" nahi jaata: jo formula/input/unit likha hi nahi gaya, wo
     record mein missing rehta hai aur `missing` list uska naam leti hai. Isi
     tarah jo check chal na sake wo `None` rehta hai.
+
+    `skips` list do to jo block chhode gaye unka reason code bhi mil jaata hai
+    (#114 — kuch bhi chupke se gayab nahi hota).
     """
     records: List[CalculationRecord] = []
     haystack = f"{question}\n{evidence_text}".lower()
@@ -852,7 +905,21 @@ def extract_calculations(answer: str, question: str = "",
                              r"[ \t]*[:=]?[ \t]*", "",
                              um.group(1).strip(), flags=re.IGNORECASE)[:200] \
             if um else ""
-        if not (formula or inputs):
+        # #114 ka doosra taala — "asli hisaab ki koshish" hui ya nahi.
+        # Pehle sirf `formula or inputs` chahiye tha, isliye "Tc = 250 K" aur
+        # "n = 175 galaxies, p = 0.03" jaise padhe hue number bhi ek
+        # CalculationRecord ban jaate the, aur report "math model nahi bana"
+        # jaisa verdict de deti thi. Ab do hi raste hain:
+        #   * formula likha ho (chahe inputs adhoore hon), YA
+        #   * inputs + NAAM se likha nateeja (Result/Nateeja/Answer/…) ho.
+        # Sirf reported number se record nahi banega — par wo block chupke se
+        # gayab bhi nahi hoga, uska reason code `skips` mein jaata hai.
+        if not formula and not (inputs and named is not None):
+            if skips is not None:
+                code = (CALC_SKIP_REPORTED_NUMBER if inputs
+                        else CALC_SKIP_NO_MATH)
+                skips.append({"reason_code": code, "why": CALC_SKIP_WHY[code],
+                              "excerpt": block.strip()[:200]})
             continue
         rec = CalculationRecord(formula=formula, inputs=inputs, units=units,
                                 assumptions=assumptions, result=result,
@@ -977,13 +1044,29 @@ def calculation_records(answer: str, question: str = "",
                                                       evidence_text)]
 
 
+def calculation_skips(answer: str, question: str = "",
+                      evidence_text: str = "") -> List[Dict]:
+    """
+    Kaunse '=' wale block hisaab nahi maane gaye, aur kyun (#114).
+
+    Ye reject-list ka calculation wala hissa hai: record na banna alag baat
+    hai, par wajah chhupani nahi hai. Har entry mein reason_code + Hinglish
+    wajah + block ka chhota excerpt hota hai.
+    """
+    skips: List[Dict] = []
+    extract_calculations(answer, question, evidence_text, skips=skips)
+    return skips
+
+
 def _calc_ok(rec) -> bool:
     """
     Ek record "kaam ka hisaab" hai ya nahi — record ya dict, dono chalte hain.
 
-    Sakht niyam: formula, inputs, units aur result chaaron likhe hon, aur jo
-    check chala wo fail na hua ho. "Calculation section mein kuch likha tha"
-    ko hisaab hona nahi maanenge — wahi pichhli galti thi.
+    Sakht niyam: formula, inputs, units aur result chaaron likhe hon, app ne
+    khud dobara jod kar wahi jawab paaya ho (`recalculation_passed is True`),
+    aur jo doosra check chala wo fail na hua ho. Sirf "recalculation nahi ho
+    saka" (None) ko bhi ab kaam ka hisaab nahi maanenge — bina apne milaan ke
+    "hisaab poora hua" kehna hi #114 ki shikayat thi.
     """
     if isinstance(rec, dict):
         complete = bool(rec.get("complete"))
@@ -997,7 +1080,9 @@ def _calc_ok(rec) -> bool:
         sanity = getattr(rec, "sanity_check_passed", None)
     if not complete:
         return False
-    return not (unit is False or recalc is False or sanity is False)
+    if recalc is not True:
+        return False
+    return not (unit is False or sanity is False)
 
 
 def usable_calculation_count(records: Optional[Sequence]) -> Optional[int]:

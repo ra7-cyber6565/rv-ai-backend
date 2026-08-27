@@ -73,6 +73,21 @@ _SUPPORT_CUES = (
     "ruled out", "rules out", "rule out",
     "cannot be fitted", "cannot be explained", "cannot be accounted for",
     "difficult to explain without", "hard to explain without",
+    # 2026-08-26 (#114): naapa hua badlav bhi ek POSITIVE nateeja hai. Cross-
+    # domain run mein archaeology ka asli claim-paper — "settlement counts fall
+    # by 71% within this window", deurbanisation "overlapping a documented
+    # weakening of the summer monsoon" — NEUTRAL nikal raha tha. Isliye uske
+    # khilaaf khada paper ("monsoon weakening did not drive deurbanisation")
+    # kabhi uske saamne nahi aaya; uski jagah ek speleothem *record* paper
+    # (jo koi wajah claim hi nahi karta) khada ho jaata tha — yani report mein
+    # nakli takraav aur asli takraav gayab.
+    # "by" ke saath hi rakha gaya hai: "fall by 71%" ek naapa hua daawa hai,
+    # akela "fall"/"drop" topic ka naam bhi ho sakta hai ("drop test").
+    # Negation `_all_negated()` pehle se sambhalta hai ("did not fall by 71%").
+    "fall by", "falls by", "fell by", "drop by", "drops by", "dropped by",
+    "decline by", "declines by", "declined by",
+    "rise by", "rises by", "rose by", "grew by", "grow by",
+    "coincides with", "coincided with",
 )
 _OPPOSE_CUES = (
     "not effective", "ineffective", "no significant", "no effect", "no evidence",
@@ -115,9 +130,66 @@ _NEGATORS = ("no ", "not ", "never ", "without ", "n't ", "neither ", "nor ",
              "failed to ", "unable to ", "cannot ", "could not ", "did not ",
              "does not ", "lack of ", "absence of ", "little ")
 
+# ── #114: "humne ye dekha hi nahi" ≠ "humein ulta nateeja mila" ──────────────
+# Live report mein ek calibration manual aur ek measurement paper ke beech
+# "takraav" chhap gaya tha. Manual ka vaakya tha "the manual does not cover
+# pressure cell maintenance" — usme "does not" hai, isliye stance OPPOSE nikla
+# aur measurement paper ke SUPPORT ke saamne khada ho gaya. Lekin "hum ye maapa
+# hi nahi" koi ulta nateeja nahi hai; ye scope ki baat hai.
+#
+# Isliye ek alag stance hai: NOT_EVALUATED. Ye OPPOSE se kamzor nahi, ALAG hai —
+# na support ginta hai, na oppose, aur consensus/claim-level gates isse pair
+# banane se saaf mana kar dete hain (jaankari phenki nahi jaati, reject list
+# mein wajah ke saath rehti hai).
+_NOT_EVALUATED_CUES = (
+    "does not cover", "did not cover", "do not cover",
+    "does not measure", "did not measure", "not measured",
+    "does not report", "did not report", "not reported",
+    "does not assess", "did not assess", "not assessed",
+    "does not evaluate", "did not evaluate", "not evaluated",
+    "does not address", "did not address",
+    "does not examine", "did not examine", "not examined",
+    "does not investigate", "did not investigate",
+    "does not test", "did not test", "not tested for",
+    "out of scope", "outside the scope", "beyond the scope",
+    "no attempt was made", "was not studied", "were not studied",
+    # Hinglish/Hindi — wahi baat apni bhasha mein.
+    "nahi dekha gaya", "nahi naapa gaya", "nahi maapa gaya",
+    "jaanch nahi ki", "shaamil nahi", "daayre se bahar",
+)
+
 _NUM_RE = re.compile(r"(\d{1,3}(?:\.\d+)?)\s?%")
 _YEAR_GAP = 6          # itne saal ka farq ho to recency conflict dekhte hain
 _NUM_GAP = 20.0        # percentage points
+
+# ── #114: sawaal se kitna juda hai, ye naapa jaata hai ───────────────────────
+# `_on_same_question` pehle ek shabd match hone par "haan, ek hi sawaal" keh
+# deti thi. Dark-matter run mein isi wajah se ek photometry-calibration paper
+# (sirf "dark" + "matter" match) rotation-curve paper ke khilaaf khada kar diya
+# gaya tha. Ab do raste hain — dono mein se ek poora ho:
+#   * sawaal ke kam se kam itne ALAG HISSE chhoote hon (`_question_parts`), YA
+#   * sawaal ke stems ka kam se kam 40% chhoota ho (chhote sawaal ke liye).
+#
+# 40% hi kyun: dark-matter ka nakli jodaa (calibration paper, sirf "dark
+# matter") 2/6 = 0.33 par baith raha tha, aur asli chhote sawaal ("vitamin D
+# fracture risk" par "fracture risk" wala paper) 2/3 = 0.67 par. Bar in dono
+# ke beech hai, kisi ek fixture par nahi.
+MIN_QUESTION_COVERAGE = 0.40
+# Mile-juli bhasha ka doosra raasta: sawaal ke kam se kam itne alag hisse
+# chhoote hon. 2 hi kyun — sirf topic ka naam ("dark matter") ek hissa hota
+# hai, aur usi par nakli takraav bante the; do alag hisse chhoona matlab source
+# ne sawaal ka topic AUR uska doosra sira dono chhua hai. Ye ginti bhasha par
+# nahi tikti, isliye Hinglish sawaal ko saza nahi milti.
+MIN_QUESTION_PARTS = 2
+# Yahan pehle ek teesra raasta bhi tha: `MIN_QUESTION_STEM_HITS = 3` — "3 alag
+# stem chhoo liye to link asli maan lo". 2026-08-27 ke mutation test ne use
+# KAAGZI sabit kiya: bar ko 3 se 4 kar dene par ek bhi test red nahi hua, yani
+# koi asli behaviour us par tikta hi nahi tha (jo bhi source 3 stem chhoota
+# hai, wo ya do hisse chhoo raha hai ya 40% coverage paar kar raha hai). Aur
+# wo raasta gate ko KAMZOR kar raha tha: "dark matter evidence in galaxy
+# rotation curves" jaise sawaal mein ek hi hisse ke teen shabd ("dark matter
+# evidence") echo karne wala junk paper us se pass ho jaata. Isliye raasta
+# hataya gaya, dheela nahi kiya gaya — do raste bache, dono naape hue hain.
 
 # ── §11: nakli contradiction ke codes ────────────────────────────────────────
 # Ye free-text nahi, ginne-layak codes hain — audit inhe count kar sakta hai.
@@ -126,8 +198,13 @@ CONTRA_TOPIC_MISMATCH = "TOPIC_MISMATCH"
 CONTRA_NO_OPPOSITE = "NO_OPPOSING_DIRECTION"
 CONTRA_GENERIC_CONFIDENCE = "GENERIC_CONFIDENCE"
 CONTRA_NO_PROPOSITION = "NO_SHARED_PROPOSITION"
+# #114 ke do naye code — dono ki wajah apni hai, aur dono reject list mein
+# ginne-layak hain (chup-chaap skip karna hi purani galti thi).
+CONTRA_NOT_EVALUATED = "SOURCE_DID_NOT_EVALUATE"
+CONTRA_WEAK_QUESTION_LINK = "WEAK_QUESTION_LINK"
 CONTRA_REJECT_CODES = (CONTRA_YEAR_ONLY, CONTRA_TOPIC_MISMATCH, CONTRA_NO_OPPOSITE,
-                       CONTRA_GENERIC_CONFIDENCE, CONTRA_NO_PROPOSITION)
+                       CONTRA_GENERIC_CONFIDENCE, CONTRA_NO_PROPOSITION,
+                       CONTRA_NOT_EVALUATED, CONTRA_WEAK_QUESTION_LINK)
 CONTRA_REJECT_WHY = {
     CONTRA_YEAR_ONLY: ("Farq sirf publication year ka tha. Purana-naya hona takraav "
                        "nahi hai, aur sirf date se kisi evidence ka weight tay nahi "
@@ -141,6 +218,12 @@ CONTRA_REJECT_WHY = {
     CONTRA_NO_PROPOSITION: ("Ek common proposition (kis baat par takraav hai) nikal hi "
                             "nahi paayi — bina proposition contradiction likhna galat "
                             "hai."),
+    CONTRA_NOT_EVALUATED: ("Doosre source ne ye cheez maapi hi nahi — 'humne ye nahi "
+                           "dekha/report nahi kiya' scope ki baat hai, ulta nateeja "
+                           "nahi. Ise takraav kehna jhooth hota."),
+    CONTRA_WEAK_QUESTION_LINK: ("Source sawaal se sirf ek-do aam shabd par juda tha "
+                                "(jaise topic ka naam), poori baat par nahi — itne "
+                                "kam overlap se takraav nahi banta."),
 }
 
 # ── §11: method-comparison ke honest status codes ────────────────────────────
@@ -276,6 +359,46 @@ class ContradictionEngine:
             start = i + len(cue)
         return hits > 0 and negated == hits
 
+    def _scope_spans(self, low: str) -> List[Tuple[int, int]]:
+        """"Ye humne dekha hi nahi" wale phrase kahan-kahan aaye — unke spans."""
+        spans: List[Tuple[int, int]] = []
+        for cue in _NOT_EVALUATED_CUES:
+            start = 0
+            while True:
+                i = low.find(cue, start)
+                if i < 0:
+                    break
+                spans.append((i, i + len(cue)))
+                start = i + 1
+        return spans
+
+    def _only_scope_denial(self, low: str, opposing: Sequence[str]) -> bool:
+        """
+        Saara "na" sirf scope ki baat hai ya nahi.
+
+        True sirf tab jab HAR oppose cue ka HAR occurrence kisi
+        not-evaluated phrase ke andar ho. Yani:
+          "the manual does not cover pressure cells"        → True  (scope)
+          "the drug did not reduce risk; we did not measure
+           bone density"                                    → False (asli null
+                                                              result bhi hai)
+        Ek bhi seedha null-result bacha ho to ye OPPOSE hi rehta hai — guard
+        detection kamzor nahi karta.
+        """
+        spans = self._scope_spans(low)
+        if not spans:
+            return False
+        for cue in opposing:
+            start = 0
+            while True:
+                i = low.find(cue, start)
+                if i < 0:
+                    break
+                if not any(s <= i and i + len(cue) <= e for s, e in spans):
+                    return False
+                start = i + 1
+        return True
+
     def stance(self, text: str) -> Tuple[str, List[str]]:
         low = (text or "").lower()
         # Pehle OPPOSE dekho — "not effective" ke andar "effective" bhi aata hai
@@ -284,6 +407,17 @@ class ContradictionEngine:
                       not any(c in o for o in opposing) and
                       not self._all_negated(low, c)]
         hedging = [c for c in _HEDGE_CUES if c in low]
+
+        # #114 — "hum ye maapa hi nahi" na support hai na oppose. Ye check
+        # support/oppose ke faisle se PEHLE aata hai, lekin sirf us haalat mein
+        # jab koi seedha daawa (support cue) bhi na ho aur saare "na" scope wale
+        # phrase ke andar hi hon. Aur agar sirf scope ki baat likhi hai (koi
+        # cue hi nahi), tab bhi ye NEUTRAL nahi hai: "hum ye naapa hi nahi"
+        # ek naapi hui baat hai, "kuch stance nahi mila" nahi.
+        scope_cues = [c for c in _NOT_EVALUATED_CUES if c in low]
+        if scope_cues and not supporting:
+            if not opposing or self._only_scope_denial(low, opposing):
+                return "NOT_EVALUATED", scope_cues
 
         if opposing and supporting:
             strong = [c for c in opposing if c in _STRONG_OPPOSE_CUES]
@@ -329,10 +463,43 @@ class ContradictionEngine:
         return len(self._stems(f"{a.title} {a.snippet}") &
                    self._stems(f"{b.title} {b.snippet}"))
 
-    def _on_same_question(self, a: SourceRecord, b: SourceRecord, question: str,
-                          min_shared: int = 1) -> bool:
+    def _question_parts(self, question: str) -> List[set]:
         """
-        Dono sources usi sawal ke keywords chhoote hain ya nahi.
+        Sawaal ko uske alag-alag HISSON mein todta hai.
+
+        #114 — coverage ka bhaag (hits/total) mile-juli bhasha ke sawaal ko saza
+        deta hai. "Indus valley civilisation ke shehron ka patan monsoon ke
+        badlav se hua ya vyapar toot jaane se…" ke 14 stems mein 9 Hindi shabd
+        hain (patan, shehron, vyapar, sabooton, badlav, toot…). Koi English
+        paper unhe kabhi match nahi karega, isliye uska maximum coverage hi
+        0.36 hai — 40% ka darwaza uske liye band tha, chahe wo bilkul isi
+        sawaal ka ulta jawab de raha ho.
+
+        Isliye ginti badalti hai: sawaal ke KITNE ALAG HISSE chhoote hain. Hissa
+        = lagataar 4+ akshar wale shabdon ka jodaa (chhota function word —
+        "ka", "se", "ya", "in", "the" — hissa tod deta hai). "dark matter
+        evidence in galaxy rotation curves" ke do hisse hain; sirf topic ka naam
+        ("dark matter") chhoone wala source ek hi hissa chhoota hai, aur ab bhi
+        reject hota hai. Wahi paper jo sawaal ke do alag hisson par baat karta
+        hai (jaise "Indus … monsoon"), pass hota hai — bhasha ki saza khatam.
+        """
+        parts: List[set] = []
+        current: set = set()
+        for word in re.findall(r"[a-z]+", (question or "").lower()):
+            if len(word) >= 4:
+                current.add(self._stem(word))
+                continue
+            if current:
+                parts.append(current)
+                current = set()
+        if current:
+            parts.append(current)
+        return parts
+
+    def _question_link(self, a: SourceRecord, b: SourceRecord, question: str,
+                       min_shared: int = 1) -> Tuple[bool, str]:
+        """
+        Dono sources usi sawal ke keywords chhoote hain ya nahi — aur KITNA.
 
         Zaroori kyun: pehle version pairwise word-overlap maangta tha, jisse do
         aise sources jo *ek hi sawal* ka ulta jawab dete hain lekin alag
@@ -340,12 +507,36 @@ class ContradictionEngine:
         association") skip ho jaate the — yani asli contradiction miss.
         Pack ek hi sawal ke liye bana hai, isliye question-level overlap kaafi
         hai; pairwise overlap ab sirf severity/caveat tay karta hai.
+
+        #114 — par "ek shabd chhoo liya" bhi kaafi maan liya gaya tha, aur usse
+        topic ke naam par nakli takraav bante the. Ab do raste hain, koi ek
+        poora hona chahiye (warna reject code ke saath laut jaata hai):
+          * 0 shabd  → `NO_SHARED_PROPOSITION` (purana behaviour, waisa hi)
+          * sawaal ke 2 ALAG hisse chhoote hon (`_question_parts` — mile-juli
+            bhasha ke lambe sawaal ka imaandaar raasta), YA
+          * stems ka 40% chhoota ho (chhote sawaal ke liye).
+        Dono mein se koi bhi pura na ho → `WEAK_QUESTION_LINK`.
         """
         topic = {w for w in self._stems(question) if len(w) >= 4}
         if not topic:
-            return True
-        return (len(self._stems(f"{a.title} {a.snippet}") & topic) >= min_shared and
-                len(self._stems(f"{b.title} {b.snippet}") & topic) >= min_shared)
+            return True, ""
+        parts = self._question_parts(question)
+        for s in (a, b):
+            stems = self._stems(f"{s.title} {s.snippet}")
+            hits = len(stems & topic)
+            if hits < max(1, min_shared):
+                return False, CONTRA_NO_PROPOSITION
+            touched = sum(1 for part in parts if part & stems)
+            if touched >= MIN_QUESTION_PARTS:
+                continue
+            if (hits / float(len(topic))) < MIN_QUESTION_COVERAGE:
+                return False, CONTRA_WEAK_QUESTION_LINK
+        return True, ""
+
+    def _on_same_question(self, a: SourceRecord, b: SourceRecord, question: str,
+                          min_shared: int = 1) -> bool:
+        """`_question_link` ka haan/na — purane callers ke liye."""
+        return self._question_link(a, b, question, min_shared)[0]
 
     def _shared_topic(self, a: SourceRecord, b: SourceRecord, min_words: int = 3) -> bool:
         """Do sources ek hi baat pe baat kar rahe hain ya nahi — mota andaaza."""
@@ -475,13 +666,18 @@ class ContradictionEngine:
         string, aur khaali proposition ka matlab hai contradiction reject
         (`NO_SHARED_PROPOSITION`). Yahi cheez "exoplanet paper vs telescope
         calibration paper" wale nakli takraav ko rokti hai.
+
+        #114 — pehle yahan ek fallback tha: agar shared stems mein sawaal ka koi
+        shabd na ho, to *koi bhi* shared shabd utha kar proposition bana di
+        jaati thi. Usse "in the" jaisi aam bhaasha ya do papers ke common
+        boilerplate se bhi "takraav ki baat" ban jaati thi. Ab core sirf
+        (shared ∩ sawaal) se banta hai — na bane to proposition khaali, aur
+        jodi reject list mein wajah ke saath jaati hai.
         """
         shared = (self._stems(f"{a.title} {a.snippet}") &
                   self._stems(f"{b.title} {b.snippet}"))
         q_stems = self._stems(question)
         core = sorted(shared & q_stems, key=lambda w: (-len(w), w))[:4]
-        if not core:
-            core = sorted(shared, key=lambda w: (-len(w), w))[:4]
         if not core:
             return ""
         return (f"Takraav is baat par hai — {' / '.join(core)}: iska nateeja/asar "
@@ -506,8 +702,16 @@ class ContradictionEngine:
         """
         Nakli contradiction chhaanto. Reject hone par record bachta hai (audit ke
         liye), par `valid=False` ho jaata hai aur user ke jawab mein nahi jaata.
+
+        #114 — jodi banane wali jagah pehle se wajah jaanti ho (scope, ya sawaal
+        se kamzor jod), to wo `reject_code` set kar deti hai; yahan us code ko
+        overwrite nahi karte, sirf uski wajah bhar dete hain.
         """
-        if c.kind == "RECENCY":
+        if c.reject_code:
+            c.valid = False
+        elif c.kind == "SCOPE":
+            c.valid, c.reject_code = False, CONTRA_NOT_EVALUATED
+        elif c.kind == "RECENCY":
             c.valid, c.reject_code = False, CONTRA_YEAR_ONLY
         elif c.kind == "CONFIDENCE":
             c.valid, c.reject_code = False, CONTRA_GENERIC_CONFIDENCE
@@ -559,17 +763,40 @@ class ContradictionEngine:
                 claim_a = self._claim_sentence(a, cues_a)
                 claim_b = self._claim_sentence(b, cues_b)
 
+                # #114 — ek taraf daawa, doosri taraf "humne ye dekha hi nahi".
+                # Ye takraav NAHI hai. Chup-chaap skip bhi nahi karte — reject
+                # list mein apne code ke saath jaata hai, taaki audit dekh sake.
+                if "NOT_EVALUATED" in (stance_a, stance_b):
+                    if {stance_a, stance_b} & {"SUPPORT", "OPPOSE", "MIXED"}:
+                        skipped, other = ((a, b) if stance_a == "NOT_EVALUATED"
+                                          else (b, a))
+                        self.last_rejected.append(self._validate(Contradiction(
+                            kind="SCOPE",
+                            summary=f"{skipped.source_id} ne ye cheez maapi hi nahi "
+                                    f"({other.source_id} ke daawe ka ulta nateeja nahi)",
+                            source_ids=[a.source_id, b.source_id],
+                            detail="Scope ka farq — 'report nahi kiya' aur 'ulta "
+                                   "nikla' ek baat nahi hai.",
+                            severity="LOW",
+                            normalized_proposition=proposition,
+                            source_a_claim=claim_a, source_b_claim=claim_b,
+                            opposing_direction=False,
+                            reject_code=CONTRA_NOT_EVALUATED)))
+                    continue
+
                 if {stance_a, stance_b} == {"SUPPORT", "OPPOSE"}:
                     # STANCE ke liye pairwise vocabulary match zaroori nahi —
                     # sawal-level relevance kaafi hai (dono isi pack mein hain).
-                    if not self._on_same_question(a, b, question):
+                    linked, link_code = self._question_link(a, b, question)
+                    if not linked:
                         self.last_rejected.append(self._validate(Contradiction(
                             kind="STANCE",
                             summary=f"{a.source_id} vs {b.source_id} — sawaal hi common "
                                     f"nahi nikla",
                             source_ids=[a.source_id, b.source_id],
                             normalized_proposition="", opposing_direction=True,
-                            source_a_claim=claim_a, source_b_claim=claim_b)))
+                            source_a_claim=claim_a, source_b_claim=claim_b,
+                            reject_code=link_code)))
                         continue
                     if overlap >= 3:
                         severity = "HIGH" if (a.peer_reviewed and b.peer_reviewed) else "MEDIUM"
@@ -722,7 +949,12 @@ class ContradictionEngine:
         `contradictions=[]`   = chali, kuch nahi mila. Dono alag baat hain, aur
         gate inhe alag hi treat karta hai.
         """
-        stance_counts = {"SUPPORT": 0, "OPPOSE": 0, "MIXED": 0, "HEDGED": 0, "NEUTRAL": 0}
+        # #114 — `NOT_EVALUATED` ki apni ginti hai. Ise NEUTRAL mein mila dena
+        # jhooth hota: "hum ye maapa hi nahi" aur "koi stance nahi mila" alag
+        # baatein hain. Ye na support ginta hai na oppose, isliye consensus level
+        # par iska koi vote nahi.
+        stance_counts = {"SUPPORT": 0, "OPPOSE": 0, "MIXED": 0, "HEDGED": 0,
+                         "NEUTRAL": 0, "NOT_EVALUATED": 0}
         keys_by_stance: Dict[str, set] = {k: set() for k in stance_counts}
 
         for s in pack.sources:
