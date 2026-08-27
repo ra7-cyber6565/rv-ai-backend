@@ -121,8 +121,21 @@ def test_normal_non_chain_question_is_unchanged_except_machine_audit():
     assert result["coverage"]["causal_chain"]["complete"] is True
 
 
-def test_three_node_incidental_arrow_needs_causal_cue_before_becoming_contract():
-    incidental = "Notation example only: input → hidden state → output. Explain the architecture."
+def test_arrow_pipeline_does_not_become_causal_contract_without_causal_cue():
+    incidental = "Architecture: input → tokenization → hidden state → output. Explain each stage."
     assert requires_causal_chain_audit(incidental) is False
-    causal = "Causal chain to assess: exposure → habit → outcome. Which links are supported?"
+    audit = audit_causal_chain(incidental, "input → tokenization → hidden state → output")
+    assert audit["required"] is False
+
+
+def test_causal_prefix_and_trailing_instruction_are_not_parsed_as_node_names():
+    causal = "Causal chain: exposure → habit → outcome: explain uncertainty for each link."
+    assert extract_requested_chain(causal) == ["exposure", "habit", "outcome"]
     assert requires_causal_chain_audit(causal) is True
+    answer = """
+- [EVIDENCE] exposure → habit [S1]: measured association with causal support.
+- [UNKNOWN] habit → outcome: direction is unresolved in this run.
+"""
+    audit = audit_causal_chain(causal, answer)
+    assert audit["complete"] is True
+    assert audit["edges_complete"] == 2
