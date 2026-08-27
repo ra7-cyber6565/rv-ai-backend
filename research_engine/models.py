@@ -1092,5 +1092,13 @@ class ResearchResult:
     # Banane wala module: research_engine/rejects.py
     rejects: Dict = field(default_factory=dict)
 
+    # #121 — CRAFT stage ka record: jab farmaish kuch BANANE ki thi (gaana/
+    # kavita/letter/kahani/nibandh/slogan), to app ne apne hi draft ka DHAANCHA
+    # khud naapa — matra, tuk, hook ki jagah, dohraav, ghise phrase. Khaali dict
+    # matlab stage chala hi nahi. Yahan ka koi bhi number "likhawat acchi hai"
+    # ya "logon ko pasand aayegi" nahi kehta: wo `cannot_measure` me naam se
+    # likha rehta hai. Banane wala module: research_engine/craft.py
+    craft: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

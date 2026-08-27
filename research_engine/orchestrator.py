@@ -46,6 +46,7 @@ from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from . import lab
+from . import craft
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -638,6 +639,11 @@ class DeepResearchEngine:
                # kis NAAP par. Khaali dict matlab ledger bana hi nahi (yaani
                # hypothesis stage hi nahi chala) — "kuch reject nahi hua" nahi.
                "rejects": {},
+               # #121 — CRAFT stage: "bana kar do" wali maang par app ne apne
+               # draft ka dhaancha KHUD naapa (matra/tuk/hook/dohraav; ₹0,
+               # offline). Khaali dict matlab stage chala hi nahi — "naap pass
+               # ho gaya" nahi.
+               "craft": {},
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -834,6 +840,13 @@ class DeepResearchEngine:
             if merge_hypothesis:
                 self._track(job_id, "HYPOTHESIS", "hypothesis (synthesis call ke andar)")
                 prompt += self.hypotheses.prompt_appendix(hypothesis_count)
+            # #121 — agar farmaish kuch BANANE ki hai (gaana/kavita/letter...) to
+            # us likhawat ko alag `rv-draft` block me maangte hain. Iske bina
+            # draft audit-prose ke beech ghul jaata hai aur naap galat hisse par
+            # chal jaati — CRAFT us halat me jaan-boojh kar "draft nahi mila"
+            # kehta hai, isliye ye ek line naap ko mumkin banati hai.
+            if craft.detect(question).get("is_request"):
+                prompt += "\n\n" + craft.DRAFT_INSTRUCTION
             try:
                 text = brain.generate(prompt, "synthesis")
             except QuotaExhausted as exc:
@@ -922,6 +935,35 @@ class DeepResearchEngine:
         if short and (want_hypothesis or gate.allowed <= 0):
             out["hypothesis_plan"] = self.hypotheses.fallback_plan(
                 question, pack, contradiction_dicts, gate, plan)
+
+        # ── #121 CRAFT — "bana kar do" wali maang ka apna naap ───────────────
+        # Ye stage sirf tab chalti hai jab farmaish me BANANE ki baat ho
+        # (gaana/kavita/letter/kahani/nibandh/slogan) — research ke sawaal is
+        # raste par aate hi nahi. Poora naap offline aur ₹0 hai; sirf "dobara
+        # likho" ka ek round model se hota hai, aur wo bhi USI budget se jo
+        # pehle se allot hai (naya budget nahi banta, isliye kharcha nahi
+        # badhta). Budget na bache to report saaf likhti hai ki revision chal hi
+        # nahi paayi — "zarurat nahi thi" aur "ho hi nahi paayi" alag baat hai.
+        craft_text = out["final"] or out["analysis"]
+        if craft_text:
+            reviser = None
+            if brain.remaining >= 1:
+                def reviser(prompt: str) -> str:
+                    try:
+                        return brain.generate(prompt, "craft_redraft")
+                    except QuotaExhausted:
+                        return ""
+            out["craft"] = craft.run_craft(question, craft_text, reviser=reviser)
+            # Naya draft jeeta to jawab me bhi wahi dikhna chahiye, warna user
+            # ek likhawat padhta hai aur naap doosri ki hoti hai. Yahan kuch
+            # kaata nahi jaata — sirf draft wala hissa badalta hai.
+            fixed, replaced = craft.apply_final_draft(craft_text, out["craft"])
+            if replaced:
+                if out["final"]:
+                    out["final"] = fixed
+                else:
+                    out["analysis"] = fixed
+            out["craft"]["answer_updated"] = bool(replaced)
 
         out["calls"] = brain.calls_used
         out["errors"].extend(brain.errors)
@@ -1863,6 +1905,10 @@ class DeepResearchEngine:
             # ("kya hataya, kis naap par, wapas kab aa sakti hai") aur audit me
             # ginti wali line jaati hai. Khaali hone par kuch chhapta nahi.
             reject_report=passes.get("rejects") or {},
+            # #121 — CRAFT ka naap: jo likhawat banai gayi uske dhaanche ka
+            # record (hypothesis section me `###` block) aur audit me naapi hui
+            # seema. Khaali hone par kuch chhapta hi nahi.
+            craft_report=passes.get("craft") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2123,6 +2169,10 @@ class DeepResearchEngine:
             # #117 — reject ledger bhi structured hi jaata hai, taaki UI ko
             # answer ka text parse karke "kya hataya" na dhoondhna pade.
             rejects=passes.get("rejects") or {},
+            # #121 — CRAFT ka naap bhi structured jaata hai (UI ko text parse
+            # nahi karna padega ki "kya naapa gaya"). Khaali dict = stage chala
+            # hi nahi.
+            craft=passes.get("craft") or {},
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

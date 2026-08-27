@@ -46,6 +46,7 @@ from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
 from .lab import lab_limits, lab_report_section
+from .craft import craft_limits, craft_section
 from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
@@ -1489,7 +1490,8 @@ Ab jawab likho:"""
                        claim_checks: Optional[Dict] = None,
                        missing_sections: Optional[List[str]] = None,
                        lab_report: Optional[Dict] = None,
-                       reject_report: Optional[Dict] = None) -> str:
+                       reject_report: Optional[Dict] = None,
+                       craft_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1615,6 +1617,11 @@ Ab jawab likho:"""
         # koi hypothesis chup-chaap gir jaaye.
         for reject_line in reject_limits(reject_report)[:4]:
             tail.append(f"- {reject_line}")
+        # #121 — CRAFT ki seema bhi NAAPI hui hai: kya-kya naapa gaya, kya naapa
+        # hi nahi ja saka, aur revision chali ya nahi. Iske bina audit me
+        # creative kaam par ek generic line lagti thi jo aadhi galat hai.
+        for craft_line in craft_limits(craft_report)[:5]:
+            tail.append(f"- {craft_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1865,7 +1872,8 @@ Ab jawab likho:"""
                  hypothesis_plan: Optional[Dict] = None,
                  calculations: Optional[List[Dict]] = None,
                  lab_report: Optional[Dict] = None,
-                 reject_report: Optional[Dict] = None) -> str:
+                 reject_report: Optional[Dict] = None,
+                 craft_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1919,6 +1927,14 @@ Ab jawab likho:"""
                 reject_text = reject_section(reject_report)
                 if reject_text:
                     parts.append(reject_text)
+                # #121 — CRAFT: agar is run me kuch BANAYA gaya tha (gaana/
+                # kavita/letter...), to us draft ka naapa hua record bhi yahin
+                # `###` block me aata hai. Ye "acha bana hai" nahi kehta —
+                # sirf dhaancha (matra/tuk/hook/dohraav) ka hisaab dikhata hai,
+                # aur jo naapa hi nahi ja sakta wo naam se likh deta hai.
+                craft_text = craft_section(craft_report)
+                if craft_text:
+                    parts.append(craft_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -1934,7 +1950,8 @@ Ab jawab likho:"""
                     claim_checks=claim_checks,
                     missing_sections=missing_sections,
                     lab_report=lab_report,
-                    reject_report=reject_report)
+                    reject_report=reject_report,
+                    craft_report=craft_report)
                 parts.append(engine_text)
             else:
                 if index == 1:
