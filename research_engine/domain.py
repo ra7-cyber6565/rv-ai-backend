@@ -782,16 +782,34 @@ PROFILES: Tuple[DomainProfile, ...] = (
                   # paper ko koi field claim hi nahi karta tha).
                   "volatility", "option pricing", "asset", "portfolio",
                   "stock market", "interest rate", "bond yield", "financial",
-                  "derivative pricing", "black scholes"),
+                  "derivative pricing", "black scholes",
+                  # 2026-08-27 (#118): trading/quant vocabulary. Iske bina
+                  # "trading model banao" wala sawaal `generic` gir jaata tha,
+                  # yaani na econ data lane khulta tha na market series lane.
+                  # Ye ROUTING vocabulary hai — kya sach hai wo evidence tay
+                  # karti hai, ye list nahi.
+                  "trading", "backtest", "back test", "sharpe", "drawdown",
+                  "moving average", "candlestick", "equity curve", "hedge",
+                  "futures", "commodity", "forex", "exchange rate", "nifty",
+                  "sensex", "nasdaq", "index fund", "mutual fund", "sip",
+                  "cpi", "wpi", "repo rate", "yield curve", "recession"),
         anchors=("gdp", "inflation", "price", "pricing", "market", "growth",
                  "income", "employment", "unemployment", "wage",
                  "minimum wage", "elasticity", "labour", "labor", "firm",
                  "poverty", "inequality", "tax", "subsidy", "investment",
                  "trade", "difference in differences", "cost", "volatility",
-                 "asset", "portfolio", "interest rate", "option"),
+                 "asset", "portfolio", "interest rate", "option",
+                 # trading side ke anchor — scoring ko in par bhi tikna chahiye
+                 "trading", "backtest", "returns", "sharpe", "drawdown",
+                 "exchange rate", "index", "yield"),
         branches=_ECON_BRANCHES,
         connectors=("openalex", "crossref", "semantic_scholar") + ECON_DATA + BOOKS,
-        avoid_connectors=("arxiv", "pubmed", "who_gho"),
+        # arXiv is baar HATAYA NAHI gaya list se sirf shauk ke liye: quantitative
+        # finance ka poora q-fin section arXiv par hi rehta hai (aur wahi jagah
+        # hai jahan backtest/volatility ke asli paper milte hain). Purana rule
+        # "econ me arxiv band" ek naap ke saath galat tha: "trading model" ke
+        # sawaal par sabse kaam ke preprint hi chhant jaate the.
+        avoid_connectors=("pubmed", "who_gho"),
         strict=True,
         shared_anchors=("price", "market", "growth", "cost", "firm", "trade",
                         "wage", "investment"),

@@ -39,7 +39,7 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .connectors import (BaseConnector, BookConnector, ClassicTextConnector,
-                         DatasetConnector, PaperConnector,
+                         DatasetConnector, MarketConnector, PaperConnector,
                          PatentDiscoveryConnector, WebConnector)
 from .models import SourceRecord
 from .network_safety import public_error
@@ -63,6 +63,13 @@ class SourceDiscovery:
         # sakta hai (public-domain granth, mahan logon ka apna likha). Plan mein
         # `classics` key na ho to ye tier chalta hi nahi.
         self.classics = ClassicTextConnector()
+        # Market/economic TIME SERIES ka tier bhi ALAG hai. `datasets` lane
+        # catalogue deta hai ("ye dataset maujood hai"), aur usse koi backtest
+        # nahi chal sakta. Ye lane period→value laata hai jo record ke
+        # `series_meta` me baith jaata hai, aur LAB usi ko padh kar walk-forward
+        # test chalata hai — bina khud koi network call kiye. Plan me `markets`
+        # key na ho to ye tier chalta hi nahi.
+        self.markets = MarketConnector()
         self.max_workers = max_workers
 
     # ── task builders ────────────────────────────────────────────────────────
@@ -154,6 +161,18 @@ class SourceDiscovery:
                 tasks.append((connector.name,
                               self._single(connector, primary, max_per_connector)))
 
+        # Market/economic TIME SERIES (#118) — SIRF tab jab planner ne `markets`
+        # bhara ho. PRIMARY query par hi chalta hai: providers rate-limited hain
+        # (World Bank 429 de chuka hai, Alpha Vantage free plan minute-capped),
+        # aur har sawaal par market call bhejna humara hi quota khata hai. Yahan
+        # se aaye record ke `series_meta` par LAB ka walk-forward test tikta hai.
+        for name in plan.get("markets", []):
+            connector = self.markets.by_name(name)
+            if connector:
+                tasks.append((connector.name,
+                              self._single(connector, primary,
+                                           max(1, min(2, max_per_connector)))))
+
         # Classic/mool text (task #84) — SIRF tab jab planner ne `classics` bhara
         # ho. Query bhi planner ki `classic_queries` hoti hai, kyunki mool text
         # dhoondhne ki bhasha aam web query se alag hai ("<naam> full text public
@@ -209,8 +228,8 @@ class SourceDiscovery:
         queries: planner se aayi ek ya zyada search strings
         plan:    {"web": bool, "papers": [names], "books": [names],
                   "datasets": [names], "patents": [names],
-                  "classics": [names], "classic_queries": [...],
-                  "summary_queries": [...]}
+                  "markets": [names], "classics": [names],
+                  "classic_queries": [...], "summary_queries": [...]}
 
         budget_seconds: is round ki discovery ka wall-clock budget (depth config se)
         """

@@ -11,6 +11,8 @@ Source connectors (Spec Section 2, 3, 11, 16)
                      data.gov.in (key optional)
     PatentDiscoveryConnector
                      EPO linked open data (keyless), USPTO ODP (key optional)
+    MarketConnector  World Bank Indicators + ECB (keyless), FRED + Alpha Vantage
+                     (free key, bina card) — TIME SERIES ka lane, catalogue nahi
 
 Naya provider add karna = BaseConnector ka ek naya subclass + facade list mein entry.
 """
@@ -47,6 +49,13 @@ from .dataset_connector import (
     WHOGhoConnector,
     WorldBankConnector,
     ZenodoConnector,
+)
+from .market_connector import (
+    AlphaVantageConnector,
+    EcbSeriesConnector,
+    FredSeriesConnector,
+    MarketConnector,
+    WorldBankSeriesConnector,
 )
 from .paper_connector import (
     ArxivConnector,
@@ -91,4 +100,8 @@ __all__ = [
     # patents — alag tier, kyunki patent legal document hai, science proof nahi
     "PatentDiscoveryConnector", "PatentProviderConnector",
     "EpoLinkedDataConnector", "UsptoOdpConnector", "espacenet_lookup",
+    # market/economic TIME SERIES — bhi alag tier, kyunki backtest ke liye
+    # catalogue kaafi nahi, asli period→value chahiye
+    "MarketConnector", "WorldBankSeriesConnector", "EcbSeriesConnector",
+    "FredSeriesConnector", "AlphaVantageConnector",
 ]

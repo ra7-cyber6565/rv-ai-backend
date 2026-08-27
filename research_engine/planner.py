@@ -23,6 +23,7 @@ from .domain import detect as domain_detect
 from . import facets as facets_mod
 from . import lenses as lens_mod
 from .local_language import normalize
+from .market_data import market_intent
 from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
 from . import query_hygiene
@@ -111,6 +112,9 @@ class ResearchPlanner:
     # package import karna network ya key kuch nahi maangta — par har call par
     # naya object banana bekaar hai.
     _PATENT_FACADE = None
+    # Market/economic series providers ki list bhi connector layer ke paas hai
+    # (kaunsa provider bina key chal sakta hai). Wahi lazy, wahi ek-baar pattern.
+    _MARKET_FACADE = None
 
     # ── open lens selection (2026-08-23) ─────────────────────────────────────
     #
@@ -170,6 +174,14 @@ class ResearchPlanner:
             from .connectors import PatentDiscoveryConnector  # noqa: PLC0415
             cls._PATENT_FACADE = PatentDiscoveryConnector()
         return cls._PATENT_FACADE
+
+    @property
+    def _market_providers(self):
+        cls = type(self)
+        if cls._MARKET_FACADE is None:
+            from .connectors import MarketConnector  # noqa: PLC0415
+            cls._MARKET_FACADE = MarketConnector()
+        return cls._MARKET_FACADE
 
     # ── 1 + 2. classify + fields ──────────────────────────────────────────────
     def classify(self, question: str) -> Dict:
@@ -676,6 +688,29 @@ class ResearchPlanner:
                                f"book ke liye summary lane "
                                f"({len(summary_queries)} query)")
 
+        # ── market/economic TIME SERIES lane (#118) ─────────────────────────
+        # Faisla `market_data.market_intent()` ka hai aur wo DETERMINISTIC hai
+        # (koi Gemini call nahi). Do signal chahiye — market ki baat AUR
+        # time-series/aage ka sawaal — kyunki "gold ka price kya hai" par
+        # provider ki poori series maangna sirf quota kharch hai.
+        #
+        # Ye lane KNOWLEDGE nahi kholti: yahan se sirf period→value aata hai,
+        # jispar LAB apna walk-forward test chalata hai. Aur wo test purane
+        # data par hota hai — isliye plan mein hi `not_financial_advice` line
+        # saath chalti hai, taaki report bante waqt wo bhoolna mushkil ho.
+        markets: List[str] = []
+        m_intent = market_intent(question or cls.get("question") or "",
+                                 domain_key=dplan.key)
+        market_reason = m_intent.get("reason", "")
+        if not getattr(config, "use_datasets", True):
+            market_reason = (f"{config.name} mode mein data lane band hai, "
+                             f"isliye market series bhi nahi maangi gayi")
+        elif m_intent.get("wanted"):
+            markets = self._market_providers.available_names()
+            if not markets:
+                market_reason = ("market series chahiye thi par koi provider "
+                                 "available nahi hai (keyless bhi nahi)")
+
         return {
             "web": True,
             "papers": papers,
@@ -687,6 +722,17 @@ class ResearchPlanner:
                               "kind": intent.get("kind", ""),
                               "signals": list(intent.get("signals", [])),
                               "reason": patent_reason},
+            # market/economic series bhi ALAG tier hai — catalogue se backtest
+            # nahi chalta, aur backtest ka result financial advice nahi hai
+            "markets": markets,
+            "market_intent": {"wanted": bool(markets),
+                              "market_signal": bool(m_intent.get("market_signal")),
+                              "series_ask": bool(m_intent.get("series_ask")),
+                              "domain_economics": bool(
+                                  m_intent.get("domain_economics")),
+                              "reason": market_reason,
+                              "not_financial_advice":
+                                  m_intent.get("not_financial_advice", "")},
             # §3 ka disclosure — kaun band hua aur kyun
             "domain": dplan.key,
             "domain_label": dplan.profile.label,

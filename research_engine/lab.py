@@ -19,7 +19,8 @@ Paanch recipe (sab deterministic):
   threshold           — "X se zyada/kam" wala daawa evidence ke numbers se naapo
   direction           — "badhega/ghatega" khud ke numbers se ulta hai ya nahi
   proportion_interval — "k of n" par Wilson interval; chhota sample = koi verdict nahi
-  walk_forward        — time-series chahiye; abhi data lane nahi hai to DATA_MISSING
+  walk_forward        — asli train → held-out backtest (naive baseline se muqabla);
+                        series na ho to DATA_MISSING, jhoothi "chal gaya" nahi
 
 Status shabd (isse bahar kuch nahi):
   TESTED_PASS, TESTED_FAIL, DATA_MISSING, NOT_TESTABLE_HERE, NOT_RUN
@@ -33,6 +34,7 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import physics_checks
+from . import market_data
 from .advanced_discovery import NumericExecutionPolicy, SafeNumericExecutor
 
 # ── status vocabulary ────────────────────────────────────────────────────────
@@ -76,6 +78,13 @@ class LabPolicy:
     relative_tolerance: float = 0.05   # 5% — recompute vs stated result
     min_proportion_sample: int = 5     # isse chhote sample par koi verdict nahi
     max_evidence_chars: int = 240_000  # evidence text ki chhat (safety valve)
+    # Walk-forward ki chhat (#118). Ye market_data se aati hai taaki ek hi jagah
+    # par tay ho ki "kitna data kaafi hai" — do jagah likhne se dono chupke se
+    # alag ho jaati hain, aur tab report kis chhat par tiki hai ye pata hi nahi
+    # chalta. Chhoti series par verdict dena sabse aasan jhooth hai.
+    min_series_points: int = market_data.MIN_SERIES_POINTS
+    min_holdout_points: int = market_data.MIN_HOLDOUT_POINTS
+    train_fraction: float = market_data.TRAIN_FRACTION
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -85,6 +94,9 @@ class LabPolicy:
             "seed": self.seed,
             "relative_tolerance": self.relative_tolerance,
             "min_proportion_sample": self.min_proportion_sample,
+            "min_series_points": self.min_series_points,
+            "min_holdout_points": self.min_holdout_points,
+            "train_fraction": self.train_fraction,
             "randomness_used": False,
             "network_used": False,
             "model_written_code_executed": False,
@@ -165,8 +177,16 @@ class TestSpec:
     question: str = ""
     safety_sensitive: bool = False
     notes: List[str] = field(default_factory=list)
+    # #118 — walk_forward ke liye NAAPI hui time series. Ye lab KHUD nahi laata:
+    # discovery (jise network ki ijaazat hai) laati hai aur `plan_specs` yahan
+    # rakh deti hai. Isi wajah se lab ka `network_used: False` waada sach rehta
+    # hai — lab sirf hisaab karta hai. None = koi series nahi mili, aur uski
+    # wajah `series_reason` me hai (khaali reason = "wajah bhi pata nahi").
+    series: Optional[Any] = None
+    series_reason: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
+        series = self.series
         return {
             "spec_id": self.spec_id,
             "hypothesis_id": self.hypothesis_id,
@@ -183,6 +203,13 @@ class TestSpec:
             "claimed_proportion": self.claimed_proportion,
             "safety_sensitive": self.safety_sensitive,
             "notes": list(self.notes),
+            # Series ka chhota parichay (poore points nahi — report bhaari ho
+            # jaati). `series_provider` khaali hona hi batata hai ki koi series
+            # nahi thi, aur `series_reason` batata hai kyun.
+            "series_provider": (str(getattr(series, "provider", "") or "")
+                                if series is not None else ""),
+            "series_points": len(getattr(series, "points", None) or ()),
+            "series_reason": self.series_reason,
             "model_written_code": False,
         }
 
@@ -379,12 +406,27 @@ def plan_specs(hypothesis: Dict[str, Any], pack: Any = None,
                     "andaaza hota — isliye sirf range report hui"]))
 
 
-    # 5. Time-series daawa — data lane abhi nahi hai, isliye jhooth ke bajaye
-    #    saaf "test nahi hua" likha jaata hai.
+    # 5. Time-series daawa — ab asli backtest chalta hai (#118). Series DO
+    #    raaston se aa sakti hai, aur kram jaan-boojh kar ye hai:
+    #      (a) provider ki naapi hui series (discovery ne `series_meta` me di) —
+    #          ye sabse bharosemand hai, kyunki isme period aur value provider
+    #          ke apne feed se aaye hain;
+    #      (b) evidence text me se nikaali series — jab (a) na ho.
+    #    Dono na milein to spec BANTI HAI (kyunki daawa forecast ka hai) par
+    #    wajah saath jaati hai, taaki report "test hua hi nahi" saaf keh sake.
     if _SERIES_RE.search(claim or ""):
+        series, reason = market_data.series_from_pack(pack)
+        if series is None:
+            if (ev_text or "").strip():
+                series, reason = market_data.series_from_text(ev_text)
+            else:
+                # Padhne ke liye kuch tha hi nahi — "period nahi mila" kehna
+                # jhooth hoga, kyunki humne koi text dekha hi nahi.
+                reason = market_data.NO_SERIES
         add(recipe="walk_forward", origin="prediction/statement",
             what="Forecast/backtest jaisa daawa — walk-forward test chahiye",
-            text=claim, evidence_text=ev_text)
+            text=claim, evidence_text=ev_text,
+            series=series, series_reason=("" if series is not None else reason))
     return specs
 
 
@@ -692,19 +734,145 @@ def _run_proportion_interval(spec: TestSpec, policy: LabPolicy,
                               if inside else "NAHI aata — data isse ulta hai.")))
 
 
+# ── walk-forward (#118): asli train → held-out test ──────────────────────────
+# `series_data_missing` ka naam #116 se WAHI rakha gaya hai — report ki line,
+# audit ki line aur test uspar tike hain, aur data lane judne se ye baat badalti
+# nahi: series na ho to aaj bhi koi backtest nahi chalta. Baaki code naye hain,
+# kyunki "series thi par test-layak nahi thi" aur "series hi nahi thi" ek jaise
+# report karna wahi purana jhooth hota.
+_WF_NOT_RUN: Dict[str, str] = {
+    market_data.NO_SERIES: (
+        "Is daawe ke liye time-ordered data chahiye (train → held-out, "
+        "walk-forward). Aisa koi series yahan maujood nahi hai, isliye koi "
+        "backtest chalaya hi nahi gaya — is number ko 'test ho chuka' mat "
+        "samjho."),
+    market_data.NO_PERIODS: (
+        "Evidence me numbers the par unke saath koi period (saal/mahina/"
+        "quarter) nahi tha, isliye time-order hi nahi bana — koi backtest "
+        "chalaya hi nahi gaya."),
+    market_data.TOO_SHORT: (
+        "Series itni chhoti hai ki usme train aur held-out dono nahi bante. "
+        "Itne data par 'test pass' likhna muft ka credit hota, isliye koi "
+        "backtest chalaya hi nahi gaya."),
+    market_data.IRREGULAR: (
+        "Periods me gaps/duplicate the (barabar step nahi), isliye walk-forward "
+        "ka matlab hi nahi banta — koi backtest chalaya hi nahi gaya."),
+    market_data.MIXED: (
+        "Ek hi series me saal, mahina aur quarter mile-jule the. Unhe jodna "
+        "khud ek galti hoti, isliye koi backtest chalaya hi nahi gaya."),
+    market_data.CONFLICT: (
+        "Ek hi period par do alag values mili — kaunsi sahi hai ye evidence se "
+        "tay nahi hota, isliye koi backtest chalaya hi nahi gaya."),
+    market_data.UNIT_MISMATCH: (
+        "Series ke points alag-alag unit me the (jaise % aur ₹ crore), aur unka "
+        "aapas me hisaab bekaar hota — isliye koi backtest chalaya hi nahi gaya."),
+    market_data.HOLDOUT_SMALL: (
+        f"Held-out hissa {market_data.MIN_HOLDOUT_POINTS} point se bhi chhota "
+        "reh gaya. Itne se koi bharosemand nateeja nahi nikalta, isliye koi "
+        "backtest chalaya hi nahi gaya."),
+    market_data.FLAT_HOLDOUT: (
+        "Held-out hisse me value hili hi nahi. Aise data par har model 'sahi' "
+        "lagta hai, isliye ise pass/fail nahi maana gaya — koi asli muqabla "
+        "hua hi nahi."),
+}
+
+# "Series thi, par test-layak nahi thi" — NO_SERIES yahan JAAN-BOOJH KAR nahi
+# hai, kyunki uska matlab ulta hai (series hi nahi thi). Dono ko ek bucket me
+# daalna audit line ko jhootha bana deta.
+_WF_UNUSABLE_CODES: Tuple[str, ...] = tuple(
+    code for code in _WF_NOT_RUN if code != market_data.NO_SERIES)
+
+
+def _wf_detail(reason_code: str) -> str:
+    """Har na-chalne wali wajah ka apna text. Anjaan code par bhi jhooth nahi."""
+    known = _WF_NOT_RUN.get(reason_code or "")
+    if known:
+        return known
+    return (f"Walk-forward test chalaya hi nahi gaya (wajah: "
+            f"{reason_code or 'pata nahi'}) — is number ko 'test ho chuka' mat "
+            "samjho.")
+
+
+def _series_label(series: Any) -> str:
+    """Series kahan se aayi — provider + id + kitne point. Guess nahi."""
+    provider = str(getattr(series, "provider", "") or "unknown-source")
+    series_id = str(getattr(series, "series_id", "") or "")
+    points = getattr(series, "points", None) or ()
+    frequency = str(getattr(series, "frequency", "") or "")
+    bits = [provider + (f"/{series_id}" if series_id else "")]
+    if frequency:
+        bits.append(frequency)
+    bits.append(f"{len(points)} point")
+    return ", ".join(bits)
+
+
 def _run_walk_forward(spec: TestSpec, policy: LabPolicy,
                       executor: SafeNumericExecutor) -> TestResult:
-    """Forecast/backtest ka asli test time-series maangta hai.
+    """Asli walk-forward backtest: train → held-out, naive baseline se muqabla.
 
-    Wo data lane abhi juda nahi hai (#118). Isliye yahan "chala liya" likhna
-    jhooth hoga — hum saaf likhte hain ki test hua hi nahi.
+    Yahan koi network call NAHI hoti. Series discovery ne laayi hai (record ke
+    `series_meta` se) ya evidence text se nikli hai, aur `plan_specs` use
+    `spec.series` me rakh chuki hai — isliye lab ka `network_used: False`
+    waada waisa hi sach rehta hai.
+
+    Pass ka matlab SIRF itna hai: is purane data par drift model naive
+    random-walk baseline se kam galti karta tha. Ye "forecast sahi hai" ya
+    "aage bhi chalega" NAHI hai, aur financial advice bilkul nahi.
     """
-    return _result(spec, DATA_MISSING, reason_code="series_data_missing",
-                   detail="Is daawe ke liye time-ordered data chahiye "
-                          "(train → held-out, walk-forward). Aisa koi series "
-                          "yahan maujood nahi hai, isliye koi backtest chalaya "
-                          "hi nahi gaya — is number ko 'test ho chuka' mat "
-                          "samjho.")
+    series = spec.series
+    if series is None or not getattr(series, "points", None):
+        reason = spec.series_reason or market_data.NO_SERIES
+        return _result(spec, DATA_MISSING, reason_code=reason,
+                       detail=_wf_detail(reason))
+
+    outcome = market_data.walk_forward(
+        series,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction)
+    label = _series_label(series)
+    source_ids = [str(sid) for sid in (getattr(series, "source_ids", None) or ())
+                  if str(sid)]
+
+    if not outcome.ok:
+        return _result(spec, DATA_MISSING,
+                       reason_code=outcome.reason_code or market_data.NO_SERIES,
+                       observed=label, evidence_ids=source_ids,
+                       detail=_wf_detail(outcome.reason_code))
+
+    beats = outcome.beats_naive
+    observed = (f"{label} | train {outcome.n_train} → held-out {outcome.n_test} "
+                f"({outcome.holdout_first}…{outcome.last_period}) | "
+                f"MAE model {outcome.model_mae:.4g} vs naive "
+                f"{outcome.naive_mae:.4g} | disha {outcome.hits}/{outcome.scored}")
+    ratio = (outcome.model_mae / outcome.naive_mae
+             if outcome.naive_mae > 0 else None)
+
+    # Held-out bilkul flat — naive baseline ki galti 0 thi, to muqabla hi nahi
+    # hua. Ise pass kehna sabse saaf jhooth hota.
+    if beats is None:
+        return _result(spec, DATA_MISSING, reason_code=market_data.FLAT_HOLDOUT,
+                       observed=observed, evidence_ids=source_ids,
+                       detail=_wf_detail(market_data.FLAT_HOLDOUT))
+
+    passed = bool(beats)
+    return _result(
+        spec, TESTED_PASS if passed else TESTED_FAIL,
+        observed=observed,
+        expected="naive random-walk baseline se KAM galti (MAE)",
+        computed=ratio, evidence_ids=source_ids,
+        reason_code=("model_beats_naive_baseline" if passed
+                     else "model_loses_to_naive_baseline"),
+        detail=((f"Held-out {outcome.n_test} period par model ki galti naive "
+                 f"baseline se kam rahi (MAE {outcome.model_mae:.4g} < "
+                 f"{outcome.naive_mae:.4g}). "
+                 if passed else
+                 f"Held-out {outcome.n_test} period par model naive baseline se "
+                 f"HAAR gaya (MAE {outcome.model_mae:.4g} >= "
+                 f"{outcome.naive_mae:.4g}) — is daawe ko data ne support nahi "
+                 "kiya. ")
+                + market_data.BACKTEST_NOTE + " "
+                + market_data.NOT_ADVICE_NOTE))
 
 
 RECIPES: Dict[str, Any] = {
@@ -942,6 +1110,30 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
             "Forecast/backtest wale daawe ke liye time-ordered data nahi tha, "
             "isliye koi walk-forward test chalaya hi nahi gaya. Un numbers ko "
             "'run karke verify kiya gaya' mat samjho.")
+    # Series MILI thi par test-layak nahi thi (chhoti, gaps wali, unit-mixed,
+    # ya flat held-out). Ye "data nahi tha" se ALAG baat hai, aur dono ko ek
+    # line me daalna wahi purana jhooth hota — isliye alag line.
+    unusable = sorted({
+        str(test.get("reason_code") or "")
+        for block in report["hypotheses"] for test in (block.get("tests") or [])
+        if test.get("recipe") == "walk_forward"
+        and str(test.get("reason_code") or "") in _WF_UNUSABLE_CODES})
+    if unusable:
+        limits.append(
+            "Series banane ki koshish hui par wo backtest-layak nahi nikli (" +
+            ", ".join(unusable) + "), isliye us daawe par koi walk-forward "
+            "nateeja nahi hai — na pass, na fail.")
+    # Jo backtest SACH ME chala, uski seema bhi likhna zaroori hai: wo purane
+    # data par chala hai, aur uska pass hona future ka waada nahi hai.
+    ran_backtest = sum(
+        1 for block in report["hypotheses"] for test in (block.get("tests") or [])
+        if test.get("recipe") == "walk_forward"
+        and test.get("status") in (TESTED_PASS, TESTED_FAIL))
+    if ran_backtest:
+        limits.append(
+            f"{ran_backtest} walk-forward backtest sach me chala, par sirf "
+            "PURANE (out-of-sample) data par — purane data par sahi nikalna "
+            "future ka waada NAHI hai, aur ye financial advice nahi hai.")
     if report.get("budget_exhausted"):
         limits.append("Lab ka time budget khatam hua — kuch test adhoore rahe.")
     return limits

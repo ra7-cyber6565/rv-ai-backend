@@ -120,6 +120,15 @@ DISCOVERY_ALLOWED_HOSTS = frozenset({
     "openlibrary.org",
     "www.googleapis.com",
     "zenodo.org",
+    # Market/economic TIME SERIES providers (#118) — sabhi official public API.
+    # Ye `datasets` lane ke catalogue hosts se alag hain: yahan se period→value
+    # aata hai, jispar LAB ka walk-forward test chalta hai. Keyless do
+    # (world bank, ECB) + key-gated do (FRED, Alpha Vantage) — key na ho to
+    # connector chalta hi nahi, isliye host hone se bhi koi call nahi jaati.
+    "api.worldbank.org",
+    "data-api.ecb.europa.eu",
+    "api.stlouisfed.org",
+    "www.alphavantage.co",
     # Wikisource — public-domain mool text lane ka official MediaWiki action API.
     # Har bhasha ka apna exact host hai (allowlist wildcard nahi leti), isliye
     # sirf wahi hosts jo `classic_connector._KNOWN_LANGS` me hain.

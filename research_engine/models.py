@@ -288,6 +288,21 @@ class SourceRecord:
     # field khaali rehti hai aur `missing_fields` mein naam se dikhti hai.
     patent_meta: Dict = field(default_factory=dict)
 
+    # ── MARKET/ECONOMIC TIME SERIES ka structured data (#118) ────────────────
+    # Khaali dict = is source ke saath koi time-ordered series nahi aayi.
+    # Bhara hua = provider ne KHUD period→value ki jodi di
+    # (`market_data.MarketSeries.to_dict()`), yaani ye number kisi text se
+    # anumaan lagakar nahi nikale gaye.
+    #
+    # Ye field isliye zaroori hai ki LAB ka walk-forward test bina NETWORK
+    # chalta hai (`LabPolicy.network_used = False` ka waada). Series network
+    # wale discovery step mein aati hai aur yahan baith jaati hai; lab use
+    # sirf PADHTA hai. Iske bina lab ko khud fetch karna padta — aur wo waada
+    # toot jaata.
+    #
+    # Isme kabhi "market advice" nahi jaati: `to_dict()` khud hi
+    # `not_financial_advice` aur `past_data_only` line saath le kar chalti hai.
+    series_meta: Dict = field(default_factory=dict)
 
     # ── helpers ──
     @property
