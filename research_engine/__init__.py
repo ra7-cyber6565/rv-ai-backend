@@ -149,6 +149,13 @@ _install_specialist_lane_quality()
 from .hypothesis_evidence_lineage import install as _install_hypothesis_evidence_lineage
 _install_hypothesis_evidence_lineage()
 
+# Explicit causal/second-order chains are now a deterministic delivery contract,
+# not only a synthesis instruction. Every requested arrow must be represented and
+# epistemically labelled; strong evidence labels additionally need a same-edge
+# citation. Missing/ambiguous links can only downgrade COMPLETE, never upgrade it.
+from .causal_chain_quality import install as _install_causal_chain_quality
+_install_causal_chain_quality()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
