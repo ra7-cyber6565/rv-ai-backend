@@ -27,6 +27,7 @@ from typing import Dict, Iterable, List, Tuple
 
 _INSTALLED = False
 _ARROW_RE = re.compile(r"\s*(?:→|->|⇒|⟶)\s*")
+_ARROW_TOKEN_RE = re.compile(r"(?:→|->|⇒|⟶)")
 _CIT_RE = re.compile(r"\[S\d{1,3}(?:[^\]]{0,40})?\]", re.IGNORECASE)
 _CUE_RE = re.compile(
     r"\b(?:causal(?:\s+model|\s+chain)?|second[- ]order|cause[- ]effect|"
@@ -34,14 +35,33 @@ _CUE_RE = re.compile(
     r"chain\s+of\s+causation)\b",
     re.IGNORECASE,
 )
-_STATUS_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
-    ("ESTABLISHED", re.compile(r"(?:\[\s*ESTABLISHED\s*\]|\bestablished\b|\bstrong empirical\b)", re.I)),
-    ("EVIDENCE", re.compile(r"(?:\[\s*EVIDENCE\s*\]|\bevidence[- ]supported\b|\bsupported by evidence\b)", re.I)),
-    ("SOURCE-REPORTED", re.compile(r"(?:\[\s*SOURCE[- ]REPORTED\s*\]|\bsource[- ]reported\b)", re.I)),
-    ("INFERENCE", re.compile(r"(?:\[\s*INFERENCE\s*\]|\binference\b|\binferred\b)", re.I)),
-    ("SPECULATION", re.compile(r"(?:\[\s*SPECULATION\s*\]|\bspeculative\b|\bspeculation\b)", re.I)),
-    ("UNKNOWN", re.compile(r"(?:\[\s*UNKNOWN\s*\]|\bunknown\b|\buncertain\b|\binsufficient evidence\b)", re.I)),
-    ("UNVERIFIED", re.compile(r"(?:\[\s*UNVERIFIED\s*\]|\bunverified\b)", re.I)),
+# Bracket labels are authoritative within an edge window.  Check them before
+# prose so a line like ``[SPECULATION] ... not established`` cannot be promoted
+# to ESTABLISHED merely because it contains the word "established".
+_EXPLICIT_STATUS_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
+    ("ESTABLISHED", re.compile(r"\[\s*ESTABLISHED\s*\]", re.I)),
+    ("EVIDENCE", re.compile(r"\[\s*EVIDENCE\s*\]", re.I)),
+    ("SOURCE-REPORTED", re.compile(r"\[\s*SOURCE[- ]REPORTED\s*\]", re.I)),
+    ("INFERENCE", re.compile(r"\[\s*INFERENCE\s*\]", re.I)),
+    ("SPECULATION", re.compile(r"\[\s*SPECULATION\s*\]", re.I)),
+    ("UNKNOWN", re.compile(r"\[\s*UNKNOWN\s*\]", re.I)),
+    ("UNVERIFIED", re.compile(r"\[\s*UNVERIFIED\s*\]", re.I)),
+)
+_PROSE_STATUS_PATTERNS: Tuple[Tuple[str, re.Pattern], ...] = (
+    ("EVIDENCE", re.compile(r"\bevidence[- ]supported\b|\bsupported by evidence\b", re.I)),
+    ("SOURCE-REPORTED", re.compile(r"\bsource[- ]reported\b", re.I)),
+    ("INFERENCE", re.compile(r"\binference\b|\binferred\b", re.I)),
+    ("SPECULATION", re.compile(r"\bspeculative\b|\bspeculation\b", re.I)),
+    ("UNKNOWN", re.compile(r"\bunknown\b|\buncertain\b|\binsufficient evidence\b", re.I)),
+    ("UNVERIFIED", re.compile(r"\bunverified\b", re.I)),
+    # ESTABLISHED is deliberately last: negative phrases such as "not
+    # established" are handled below and cannot silently upgrade an edge.
+    ("ESTABLISHED", re.compile(r"\bestablished\b|\bstrong empirical\b", re.I)),
+)
+_NEGATED_ESTABLISHED_RE = re.compile(
+    r"\b(?:not|isn['’]?t|wasn['’]?t|never|no)\s+(?:yet\s+)?established\b|"
+    r"\bestablished\s+(?:evidence\s+)?(?:is\s+)?(?:absent|lacking|insufficient)\b",
+    re.I,
 )
 _CITATION_REQUIRED = {"ESTABLISHED", "EVIDENCE", "SOURCE-REPORTED"}
 _MARKER = "CAUSAL CHAIN GAP"
@@ -85,7 +105,7 @@ def _clean_chain_parts(raw_line: str) -> List[str]:
             prefix, suffix = value.rsplit(":", 1)
             if suffix.strip() and _CUE_RE.search(prefix):
                 value = suffix
-        # Common trailing form: "... → outcome: explain uncertainty".  Text after
+        # Common trailing form: "... → outcome: explain uncertainty". Text after
         # the colon belongs to the instruction, not the last node.
         if index == len(raw_parts) - 1 and ":" in value:
             node, suffix = value.split(":", 1)
@@ -124,39 +144,72 @@ def requires_causal_chain_audit(question: str) -> bool:
 
 
 def _status(text: str) -> str:
-    for label, pattern in _STATUS_PATTERNS:
-        if pattern.search(text or ""):
+    body = str(text or "")
+    for label, pattern in _EXPLICIT_STATUS_PATTERNS:
+        if pattern.search(body):
             return label
+    for label, pattern in _PROSE_STATUS_PATTERNS:
+        if not pattern.search(body):
+            continue
+        if label == "ESTABLISHED" and _NEGATED_ESTABLISHED_RE.search(body):
+            continue
+        return label
     return ""
 
 
 def _edge_window(answer: str, left: str, right: str) -> str:
-    """Find a bounded answer window containing the ordered edge."""
+    """Find a bounded answer window containing the explicit ordered edge."""
     body = str(answer or "")
-    folded = unicodedata.normalize("NFKC", body).casefold()
     lkey, rkey = _node_key(left), _node_key(right)
     if not lkey or not rkey:
         return ""
 
     # Prefer a single line: tables and bullet lists normally encode one edge per
-    # row, which prevents a status from a neighbouring edge leaking in.
+    # row, which prevents a status from a neighbouring edge leaking in. Requiring
+    # an arrow token between the nodes also avoids matching two names that merely
+    # occur in the same sentence for another reason.
     for line in body.splitlines():
         line_key = _node_key(line)
         li, ri = line_key.find(lkey), line_key.find(rkey)
-        if li >= 0 and ri > li:
+        if li < 0 or ri <= li:
+            continue
+        # Work on the raw line because normalization removes the arrow symbol.
+        left_raw = re.search(re.escape(str(left)), line, re.I)
+        if left_raw is None:
+            # Case/Unicode normalization can defeat literal matching; the ordered
+            # key test above is still useful, but require at least one arrow on
+            # the line to preserve the explicit-edge contract.
+            if _ARROW_TOKEN_RE.search(line):
+                return line[:1200]
+            continue
+        right_raw = re.search(re.escape(str(right)), line[left_raw.end():], re.I)
+        if right_raw is None:
+            continue
+        between = line[left_raw.end(): left_raw.end() + right_raw.start()]
+        if _ARROW_TOKEN_RE.search(between):
             return line[:1200]
 
-    # Fallback for wrapped prose. Bound the span so labels/citations from a far
-    # away paragraph cannot satisfy this edge.
-    start = 0
-    while True:
-        li = folded.find(lkey, start)
-        if li < 0:
-            return ""
-        ri = folded.find(rkey, li + len(lkey))
-        if ri >= 0 and ri - li <= 500:
-            return body[max(0, li - 120): min(len(body), ri + len(rkey) + 320)]
-        start = li + len(lkey)
+    # Wrapped Markdown may split one edge across physical lines. Permit that
+    # only inside the same paragraph and only when an arrow token is actually
+    # between the two nodes. Never bridge into a neighbouring bullet/heading;
+    # that was the bug that made a missing environment→culture edge look present.
+    for paragraph in re.split(r"\n\s*\n", body):
+        if not paragraph.strip() or re.search(r"\n\s*(?:[-*+]\s+|#{1,6}\s+)", paragraph):
+            continue
+        pkey = _node_key(paragraph)
+        li, ri = pkey.find(lkey), pkey.find(rkey)
+        if li < 0 or ri <= li:
+            continue
+        left_raw = re.search(re.escape(str(left)), paragraph, re.I)
+        if left_raw is None:
+            continue
+        right_raw = re.search(re.escape(str(right)), paragraph[left_raw.end():], re.I)
+        if right_raw is None:
+            continue
+        between = paragraph[left_raw.end(): left_raw.end() + right_raw.start()]
+        if _ARROW_TOKEN_RE.search(between):
+            return paragraph[:1600]
+    return ""
 
 
 def audit_causal_chain(question: str, answer: str) -> Dict:
