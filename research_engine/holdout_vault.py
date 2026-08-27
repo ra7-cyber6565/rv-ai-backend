@@ -1,16 +1,9 @@
 """Application-level sealed holdout vault and double-blind evaluation state machine.
 
-The goal is to prevent accidental/post-hoc optimization on final evaluation data:
-- the dataset is stored behind an evaluator capability token;
-- builder-facing APIs never return holdout bytes or the token;
-- candidate implementation + evaluation protocol are frozen before evaluation;
-- the evaluator receives the frozen candidate packet and holdout bytes, but not the
-  hypothesis narrative supplied to a builder;
-- evaluation is one-shot by default and hash-audited.
-
-This is an application security boundary, not DRM against an operating-system
-administrator who can directly read the storage directory. Stronger deployment
-is possible by putting this directory behind a separate evaluator service/KMS.
+The builder never receives holdout bytes/token/path. Candidate implementation and
+protocol are frozen before one-shot evaluation. Dataset/result commitments are
+SHA-256 audited. This is an application boundary, not DRM against an OS admin;
+stronger deployments should isolate the vault behind a separate evaluator/KMS.
 """
 from __future__ import annotations
 
@@ -25,7 +18,6 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, Mapping, Optional
 
-
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,200}$")
 _SCHEMA_VERSION = 1
 
@@ -38,6 +30,15 @@ def _safe_id(value: str, field: str) -> str:
     text = str(value or "").strip()
     if not _ID_RE.fullmatch(text):
         raise ValueError(f"{field} is empty or contains unsupported characters")
+    return text
+
+
+def _required_text(value: Any, field: str, max_length: int = 1000) -> str:
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError(f"{field} is required")
+    if len(text) > max_length:
+        raise ValueError(f"{field} is too long")
     return text
 
 
@@ -70,8 +71,6 @@ class EvaluationReceipt:
 
 
 class HoldoutVault:
-    """Filesystem-backed sealed holdout vault with one-shot evaluator token."""
-
     def __init__(self, directory: str):
         self.directory = os.path.abspath(directory)
         os.makedirs(self.directory, exist_ok=True)
@@ -111,8 +110,9 @@ class HoldoutVault:
             raise KeyError(vault_id)
         with open(path, "r", encoding="utf-8") as handle:
             meta = json.load(handle)
-        if meta.get("schema_version") != _SCHEMA_VERSION:
-            raise ValueError("unsupported holdout vault schema")
+        required = {"schema_version", "vault_id", "dataset_sha256", "token_hash", "state"}
+        if meta.get("schema_version") != _SCHEMA_VERSION or not required.issubset(meta):
+            raise ValueError("unsupported or corrupted holdout vault metadata")
         return meta
 
     def _save(self, meta: Mapping[str, Any]) -> None:
@@ -128,18 +128,21 @@ class HoldoutVault:
         metadata: Optional[Mapping[str, Any]] = None,
     ) -> VaultCreation:
         vault_id = _safe_id(vault_id, "vault_id")
+        label = _required_text(dataset_label, "dataset_label", 300)
         if not isinstance(dataset, (bytes, bytearray)) or not dataset:
             raise ValueError("dataset must be non-empty bytes")
-        if os.path.exists(self._meta_path(vault_id)) or os.path.exists(self._data_path(vault_id)):
+        data_path = self._data_path(vault_id)
+        meta_path = self._meta_path(vault_id)
+        if os.path.exists(meta_path) or os.path.exists(data_path):
             raise ValueError("vault_id already exists")
-        token = secrets.token_urlsafe(32)
+
         dataset_bytes = bytes(dataset)
         digest = _sha_bytes(dataset_bytes)
-        self._write_atomic(self._data_path(vault_id), dataset_bytes)
+        token = secrets.token_urlsafe(32)
         meta = {
             "schema_version": _SCHEMA_VERSION,
             "vault_id": vault_id,
-            "dataset_label": str(dataset_label).strip()[:300],
+            "dataset_label": label,
             "dataset_sha256": digest,
             "dataset_bytes": len(dataset_bytes),
             "public_metadata": dict(metadata or {}),
@@ -149,13 +152,20 @@ class HoldoutVault:
             "candidate": None,
             "evaluation": None,
         }
-        if not meta["dataset_label"]:
-            raise ValueError("dataset_label is required")
-        self._save(meta)
+        # Validate everything before persisting either member, avoiding orphaned data.
+        json.dumps(meta, ensure_ascii=False, sort_keys=True)
+        self._write_atomic(data_path, dataset_bytes)
+        try:
+            self._save(meta)
+        except Exception:
+            try:
+                os.remove(data_path)
+            except OSError:
+                pass
+            raise
         return VaultCreation(vault_id, token, digest, "SEALED")
 
     def builder_view(self, vault_id: str) -> Dict[str, Any]:
-        """Safe metadata visible to model/strategy builders; never data/token/path."""
         meta = self._load(vault_id)
         return {
             "vault_id": meta["vault_id"],
@@ -181,16 +191,16 @@ class HoldoutVault:
         meta = self._load(vault_id)
         if meta["state"] != "SEALED" or meta.get("candidate") is not None:
             raise ValueError("candidate can only be frozen once while vault is SEALED")
+        if not isinstance(evaluator_instructions, Mapping):
+            raise ValueError("evaluator_instructions must be a mapping")
         candidate = {
             "candidate_id": _safe_id(candidate_id, "candidate_id"),
-            "implementation_hash": str(implementation_hash).strip(),
-            "protocol_hash": str(protocol_hash).strip(),
+            "implementation_hash": _required_text(implementation_hash, "implementation_hash"),
+            "protocol_hash": _required_text(protocol_hash, "protocol_hash"),
             "evaluator_instructions": dict(evaluator_instructions),
             "theory_blind": bool(theory_blind),
             "frozen_at": _now(),
         }
-        if not candidate["implementation_hash"] or not candidate["protocol_hash"]:
-            raise ValueError("implementation_hash and protocol_hash are required")
         candidate["freeze_hash"] = _sha_json(
             {key: value for key, value in candidate.items() if key not in {"frozen_at", "freeze_hash"}}
         )
@@ -204,7 +214,10 @@ class HoldoutVault:
         if not isinstance(result, Mapping):
             raise ValueError("evaluator must return a mapping")
         clean = dict(result)
-        encoded = json.dumps(clean, ensure_ascii=False, sort_keys=True).encode("utf-8")
+        try:
+            encoded = json.dumps(clean, ensure_ascii=False, sort_keys=True, allow_nan=False).encode("utf-8")
+        except (TypeError, ValueError) as exc:
+            raise ValueError("evaluation result must be finite JSON-serializable data") from exc
         if len(encoded) > 256 * 1024:
             raise ValueError("evaluation result is too large")
         return clean
@@ -216,7 +229,6 @@ class HoldoutVault:
         evaluator_token: str,
         evaluator: Callable[[bytes, Mapping[str, Any]], Mapping[str, Any]],
     ) -> EvaluationReceipt:
-        """Run the frozen evaluator exactly once over the holdout bytes."""
         meta = self._load(vault_id)
         if meta["state"] != "FROZEN" or not meta.get("candidate"):
             raise ValueError("vault must have a frozen candidate before evaluation")
@@ -232,13 +244,13 @@ class HoldoutVault:
         if not hmac.compare_digest(digest, str(meta["dataset_sha256"])):
             raise ValueError("holdout dataset integrity check failed")
 
-        evaluator_packet = {
+        packet = {
             "vault_id": meta["vault_id"],
             "dataset_sha256": meta["dataset_sha256"],
             "public_metadata": dict(meta.get("public_metadata") or {}),
             "candidate": dict(meta["candidate"]),
         }
-        result = self._validate_result(evaluator(dataset, evaluator_packet))
+        result = self._validate_result(evaluator(dataset, packet))
         receipt = {
             "vault_id": meta["vault_id"],
             "candidate_id": meta["candidate"]["candidate_id"],
@@ -254,24 +266,23 @@ class HoldoutVault:
         meta["token_hash"] = _sha_bytes(secrets.token_bytes(32))
         self._save(meta)
         return EvaluationReceipt(
-            vault_id=receipt["vault_id"],
-            candidate_id=receipt["candidate_id"],
-            dataset_sha256=receipt["dataset_sha256"],
-            protocol_hash=receipt["protocol_hash"],
-            result_hash=receipt["result_hash"],
-            result=dict(receipt["result"]),
+            vault_id=receipt["vault_id"], candidate_id=receipt["candidate_id"],
+            dataset_sha256=receipt["dataset_sha256"], protocol_hash=receipt["protocol_hash"],
+            result_hash=receipt["result_hash"], result=dict(receipt["result"]),
             evaluated_at=receipt["evaluated_at"],
         )
 
     def evaluation_receipt(self, vault_id: str) -> Optional[Dict[str, Any]]:
-        meta = self._load(vault_id)
-        receipt = meta.get("evaluation")
+        receipt = self._load(vault_id).get("evaluation")
         return dict(receipt) if isinstance(receipt, Mapping) else None
 
     def verify_integrity(self, vault_id: str) -> bool:
         meta = self._load(vault_id)
-        with open(self._data_path(vault_id), "rb") as handle:
-            digest = _sha_bytes(handle.read())
+        try:
+            with open(self._data_path(vault_id), "rb") as handle:
+                digest = _sha_bytes(handle.read())
+        except OSError:
+            return False
         return hmac.compare_digest(digest, str(meta["dataset_sha256"]))
 
 
@@ -285,8 +296,6 @@ class BlindPacket:
 
 
 class DoubleBlindCoordinator:
-    """Keep builder theory and evaluator holdout knowledge on separate surfaces."""
-
     def __init__(self):
         self._evaluations: Dict[str, Dict[str, Any]] = {}
 
@@ -303,35 +312,37 @@ class DoubleBlindCoordinator:
         evaluation_id = _safe_id(evaluation_id, "evaluation_id")
         if evaluation_id in self._evaluations:
             raise ValueError("evaluation_id already exists")
-        if not str(builder_theory).strip():
-            raise ValueError("builder_theory is required")
-        self._evaluations[evaluation_id] = {
+        if not isinstance(evaluator_instructions, Mapping):
+            raise ValueError("evaluator_instructions must be a mapping")
+        record = {
             "candidate_id": _safe_id(candidate_id, "candidate_id"),
-            "builder_theory": str(builder_theory),
-            "implementation_hash": str(implementation_hash).strip(),
-            "protocol_hash": str(protocol_hash).strip(),
+            "builder_theory": _required_text(builder_theory, "builder_theory", 20000),
+            "implementation_hash": _required_text(implementation_hash, "implementation_hash"),
+            "protocol_hash": _required_text(protocol_hash, "protocol_hash"),
             "evaluator_instructions": dict(evaluator_instructions),
             "result": None,
         }
+        self._evaluations[evaluation_id] = record
 
     def evaluator_packet(self, evaluation_id: str) -> BlindPacket:
-        record = self._evaluations[_safe_id(evaluation_id, "evaluation_id")]
+        evaluation_id = _safe_id(evaluation_id, "evaluation_id")
+        record = self._evaluations[evaluation_id]
         return BlindPacket(
-            evaluation_id=evaluation_id,
-            candidate_id=record["candidate_id"],
-            implementation_hash=record["implementation_hash"],
-            protocol_hash=record["protocol_hash"],
+            evaluation_id=evaluation_id, candidate_id=record["candidate_id"],
+            implementation_hash=record["implementation_hash"], protocol_hash=record["protocol_hash"],
             instructions=dict(record["evaluator_instructions"]),
         )
 
     def record_result(self, evaluation_id: str, result: Mapping[str, Any]) -> None:
-        record = self._evaluations[_safe_id(evaluation_id, "evaluation_id")]
+        evaluation_id = _safe_id(evaluation_id, "evaluation_id")
+        record = self._evaluations[evaluation_id]
         if record["result"] is not None:
             raise ValueError("blind evaluation result is immutable")
-        record["result"] = dict(result)
+        record["result"] = HoldoutVault._validate_result(result)
 
     def reveal_after_evaluation(self, evaluation_id: str) -> Dict[str, Any]:
-        record = self._evaluations[_safe_id(evaluation_id, "evaluation_id")]
+        evaluation_id = _safe_id(evaluation_id, "evaluation_id")
+        record = self._evaluations[evaluation_id]
         if record["result"] is None:
             raise ValueError("theory remains sealed until evaluation result exists")
         return {
