@@ -989,6 +989,30 @@ class DeepResearchEngine:
         except Exception:
             pass  # anchor ek sudhaar hai, zaroorat nahi — isse pipeline na ruke
 
+        # 1b. Bhasha ka pul (#119). Lens vocabulary tabhi banta hai jab lens
+        # engine sawaal ke shabd pehchaan le — aur wo pehchaan aaj Hindi tak
+        # mehdood thi. Bangla/Russian sawaal par anchor khaali aata tha, phir
+        # teen perfect English paper par bhi score 0.000/0.000/0.000 (naapa
+        # gaya). Yahan `lang_bridge` do kaam karta hai: (i) script-level mel
+        # semantic scoring ke andar apne aap lag jaata hai, (ii) matlab ka pul
+        # Wikipedia ke apne langlinks se banta hai — koi hath se likhi glossary
+        # nahi. Pul na ban paaye to `translation_missing` warning me saaf jaata
+        # hai; chup rehna bhi jhooth hota (user ko lagta ki bas source hi nahi
+        # hain). Lens ka anchor mil gaya ho to hum usko chhedte hi nahi.
+        try:
+            from . import lang_bridge
+            lens_anchor = str(plan.get("lens_scoring_query") or "").strip()
+            bridge = lang_bridge.bridge_report(question, lookup=not lens_anchor)
+            plan["language_bridge"] = bridge
+            bridge_terms = " ".join(
+                str(t) for t in (bridge.get("english_terms") or [])).strip()
+            if bridge_terms and not lens_anchor:
+                self.evidence.relevance.set_scoring_anchor(bridge_terms[:200])
+            elif bridge.get("note") and not lens_anchor:
+                warnings.append(str(bridge["note"]))
+        except Exception:
+            pass  # pul ek sudhaar hai — iske bina bhi research chalti rahe
+
         # 2. documents (hamesha)
         self._track(job_id, "PROCESSING", "uploaded documents check ho rahe hain")
         doc_records, doc_note = self._document_records(question, config)

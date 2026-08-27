@@ -17,7 +17,7 @@ from typing import Callable, Dict, List, Optional
 
 from . import classics as classics_mod
 from . import concept_ledger as ledger_mod
-from .connectors.classic_connector import wikisource_langs
+from .connectors.classic_connector import langs_for_question as classic_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
 from . import facets as facets_mod
@@ -669,7 +669,8 @@ class ResearchPlanner:
             summary_queries = list(lane.get("summary_queries", []))[:text_budget]
             classics_names = ["wikisource" if code == "en"
                               else f"wikisource_{code}"
-                              for code in wikisource_langs()]
+                              for code in classic_langs(
+                                  question or cls.get("question") or "")]
             classics_reason = (f"mool text lane chali (Wikisource official API, "
                                f"{len(classic_queries)} query) + copyright wali "
                                f"book ke liye summary lane "

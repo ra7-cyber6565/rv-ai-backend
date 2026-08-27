@@ -49,6 +49,30 @@ def wikisource_langs() -> Tuple[str, ...]:
     return picked or _DEFAULT_LANGS
 
 
+def langs_for_question(question: str) -> Tuple[str, ...]:
+    """Env ki list + SAWAAL KI APNI SCRIPT ki bhasha (#119).
+
+    Kyun: `_DEFAULT_LANGS = ("en",)` ka matlab tha ki Bangla ya Tamil me poochha
+    gaya sawaal bhi sirf `en.wikisource` par jaata — jahan us granth ka mool
+    paath hi nahi hota. Bhasha ka faisla sawaal ki script se hona chahiye, kisi
+    env list ya hath se likhi setting se nahi. Env ki list hataayi NAHI gayi
+    (jisne set ki uske liye sab waisa hi chalega), uske saath sirf sawaal ki
+    bhasha JOD di gayi hai. Devanagari par `sa` bhi jodte hain kyunki Sanskrit
+    granth usi script me hain par `sa.wikisource` par rehte hain.
+    """
+    langs = list(wikisource_langs())
+    try:
+        from ..lang_bridge import dominant_script, wiki_lang_of
+        code = wiki_lang_of(dominant_script(question or ""))
+    except Exception:
+        code = ""
+    extra = [code] + (["sa"] if code == "hi" else [])
+    for candidate in extra:
+        if candidate and candidate in _KNOWN_LANGS and candidate not in langs:
+            langs.append(candidate)
+    return tuple(langs)
+
+
 class WikisourceConnector(BaseConnector):
     """Wikisource ka official action API — mool text ka sabse saaf free raasta.
 
@@ -133,7 +157,25 @@ class ClassicTextConnector:
         ]
 
     def by_name(self, name: str) -> Optional[BaseConnector]:
-        return next((c for c in self.connectors if c.name == name), None)
+        found = next((c for c in self.connectors if c.name == name), None)
+        if found is not None:
+            return found
+        # Planner sawaal ki script se bhasha chun sakta hai (`langs_for_question`),
+        # par ye facade construction ke waqt bani thi jab sawaal pata hi nahi tha.
+        # Aise naam ko chup-chaap gira dena = lane band, aur user ko kabhi pata
+        # nahi chalta ki uski bhasha ki wiki dekhi hi nahi gayi. Isliye known
+        # bhasha ka connector zaroorat par yahin ban jaata hai. Anjaan naam par
+        # ab bhi None (host allowlist ki hi bhasha chalein).
+        lang = ""
+        if name == "wikisource":
+            lang = "en"
+        elif name.startswith("wikisource_"):
+            lang = name[len("wikisource_"):].strip().lower()
+        if lang in _KNOWN_LANGS:
+            connector = WikisourceConnector(lang=lang)
+            self.connectors.append(connector)
+            return connector
+        return None
 
     def search(self, query: str, max_per_source: int = 3,
                only: Optional[List[str]] = None) -> Dict:

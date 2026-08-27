@@ -91,6 +91,17 @@ _MAX_SLEEP_SECONDS = 8.0
 # selected by connector code and must stay on this exact-host allowlist.  This
 # makes the shared helper fail closed if a future connector accidentally passes
 # through a user/source-controlled URL.
+# Wikipedia langlinks = bhasha ka pul (`research_engine/lang_bridge.py`). Kisi
+# shabd ka doosri bhasha wala naam Wikipedia ke apne langlinks me PEHLE SE likha
+# hai, isliye hamein koi glossary hath se nahi likhni padti. Allowlist wildcard
+# nahi leti, isliye sirf wahi bhashaayein jinki script `lang_bridge` pehchanta
+# hai (+ wo Indian bhashaayein jo Devanagari/Bengali script share karti hain).
+_BRIDGE_WIKI_LANGS: Tuple[str, ...] = (
+    "en", "hi", "bn", "pa", "gu", "or", "ta", "te", "kn", "ml", "si",
+    "ar", "he", "el", "ru", "th", "ja", "ko", "zh",
+    "mr", "sa", "ne", "as", "fa", "ur", "uk",
+)
+
 DISCOVERY_ALLOWED_HOSTS = frozenset({
     "api.crossref.org",
     "api.data.gov.in",
@@ -138,7 +149,7 @@ DISCOVERY_ALLOWED_HOSTS = frozenset({
     "ru.wikisource.org",
     "zh.wikisource.org",
     "ja.wikisource.org",
-})
+}) | frozenset(f"{lang}.wikipedia.org" for lang in _BRIDGE_WIKI_LANGS)
 
 
 def _max_response_bytes() -> int:

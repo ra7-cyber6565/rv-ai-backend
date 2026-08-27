@@ -74,6 +74,11 @@ def similarity(query: str, text: str) -> float:
     Query ke shabd kitne cover hue — yahi asli sawaal hai, isliye denominator
     query ka weight hai, text ki lambai ka nahi (warna lamba abstract jeet jata).
     """
+    return round(_with_script_bridge(query, text, _literal(query, text)), 4)
+
+
+def _literal(query: str, text: str) -> float:
+    """Wahi purana literal overlap — bridge ke bina (recursion-free)."""
     q_bag = {t for t in (stem(x) for x in tokens(query)) if t}
     if not q_bag:
         return 0.0
@@ -89,7 +94,54 @@ def similarity(query: str, text: str) -> float:
     if q_bi:
         shared = len(q_bi & t_bi)
         base = min(1.0, base + 0.15 * min(shared, 3) / 3.0 * (1.0 if shared else 0.0))
-    return round(base, 4)
+    return base
+
+
+# Script-pul se mila match literal match se THODA kam pakka hai (transliteration
+# me do alag shabd ek jaise skeleton de sakte hain), isliye usko poora weight
+# nahi milta. Ye number kisi probability ka daawa nahi — sirf ek discount hai.
+_BRIDGE_TRUST = 0.9
+# Ek hi bridged shabd par poora score dena jhooth hoga, isliye cross-script pass
+# ke liye kam se kam do English shabd chahiye.
+_MIN_CROSS_TOKENS = 2
+
+
+def _ascii_side(query: str) -> str:
+    """Query ka wo hissa jo English/Latin me hai (anchor + loanword + naam)."""
+    return " ".join(t for t in tokens(query) if t.isascii())
+
+
+def _with_script_bridge(query: str, text: str, base: float) -> float:
+    """Sawaal aur text ki script alag ho to `lang_bridge` ka mel bhi gino.
+
+    **Zero-regression:** dono taraf pure ASCII ho to `needs_bridge` False deta
+    hai aur `base` waisa ka waisa laut jaata hai — isliye English↔English ke
+    naape hue benchmark hil hi nahi sakte. Bridge fail ho jaaye to bhi purana
+    score lautta hai; scoring kisi naye module ke bharose nahi rukti.
+
+    Do parat yahan judti hain:
+      1. **skeleton mel** — transliterated shabd/naam (क्वांटम = quantum) apne
+         aap match ho jaate hain.
+      2. **cross-script coverage** — sawaal Devanagari/Bangla me ho aur source
+         pura English ho, to sawaal ke us script wale shabd English text me
+         mil hi nahi sakte. Unhe "miss" ginna source ko user ki bhasha ki saza
+         dena hai. Isliye tab sirf sawaal ke English hisse (bridge/anchor se
+         aaye shabd) ka coverage bhi naapa jaata hai — discount ke saath, aur
+         kam se kam do shabd hone par.
+    """
+    try:
+        from . import lang_bridge
+        if not lang_bridge.needs_bridge(query, text):
+            return base
+        bridged, _hits = lang_bridge.bridged_overlap(query, text)
+        best = max(base, bridged * _BRIDGE_TRUST)
+        if str(text or "").isascii() and not str(query or "").isascii():
+            latin = _ascii_side(query)
+            if len(latin.split()) >= _MIN_CROSS_TOKENS:
+                best = max(best, _literal(latin, text) * _BRIDGE_TRUST)
+        return best
+    except Exception:
+        return base
 
 
 def best_similarity(query: str, texts: Iterable[str]) -> float:
