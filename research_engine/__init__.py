@@ -142,6 +142,13 @@ _install_source_family_query_fairness()
 from .specialist_lane_quality import install as _install_specialist_lane_quality
 _install_specialist_lane_quality()
 
+# Hypothesis prose can sound mechanistic even when the cited papers only support
+# a neighbouring behavioural claim.  Audit mechanism/reasoning step-by-step
+# against the existing same-source relevance+support verifier; unsupported steps
+# must be disclosed as INFERENCE/NO-SOURCE and can only lower confidence.
+from .hypothesis_evidence_lineage import install as _install_hypothesis_evidence_lineage
+_install_hypothesis_evidence_lineage()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
