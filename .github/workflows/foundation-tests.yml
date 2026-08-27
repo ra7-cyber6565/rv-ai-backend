@@ -63,7 +63,10 @@ jobs:
             tests/test_hypothesis_evidence_lineage.py \
             tests/test_quality_metric_ui.py \
             tests/test_causal_chain_quality.py \
-            tests/test_ui_hygiene.py
+            tests/test_ui_hygiene.py \
+            tests/test_capability_registry.py \
+            tests/test_scientific_memory.py \
+            tests/test_statistical_validation.py
 
       # Keep CI and the user's Windows laptop on exactly the same release gate.
       # The runner itself compiles sources, runs focused integration tests,
