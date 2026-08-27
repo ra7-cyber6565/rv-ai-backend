@@ -245,16 +245,19 @@ def test_installed_report_uses_qualified_coverage_not_candidate_count():
         read_level="snippet",
         proposition=None,
     )
-    irrelevant_math = _source(
+    irrelevant_empirical = _source(
         "S2",
-        title="Strong approximations for empirical processes",
-        snippet="We prove a theorem for empirical process approximation rates.",
+        title="Image-classifier benchmark experiment",
+        snippet=(
+            "We measured a large image dataset in an experiment and report "
+            "classification results with statistical confidence intervals."
+        ),
         relevance=0.11,
         proposition=False,
         read_level="abstract",
     )
     report = sd.build_evidence_lane_report(
-        question, plan, EvidencePack(sources=[official, irrelevant_math])
+        question, plan, EvidencePack(sources=[official, irrelevant_empirical])
     )
     assert "official_document_record" in report["covered_required_lanes"]
     assert "empirical_science" in report["missing_required_lanes"]
