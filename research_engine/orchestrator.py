@@ -145,8 +145,17 @@ class DeepResearchEngine:
         records = self.evidence.records_from_retrieval(retrieval)
         note = (f"{len(records)} document chunks mile" if records
                 else "koi uploaded document match nahi hua")
-        if self.vectors.last_error:
-            note += f" (vector search error: {self.vectors.last_error[:80]})"
+        # #115 — pehle yahan raw exception text jaata tha
+        # (`AttributeError: module 'rag.pipeline' has no attribute 'client'`),
+        # aur ye note answer ke research-process hisse mein chhap jaata tha.
+        # Ab sirf saaf wajah jaati hai; raw baat VectorSearch.last_error mein
+        # server ke andar rehti hai. `getattr` isliye ki test/benchmark ke
+        # simple vector-stub is method ke bina bhi research chala sakein —
+        # research kisi note ke liye rukna nahi chahiye.
+        reason = getattr(self.vectors, "problem_note", None)
+        problem = reason() if callable(reason) else ""
+        if problem:
+            note += f" — {problem}"
         return records, note
 
     # ── 2. discovery (always on, multi-round) ────────────────────────────────
