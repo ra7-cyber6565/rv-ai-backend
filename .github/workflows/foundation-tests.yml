@@ -60,6 +60,9 @@ jobs:
             tests/test_source_family_query_fairness.py \
             tests/test_specialist_lane_quality.py \
             tests/test_controversial_text_lane.py \
+            tests/test_hypothesis_evidence_lineage.py \
+            tests/test_quality_metric_ui.py \
+            tests/test_causal_chain_quality.py \
             tests/test_ui_hygiene.py
 
       # Keep CI and the user's Windows laptop on exactly the same release gate.
