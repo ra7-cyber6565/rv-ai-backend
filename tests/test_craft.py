@@ -308,9 +308,14 @@ def test_weak_draft_fails_with_named_measured_reasons():
     assert measured["status"] == craft.DRAFT_WEAK
     failed = {c["check"]: c for c in measured["checks"]
               if c["status"] == craft.NOT_MET}
+    # #131 ke baad ek naap zyada FAIL hoti hai: `singability_line_outliers`.
+    # Ye jaan-boojh kar yahan joda gaya hai — is draft me "bas/bas/bas" jaisi
+    # line hain, to line-lambai ka farak asli me bahar hai (2/5 line outlier).
+    # Set exact hi rakhi gayi hai taaki koi nayi FAIL chupke se na aa jaaye.
     assert set(failed) == {"line_count", "matra_target", "matra_consistency",
                            "cliche_density", "no_appeal_claim",
-                           "mood_words_present"}
+                           "mood_words_present",
+                           "singability_line_outliers"}
     for name, check in failed.items():
         assert check["reason"], name
         assert check["note"], name
@@ -458,6 +463,22 @@ def test_too_short_or_missing_draft_returns_empty_not_a_guess():
 _Q_HARD = "tanhai par 8 line ka 16 matra ka gaana banao"
 _ANSWER_BAD = _fenced(_BAD)
 
+# #131 ke baad gaane ke jawab me MUSIC DIRECTION bhi ek naapi hui shart hai
+# (`music_direction_present`: chaar khaane me se teen naam se aane chahiye).
+# Isliye "koi naap fail nahi hui" wala case is block ke saath likha jaata hai —
+# assertion kamzor nahi ki gayi, input poora kiya gaya hai. Yahan koi "dhun
+# mast banegi" jaisa daawa nahi hai, warna `no_music_quality_claim` FAIL hoti.
+_MUSIC_DIRECTION = ("\nMusic direction (sirf salaah, koi audio nahi bani):\n"
+                    "- Tempo: dheema, 70 bpm ke aas paas\n"
+                    "- Scale/raag: minor, raag bhairavi jaisa\n"
+                    "- Vaadya: guitar aur halka tabla\n"
+                    "- Aawaz: male vocal, akela\n")
+
+
+def _answer_with_music(body: str) -> str:
+    """Jawab jaisa asli me jaata hai: draft + uske baad music direction."""
+    return _fenced(body) + _MUSIC_DIRECTION
+
 
 def _reviser_of(body: str):
     def reviser(prompt: str) -> str:
@@ -535,7 +556,8 @@ def test_reviser_that_returns_nothing_is_recorded():
 
 
 def test_no_failure_means_no_revision_attempt():
-    good = craft.run_craft("tanhai par 8 line ka gaana banao", _fenced(_SONG),
+    good = craft.run_craft("tanhai par 8 line ka gaana banao",
+                           _answer_with_music(_SONG),
                            reviser=_reviser_of(_BAD))
     assert good["status"] == craft.DRAFT_OK
     assert good["revision"]["attempted"] is False
@@ -667,7 +689,11 @@ def test_section_carries_the_status_the_disclaimer_and_the_failed_checks():
 def test_limits_come_from_the_measured_state_not_a_generic_line():
     weak = craft.craft_limits(craft.run_craft(_Q_HARD, _ANSWER_BAD))
     joined = " ".join(weak)
-    assert "3 dhaanche wale naap target par the aur 6 nahi" in joined
+    # Ginti #131 ke baad badli: craft ke 12 naap ab 20 hain (8 songcraft naap
+    # jud gayi). Ye line naap se banti hai, likhi hui nahi — isliye number
+    # jaan-boojh kar dobara pin kiya gaya hai. "approx" ka lafz sirf matra ke
+    # roman-akshar niyam ke liye hai, kisi doosri seema ke liye nahi.
+    assert "5 dhaanche wale naap target par the aur 8 nahi" in joined
     assert "approx" in joined
     assert "reviser_not_available" in joined
 

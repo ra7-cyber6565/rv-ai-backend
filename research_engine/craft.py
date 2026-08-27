@@ -36,7 +36,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import lang_bridge
+from . import lang_bridge, songcraft
 
 # ── check status vocabulary (LAB se alag rakha gaya hai jaan-boojh kar) ───────
 # LAB hypothesis ke SACH ke baare me bolta hai; CRAFT sirf draft ke DHAANCHE ke
@@ -796,6 +796,9 @@ class Spec:
     rhyme_required: bool = False
     hook_required: bool = False
     mood_asked: List[str] = field(default_factory=list)
+    # #128: style/register/bhasha ki MAANG (songcraft.StyleAsk). Ye "us style ka
+    # gyaan aa gaya" nahi hai — sirf "user ne kis cheez ka naam liya".
+    style: Any = None
     notes: List[str] = field(default_factory=list)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -810,6 +813,8 @@ class Spec:
             "rhyme_required": self.rhyme_required,
             "hook_required": self.hook_required,
             "mood_asked": list(self.mood_asked),
+            "style": (self.style.to_dict()
+                      if hasattr(self.style, "to_dict") else {}),
             "notes": list(self.notes),
             # Ye do line kabhi badalti nahi: SPEC banane ka matlab ye nahi ki
             # draft acha hoga, aur naap "pasand aayega" nahi bolta.
@@ -875,6 +880,13 @@ def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
     if spec.line_target and spec.line_target < picked.min_lines:
         spec.notes.append("User ki gini hui line form ke default se kam hai — "
                           "user ki ginti hi maani gayi.")
+    # #128: style/bhasha/lehja ki maang padho (ADDRESSING only). Isse koi
+    # MET/NOT_MET faisla nahi hota — sirf "user ne kya maanga" record hota hai.
+    spec.style = songcraft.style_of(text, form=picked.form_id,
+                                    moods=spec.mood_asked)
+    for line in getattr(spec.style, "notes", ()) or ():
+        if line not in spec.notes:
+            spec.notes.append(line)
     return spec
 
 
@@ -1196,6 +1208,28 @@ def _check_mood_words(spec: Spec, facts: Dict[str, Any]) -> Check:
                         "Jo bhaav maanga tha, uske shabd draft me nahi mile."))
 
 
+def _songcraft_runner(name: str) -> Callable[[Spec, Dict[str, Any]], Check]:
+    """
+    songcraft ke naap ko craft ke `Check` me badalne wala patla wrapper.
+
+    Naap ka dimaag songcraft.py me hai (Claude-owned, alag file), yahan sirf
+    dhaanche ka anuvaad hai. Status wahi rehta hai jo songcraft ne diya — yahan
+    kuch "sudhaara" nahi jaata, warna fail-closed ka matlab khatam ho jaata.
+    """
+
+    def run(spec: Spec, facts: Dict[str, Any]) -> Check:
+        row = songcraft.run_check(name, spec, facts)
+        return _check(str(row.get("check") or name), row["status"],
+                      measured=str(row.get("measured", "")),
+                      target=str(row.get("target", "")),
+                      reason=str(row.get("reason", "")),
+                      note=str(row.get("note", "")),
+                      approx=bool(row.get("approx")))
+
+    run.__name__ = "_check_songcraft_" + name
+    return run
+
+
 # Kram maayne rakhta hai: report isi kram me chhapti hai.
 CHECKS: Tuple[Tuple[str, Callable[[Spec, Dict[str, Any]], Check]], ...] = (
     ("line_count", _check_line_count),
@@ -1210,10 +1244,11 @@ CHECKS: Tuple[Tuple[str, Callable[[Spec, Dict[str, Any]], Check]], ...] = (
     ("script_match", _check_script),
     ("no_appeal_claim", _check_appeal_claim),
     ("mood_words_present", _check_mood_words),
-)
+) + tuple((name, _songcraft_runner(name)) for name in songcraft.CHECK_NAMES)
 
 
-def measure(draft: str, spec: Optional[Spec]) -> Dict[str, Any]:
+def measure(draft: str, spec: Optional[Spec], study: Any = None,
+            context: str = "") -> Dict[str, Any]:
     """
     Draft par saare check chalao — fail-closed.
 
@@ -1229,6 +1264,19 @@ def measure(draft: str, spec: Optional[Spec]) -> Dict[str, Any]:
         return {"status": NO_DRAFT, "checks": [], "measured": {},
                 "note": "Naapne ke liye draft hi nahi mila."}
     facts = draft_facts(body)
+    # #131: gaane ke naye naap ke liye alag context (mood arc, register,
+    # style-fit, music direction). Ye banane me kuch toot jaaye to bhi poora
+    # naap nahi girna chahiye — us haalat me songcraft ke check khud
+    # NOT_MEASURED ho jaate hain (fail-closed).
+    try:
+        stanzas = stanzas_of(body)
+        facts["songcraft"] = songcraft.context_facts(
+            body, spec=spec, study=study, context=context,
+            stanza_moods=[mood_hints("\n".join(stanza)) for stanza in stanzas],
+            stanza_line_counts=[len(stanza) for stanza in stanzas],
+        )
+    except Exception:
+        facts["songcraft"] = {}
     checks: List[Check] = []
     for name, runner in CHECKS:
         try:
@@ -1265,6 +1313,13 @@ def measure(draft: str, spec: Optional[Spec]) -> Dict[str, Any]:
             "cliches": facts["cliches"],
             "script": facts["script"],
             "moods_in_draft": facts["moods"],
+            "stanza_moods": list(
+                (facts.get("songcraft") or {}).get("stanza_moods") or []),
+            "guidance_source_count": int(
+                (facts.get("songcraft") or {}).get("guidance_source_count")
+                or 0),
+            "style_conventions_read": bool(
+                (facts.get("songcraft") or {}).get("style_conventions_read")),
         },
         "note": "",
     }
@@ -1499,6 +1554,53 @@ def _warnings(spec: Optional[Spec], draft_source: str,
     return out
 
 
+def _songcraft_block(study: Any, spec: Optional[Spec] = None) -> Dict[str, Any]:
+    """
+    Gaane wale hisse ka imaandaar hisaab — chaahe study aayi ho ya nahi.
+
+    Study na aayi ho to `ran: False` aur `style_conventions_read: False` jaata
+    hai. Ye khaali dictionary nahi lautata, kyunki gaayab key ko UI "sab theek"
+    padh leti hai; "padha hi nahi" saaf likha jaana chahiye.
+
+    MAANG (style/bhasha/lehja) SPEC se bhi aa jaati hai — wo padhne se nahi,
+    user ke shabd se banti hai. Isliye study na hone par bhi maang dikhti hai,
+    par "padha hua" wala hisaab tab bhi 0 rehta hai.
+    """
+    pack = study if isinstance(study, dict) else {}
+    guidance = pack.get("guidance") if isinstance(pack.get("guidance"), dict) \
+        else {}
+    ask = pack.get("ask_dict") or {}
+    if not ask and spec is not None and hasattr(spec.style, "to_dict"):
+        ask = spec.style.to_dict()
+    return {
+        "ran": bool(pack.get("ran")),
+        "ask": ask,
+        # `ask_dict` naam se bhi rakha jaata hai kyunki songcraft.section_lines()
+        # isi key se label padhta hai — sirf "ask" rakhne par report me style ki
+        # maang gayab ho jaati thi.
+        "ask_dict": ask,
+        "guidance": {
+            "read_note": str((guidance.get("read_note") or "")),
+            "numeric_conventions": list(
+                guidance.get("numeric_conventions") or []),
+        },
+        "queries": list(pack.get("queries") or []),
+        "guidance_lines": list(guidance.get("lines") or []),
+        "guidance_source_count": int(pack.get("guidance_source_count") or 0),
+        "style_conventions_read": bool(pack.get("style_conventions_read")),
+        "numeric_conventions": list(guidance.get("numeric_conventions") or []),
+        "read_note": str(guidance.get("read_note") or ""),
+        "gemini_calls": int(pack.get("gemini_calls") or 0),
+        "network_used": bool(pack.get("network_used")),
+        "audio_generated": songcraft.AUDIO_GENERATED,
+        "music_direction_is_suggestion":
+            songcraft.MUSIC_DIRECTION_IS_SUGGESTION,
+        "note": ("Gaane ki style/bhasha ka koi niyam kahin se PADHA nahi gaya — "
+                 "isliye style-fit ka naap NOT_MEASURED rehta hai."
+                 if not pack.get("style_conventions_read") else ""),
+    }
+
+
 def _empty_report(reason: str, note: str) -> Dict[str, Any]:
     """CRAFT chala hi nahi — aur ye baat dabai nahi jaati."""
     return {
@@ -1516,7 +1618,10 @@ def _empty_report(reason: str, note: str) -> Dict[str, Any]:
         "gemini_calls": 0,
         "provider_cost": POLICY.provider_cost,
         "policy": POLICY.to_dict(),
-        "cannot_measure": list(CANNOT_MEASURE),
+        "songcraft": _songcraft_block(None),
+        "songcraft_policy": songcraft.policy(),
+        "cannot_measure": list(CANNOT_MEASURE)
+                          + list(songcraft.CANNOT_MEASURE_EXTRA),
         "disclaimer": CRAFT_DISCLAIMER,
         "warnings": [],
         "note": note,
@@ -1524,7 +1629,8 @@ def _empty_report(reason: str, note: str) -> Dict[str, Any]:
 
 
 def run_craft(question: str, answer_text: str,
-              reviser: Optional[Callable[[str], str]] = None) -> Dict[str, Any]:
+              reviser: Optional[Callable[[str], str]] = None,
+              study: Any = None) -> Dict[str, Any]:
     """
     Poora CRAFT stage: farmaish pehchaano → SPEC → draft dhoondo → naapo →
     (zaroorat par) ek baar dobara likhwao → sach ke saath lauta do.
@@ -1536,6 +1642,10 @@ def run_craft(question: str, answer_text: str,
     Ye function khud kabhi model ko call nahi karta, network nahi chhoota, aur
     kisi bhi haal me ye nahi kehta ki likhawat acchi hai ya logon ko pasand
     aayegi.
+
+    `study` (songcraft.study(...) ka nateeja) sirf tab kuch badalta hai jab usme
+    ASLI padhi hui baat ho. Nahi diya gaya to gaane wale naye naap NOT_MEASURED
+    rehte hain — "padha hi nahi" ko "theek hai" nahi likha jaata.
     """
     detection = detect(question)
     if not detection.get("is_request"):
@@ -1550,7 +1660,7 @@ def run_craft(question: str, answer_text: str,
 
     draft, source = extract_draft(answer_text, spec)
     first_draft = draft
-    measured = measure(draft, spec)
+    measured = measure(draft, spec, study=study, context=answer_text)
     revision: Dict[str, Any] = {"attempted": False, "ran": False, "rounds": 0,
                                 "kept": "pehla", "notes": [], "reason": ""}
     gemini_calls = 0
@@ -1573,7 +1683,19 @@ def run_craft(question: str, answer_text: str,
                 revision["ran"] = True
                 revision["rounds"] = 1
                 new_draft, new_source = extract_draft(new_text, spec)
-                new_measured = measure(new_draft, spec)
+                # Doosre round ka context = wahi JAWAB jisme purana draft ki
+                # jagah naya draft baith gaya (apply_final_draft bilkul yahi
+                # karta hai). Sirf `new_text` dena ek naap-ki-galti thi: music
+                # direction aur daawe jawab ki prose me hote hain, reviser wo
+                # wapas nahi likhta — to answer-level naap sirf isliye gir jaati
+                # thi ki text hi nahi diya gaya tha.
+                if (first_draft.strip() and new_draft.strip()
+                        and first_draft in answer_text):
+                    new_context = answer_text.replace(first_draft, new_draft, 1)
+                else:
+                    new_context = new_text
+                new_measured = measure(new_draft, spec, study=study,
+                                       context=new_context)
                 revision["second_status"] = new_measured.get("status")
                 if _revision_is_better(new_measured, measured):
                     draft, source, measured = new_draft, new_source, new_measured
@@ -1612,7 +1734,10 @@ def run_craft(question: str, answer_text: str,
         "gemini_calls": gemini_calls,
         "provider_cost": POLICY.provider_cost,
         "policy": POLICY.to_dict(),
-        "cannot_measure": list(CANNOT_MEASURE),
+        "songcraft": _songcraft_block(study, spec),
+        "songcraft_policy": songcraft.policy(),
+        "cannot_measure": list(CANNOT_MEASURE)
+                          + list(songcraft.CANNOT_MEASURE_EXTRA),
         "disclaimer": CRAFT_DISCLAIMER,
         "warnings": _warnings(spec, source, measured),
         "note": measured.get("note", ""),
@@ -1673,6 +1798,10 @@ def craft_section(report: Optional[Dict[str, Any]]) -> str:
     source = str(report.get("draft_source") or "")
     if source:
         lines.append(f"**Draft kahan se liya:** `{source}`")
+    # #130: gaane wali maang aur "kya padha gaya" — chhupana mana hai.
+    if str(spec.get("form") or "") == songcraft.SONG_FORM:
+        for line in songcraft.section_lines(report.get("songcraft")):
+            lines.append(f"- {line}")
     lines.append("")
     for check in report.get("checks") or []:
         mark = _CHECK_MARK.get(str(check.get("status")), "•")
@@ -1756,4 +1885,15 @@ def craft_limits(report: Optional[Dict[str, Any]]) -> List[str]:
         "Yahan koi audio nahi bana aur kisi maujooda gaane se milaan nahi kiya "
         "gaya — dhun par baithega ya kisi ke kaam se milta hai, dono is naap "
         "se bahar hain.")
+    if str((report.get("spec") or {}).get("form") or "") == songcraft.SONG_FORM:
+        for line in songcraft.limits():
+            if line not in limits:
+                limits.append(line)
+        block = report.get("songcraft") or {}
+        if not block.get("style_conventions_read"):
+            limits.append(
+                "Gaane ki style ka koi asli niyam kahin se padha nahi gaya "
+                f"(padhi hui source: {int(block.get('guidance_source_count') or 0)})"
+                " — isliye style-fit ka naap chala hi nahi, aur 'style match ho "
+                "gayi' kahna jhooth hoga.")
     return limits

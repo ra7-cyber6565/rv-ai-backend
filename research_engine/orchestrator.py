@@ -47,6 +47,7 @@ from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from . import lab
 from . import craft
+from . import songcraft
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -593,6 +594,28 @@ class DeepResearchEngine:
                 parts.append(str(value))
         return "\n".join(parts)
 
+    @staticmethod
+    def _songcraft_study(question: str, pack: Optional[EvidencePack]) -> Dict:
+        """
+        #130 — gaane ka "hunar" padho: jo sources mil chuke hain, unme se craft
+        ki baat CITE karke nikaalo.
+
+        Yahan koi model call nahi hoti aur koi nayi network call nahi hoti — ye
+        sirf pehle se aaye sources ko padhta hai. Andar kuch toot jaaye to
+        khaali (par imaandaar) pack lautta hai: `ran: False` ka matlab "padha
+        nahi gaya" hai, "sab theek hai" nahi.
+        """
+        try:
+            sources = list(getattr(pack, "sources", []) or []) if pack else []
+            return songcraft.study(question, sources=sources)
+        except Exception:
+            return {"ran": False, "prompt_block": "", "queries": [],
+                    "guidance_source_count": 0,
+                    "style_conventions_read": False,
+                    "gemini_calls": 0, "network_used": False,
+                    "audio_generated": songcraft.AUDIO_GENERATED,
+                    "note": "songcraft study andar ki galti se chal nahi paayi"}
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
                     job_id: Optional[str] = None,
@@ -606,6 +629,12 @@ class DeepResearchEngine:
                       (sirf CUSTOM mode, jahan user khud budget badha sakta hai)
         """
         brain = GeminiReasoning(budget=config.gemini_calls)
+        # #130 — gaane ki farmaish par "hunar kya kehta hai" wala padha hua
+        # hissa. Ye poora offline hai (0 Gemini call, koi network nahi): jo
+        # sources DISCOVERY me pehle se aa chuke hain, unhi me se craft ki
+        # baat quote hoti hai. Kuch na mile to block khaali nahi jaata — usme
+        # saaf likha hota hai ki kuch padha nahi gaya.
+        song_study = self._songcraft_study(question, pack)
         out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
                "final": "", "errors": [], "calls": 0, "critique": {},
                "hypotheses": [],
@@ -847,6 +876,12 @@ class DeepResearchEngine:
             # kehta hai, isliye ye ek line naap ko mumkin banati hai.
             if craft.detect(question).get("is_request"):
                 prompt += "\n\n" + craft.DRAFT_INSTRUCTION
+                # Gaane wali maang par style/lehja/music ki hidayat bhi jaati
+                # hai — par sirf CITED lines ke saath. Ye block khud dava nahi
+                # karta ki dhun achhi banegi; wo naapa hi nahi ja sakta.
+                block = str(song_study.get("prompt_block") or "")
+                if block:
+                    prompt += "\n\n" + block
             try:
                 text = brain.generate(prompt, "synthesis")
             except QuotaExhausted as exc:
@@ -953,7 +988,8 @@ class DeepResearchEngine:
                         return brain.generate(prompt, "craft_redraft")
                     except QuotaExhausted:
                         return ""
-            out["craft"] = craft.run_craft(question, craft_text, reviser=reviser)
+            out["craft"] = craft.run_craft(question, craft_text,
+                                           reviser=reviser, study=song_study)
             # Naya draft jeeta to jawab me bhi wahi dikhna chahiye, warna user
             # ek likhawat padhta hai aur naap doosri ki hoti hai. Yahan kuch
             # kaata nahi jaata — sirf draft wala hissa badalta hai.

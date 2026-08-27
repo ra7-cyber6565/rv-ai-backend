@@ -17,6 +17,7 @@ from typing import Callable, Dict, List, Optional
 
 from . import classics as classics_mod
 from . import concept_ledger as ledger_mod
+from . import craft as craft_mod
 from .connectors.classic_connector import langs_for_question as classic_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
@@ -28,6 +29,7 @@ from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
 from . import query_hygiene
 from .requested import parse_requests
+from . import songcraft
 from .specialist_domains import (
     build_specialist_plan,
     phrase_hit,
@@ -711,6 +713,44 @@ class ResearchPlanner:
                 market_reason = ("market series chahiye thi par koi provider "
                                  "available nahi hai (keyless bhi nahi)")
 
+        # ── gaana/likhawat ka CRAFT-STUDY lane (#129) ───────────────────────
+        # Do signal chahiye (market lane ka wahi niyam):
+        #   1. farmaish banane ki ho (craft.detect → is_request), AUR
+        #   2. wo gaane wali form ho (song), warna nibandh par bhi music ki
+        #      kitaabein dhoondhna sirf budget kharch hai.
+        #
+        # Ye lane KOI GYAAN NAHI kholti: sirf query deti hai. Style ka asli
+        # taqaza tab hi naapa jaata hai jab kisi PADHI HUI source me number
+        # mila ho (songcraft ka `style_fit_structure` isi par tika hai).
+        # `is_lyrics_hunt` guard yahin bhi lagta hai — kisi maujooda gaane ke
+        # bol dhoondhna is lane ka kaam NAHI hai (copyright).
+        craft_queries: List[str] = []
+        craft_reason = "farmaish gaane jaisi nahi lagi, isliye craft-study band"
+        craft_ask: Dict = {}
+        song_text = question or cls.get("question") or ""
+        try:
+            detection = craft_mod.detect(song_text)
+            is_song = (bool(detection.get("is_request"))
+                       and str(detection.get("form") or "")
+                       == songcraft.SONG_FORM)
+        except Exception:
+            detection, is_song = {}, False
+            craft_reason = "craft detect andar se toot gaya — lane nahi chali"
+        if is_song and songcraft.is_lyrics_hunt(song_text):
+            craft_reason = ("gaane ke BOL maange ja rahe the — wo is lane se "
+                            "nahi aate (copyright), sirf craft padha jaata hai")
+        elif is_song:
+            ask = songcraft.style_of(song_text)
+            craft_ask = ask.to_dict()
+            # Depth lane band nahi karti, chhoti karti hai — padhna hi maksad
+            # hai, aur jitna padh nahi sakte utni query maangna bekaar hai.
+            budget = 2 if int(getattr(config, "max_fulltext", 3) or 1) <= 1 else \
+                songcraft.MAX_STUDY_QUERIES
+            craft_queries = list(songcraft.study_queries(ask))[:budget]
+            craft_reason = (f"gaane ki farmaish mili — craft-study lane chali "
+                            f"({len(craft_queries)} query; style/bhasha ki maang "
+                            f"padhi gayi, gyaan nahi maana gaya)")
+
         return {
             "web": True,
             "papers": papers,
@@ -775,6 +815,18 @@ class ResearchPlanner:
                              # ne, ya pehle yaad kiya hua naam (jo evidence nahi).
                              "ledger_opened_lane": bool(lane.get("ledger_opened_lane")),
                              "ledger": dict(lane.get("ledger") or {})},
+            # Gaane ka CRAFT-STUDY lane (#129) — ye bhi search PLAN hai,
+            # evidence nahi. Isliye `style_conventions_read` yahan kabhi True
+            # nahi hota: query banana padhna nahi hai.
+            "craft_study": craft_queries,
+            "craft_study_lane": {"wanted": bool(craft_queries),
+                                 "is_song_request": bool(is_song),
+                                 "lyrics_hunt_blocked": True,
+                                 "ask": craft_ask,
+                                 "style_conventions_read": False,
+                                 "audio_generated": songcraft.AUDIO_GENERATED,
+                                 "gemini_calls": 0,
+                                 "reason": craft_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────

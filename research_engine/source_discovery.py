@@ -43,6 +43,7 @@ from .connectors import (BaseConnector, BookConnector, ClassicTextConnector,
                          PatentDiscoveryConnector, WebConnector)
 from .models import SourceRecord
 from .network_safety import public_error
+from . import songcraft
 
 
 class SourceDiscovery:
@@ -212,6 +213,63 @@ class SourceDiscovery:
                 tasks.append(("classic_summary_web",
                               self._web_chain(clean, max(1, min(2, max_web)))))
 
+        # Gaane ka CRAFT-STUDY (#129) — SIRF tab jab planner ne `craft_study`
+        # bhara ho. Ye tier "gaana likhne ka hunar" padhta hai: songwriting/
+        # prosody/music-emotion ki kitaab aur paper. Kisi MAUJOODA gaane ke bol
+        # yahan se NAHI aate — planner pehle rok chuka hota hai, aur yahan
+        # doosri deewar bhi hai (do jagah guard jaan-boojh kar).
+        #
+        # Har query ek hi lane par jaati hai (sab connectors par nahi), aur
+        # limit chhoti rehti hai: ye lane jawab ka mool sawaal nahi hai, sirf
+        # likhne ka tareeka sikhne ke liye hai — iska budget kam hi rehna
+        # chahiye warna asli sawaal ka discovery bhookha reh jaayega.
+        craft_limit = max(1, min(2, max_per_connector))
+        seen_craft = set()
+        # Craft-study apna lane KHUD maangta hai: domain routing ne books band
+        # ki hain (sawaal "gaana likho" hai, physics nahi) par gaane ka hunar
+        # asli me kitaabon me likha hai — intel ki maang bhi wahi hai. Isliye
+        # yahan facade se pehla maujood book/paper connector liya jaata hai,
+        # bhale plan ka books tier khaali ho. Ye asli sawaal ka lane nahi
+        # kholta: limit chhoti hai aur query sirf craft ki hai.
+        book_name = next((n for n in plan.get("books", [])
+                          if self.books.by_name(n)), "")
+        if not book_name:
+            book_name = next((c.name for c in getattr(self.books, "connectors",
+                                                      [])), "")
+        paper_name = next((n for n in plan.get("papers", [])
+                           if self.papers.by_name(n)), "")
+        if not paper_name:
+            paper_name = next((c.name for c in getattr(self.papers,
+                                                       "connectors", [])), "")
+        for entry in list(plan.get("craft_study", []))[
+                :songcraft.MAX_STUDY_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "web").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), "web"
+            key = clean.casefold()
+            if not clean or key in seen_craft:
+                continue
+            # Doosri deewar: bol/karaoke/mp3 wali query kabhi network par nahi
+            # jaati, chahe plan me galti se aa gayi ho.
+            if songcraft.is_lyrics_hunt(clean):
+                continue
+            seen_craft.add(key)
+            connector = None
+            if lane == "books" and book_name:
+                connector = self.books.by_name(book_name)
+            elif lane == "papers" and paper_name:
+                connector = self.papers.by_name(paper_name)
+            if connector is not None:
+                tasks.append(("craft_study_" + lane,
+                              self._single(connector, clean, craft_limit)))
+            elif plan.get("web", True):
+                # lane band ho (QUICK mode) to chup na baitho — web chain se
+                # padho, aur naam se saaf rahe ki ye craft-study thi.
+                tasks.append(("craft_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
         return tasks
 
     def discover(
@@ -229,7 +287,8 @@ class SourceDiscovery:
         plan:    {"web": bool, "papers": [names], "books": [names],
                   "datasets": [names], "patents": [names],
                   "markets": [names], "classics": [names],
-                  "classic_queries": [...], "summary_queries": [...]}
+                  "classic_queries": [...], "summary_queries": [...],
+                  "craft_study": [{"query","lane","why"}, ...]}
 
         budget_seconds: is round ki discovery ka wall-clock budget (depth config se)
         """
