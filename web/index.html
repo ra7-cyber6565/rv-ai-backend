@@ -34,6 +34,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
 .docbtns{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.dbtn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 11px;font:inherit;font-size:12.5px;cursor:pointer}.dbtn:hover{border-color:var(--brand)}.dbtn.go{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:650}.dbtn:disabled{opacity:.45;cursor:default}
 .pastebox{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;margin-top:8px;font:inherit;font-size:13px;line-height:1.5;max-height:150px}
 .pname{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;font:inherit;font-size:12.5px;flex:1;min-width:150px}
+.docsep{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
 .doclist{margin-top:9px}.doc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:12.5px;overflow-wrap:anywhere}.doc b{font-weight:650}.doc .dm{color:var(--muted);font-size:11.5px;margin-top:2px}.doc.err{border-color:#f5c6c2;background:#fdeceb;color:#8a2018}.doc.err .dm{color:#8a2018}
 @media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
@@ -72,6 +73,19 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
     <div class="docbtns" id="pasteactions" hidden><input class="pname" id="pastename" type="text" maxlength="80" placeholder="Is text ka naam (jaise: geeta-explanation)"><button type="button" class="dbtn go" id="pastesend">Ye text do</button></div>
     <input id="fileinput" type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.text,.html,.htm,.vtt,.srt">
     <div class="doclist" id="doclist"></div>
+    <div class="docsep">
+      <div class="dochead"><strong>Audio, video, YouTube aur badi kitaab</strong></div>
+      <div class="docnote" id="medianote">Ye lane server ki asli capability par khulte hain — check ho raha hai…</div>
+      <div class="docbtns">
+        <button type="button" class="dbtn" id="pickmedia" disabled>Audio/video file do (local transcribe)</button>
+        <button type="button" class="dbtn" id="yttoggle" disabled>YouTube link do (public captions)</button>
+        <button type="button" class="dbtn" id="pickbook" disabled>Badi PDF/kitaab — page-by-page padho</button>
+      </div>
+      <div class="docbtns" id="ytactions" hidden><input class="pname" id="yturl" type="text" maxlength="300" placeholder="YouTube link ya video id"><button type="button" class="dbtn go" id="ytsend">Captions lo</button></div>
+      <input id="mediainput" type="file" hidden accept=".mp3,.wav,.m4a,.ogg,.flac,.aac,.wma,.mp4,.mov,.mkv,.webm,.m4b,.opus">
+      <input id="bookinput" type="file" hidden accept=".pdf">
+      <div class="doclist" id="booklist"></div>
+    </div>
   </section>
   <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
   <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
@@ -296,6 +310,311 @@ $("#pastesend").addEventListener("click",()=>{
   pastebox.value="";pastename.value="";
   uploadMany([{blob:new Blob([text],{type:"text/plain"}),name:name}]);
 });
+// ── #120: audio / video / YouTube / badi kitaab ──────────────────────────────
+// Teen niyam yahan tay hain aur teeno screen par likhe jaate hain:
+//  1. Ye lane tabhi khulte hain jab server ki asli capability list kehti hai ki
+//     backend maujood hai. Capability na mile to lane BAND rehte hain — "shayad
+//     chal jaayega" dikhana jhooth hai.
+//  2. Video ka sirf AUDIO padha jaata hai. Koi frame, chehra, scene ya visual
+//     analysis nahi hota — aur ye baat button ke neeche likhi rehti hai.
+//  3. YouTube lane public CAPTIONS laata hai, audio transcription nahi; aur
+//     transcript milna "samajh liya" nahi hota.
+const MEDIA_EXT=[".mp3",".wav",".m4a",".ogg",".flac",".aac",".wma",".mp4",".mov",".mkv",".webm",".m4b",".opus"];
+const MAX_MEDIA_BYTES=200*1024*1024;
+const MAX_BOOK_BYTES=60*1024*1024;
+const BOOK_BATCH_PAGES=30;
+const CAPS={loaded:false,data:null,error:""};
+const NO_FRAME_NOTE="Video ka sirf audio padha jaata hai — frame, scene ya visual ka koi analysis nahi hota.";
+// Backend asli wajah `detail` mein bhejta hai — kabhi string, kabhi {message,hint}.
+// Sirf generic line dikhane se wajah gayab ho jaati hai, isliye jab asli text ho
+// to wahi jodte hain (yahan se koi URL/link nahi banti, sirf plain text).
+function detailText(data){
+  const d=(data&&typeof data==="object")?data.detail:null;
+  if(typeof d==="string")return d.trim().slice(0,400);
+  if(d&&typeof d==="object"&&!Array.isArray(d)){
+    const bits=[];
+    for(const k of ["message","hint","note","needs"]){const v=d[k];if(typeof v==="string"&&v.trim())bits.push(v.trim());}
+    return bits.join(" ").slice(0,400);
+  }
+  return "";
+}
+function needsText(bit,fallback){const n=String(bit.needs||"").trim();return (n||fallback).replace(/\.+$/,"");}
+function mediaFailure(status,data,area,aborted){
+  // Upload/ingest ke apne saaf jawab. Chat ki line ("question input mein wapas
+  // rakh diya hai") yahan jhooth hoti — koi question gaya hi nahi tha; aur 501
+  // par "retry karo" bhi jhooth hai, capability install hi nahi hai.
+  const real=detailText(data),code=Number(status||0),tail=real?" Backend ne kaha: "+real:"";
+  const wait=Math.max(0,Math.min(3600,Number((data&&data.retry_after_seconds)||0)));
+  if(aborted)return area+" ka safe wait-time khatam ho gaya. Ho sakta hai backend abhi bhi chala raha ho; chhote hisse mein dobara do."+tail;
+  if(code===400||code===422||code===501){
+    const why=code===501?"is server par ye capability install hi nahi hai, retry se nahi hogi"
+      :(code===400?"jo diya wo is lane ke liye supported nahi hai"
+                  :"di hui file/link se kaam layak content nahi nikla");
+    return area+" nahi ho saki — "+why+"."+tail;
+  }
+  if(code===429)return area+" limit abhi busy hai"+(wait?" — "+wait+" second baad dobara do.":"; thoda ruk kar dobara do.")+tail;
+  if(code===413)return area+" ke liye ye file server ki had se badi hai."+tail;
+  if(code===401||code===403||code===404)return "Private session valid nahi rahi, isliye ye "+area.toLowerCase()+" adhoori rah gayi. Page refresh karke file/link dobara do."+tail;
+  if(code===503)return "Backend ka private session/storage layer ready nahi hai, isliye ye lane abhi kaam nahi karega."+tail;
+  if(code>=500)return "Backend ne "+area.toLowerCase()+" complete nahi ki. Dobara try ho sakta hai, par pehle backend health check karo."+tail;
+  if(!code)return "Backend tak network connection nahi bana — kuch bhi upload/ingest nahi hua."+tail;
+  return area+" complete nahi hui (HTTP "+code+")."+tail;
+}
+function capBit(caps,key){const c=(caps&&typeof caps==="object")?caps[key]:null;return (c&&typeof c==="object")?c:{};}
+function mediaGate(caps){
+  const av=capBit(caps,"audio_video_transcription");
+  if(av.available===true){
+    const backend=String(av.backend||"").trim();
+    return {ok:true,why:"Local transcribe backend: "+(backend||"naam nahi bataya gaya")
+      +". Ye tumhari di hui file ka machine transcript hai — samajh (comprehension) nahi. "+NO_FRAME_NOTE};
+  }
+  return {ok:false,why:"Is server par local speech-to-text install nahi hai, isliye ye lane band hai. Chahiye: "
+    +needsText(av,"faster-whisper YA openai-whisper (free + local)")
+    +". Koi paid API ya platform download/bypass yahan use nahi hoti."};
+}
+function ytGate(caps){
+  const yt=capBit(caps,"youtube_captions");
+  if(yt.available===true)return {ok:true,why:"Ye video ke public captions hain, audio transcription nahi. Citations timestamp ke saath aayengi, aur caption milna samajh lena nahi hota."};
+  const flag=yt.enabled_flag===true,lib=yt.library_installed===true;
+  const miss=(!flag&&!lib)?"server ka ALLOW_YT_TRANSCRIPT flag band hai aur caption library bhi install nahi hai"
+    :(!flag?"caption library install hai, par server ka ALLOW_YT_TRANSCRIPT flag band hai"
+           :"flag on hai, par caption library install nahi hai");
+  return {ok:false,why:"YouTube captions lane band hai — "+miss+". Chahiye: "
+    +needsText(yt,"ALLOW_YT_TRANSCRIPT=true + youtube-transcript-api")+"."};
+}
+function bookGate(caps){
+  const pdf=capBit(caps,"pdf_text"),ocr=capBit(caps,"pdf_ocr_for_scanned_pages");
+  if(pdf.available!==true)return {ok:false,why:"PDF ka text nikaalne wali library is server par nahi hai, isliye page-by-page reading band hai. Chahiye: "+needsText(pdf,"pymupdf")+"."};
+  const scan=(ocr.available===true)?"Scan wale page ke liye OCR bhi available hai."
+    :("Scan-only page OCR ke bina unreadable rahenge — OCR is server par nahi hai (chahiye: "+needsText(ocr,"pytesseract + Tesseract binary")+").");
+  return {ok:true,why:"Kitaab ek hi baar mein poori nahi padhi jaati: "+BOOK_BATCH_PAGES
+    +" page ke bounded batch chalte hain aur tum jab chaaho aage badha sakte ho. "+scan
+    +" Text nikal jaana padh-kar-samajh lena nahi hai, aur adhoori reading kabhi \"poori kitaab padh li\" nahi kehlati."};
+}
+const media=$("#medianote"),mediainput=$("#mediainput"),bookinput=$("#bookinput"),
+      pickmedia=$("#pickmedia"),pickbook=$("#pickbook"),yttoggle=$("#yttoggle"),
+      ytactions=$("#ytactions"),yturl=$("#yturl"),booklist=$("#booklist");
+let capsPromise=null;
+async function loadCaps(){
+  if(CAPS.loaded)return CAPS;
+  if(capsPromise)return capsPromise;
+  capsPromise=(async()=>{
+    const {r,data}=await jsonFetch(API+"/api/v1/processing-capabilities",{},20000);
+    CAPS.loaded=true;
+    if(!r.ok||!data||typeof data!=="object"||Array.isArray(data)){
+      CAPS.data=null;
+      CAPS.error="Server ki capability list nahi mili (HTTP "+Number(r.status||0)
+        +"), isliye audio/video/YouTube/kitaab lane band rakhe hain. Jab tak sach pata nahi hai, band dikhana galat \"chal jaayega\" se behtar hai.";
+    }else{CAPS.data=data;CAPS.error="";}
+    return CAPS;
+  })();
+  try{return await capsPromise;}finally{capsPromise=null;}
+}
+function capsLines(caps){
+  const m=mediaGate(caps),y=ytGate(caps),b=bookGate(caps);
+  return [(m.ok?"✓":"✕")+" Audio/video: "+m.why,
+          (y.ok?"✓":"✕")+" YouTube: "+y.why,
+          (b.ok?"✓":"✕")+" Badi PDF/kitaab: "+b.why];
+}
+function applyCaps(){
+  if(IS_FILE)return;
+  if(!CAPS.loaded){media.textContent="Ye lane server ki asli capability par khulte hain — check ho raha hai…";return;}
+  if(!CAPS.data){pickmedia.disabled=true;yttoggle.disabled=true;pickbook.disabled=true;
+    media.textContent=CAPS.error;return;}
+  const m=mediaGate(CAPS.data),y=ytGate(CAPS.data),b=bookGate(CAPS.data);
+  pickmedia.disabled=!m.ok;yttoggle.disabled=!y.ok;pickbook.disabled=!b.ok;
+  if(!y.ok){ytactions.hidden=true;}
+  media.textContent=capsLines(CAPS.data).join(" ");
+}
+// Backend ka video-id parsing yahi hai (api/routes.py); client par pehle jaanch
+// lene se galat link bina request ke pakda jaata hai. Dono jagah ek hi niyam.
+function ytVideoId(raw){
+  const text=String(raw??"").trim();let id=text;
+  for(const marker of ["v=","youtu.be/","/shorts/","/embed/"]){
+    const at=text.indexOf(marker);
+    if(at>=0){id=text.slice(at+marker.length);break;}
+  }
+  id=id.split("&")[0].split("?")[0].replace(/^\/+/,"").replace(/\/+$/,"");
+  if(!id||id.length>64||!/^[A-Za-z0-9_-]+$/.test(id))return "";
+  return id;
+}
+async function projectForm(url,build,timeoutMs){
+  // Wahi discipline jo uploadDoc ki hai: FormData par Content-Type browser khud
+  // lagata hai, capability sirf header mein jaati hai (URL mein kabhi nahi), aur
+  // session ghoom jaane par ek hi baar refresh — infinite loop nahi.
+  let out={r:{ok:false,status:0},data:{},aborted:false};
+  for(let attempt=0;attempt<2;attempt++){
+    await ensureSession();
+    out=await jsonFetch(API+url,{method:"POST",headers:{"X-Project-Token":PROJECT.token},body:build(PROJECT.id)},timeoutMs);
+    if(out.r.status!==404||attempt===1)break;
+    resetProjectSession();
+  }
+  return out;
+}
+async function uploadMedia(blob,name){
+  const entry={name:name,state:"Bheja ja raha hai — local transcribe mein waqt lagta hai…",ready:false,bad:false};
+  givenDocs.push(entry);renderDocs();
+  if(!MEDIA_EXT.includes(docExt(name))){entry.bad=true;entry.state="Ye audio/video format supported nahi hai. Supported: "+MEDIA_EXT.join(", ");renderDocs();return;}
+  if(!blob.size){entry.bad=true;entry.state="File khaali hai — sunne layak kuch nahi mila.";renderDocs();return;}
+  if(blob.size>MAX_MEDIA_BYTES){entry.bad=true;entry.state="File 200 MB se badi hai; chhote hisson mein do.";renderDocs();return;}
+  try{
+    const out=await projectForm("/api/v1/transcribe-audio",id=>{
+      const fd=new FormData();fd.append("file",blob,name);fd.append("project_id",id);
+      fd.append("title",name);fd.append("lang","");return fd;},900000);
+    const {r,data}=out;
+    if(!r.ok){entry.bad=true;entry.state=mediaFailure(r.status,data,"Transcribe",out.aborted);renderDocs();return;}
+    const chunks=Number(data.chunks||0);
+    if(!chunks){entry.bad=true;entry.state="Transcribe chali par store karne layak text nahi bana. Research isko source nahi banayegi.";renderDocs();return;}
+    entry.ready=true;
+    entry.state="Tayyar — "+chunks+" timestamped chunk"
+      +(data.backend?" • local backend: "+String(data.backend):"")
+      +(data.duration_note?" • "+String(data.duration_note):"")
+      +(data.honesty_note?" • "+String(data.honesty_note):"")
+      +". "+NO_FRAME_NOTE
+      +" Machine transcript sunkar samajh lena nahi hai; answer mein ye tumhare diye document ke label ke saath aayega aur akela ye kisi baat ko VERIFIED nahi banata.";
+  }catch(e){entry.bad=true;entry.state=mediaFailure(0,{},"Transcribe",false);}
+  renderDocs();
+}
+async function ingestYt(raw){
+  const id=ytVideoId(raw);
+  const entry={name:id?("youtube:"+id):"youtube link",state:"Public captions maange ja rahe hain…",ready:false,bad:false};
+  givenDocs.push(entry);renderDocs();
+  if(!id){entry.bad=true;entry.state="Ye YouTube link/video id samajh nahi aayi. Poora link ya sirf video id do.";renderDocs();return;}
+  try{
+    const out=await projectPost("/api/v1/ingest-youtube",projectId=>({video:id,project_id:projectId,title:"youtube_"+id}),120000);
+    const {r,data}=out;
+    if(!r.ok){entry.bad=true;entry.state=mediaFailure(r.status,data,"YouTube captions",out.aborted);renderDocs();return;}
+    const chunks=Number(data.chunks||0);
+    if(!chunks){entry.bad=true;entry.state="Captions aaye par store karne layak block nahi bane. Research isko source nahi banayegi.";renderDocs();return;}
+    entry.ready=true;
+    entry.state="Tayyar — "+chunks+" timestamped block"
+      +(Number(data.cues||0)?" • "+Number(data.cues)+" caption cue":"")
+      +" • "+(String(data.honesty_note||"").trim()||"Ye video ke public captions hain, audio transcription nahi.")
+      +" "+NO_FRAME_NOTE;
+  }catch(e){entry.bad=true;entry.state=mediaFailure(0,{},"YouTube captions",false);}
+  renderDocs();
+}
+// Badi kitaab: ek baar mein poori nahi. Backend bounded batch mein page dekhta
+// hai aur har batch ke baad apni asli coverage batata hai — yahan wahi ginti
+// jaisi hai waisi dikhti hai. "Poori kitaab padh li" ka dawa app nahi karta.
+const bookRuns=[];
+function pctText(v){const n=Number(v);if(!isFinite(n)||n<0)return "pata nahi";return (Math.round(n*1000)/10)+"%";}
+function rangeText(list){
+  const rows=Array.isArray(list)?list:[],out=[];
+  for(const r of rows){
+    if(!r||typeof r!=="object")continue;
+    const a=Number(r.start||0),b=Number(r.end||0);
+    if(!a||!b)continue;
+    out.push(a===b?String(a):(a+"-"+b));
+  }
+  if(!out.length)return "";
+  return out.slice(0,8).join(", ")+(out.length>8?" (+"+(out.length-8)+" aur)":"");
+}
+function readingLine(session){
+  const st=(session&&typeof session==="object")?session:{};
+  const cov=(st.coverage&&typeof st.coverage==="object")?st.coverage:{};
+  const hon=(st.honesty&&typeof st.honesty==="object")?st.honesty:{};
+  const total=Number(cov.total_pages||0),bits=[];
+  bits.push("Status: "+(String(st.status||"").trim()||"pata nahi"));
+  const blocker=String(st.processing_blocker||"").trim();
+  if(blocker)bits.push("Ruka: "+blocker);
+  bits.push(total?("Page dekhe: "+pctText(cov.page_inspection_fraction)+" (kul "+total+" page)")
+                 :"Kul page ka pata nahi chala");
+  bits.push("Text mila: "+pctText(cov.text_available_fraction));
+  const gaps=rangeText(cov.unreadable_page_ranges);
+  if(gaps)bits.push("Padhe nahi ja sake page: "+gaps);
+  const pending=rangeText(cov.pending_translation_page_ranges);
+  if(pending)bits.push("Translation review pending page: "+pending);
+  bits.push("Dawa: "+(String(hon.completion_claim||"").trim()||"NOT_READ_YET"));
+  const next=Number(cov.next_page||0);
+  bits.push(next?("Agla batch page "+next+" se"):"Aage koi pending batch nahi");
+  return bits.join(" • ");
+}
+function bookDone(session){
+  const cov=((session&&typeof session==="object")?session.coverage:null)||{};
+  return !Number(cov.next_page||0);
+}
+function renderBooks(){
+  booklist.innerHTML=bookRuns.map((b,i)=>'<div class="doc'+(b.bad?" err":"")+'"><b>'+esc(b.name)+'</b>'
+    +'<div class="dm">'+esc(b.state)+'</div>'
+    +((b.sessionId&&!b.done&&!b.bad)?'<div class="docbtns"><button type="button" class="dbtn" data-book="'+i+'"'+(b.busy?" disabled":"")+'>Aage ke '+BOOK_BATCH_PAGES+' page padho</button></div>':"")
+    +'</div>').join("");
+}
+async function startBook(blob,name){
+  const run={name:name,sessionId:"",state:"Pehla bounded batch process ho raha hai…",bad:false,busy:true,done:false};
+  bookRuns.push(run);renderBooks();
+  try{
+    if(docExt(name)!==".pdf"){run.bad=true;run.state="Page-by-page reading abhi sirf PDF ke liye hai; dusre format 📎 wale document lane se do.";return;}
+    if(!blob.size){run.bad=true;run.state="File khaali hai — padhne layak kuch nahi mila.";return;}
+    if(blob.size>MAX_BOOK_BYTES){run.bad=true;run.state="File 60 MB se badi hai; chhote hisson mein do.";return;}
+    const out=await projectForm("/api/v1/reading-sessions/start",id=>{
+      const fd=new FormData();fd.append("file",blob,name);fd.append("project_id",id);
+      fd.append("title",name);fd.append("batch_pages",String(BOOK_BATCH_PAGES));
+      fd.append("use_ocr","true");return fd;},600000);
+    const {r,data}=out;
+    if(!r.ok){run.bad=true;run.state=mediaFailure(r.status,data,"Reading session",out.aborted);return;}
+    const s=(data&&typeof data.session==="object")?data.session:{};
+    run.sessionId=String(s.session_id||"");
+    run.done=bookDone(s);
+    run.state=readingLine(s);
+    if(!run.sessionId){run.bad=true;run.state="Session id nahi mila, isliye aage ke page nahi padhe ja sakte. "+run.state;}
+  }catch(e){run.bad=true;run.state=mediaFailure(0,{},"Reading session",false);}
+  finally{run.busy=false;renderBooks();}
+}
+async function resumeBook(index){
+  const run=bookRuns[Number(index)];
+  if(!run||run.busy||run.done||run.bad||!run.sessionId)return;
+  const before=run.state;
+  run.busy=true;run.state="Agle "+BOOK_BATCH_PAGES+" page padhe ja rahe hain…";renderBooks();
+  try{
+    const out=await projectPost("/api/v1/reading-sessions/"+encodeURIComponent(run.sessionId)+"/resume",
+      projectId=>({project_id:projectId,batch_pages:BOOK_BATCH_PAGES,use_ocr:true}),600000);
+    const {r,data}=out;
+    if(!r.ok){run.bad=true;run.state=mediaFailure(r.status,data,"Reading session",out.aborted)
+      +" Jahan tak pahunche the: "+before;return;}
+    const s=(data&&typeof data.session==="object")?data.session:{};
+    run.done=bookDone(s);run.state=readingLine(s);
+  }catch(e){run.bad=true;run.state=mediaFailure(0,{},"Reading session",false)+" Jahan tak pahunche the: "+before;}
+  finally{run.busy=false;renderBooks();}
+}
+async function mediaMany(items){
+  // Ek-ek karke: local transcribe CPU-bhaari hai, do file saath mein backend ko
+  // ragad deti hain. Wahi lock jo document upload use karta hai.
+  if(uploading||!items.length)return;
+  uploading=true;attach.disabled=true;
+  try{for(const it of items)await uploadMedia(it.blob,it.name);}
+  finally{uploading=false;attach.disabled=IS_FILE;}
+}
+pickmedia.addEventListener("click",()=>{if(!IS_FILE&&!pickmedia.disabled)mediainput.click();});
+mediainput.addEventListener("change",()=>{
+  const items=Array.from(mediainput.files||[]).map(f=>({blob:f,name:f.name||"media"}));
+  mediainput.value="";mediaMany(items);
+});
+pickbook.addEventListener("click",()=>{if(!IS_FILE&&!pickbook.disabled)bookinput.click();});
+bookinput.addEventListener("change",()=>{
+  const one=(bookinput.files||[])[0];bookinput.value="";
+  if(one)startBook(one,one.name||"book.pdf");
+});
+yttoggle.addEventListener("click",()=>{
+  if(yttoggle.disabled)return;
+  const show=ytactions.hidden;ytactions.hidden=!show;if(show)yturl.focus();
+});
+$("#ytsend").addEventListener("click",()=>{
+  const raw=yturl.value.trim();if(!raw||IS_FILE)return;
+  yturl.value="";ingestYt(raw);
+});
+booklist.addEventListener("click",e=>{
+  const t=e.target.closest("[data-book]");
+  if(!t||!booklist.contains(t))return;
+  resumeBook(t.dataset.book);
+});
+// Panel khulte waqt hi capability poochhi jaati hai — page load par nahi, taaki
+// jo user ye lane use hi nahi karta uske liye ek extra request na ho.
+attach.addEventListener("click",()=>{
+  if(docs.hidden||IS_FILE)return;
+  if(CAPS.loaded){applyCaps();return;}
+  loadCaps().then(applyCaps).catch(()=>{});
+});
 
 async function runChat(message,el){thinking(el);try{let out={r:{ok:false,status:0},data:{},aborted:false};for(let attempt=0;attempt<2;attempt++){out=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}),55000);if(out.r.ok||![0,502,503,504].includes(Number(out.r.status||0))||attempt===1)break;await sleep(1500);}const {r,data}=out;if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat",out.aborted));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
 
@@ -514,6 +833,8 @@ function resize(){input.style.height="auto";input.style.height=Math.min(180,inpu
 document.querySelectorAll(".modes button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.mode;$("#hint").textContent=HINT[mode];}));document.addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){input.value=c.dataset.q;resize();submit();}});
 if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");
   attach.disabled=true;attach.title="File:// mode mein upload available nahi hai";
+  pickmedia.disabled=true;yttoggle.disabled=true;pickbook.disabled=true;ytactions.hidden=true;
+  media.textContent="Ye page file se khula hai, isliye audio/video, YouTube aur kitaab wale lane bhi band hain. Backend server ke URL se page kholo.";
   $("#docnote").textContent="Ye page file se khula hai, isliye document dena band hai. Backend server ke URL se page kholo.";}
 input.focus();
 // Backup ka pata background mein le aao — fail ho to kuch nahi badalta.
