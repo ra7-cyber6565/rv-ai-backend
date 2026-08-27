@@ -96,6 +96,14 @@ from .depth import DepthConfig, get_depth_config, quota_note
 from .controversial_texts import install as _install_controversial_text_lane
 _install_controversial_text_lane()
 
+# Illegal/high-risk subject matter is not blanket-hidden.  Keep contextual,
+# historical, legal, defensive and harm-reduction research visible, but seal a
+# deterministic prompt/output boundary against operational wrongdoing or serious
+# harm.  This does not weaken authentication, network safety, source trust or
+# evidence gates and performs no network/model call at install time.
+from .safety_information_boundary import install as _install_safety_information_boundary
+_install_safety_information_boundary()
+
 # Stress-test hardening: long multi-domain questions get facet-wise evidence
 # axes, distinctive proposition relevance, same-proposition contradiction
 # checks, substantive section coverage, conservative hypothesis confidence and
