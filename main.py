@@ -184,7 +184,7 @@ def _runtime_safety_status() -> dict:
 
 
 def _website_html() -> str:
-    """Return the shipped client with an honest terminal-stage label.
+    """Return the shipped client with honest lifecycle and quality metrics.
 
     `COMPLETE` is an internal lifecycle stage meaning the worker stopped and a
     result is available. It is not proof that the result status is COMPLETE;
@@ -192,19 +192,40 @@ def _website_html() -> str:
     internal stage key for polling compatibility while making the user-facing
     label describe only what is actually known.
 
-    The client historically used an unquoted JavaScript object key (`COMPLETE:`)
-    while an early hardening patch expected a quoted JSON-style key. Accept both
-    forms and harmless whitespace so presentation honesty cannot silently regress
-    because the HTML formatter changes.
+    Process coverage and semantic requested-content coverage are also different
+    measurements. Inject the distinction from their structured backend fields so
+    a 90%+ process checklist can never look like a 90% truth/answer-quality score.
+    The transform is presentation-only and never changes a backend result.
     """
     with open(INDEX_HTML, "r", encoding="utf-8") as handle:
         html = handle.read()
-    return re.sub(
+    html = re.sub(
         r'''["']?COMPLETE["']?\s*:\s*["']Research complete["']''',
         '"COMPLETE":"Research run finished"',
         html,
         count=1,
     )
+
+    helper = '''function qualityMetricLines(data){
+  const out=[],ra=(data&&data.research_assurance)||{},cov=(data&&data.coverage)||{};
+  const process=Number(ra.research_process_coverage_percent);
+  if(Number.isFinite(process))out.push("Research-process coverage: "+process+"% — checklist execution; answer ki truth/quality probability nahi.");
+  const sem=(cov.structured_answer_semantic&&typeof cov.structured_answer_semantic==="object")?cov.structured_answer_semantic:{};
+  const semantic=Number(sem.semantic_coverage_percent);
+  if(Number.isFinite(semantic))out.push("Semantic requested-content coverage: "+semantic+"% — requested parts ki substantive delivery; truth probability nahi.");
+  if(out.length===2)out.push("Process % aur semantic % alag metrics hain; process score ko answer-quality/truth score mat maano.");
+  return out;
+}
+'''
+    marker = "function auditHtml(split,data){"
+    if "function qualityMetricLines(data){" not in html and marker in html:
+        html = html.replace(marker, helper + marker, 1)
+
+    anchor = '  if(Array.isArray(data.quality_repairs)&&data.quality_repairs.length)bits.push("Gate repairs: "+joinLabels(data.quality_repairs));'
+    metric_line = "  for(const metric of qualityMetricLines(data))bits.push(metric);"
+    if metric_line not in html and anchor in html:
+        html = html.replace(anchor, anchor + "\n" + metric_line, 1)
+    return html
 
 
 @app.get("/")
