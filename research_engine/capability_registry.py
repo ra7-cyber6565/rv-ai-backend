@@ -16,6 +16,7 @@ from typing import Dict, Mapping, Sequence, Tuple
 class ProofKind(str, Enum):
     CODE = "code"
     TEST = "test"
+    WIRING = "production_wiring"
     EXECUTION = "execution"
     INDEPENDENT = "independent_validation"
     PERSISTENCE = "persistence"
@@ -73,6 +74,11 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
     """Evidence classes required before a capability can be called max-level."""
     required = {ProofKind.CODE, ProofKind.TEST}
 
+    # These capabilities otherwise need only CODE+TEST evidence.  Their current
+    # implementations are standalone libraries, so they must additionally prove
+    # that a production entry point actually invokes them before being VERIFIED.
+    production_wiring = {14, 112}
+
     execution = {
         18, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
         36, 37, 38, 39, 40, 41, 66, 69, 71, 72, 73, 74, 79, 80, 86, 88, 89,
@@ -102,6 +108,8 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
         required.update({ProofKind.HARDWARE, ProofKind.SAFETY})
     if capability_id in safety_boundary:
         required.add(ProofKind.SAFETY)
+    if capability_id in production_wiring:
+        required.add(ProofKind.WIRING)
 
     return tuple(sorted(required, key=lambda item: item.value))
 

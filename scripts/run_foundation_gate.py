@@ -393,6 +393,12 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
             "benchmark_superconductivity_v2",
             [python, benchmark.relative_to(REPO_ROOT).as_posix()],
         ))
+    dark_matter = REPO_ROOT / "tests" / "benchmark_dark_matter_acceptance.py"
+    if dark_matter.is_file():
+        plan.append((
+            "benchmark_dark_matter_acceptance",
+            [python, dark_matter.relative_to(REPO_ROOT).as_posix()],
+        ))
     return plan
 
 

@@ -57,6 +57,7 @@ _REQUIRED_STAGES: Tuple[str, ...] = (
     "architecture_audit",
     "benchmark_cross_domain",
     "benchmark_superconductivity_v2",
+    "benchmark_dark_matter_acceptance",
 )
 _FILE_PROOFS = {ProofKind.CODE, ProofKind.TEST}
 
@@ -191,6 +192,7 @@ def _validate_required_stage_commands(commands: Mapping[str, Sequence[str]]) -> 
         "architecture_audit": ("scripts/audit_architecture.py",),
         "benchmark_cross_domain": ("tests/benchmark_cross_domain.py",),
         "benchmark_superconductivity_v2": ("tests/benchmark_superconductivity.py",),
+        "benchmark_dark_matter_acceptance": ("tests/benchmark_dark_matter_acceptance.py",),
     }
     for name, suffix in exact_suffixes.items():
         _require_suffix(commands[name], suffix, name)

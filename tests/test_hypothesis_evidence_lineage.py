@@ -147,6 +147,7 @@ def test_enrich_caps_confidence_and_serializes_lineage_on_failed_mechanism():
     assert payload["mechanism_evidence_lineage"]["undisclosed_or_failed_steps"] >= 1
     warnings = engine.honesty_check(rows)
     assert any("evidence-lineage fail" in warning for warning in warnings)
+    assert all("[NO-SOURCE]" not in warning for warning in warnings)
 
 
 def test_disclosed_unsupported_mechanism_cannot_keep_moderate_confidence():

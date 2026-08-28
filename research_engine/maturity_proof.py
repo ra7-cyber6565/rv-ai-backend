@@ -52,6 +52,7 @@ _HMAC_CHAIN = "hmac-sha256"
 _LIVE_PROOFS = {ProofKind.RUNTIME, ProofKind.LIVE}
 _FILE_HASH_PROOFS = {ProofKind.CODE, ProofKind.TEST}
 _REVISION_BOUND_PROOFS = {
+    ProofKind.WIRING,
     ProofKind.EXECUTION,
     ProofKind.INDEPENDENT,
     ProofKind.PERSISTENCE,

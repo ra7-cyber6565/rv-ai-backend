@@ -78,6 +78,32 @@ def test_changed_code_hash_invalidates_stale_code_proof(tmp_path):
     assert status.active_receipts == 1
 
 
+def test_code_and_unit_tests_cannot_verify_disconnected_capability(tmp_path):
+    ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
+    code_sha = _sha(b"formal-logic")
+    test_sha = _sha(b"formal-logic-tests")
+    ledger.add(
+        receipt_id="cap14-code", capability_id=14, proof_kind=ProofKind.CODE,
+        subject="research_engine/formal_logic.py", subject_sha256=code_sha,
+        verifier="ci", observed_at=100.0, reference="run:1",
+    )
+    ledger.add(
+        receipt_id="cap14-test", capability_id=14, proof_kind=ProofKind.TEST,
+        subject="tests/test_formal_logic.py", subject_sha256=test_sha,
+        verifier="ci", observed_at=100.0, reference="run:1",
+    )
+    report, _ = ledger.maturity_report(
+        current_hashes={
+            "research_engine/formal_logic.py": code_sha,
+            "tests/test_formal_logic.py": test_sha,
+        },
+        now=110.0,
+    )
+    capability = report.results[13]
+    assert capability.status == "INCOMPLETE"
+    assert capability.missing_proofs == (ProofKind.WIRING,)
+
+
 def test_missing_current_file_hash_also_makes_code_test_proof_stale(tmp_path):
     ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
     _add_basic_code_and_test(ledger)

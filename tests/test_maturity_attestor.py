@@ -106,6 +106,10 @@ def _receipt_value(root, revision, *, created=9_900, passed=True):
             "benchmark_superconductivity_v2",
             [py, "tests/benchmark_superconductivity.py"],
         ),
+        _stage(
+            "benchmark_dark_matter_acceptance",
+            [py, "tests/benchmark_dark_matter_acceptance.py"],
+        ),
     ]
     return {
         "schema_version": 2,

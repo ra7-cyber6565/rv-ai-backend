@@ -282,6 +282,15 @@ def test_nonfinite_inputs_and_invalid_policy_fail_closed(tmp_path):
             observed_at_epoch=1100,
         )
 
+    with pytest.raises(ValueError, match=r"observed_metrics\[accuracy\] must be finite"):
+        validator.observe_batch(
+            "model-v1",
+            "batch-2",
+            feature_samples=_stable_features(),
+            observed_at_epoch=1200,
+            observed_metrics={"accuracy": float("inf")},
+        )
+
 
 def test_persistence_roundtrip_preserves_state_and_history(tmp_path):
     validator = _validator(tmp_path)
