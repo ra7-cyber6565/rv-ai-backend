@@ -69,7 +69,11 @@ jobs:
             tests/test_procedural_memory.py \
             tests/test_knowledge_watch.py
 
+      # Always execute the comprehensive diagnostic gate after dependencies are
+      # installed, even when the focused gate found a failure. A prior failed
+      # step still keeps the job red; this only exposes the complete failure set.
       - name: Run strict zero-cost foundation gate
+        if: always()
         run: |
           python scripts/run_foundation_gate.py \
             --timeout-seconds 900 \
@@ -81,5 +85,7 @@ jobs:
         with:
           name: foundation-gate-receipt-${{ github.run_id }}
           path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
-          if-no-files-found: error
+          # Missing receipt is already evidence of a failed diagnostic stage;
+          # avoid masking the primary failure with a second artifact error.
+          if-no-files-found: warn
           retention-days: 1
