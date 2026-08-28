@@ -1,10 +1,17 @@
 """Persistent tamper-evident proof ledger for the 142-capability maturity gate.
 
-A capability name, source file or passing screenshot is not enough.  This ledger
-stores explicit proof receipts in a hash chain, supports revocation/expiry, and
-invalidates CODE/TEST receipts when the current file hash changes.  Only active
-receipts are translated into ``CapabilityEvidence`` for the fail-closed
-``capability_registry``.
+A capability name, source file, screenshot, or historical green run is not enough.
+The ledger stores explicit proof receipts in a hash chain, supports revocation and
+expiry, invalidates CODE/TEST receipts when their current file hash changes, and
+binds every non-file verification proof to the exact implementation revision it
+observed. A changed implementation therefore cannot inherit stale execution,
+reproducibility, safety, independence, persistence, runtime, live, or hardware
+proof from an older revision.
+
+Only active, current receipts are translated into ``CapabilityEvidence`` for the
+fail-closed ``capability_registry``. The resulting maturity percentage is proof
+completion only; it is never a truth, safety, profitability, or real-world
+success probability.
 """
 from __future__ import annotations
 
@@ -32,6 +39,19 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,200}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _SCHEMA_VERSION = 1
 _LIVE_PROOFS = {ProofKind.RUNTIME, ProofKind.LIVE}
+_FILE_HASH_PROOFS = {ProofKind.CODE, ProofKind.TEST}
+# These proofs describe observed behaviour/operation of an implementation. If
+# code/release revision changes, the old observation cannot verify the new one.
+_REVISION_BOUND_PROOFS = {
+    ProofKind.EXECUTION,
+    ProofKind.INDEPENDENT,
+    ProofKind.PERSISTENCE,
+    ProofKind.RUNTIME,
+    ProofKind.LIVE,
+    ProofKind.HARDWARE,
+    ProofKind.SAFETY,
+    ProofKind.REPRODUCIBILITY,
+}
 
 
 def _canonical(value: Any) -> bytes:
@@ -62,6 +82,17 @@ def _safe_sha(value: str) -> str:
     return text
 
 
+def _safe_revision(value: str, *, required: bool) -> str:
+    text = str(value or "").strip()
+    if not text:
+        if required:
+            raise ValueError("implementation_revision is required for this proof kind")
+        return ""
+    if not _ID_RE.fullmatch(text):
+        raise ValueError("implementation_revision is invalid")
+    return text
+
+
 @dataclass(frozen=True)
 class ProofReceipt:
     receipt_id: str
@@ -73,6 +104,7 @@ class ProofReceipt:
     observed_at: float
     valid_until: Optional[float]
     reference: str
+    implementation_revision: str
     sequence: int
     event_hash: str
 
@@ -84,6 +116,7 @@ class ProofLedgerStatus:
     revoked_receipts: int
     expired_receipts: int
     stale_file_receipts: int
+    stale_revision_receipts: int
     ledger_head_hash: str
 
 
@@ -119,8 +152,6 @@ class ProofLedger:
                     f"pid={os.getpid()} time={time.time()}".encode("ascii", "replace"),
                 )
             except FileExistsError:
-                # Operations are tiny. A very old lock is treated as a crashed
-                # writer; a current lock is never stolen before the timeout.
                 try:
                     age = time.time() - os.path.getmtime(self.lock_path)
                 except OSError:
@@ -228,6 +259,7 @@ class ProofLedger:
         observed_at: float,
         reference: str = "",
         valid_until: Optional[float] = None,
+        implementation_revision: str = "",
     ) -> ProofReceipt:
         receipt_id = _safe_id(receipt_id, "receipt_id")
         verifier = _safe_id(verifier, "verifier")
@@ -251,6 +283,10 @@ class ProofLedger:
             raise ValueError("valid_until must be finite and after observed_at")
         if kind in _LIVE_PROOFS and expiry is None:
             raise ValueError("runtime/live proof must have valid_until")
+        revision = _safe_revision(
+            implementation_revision,
+            required=(kind in _REVISION_BOUND_PROOFS),
+        )
         reference = str(reference or "").strip()[:2_000]
 
         events = self._events()
@@ -272,6 +308,7 @@ class ProofLedger:
             "observed_at": observation_time,
             "valid_until": expiry,
             "reference": reference,
+            "implementation_revision": revision,
         })
         return ProofReceipt(
             receipt_id=receipt_id,
@@ -283,6 +320,7 @@ class ProofLedger:
             observed_at=observation_time,
             valid_until=expiry,
             reference=reference,
+            implementation_revision=revision,
             sequence=int(row["sequence"]),
             event_hash=str(row["event_hash"]),
         )
@@ -317,10 +355,12 @@ class ProofLedger:
         *,
         current_hashes: Mapping[str, str],
         now: float,
+        current_revision: str = "",
     ) -> Tuple[list[Dict[str, Any]], ProofLedgerStatus]:
         current_time = float(now)
         if not math.isfinite(current_time):
             raise ValueError("now must be finite")
+        revision = _safe_revision(current_revision, required=False)
         events = self._events()
         if not self._verify_events(events):
             raise ValueError("proof ledger integrity failure")
@@ -332,7 +372,8 @@ class ProofLedger:
         }
         active = []
         expired_count = 0
-        stale_count = 0
+        stale_file_count = 0
+        stale_revision_count = 0
         for row in events:
             if row.get("event_type") != "ADD":
                 continue
@@ -343,13 +384,22 @@ class ProofLedger:
                 expired_count += 1
                 continue
             kind = ProofKind(str(row["proof_kind"]))
-            if kind in {ProofKind.CODE, ProofKind.TEST}:
+            if kind in _FILE_HASH_PROOFS:
                 current_digest = str(current_hashes.get(str(row["subject"]), "")).lower()
                 if not _SHA_RE.fullmatch(current_digest) or not hmac.compare_digest(
                     current_digest,
                     str(row["subject_sha256"]),
                 ):
-                    stale_count += 1
+                    stale_file_count += 1
+                    continue
+            if kind in _REVISION_BOUND_PROOFS:
+                receipt_revision = str(row.get("implementation_revision") or "").strip()
+                if (
+                    not revision
+                    or not receipt_revision
+                    or not hmac.compare_digest(revision, receipt_revision)
+                ):
+                    stale_revision_count += 1
                     continue
             active.append(row)
 
@@ -359,7 +409,8 @@ class ProofLedger:
             active_receipts=len(active),
             revoked_receipts=len(revoked),
             expired_receipts=expired_count,
-            stale_file_receipts=stale_count,
+            stale_file_receipts=stale_file_count,
+            stale_revision_receipts=stale_revision_count,
             ledger_head_hash=head,
         )
 
@@ -368,14 +419,21 @@ class ProofLedger:
         *,
         current_hashes: Mapping[str, str],
         now: float,
+        current_revision: str = "",
     ) -> Tuple[Mapping[int, CapabilityEvidence], ProofLedgerStatus]:
-        rows, status = self._active_rows(current_hashes=current_hashes, now=now)
+        rows, status = self._active_rows(
+            current_hashes=current_hashes,
+            now=now,
+            current_revision=current_revision,
+        )
         grouped: Dict[int, Dict[ProofKind, list[str]]] = {}
         for row in rows:
             capability_id = int(row["capability_id"])
             kind = ProofKind(str(row["proof_kind"]))
+            revision = str(row.get("implementation_revision") or "")
             label = (
                 f"{row['subject']}@sha256:{row['subject_sha256']}"
+                + (f"@rev:{revision}" if revision else "")
                 + (f"#{row['reference']}" if row.get("reference") else "")
             )
             grouped.setdefault(capability_id, {}).setdefault(kind, []).append(label)
@@ -396,6 +454,11 @@ class ProofLedger:
         *,
         current_hashes: Mapping[str, str],
         now: float,
+        current_revision: str = "",
     ) -> Tuple[MaturityReport, ProofLedgerStatus]:
-        evidence, status = self.evidence(current_hashes=current_hashes, now=now)
+        evidence, status = self.evidence(
+            current_hashes=current_hashes,
+            now=now,
+            current_revision=current_revision,
+        )
         return assess_capabilities(evidence), status
