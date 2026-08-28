@@ -1,15 +1,14 @@
-"""Bayesian experiment selection for discriminating hypotheses.
+"""Bayesian experiment selection for discriminating competing hypotheses.
 
-This module answers a narrower question than the hypothesis generator: given a
-set of explicit competing hypotheses, explicit prior weights, and explicit
-outcome likelihoods for candidate experiments, which experiment is expected to
-separate the hypotheses most, which acceptable experiment is cheapest, and how
-should belief weights update after an observed outcome?
+Inputs are explicit assumptions: prior weights and per-hypothesis outcome
+likelihoods. They are never silently treated as measured truth. The engine
+computes expected information gain, pairwise separation, resource-aware utility,
+minimum-cost choices, posterior updates, and explicit stopping rules.
 
-The probability inputs are model assumptions, not measured truth. Expected
-information gain is therefore a planning score, not a probability that a
-hypothesis is correct. Real-world safety/ethics approval remains external; an
-experiment marked ``REVIEW_REQUIRED`` or ``BLOCKED`` is excluded by default.
+Safety is fail-closed for experiment *selection*: BLOCKED, REVIEW_REQUIRED, or
+infeasible experiments never become the default recommendation. A posterior
+update only consumes an already supplied outcome; it does not authorize or run
+an experiment. Every planning/result object keeps truth/proof claims false.
 """
 from __future__ import annotations
 
@@ -54,7 +53,7 @@ def _entropy_bits(probabilities: Sequence[float]) -> float:
 
 
 def _normalize_priors(priors: Mapping[str, float]) -> Dict[str, float]:
-    if len(priors) < 2:
+    if not isinstance(priors, Mapping) or len(priors) < 2:
         raise ValueError("at least two competing hypotheses are required")
     clean: Dict[str, float] = {}
     for hypothesis_id, value in priors.items():
@@ -71,11 +70,18 @@ def _normalize_priors(priors: Mapping[str, float]) -> Dict[str, float]:
     if total <= 0:
         raise ValueError("at least one prior weight must be positive")
     normalized = {hid: value / total for hid, value in clean.items()}
-    # A zero prior can never recover under ordinary Bayes. Require explicit
-    # non-zero support for every hypothesis that the planner is asked to compare.
+    # A zero prior can never recover under ordinary Bayes. If a hypothesis is
+    # still in the competition, require explicit non-zero support.
     if any(value <= 0 for value in normalized.values()):
         raise ValueError("every competing hypothesis must have positive prior support")
     return normalized
+
+
+def _clean_experiment_id(value: str) -> str:
+    experiment_id = str(value or "").strip()
+    if not experiment_id or len(experiment_id) > 200:
+        raise ValueError("experiment_id is required and bounded")
+    return experiment_id
 
 
 @dataclass(frozen=True)
@@ -91,9 +97,7 @@ class ExperimentDesign:
     notes: str = ""
 
     def validate(self, hypothesis_ids: Sequence[str]) -> Tuple[str, ...]:
-        eid = str(self.experiment_id or "").strip()
-        if not eid or len(eid) > 200:
-            raise ValueError("experiment_id is required and bounded")
+        _clean_experiment_id(self.experiment_id)
         cost = _finite(self.monetary_cost, "monetary_cost")
         duration = _finite(self.duration_hours, "duration_hours")
         risk = _finite(self.operational_risk, "operational_risk")
@@ -104,10 +108,15 @@ class ExperimentDesign:
         safety = str(self.safety_status or "").strip().upper()
         if safety not in _SAFETY_STATES:
             raise ValueError("unsupported safety_status")
+        if len(str(self.measurement or "")) > 4_000 or len(str(self.notes or "")) > 8_000:
+            raise ValueError("experiment text fields must be bounded")
 
         expected_hypotheses = set(hypothesis_ids)
+        if not isinstance(self.outcome_likelihoods, Mapping):
+            raise ValueError("outcome_likelihoods must be a mapping")
         if set(self.outcome_likelihoods) != expected_hypotheses:
             raise ValueError("likelihood table must contain every hypothesis exactly once")
+
         outcome_sets = []
         for hid in hypothesis_ids:
             row = self.outcome_likelihoods[hid]
@@ -116,6 +125,8 @@ class ExperimentDesign:
             cleaned_outcomes = {str(outcome or "").strip() for outcome in row}
             if "" in cleaned_outcomes or len(cleaned_outcomes) != len(row):
                 raise ValueError("outcome labels must be unique and non-empty")
+            if any(len(outcome) > 200 for outcome in cleaned_outcomes):
+                raise ValueError("outcome labels must be bounded")
             total = 0.0
             for outcome, value in row.items():
                 probability = _finite(value, f"likelihood.{hid}.{outcome}")
@@ -170,6 +181,21 @@ class ExperimentRecommendation:
     real_world_approval_implied: bool = False
 
 
+@dataclass(frozen=True)
+class PosteriorUpdateReceipt:
+    experiment_id: str
+    observed_outcome: str
+    prior: Mapping[str, float]
+    posterior: Mapping[str, float]
+    predictive_probability: float
+    prior_entropy_bits: float
+    posterior_entropy_bits: float
+    assumptions_hash: str
+    update_hash: str
+    truth_proven: bool = False
+    experiment_executed_by_this_function: bool = False
+
+
 def _pairwise_separation(
     experiment: ExperimentDesign,
     hypothesis_ids: Sequence[str],
@@ -179,9 +205,7 @@ def _pairwise_separation(
     separations = []
     weights = []
     for index, left in enumerate(hypothesis_ids):
-        for right in hypothesis_ids[index + 1:]:
-            # Total variation distance.  0 = indistinguishable outcome models,
-            # 1 = perfectly separating models.
+        for right in hypothesis_ids[index + 1 :]:
             distance = 0.5 * sum(
                 abs(
                     float(experiment.outcome_likelihoods[left][outcome])
@@ -192,11 +216,11 @@ def _pairwise_separation(
             separations.append(distance)
             weights.append(priors[left] * priors[right])
     weakest = min(separations) if separations else 0.0
-    weighted_total = sum(weights)
+    total_weight = sum(weights)
     mean = (
         sum(distance * weight for distance, weight in zip(separations, weights))
-        / weighted_total
-        if weighted_total > 0
+        / total_weight
+        if total_weight > 0
         else 0.0
     )
     return weakest, mean
@@ -210,7 +234,6 @@ def score_experiment(
     risk_cost: float = 0.0,
     allow_review_required: bool = False,
 ) -> ExperimentScore:
-    """Calculate expected information gain and separation for one design."""
     normalized = _normalize_priors(priors)
     hypothesis_ids = tuple(sorted(normalized))
     outcomes = experiment.validate(hypothesis_ids)
@@ -228,6 +251,9 @@ def score_experiment(
             for hid in hypothesis_ids
         )
         if predictive <= _EPS:
+            # Impossible outcome contributes zero expected entropy. Keep a
+            # neutral posterior in the planning table only; observing it later
+            # is a hard error in update_posterior_with_receipt().
             posterior = dict(normalized)
             entropy = prior_entropy
             predictive = 0.0
@@ -242,17 +268,17 @@ def score_experiment(
             }
             entropy = _entropy_bits(tuple(posterior.values()))
             expected_entropy += predictive * entropy
-        posterior_rows.append(OutcomePosterior(
-            outcome=outcome,
-            predictive_probability=predictive,
-            posterior=posterior,
-            entropy_bits=entropy,
-        ))
+        posterior_rows.append(
+            OutcomePosterior(
+                outcome=outcome,
+                predictive_probability=predictive,
+                posterior=posterior,
+                entropy_bits=entropy,
+            )
+        )
 
     information_gain = max(0.0, prior_entropy - expected_entropy)
-    normalized_gain = (
-        information_gain / prior_entropy if prior_entropy > _EPS else 0.0
-    )
+    normalized_gain = information_gain / prior_entropy if prior_entropy > _EPS else 0.0
     weakest, mean = _pairwise_separation(
         experiment, hypothesis_ids, outcomes, normalized
     )
@@ -260,29 +286,31 @@ def score_experiment(
     duration = float(experiment.duration_hours)
     risk = float(experiment.operational_risk)
     effective_cost = cost + duration * duration_weight + risk * risk_weight
-    # Zero-cost computational experiments are allowed. Avoid an artificial
-    # infinity while still ranking positive information above zero information.
     cost_efficiency = information_gain / max(effective_cost, 1e-9)
     utility = information_gain * (0.5 + 0.5 * mean) / max(effective_cost, 1e-9)
     safety = str(experiment.safety_status).strip().upper()
     safety_eligible = safety == "APPROVED" or (
         allow_review_required and safety == "REVIEW_REQUIRED"
     )
-    eligible = bool(experiment.feasible and safety_eligible and safety != "BLOCKED")
-    assumptions_hash = _canonical_hash({
-        "priors": normalized,
-        "experiment_id": experiment.experiment_id,
-        "likelihoods": experiment.outcome_likelihoods,
-        "cost": cost,
-        "duration": duration,
-        "risk": risk,
-        "safety": safety,
-        "feasible": bool(experiment.feasible),
-        "duration_cost_per_hour": duration_weight,
-        "risk_cost": risk_weight,
-    })
+    eligible = bool(
+        experiment.feasible and safety_eligible and safety != "BLOCKED"
+    )
+    assumptions_hash = _canonical_hash(
+        {
+            "priors": normalized,
+            "experiment_id": _clean_experiment_id(experiment.experiment_id),
+            "likelihoods": experiment.outcome_likelihoods,
+            "cost": cost,
+            "duration": duration,
+            "risk": risk,
+            "safety": safety,
+            "feasible": bool(experiment.feasible),
+            "duration_cost_per_hour": duration_weight,
+            "risk_cost": risk_weight,
+        }
+    )
     return ExperimentScore(
-        experiment_id=experiment.experiment_id,
+        experiment_id=_clean_experiment_id(experiment.experiment_id),
         prior_entropy_bits=prior_entropy,
         expected_posterior_entropy_bits=expected_entropy,
         information_gain_bits=information_gain,
@@ -312,7 +340,8 @@ def rank_discriminating_experiments(
 ) -> Tuple[ExperimentScore, ...]:
     if not experiments:
         raise ValueError("at least one experiment is required")
-    if len({experiment.experiment_id for experiment in experiments}) != len(experiments):
+    normalized_ids = [_clean_experiment_id(item.experiment_id) for item in experiments]
+    if len(normalized_ids) != len(set(normalized_ids)):
         raise ValueError("experiment ids must be unique")
     scores = [
         score_experiment(
@@ -324,18 +353,17 @@ def rank_discriminating_experiments(
         )
         for experiment in experiments
     ]
-    # Ineligible experiments remain visible for audit, but never outrank an
-    # eligible design.  The primary objective is actual discrimination, then
-    # weakest-pair coverage, then lower cost/risk/time.
-    scores.sort(key=lambda score: (
-        not score.eligible,
-        -score.information_gain_bits,
-        -score.weakest_pair_separation,
-        score.monetary_cost,
-        score.operational_risk,
-        score.duration_hours,
-        score.experiment_id,
-    ))
+    scores.sort(
+        key=lambda score: (
+            not score.eligible,
+            -score.information_gain_bits,
+            -score.weakest_pair_separation,
+            score.monetary_cost,
+            score.operational_risk,
+            score.duration_hours,
+            score.experiment_id,
+        )
+    )
     return tuple(scores)
 
 
@@ -360,28 +388,39 @@ def choose_discriminating_experiment(
         duration_cost_per_hour=duration_cost_per_hour,
         risk_cost=risk_cost,
     )
+
+    accepted = []
     rejected = []
     for score in ranked:
-        reason = None
         if not score.eligible:
-            reason = f"ineligible:{score.safety_status}"
+            rejected.append((score.experiment_id, f"ineligible:{score.safety_status}"))
         elif score.information_gain_bits + _EPS < minimum_gain:
-            reason = "insufficient_information_gain"
+            rejected.append((score.experiment_id, "insufficient_information_gain"))
         elif score.weakest_pair_separation + _EPS < minimum_separation:
-            reason = "weakest_hypothesis_pair_not_separated"
-        if reason:
-            rejected.append((score.experiment_id, reason))
-            continue
-        return ExperimentRecommendation(
-            experiment_id=score.experiment_id,
-            reason=(
-                "highest expected information gain among eligible designs while "
-                "meeting the requested discrimination thresholds"
-            ),
-            score=score,
-            rejected=tuple(rejected),
-        )
-    raise ValueError("no eligible experiment meets the discrimination thresholds")
+            rejected.append(
+                (score.experiment_id, "weakest_hypothesis_pair_not_separated")
+            )
+        else:
+            accepted.append(score)
+    if not accepted:
+        raise ValueError("no eligible experiment meets the discrimination thresholds")
+
+    # ranked already expresses the discrimination objective. Keep a complete
+    # audit trail instead of early-returning before later ineligible rows are seen.
+    winner = accepted[0]
+    rejected.extend(
+        (score.experiment_id, "lower_discrimination_rank")
+        for score in accepted[1:]
+    )
+    return ExperimentRecommendation(
+        experiment_id=winner.experiment_id,
+        reason=(
+            "highest expected information gain among eligible designs while "
+            "meeting the requested discrimination thresholds"
+        ),
+        score=winner,
+        rejected=tuple(sorted(rejected)),
+    )
 
 
 def choose_minimum_cost_experiment(
@@ -393,14 +432,14 @@ def choose_minimum_cost_experiment(
     max_operational_risk: float = 1.0,
     max_duration_hours: Optional[float] = None,
 ) -> ExperimentRecommendation:
-    """Choose the cheapest eligible design that clears scientific constraints."""
     minimum_gain = _finite(min_information_gain_bits, "min_information_gain_bits")
     minimum_separation = _finite(
         min_weakest_pair_separation, "min_weakest_pair_separation"
     )
     maximum_risk = _finite(max_operational_risk, "max_operational_risk")
     maximum_duration = (
-        None if max_duration_hours is None
+        None
+        if max_duration_hours is None
         else _finite(max_duration_hours, "max_duration_hours")
     )
     if minimum_gain < 0 or not 0 <= minimum_separation <= 1:
@@ -414,31 +453,37 @@ def choose_minimum_cost_experiment(
     accepted = []
     rejected = []
     for score in scores:
-        reason = None
         if not score.eligible:
-            reason = f"ineligible:{score.safety_status}"
+            rejected.append((score.experiment_id, f"ineligible:{score.safety_status}"))
         elif score.information_gain_bits + _EPS < minimum_gain:
-            reason = "insufficient_information_gain"
+            rejected.append((score.experiment_id, "insufficient_information_gain"))
         elif score.weakest_pair_separation + _EPS < minimum_separation:
-            reason = "insufficient_pair_separation"
+            rejected.append((score.experiment_id, "insufficient_pair_separation"))
         elif score.operational_risk > maximum_risk + _EPS:
-            reason = "risk_limit_exceeded"
-        elif maximum_duration is not None and score.duration_hours > maximum_duration + _EPS:
-            reason = "duration_limit_exceeded"
-        if reason:
-            rejected.append((score.experiment_id, reason))
+            rejected.append((score.experiment_id, "risk_limit_exceeded"))
+        elif (
+            maximum_duration is not None
+            and score.duration_hours > maximum_duration + _EPS
+        ):
+            rejected.append((score.experiment_id, "duration_limit_exceeded"))
         else:
             accepted.append(score)
     if not accepted:
         raise ValueError("no eligible experiment satisfies cost-plan constraints")
-    accepted.sort(key=lambda score: (
-        score.monetary_cost,
-        score.duration_hours,
-        score.operational_risk,
-        -score.information_gain_bits,
-        score.experiment_id,
-    ))
+    accepted.sort(
+        key=lambda score: (
+            score.monetary_cost,
+            score.duration_hours,
+            score.operational_risk,
+            -score.information_gain_bits,
+            score.experiment_id,
+        )
+    )
     winner = accepted[0]
+    rejected.extend(
+        (score.experiment_id, "higher_cost_than_selected_design")
+        for score in accepted[1:]
+    )
     return ExperimentRecommendation(
         experiment_id=winner.experiment_id,
         reason=(
@@ -458,7 +503,6 @@ def choose_active_learning_step(
     risk_cost: float = 0.0,
     min_information_gain_bits: float = 1e-6,
 ) -> ExperimentRecommendation:
-    """Choose the best information-per-resource next measurement."""
     minimum_gain = _finite(min_information_gain_bits, "min_information_gain_bits")
     if minimum_gain < 0:
         raise ValueError("min_information_gain_bits cannot be negative")
@@ -469,24 +513,37 @@ def choose_active_learning_step(
         risk_cost=risk_cost,
     )
     eligible = [
-        score for score in scores
+        score
+        for score in scores
         if score.eligible and score.information_gain_bits + _EPS >= minimum_gain
     ]
     if not eligible:
         raise ValueError("no eligible informative experiment exists")
-    eligible.sort(key=lambda score: (
-        -score.utility,
-        -score.information_gain_bits,
-        score.monetary_cost,
-        score.duration_hours,
-        score.operational_risk,
-        score.experiment_id,
-    ))
-    winner = eligible[0]
-    rejected = tuple(
-        (score.experiment_id, "lower_active_learning_utility")
-        for score in scores if score.experiment_id != winner.experiment_id
+    eligible.sort(
+        key=lambda score: (
+            -score.utility,
+            -score.information_gain_bits,
+            score.monetary_cost,
+            score.duration_hours,
+            score.operational_risk,
+            score.experiment_id,
+        )
     )
+    winner = eligible[0]
+    rejected = []
+    eligible_ids = {score.experiment_id for score in eligible}
+    for score in scores:
+        if score.experiment_id == winner.experiment_id:
+            continue
+        if not score.eligible:
+            reason = f"ineligible:{score.safety_status}"
+        elif score.information_gain_bits + _EPS < minimum_gain:
+            reason = "insufficient_information_gain"
+        elif score.experiment_id in eligible_ids:
+            reason = "lower_active_learning_utility"
+        else:  # defensive; all rows should hit one branch above
+            reason = "not_selected"
+        rejected.append((score.experiment_id, reason))
     return ExperimentRecommendation(
         experiment_id=winner.experiment_id,
         reason=(
@@ -494,16 +551,15 @@ def choose_active_learning_step(
             "eligible experiments"
         ),
         score=winner,
-        rejected=rejected,
+        rejected=tuple(sorted(rejected)),
     )
 
 
-def update_posterior(
+def update_posterior_with_receipt(
     priors: Mapping[str, float],
     experiment: ExperimentDesign,
     observed_outcome: str,
-) -> Mapping[str, float]:
-    """Bayesian active-learning update after a real/simulated outcome is supplied."""
+) -> PosteriorUpdateReceipt:
     normalized = _normalize_priors(priors)
     hypothesis_ids = tuple(sorted(normalized))
     outcomes = experiment.validate(hypothesis_ids)
@@ -524,9 +580,44 @@ def update_posterior(
         )
         for hid in hypothesis_ids
     }
-    # Normalize once more to absorb floating-point drift.
     total = sum(posterior.values())
-    return {hid: value / total for hid, value in posterior.items()}
+    posterior = {hid: value / total for hid, value in posterior.items()}
+    assumption_payload = {
+        "priors": normalized,
+        "experiment_id": _clean_experiment_id(experiment.experiment_id),
+        "likelihoods": experiment.outcome_likelihoods,
+    }
+    assumptions_hash = _canonical_hash(assumption_payload)
+    update_hash = _canonical_hash(
+        {
+            "assumptions_hash": assumptions_hash,
+            "observed_outcome": outcome,
+            "predictive_probability": predictive,
+            "posterior": posterior,
+        }
+    )
+    return PosteriorUpdateReceipt(
+        experiment_id=_clean_experiment_id(experiment.experiment_id),
+        observed_outcome=outcome,
+        prior=normalized,
+        posterior=posterior,
+        predictive_probability=predictive,
+        prior_entropy_bits=_entropy_bits(tuple(normalized.values())),
+        posterior_entropy_bits=_entropy_bits(tuple(posterior.values())),
+        assumptions_hash=assumptions_hash,
+        update_hash=update_hash,
+    )
+
+
+def update_posterior(
+    priors: Mapping[str, float],
+    experiment: ExperimentDesign,
+    observed_outcome: str,
+) -> Mapping[str, float]:
+    """Backward-compatible posterior mapping plus strict receipt path above."""
+    return update_posterior_with_receipt(
+        priors, experiment, observed_outcome
+    ).posterior
 
 
 def stop_active_learning(
@@ -536,7 +627,6 @@ def stop_active_learning(
     posterior_dominance: float = 0.95,
     min_remaining_information_gain_bits: float = 0.01,
 ) -> Mapping[str, object]:
-    """Explicit stopping rule: dominance OR no worthwhile eligible experiment."""
     normalized = _normalize_priors(priors)
     dominance = _finite(posterior_dominance, "posterior_dominance")
     minimum_gain = _finite(
@@ -554,16 +644,20 @@ def stop_active_learning(
             "leader_probability": leader_probability,
             "truth_proven": False,
         }
-    scores = rank_discriminating_experiments(priors, experiments)
-    best_gain = max(
-        (score.information_gain_bits for score in scores if score.eligible),
-        default=0.0,
-    )
+    if not experiments:
+        best_gain = 0.0
+    else:
+        scores = rank_discriminating_experiments(priors, experiments)
+        best_gain = max(
+            (score.information_gain_bits for score in scores if score.eligible),
+            default=0.0,
+        )
     return {
         "stop": best_gain < minimum_gain,
         "reason": (
             "no_remaining_experiment_clears_information_gain_floor"
-            if best_gain < minimum_gain else "continue_active_learning"
+            if best_gain < minimum_gain
+            else "continue_active_learning"
         ),
         "leader": leader,
         "leader_probability": leader_probability,
