@@ -12,6 +12,7 @@ def test_registry_is_exactly_142_contiguous_unique_capabilities():
     assert len(CAPABILITIES) == 142
     assert [item.id for item in CAPABILITIES] == list(range(1, 143))
     assert len({item.name for item in CAPABILITIES}) == 142
+    assert CAPABILITY_BY_ID[20].name == "Hypothesis Evolution Engine"
     assert CAPABILITY_BY_ID[23].name == "Code Sandbox"
     assert CAPABILITY_BY_ID[97].name == "Holdout Vault"
     assert CAPABILITY_BY_ID[114].name == "Sandboxed Reality"
@@ -40,6 +41,28 @@ def test_max_level_requires_more_than_code_and_test_for_real_world_capabilities(
     assert ProofKind.PERSISTENCE in continuous.required_proofs
     assert ProofKind.RUNTIME in continuous.required_proofs
     assert ProofKind.LIVE in continuous.required_proofs
+
+
+def test_hypothesis_evolution_requires_executed_reproducible_proof():
+    evolution = CAPABILITY_BY_ID[20]
+    assert ProofKind.CODE in evolution.required_proofs
+    assert ProofKind.TEST in evolution.required_proofs
+    assert ProofKind.EXECUTION in evolution.required_proofs
+    assert ProofKind.REPRODUCIBILITY in evolution.required_proofs
+
+    evidence = {
+        20: CapabilityEvidence(
+            capability_id=20,
+            proofs={
+                ProofKind.CODE: ("research_engine/hypothesis_evolution.py",),
+                ProofKind.TEST: ("tests/test_hypothesis_evolution.py",),
+            },
+        )
+    }
+    result = assess_capabilities(evidence).results[19]
+    assert result.status == "INCOMPLETE"
+    assert ProofKind.EXECUTION in result.missing_proofs
+    assert ProofKind.REPRODUCIBILITY in result.missing_proofs
 
 
 def test_sandbox_and_tool_authority_capabilities_require_safety_proof():
