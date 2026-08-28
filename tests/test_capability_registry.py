@@ -14,6 +14,7 @@ def test_registry_is_exactly_142_contiguous_unique_capabilities():
     assert len({item.name for item in CAPABILITIES}) == 142
     assert CAPABILITY_BY_ID[20].name == "Hypothesis Evolution Engine"
     assert CAPABILITY_BY_ID[23].name == "Code Sandbox"
+    assert CAPABILITY_BY_ID[79].name == "Cryptographic Evidence Integrity"
     assert CAPABILITY_BY_ID[97].name == "Holdout Vault"
     assert CAPABILITY_BY_ID[114].name == "Sandboxed Reality"
     assert CAPABILITY_BY_ID[142].name == "Final Evidence Packet"
@@ -63,6 +64,35 @@ def test_hypothesis_evolution_requires_executed_reproducible_proof():
     assert result.status == "INCOMPLETE"
     assert ProofKind.EXECUTION in result.missing_proofs
     assert ProofKind.REPRODUCIBILITY in result.missing_proofs
+
+
+def test_cryptographic_integrity_requires_execution_persistence_repro_and_safety():
+    crypto = CAPABILITY_BY_ID[79]
+    for proof in (
+        ProofKind.CODE,
+        ProofKind.TEST,
+        ProofKind.EXECUTION,
+        ProofKind.PERSISTENCE,
+        ProofKind.REPRODUCIBILITY,
+        ProofKind.SAFETY,
+    ):
+        assert proof in crypto.required_proofs
+
+    evidence = {
+        79: CapabilityEvidence(
+            capability_id=79,
+            proofs={
+                ProofKind.CODE: ("research_engine/maturity_proof.py",),
+                ProofKind.TEST: ("tests/test_maturity_proof_crypto.py",),
+            },
+        )
+    }
+    result = assess_capabilities(evidence).results[78]
+    assert result.status == "INCOMPLETE"
+    assert ProofKind.EXECUTION in result.missing_proofs
+    assert ProofKind.PERSISTENCE in result.missing_proofs
+    assert ProofKind.REPRODUCIBILITY in result.missing_proofs
+    assert ProofKind.SAFETY in result.missing_proofs
 
 
 def test_sandbox_and_tool_authority_capabilities_require_safety_proof():
