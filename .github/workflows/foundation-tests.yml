@@ -76,7 +76,8 @@ jobs:
             tests/test_maturity_attestor.py \
             tests/test_experiment_intelligence.py \
             tests/test_experiment_intelligence_hardening.py \
-            tests/test_hypothesis_evolution.py
+            tests/test_hypothesis_evolution.py \
+            tests/test_visual_science.py
 
       - name: Run strict zero-cost foundation gate
         if: always()
