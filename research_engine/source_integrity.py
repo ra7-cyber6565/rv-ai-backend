@@ -2,8 +2,8 @@
 
 Implements conservative software foundations for blueprint #115 (Data Poisoning
 Defense), #116 (Dynamic Source Trust), #117 (Fraud/Manipulation Detector) and
-#118 (Consensus Is Not Proof).  Trust is updated only from explicit resolved
-outcomes and is never treated as truth.  Repeated/syndicated evidence is grouped
+#118 (Consensus Is Not Proof). Trust is updated only from explicit resolved
+outcomes and is never treated as truth. Repeated/syndicated evidence is grouped
 before consensus is counted, and anomaly findings only quarantine for review;
 they do not silently delete evidence.
 """
@@ -13,7 +13,7 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Sequence, Tuple
 
 
@@ -29,23 +29,6 @@ def _safe_id(value: object, field: str) -> str:
     return text
 
 
-def _text(value: object, field: str, max_len: int = 10_000) -> str:
-    text = str(value or "").strip()
-    if not text or len(text) > max_len:
-        raise ValueError(f"{field} is empty or too long")
-    return text
-
-
-def _probability(value: object, field: str) -> float:
-    try:
-        number = float(value)
-    except (TypeError, ValueError) as exc:
-        raise ValueError(f"{field} must be numeric") from exc
-    if not math.isfinite(number) or not 0.0 <= number <= 1.0:
-        raise ValueError(f"{field} must be finite and in [0,1]")
-    return number
-
-
 def _positive(value: object, field: str) -> float:
     try:
         number = float(value)
@@ -58,7 +41,13 @@ def _positive(value: object, field: str) -> float:
 
 def _canonical(value: Any) -> bytes:
     try:
-        return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
+        return json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         raise ValueError("source integrity payload must be finite JSON-compatible data") from exc
 
@@ -201,7 +190,12 @@ class DynamicSourceTrust:
 
 def _finding(kind: str, severity: str, source_ids: Sequence[str], explanation: str) -> IntegrityFinding:
     ids = tuple(sorted({_safe_id(item, "source_id") for item in source_ids}))
-    payload = {"kind": kind, "severity": severity, "source_ids": ids, "explanation": explanation}
+    payload = {
+        "kind": kind,
+        "severity": severity,
+        "source_ids": ids,
+        "explanation": explanation,
+    }
     digest = _hash(payload)
     return IntegrityFinding(
         finding_id=f"{kind.lower()}-{digest[:16]}",
@@ -226,10 +220,9 @@ def _detect_cycles(by_id: Mapping[str, SourceObservation]) -> Tuple[Tuple[str, .
                 start = path.index(node)
             except ValueError:
                 return
-            cycle = tuple(path[start:] + [node])
-            core = cycle[:-1]
+            core = tuple(path[start:])
             if core:
-                rotations = [tuple(core[index:] + core[:index]) for index in range(len(core))]
+                rotations = [core[index:] + core[:index] for index in range(len(core))]
                 cycles.add(min(rotations))
             return
         if node in visited:
@@ -248,6 +241,45 @@ def _detect_cycles(by_id: Mapping[str, SourceObservation]) -> Tuple[Tuple[str, .
     return tuple(sorted(cycles))
 
 
+def _effective_independence_components(sources: Sequence[SourceObservation]) -> int:
+    """Conservatively collapse dependence by content OR declared group.
+
+    Two sources belong to the same effective component if they share an exact
+    content hash or a declared independence group.  Transitivity is intentional:
+    if A shares content with B and B shares a group with C, none of A/B/C may be
+    counted as three independent confirmations.
+    """
+    parent: Dict[str, str] = {item.source_id: item.source_id for item in sources}
+
+    def find(node: str) -> str:
+        while parent[node] != node:
+            parent[node] = parent[parent[node]]
+            node = parent[node]
+        return node
+
+    def union(left: str, right: str) -> None:
+        a, b = find(left), find(right)
+        if a != b:
+            if a > b:
+                a, b = b, a
+            parent[b] = a
+
+    by_content: Dict[str, str] = {}
+    by_group: Dict[str, str] = {}
+    for item in sorted(sources, key=lambda row: row.source_id):
+        previous = by_content.get(item.content_hash)
+        if previous is None:
+            by_content[item.content_hash] = item.source_id
+        else:
+            union(previous, item.source_id)
+        previous = by_group.get(item.independence_group)
+        if previous is None:
+            by_group[item.independence_group] = item.source_id
+        else:
+            union(previous, item.source_id)
+    return len({find(item.source_id) for item in sources})
+
+
 def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceIntegrityReport:
     if isinstance(sources, (str, bytes, bytearray)) or not isinstance(sources, Sequence):
         raise ValueError("sources must be a finite sequence")
@@ -264,7 +296,6 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
     findings = []
     quarantine: set[str] = set()
 
-    # Missing provenance is a review signal, not automatic falsehood.
     missing_provenance = [item.source_id for item in normalized if not item.provenance_complete]
     if missing_provenance:
         findings.append(_finding(
@@ -275,7 +306,6 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
         ))
         quarantine.update(missing_provenance)
 
-    # Exact-content syndication must not masquerade as independent evidence.
     by_content: Dict[str, list[SourceObservation]] = {}
     for item in normalized:
         by_content.setdefault(item.content_hash, []).append(item)
@@ -293,8 +323,6 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
             if severity == "HIGH":
                 quarantine.update(ids)
 
-    # Same claim fingerprint appearing under many nominal independence groups is
-    # a coordination/poisoning signal, not proof of manipulation.
     by_claim: Dict[str, list[SourceObservation]] = {}
     for item in normalized:
         if item.claim_fingerprint:
@@ -321,11 +349,10 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
         ))
         quarantine.update(cycle)
 
-    # Parent chronology: a child cannot derive from a parent published later,
-    # barring bad metadata/versioning. Surface the inconsistency.
     for item in normalized:
         bad_parents = [
-            parent for parent in item.parent_source_ids
+            parent
+            for parent in item.parent_source_ids
             if parent in by_id and by_id[parent].published_at_epoch > item.published_at_epoch
         ]
         if bad_parents:
@@ -338,13 +365,8 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
             ))
             quarantine.update(ids)
 
-    # Effective independent support collapses exact copies first, then counts one
-    # representative per independence group.
-    representatives: Dict[str, set[str]] = {}
-    for item in normalized:
-        representatives.setdefault(item.independence_group, set()).add(item.content_hash)
-    effective = len(representatives)
-
+    independence_groups = {item.independence_group for item in normalized}
+    effective = _effective_independence_components(normalized)
     ordered_findings = tuple(sorted(findings, key=lambda item: (item.kind, item.finding_id)))
     payload = {
         "sources": [
@@ -368,7 +390,7 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
     return SourceIntegrityReport(
         source_count=len(normalized),
         unique_content_count=len(by_content),
-        independence_group_count=len(representatives),
+        independence_group_count=len(independence_groups),
         effective_independent_support=effective,
         findings=ordered_findings,
         quarantine_candidates=tuple(sorted(quarantine)),
