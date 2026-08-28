@@ -72,6 +72,7 @@ jobs:
             tests/test_tool_broker.py \
             tests/test_maturity_proof.py \
             tests/test_maturity_proof_crypto.py \
+            tests/test_maturity_auditor.py \
             tests/test_experiment_intelligence.py \
             tests/test_experiment_intelligence_hardening.py \
             tests/test_hypothesis_evolution.py
