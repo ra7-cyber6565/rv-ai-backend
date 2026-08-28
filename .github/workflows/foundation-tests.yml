@@ -4,8 +4,6 @@ on:
   pull_request:
     branches: [main]
   push:
-    # PR checks should prevent bad merges once branch protection is enabled;
-    # this second line also detects any accidental/admin direct main push.
     branches: [main, chatgpt-upload-safety]
   workflow_dispatch:
 
@@ -73,13 +71,11 @@ jobs:
             tests/test_data_forensics.py \
             tests/test_tool_broker.py \
             tests/test_maturity_proof.py \
+            tests/test_maturity_proof_crypto.py \
             tests/test_experiment_intelligence.py \
             tests/test_experiment_intelligence_hardening.py \
             tests/test_hypothesis_evolution.py
 
-      # Always execute the comprehensive diagnostic gate after dependencies are
-      # installed, even when the focused gate found a failure. A prior failed
-      # step still keeps the job red; this only exposes the complete failure set.
       - name: Run strict zero-cost foundation gate
         if: always()
         run: |
@@ -93,7 +89,5 @@ jobs:
         with:
           name: foundation-gate-receipt-${{ github.run_id }}
           path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
-          # Missing receipt is already evidence of a failed diagnostic stage;
-          # avoid masking the primary failure with a second artifact error.
           if-no-files-found: warn
           retention-days: 1
