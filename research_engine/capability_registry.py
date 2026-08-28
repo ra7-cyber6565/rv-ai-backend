@@ -1,17 +1,16 @@
 """Fail-closed maturity registry for the 142-engine Infinity Research AI blueprint.
 
-This module exists to stop a recurring failure mode: a feature name or a module is
-not proof that the capability is implemented.  A capability is considered
-``VERIFIED`` only when every proof class required for that capability is present.
-The aggregate percentage is a *proof-completion score*, never a truth, safety,
-profitability, or real-world-success probability.
+A feature name, module, screenshot, or passing happy-path test is not proof that
+a capability is max-level. A capability becomes ``VERIFIED`` only when every
+proof class required by its semantics is present. The aggregate percentage is a
+*proof-completion score*, never a truth, safety, profitability, or real-world
+success probability.
 """
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, Iterable, Mapping, Sequence, Tuple
+from typing import Dict, Mapping, Sequence, Tuple
 
 
 class ProofKind(str, Enum):
@@ -64,20 +63,22 @@ class MaturityReport:
 
     @property
     def blocking_capability_ids(self) -> Tuple[int, ...]:
-        return tuple(r.capability_id for r in self.results if r.status != "VERIFIED")
+        return tuple(
+            result.capability_id for result in self.results
+            if result.status != "VERIFIED"
+        )
 
 
 def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
-    """Return evidence classes required before a capability can be called max-level.
+    """Evidence classes required before a capability can be called max-level.
 
-    Every software capability needs code + tests.  Capabilities whose definition
-    includes actual experiments, simulations, evaluation, or replication also
-    require execution and reproducibility.  Memory/governance capabilities need
-    persistent-state proof.  Continuous/live capabilities need runtime/live proof.
-    Physical-lab capabilities additionally need hardware and safety evidence.
-    Independent-agent claims require independent-validation evidence.
+    Every software capability needs code + tests. Experiments/simulations also
+    need executed reproducible receipts. Memory/governance needs persistence.
+    Continuous capabilities need runtime/live observation. Physical capabilities
+    additionally need real hardware + safety evidence. Sandboxes, permission
+    authorities, and external-tool execution boundaries require an explicit
+    adversarial safety gate even when their ordinary tests pass.
     """
-
     required = {ProofKind.CODE, ProofKind.TEST}
 
     execution = {
@@ -93,6 +94,7 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
     runtime = {41, 42, 49, 75, 76, 87, 88, 89, 91, 92, 135, 136, 137}
     live = {41, 42, 87, 88, 89, 135, 136, 137}
     physical = {25, 26, 71, 72, 73, 74, 125, 126, 127}
+    safety_boundary = {23, 111, 113, 114}
 
     if capability_id in execution:
         required.update({ProofKind.EXECUTION, ProofKind.REPRODUCIBILITY})
@@ -106,6 +108,8 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
         required.add(ProofKind.LIVE)
     if capability_id in physical:
         required.update({ProofKind.HARDWARE, ProofKind.SAFETY})
+    if capability_id in safety_boundary:
+        required.add(ProofKind.SAFETY)
 
     return tuple(sorted(required, key=lambda item: item.value))
 
@@ -260,8 +264,9 @@ CAPABILITIES: Tuple[CapabilitySpec, ...] = tuple(
     CapabilitySpec(id=index, name=name, required_proofs=_proofs_for(index))
     for index, name in enumerate(_NAMES, start=1)
 )
-
-CAPABILITY_BY_ID: Dict[int, CapabilitySpec] = {item.id: item for item in CAPABILITIES}
+CAPABILITY_BY_ID: Dict[int, CapabilitySpec] = {
+    item.id: item for item in CAPABILITIES
+}
 
 
 def assess_capabilities(
@@ -270,7 +275,6 @@ def assess_capabilities(
     evidence = evidence or {}
     results = []
     verified = 0
-
     for spec in CAPABILITIES:
         item = evidence.get(spec.id)
         missing = tuple(
@@ -280,16 +284,13 @@ def assess_capabilities(
         status = "VERIFIED" if not missing else "INCOMPLETE"
         if status == "VERIFIED":
             verified += 1
-        results.append(
-            CapabilityResult(
-                capability_id=spec.id,
-                name=spec.name,
-                status=status,
-                required_proofs=spec.required_proofs,
-                missing_proofs=missing,
-            )
-        )
-
+        results.append(CapabilityResult(
+            capability_id=spec.id,
+            name=spec.name,
+            status=status,
+            required_proofs=spec.required_proofs,
+            missing_proofs=missing,
+        ))
     total = len(CAPABILITIES)
     score = round((verified / total) * 100.0, 2) if total else 0.0
     return MaturityReport(
@@ -306,7 +307,6 @@ def evidence_item(
     **proofs: Sequence[str],
 ) -> CapabilityEvidence:
     """Convenience constructor with strict proof-name validation."""
-
     if capability_id not in CAPABILITY_BY_ID:
         raise ValueError(f"Unknown capability id: {capability_id}")
     normalized: Dict[ProofKind, Tuple[str, ...]] = {}
@@ -315,7 +315,9 @@ def evidence_item(
             kind = ProofKind(key)
         except ValueError as exc:
             raise ValueError(f"Unknown proof kind: {key}") from exc
-        normalized[kind] = tuple(str(value).strip() for value in values if str(value).strip())
+        normalized[kind] = tuple(
+            str(value).strip() for value in values if str(value).strip()
+        )
     return CapabilityEvidence(capability_id=capability_id, proofs=normalized)
 
 
@@ -329,8 +331,13 @@ def validate_registry() -> None:
     for item in CAPABILITIES:
         if not item.required_proofs:
             raise RuntimeError(f"Capability {item.id} has no proof requirements")
-        if ProofKind.CODE not in item.required_proofs or ProofKind.TEST not in item.required_proofs:
-            raise RuntimeError(f"Capability {item.id} must require code and tests")
+        if (
+            ProofKind.CODE not in item.required_proofs
+            or ProofKind.TEST not in item.required_proofs
+        ):
+            raise RuntimeError(
+                f"Capability {item.id} must require code and tests"
+            )
 
 
 validate_registry()
