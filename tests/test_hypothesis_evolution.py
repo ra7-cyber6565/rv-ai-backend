@@ -89,7 +89,7 @@ def test_generation_records_mutation_crossover_lineage_and_never_claims_truth():
     assert all(len(score.lineage_hash) == 64 for score in result.scores)
 
 
-def test_unknown_or_missing_parent_and_wrong_generation_fail_closed():
+def test_unknown_missing_or_forged_parent_lineage_fails_closed():
     roots = _roots()
     with pytest.raises(ValueError, match="at least one parent"):
         select_generation(roots, [_v("H1", generation=1)], generation=1)
@@ -105,6 +105,8 @@ def test_unknown_or_missing_parent_and_wrong_generation_fail_closed():
             [_v("H2", generation=2, parents=("H0-A",))],
             generation=1,
         )
+    with pytest.raises(ValueError, match="generation 0 roots"):
+        _v("FORGED-ROOT", parents=("ghost-parent",)).validate()
 
 
 def test_near_duplicate_is_suppressed_and_elimination_is_preserved():
@@ -233,17 +235,52 @@ def test_invalid_scores_complexity_ids_and_self_parent_fail_closed():
         _v("", statement="A sufficiently long statement", mechanism="valid mechanism").validate()
 
 
-def test_policy_and_generation_limits_are_hard_bounds():
+def test_policy_generation_population_and_proposal_limits_are_hard_bounds():
     with pytest.raises(ValueError, match="population_size"):
         EvolutionPolicy(population_size=1).validate()
     with pytest.raises(ValueError, match="max_generations"):
         EvolutionPolicy(max_generations=101).validate()
+    with pytest.raises(ValueError, match="max_proposals_per_generation"):
+        EvolutionPolicy(max_proposals_per_generation=1001).validate()
     with pytest.raises(ValueError, match="generation outside"):
         select_generation(
             _roots(),
             [_v("H101", generation=13, parents=("H0-A",))],
             generation=13,
             policy=EvolutionPolicy(max_generations=12),
+        )
+
+    proposals = tuple(
+        _v(
+            f"P{index}",
+            generation=1,
+            parents=("H0-A",),
+            statement=f"Proposal {index} predicts a bounded measurable response",
+            mechanism=f"Proposal mechanism {index} changes a bounded response pathway",
+        )
+        for index in range(4)
+    )
+    with pytest.raises(ValueError, match="proposal batch"):
+        select_generation(
+            _roots(),
+            proposals,
+            generation=1,
+            policy=EvolutionPolicy(max_proposals_per_generation=3),
+        )
+
+    oversized_previous = _roots() + (
+        _v(
+            "H0-C",
+            statement="C predicts a magnetic-linked response in the target system",
+            mechanism="Magnetic coupling changes the measured target-system response",
+        ),
+    )
+    with pytest.raises(ValueError, match="previous population"):
+        select_generation(
+            oversized_previous,
+            [_v("H1-C", generation=1, parents=("H0-A",))],
+            generation=1,
+            policy=EvolutionPolicy(population_size=2, elite_count=1),
         )
 
 
@@ -276,24 +313,62 @@ def test_run_evolution_is_bounded_reproducible_and_requires_generation_zero_root
     assert [item.population_hash for item in first] == [item.population_hash for item in second]
     assert [item.generation for item in first] == [1, 2, 3]
 
-    bad_roots = (_v("R1", generation=1), _v("R2", generation=0))
+    bad_roots = (
+        _v("R1", generation=1, parents=("R2",)),
+        _v("R2", generation=0),
+    )
     with pytest.raises(ValueError, match="generation 0"):
         run_evolution(bad_roots, factory, generations=1)
 
     with pytest.raises(ValueError, match="generations outside"):
-        run_evolution(roots, factory, generations=13, policy=EvolutionPolicy(max_generations=12))
+        run_evolution(
+            roots,
+            factory,
+            generations=13,
+            policy=EvolutionPolicy(max_generations=12),
+        )
 
 
-def test_duplicate_ids_and_future_previous_variants_are_rejected():
+def test_run_evolution_rejects_non_sequence_and_oversized_factory_output():
+    roots = _roots()
+
+    def none_factory(_generation, _population):
+        return None
+
+    with pytest.raises(ValueError, match="finite sequence"):
+        run_evolution(roots, none_factory, generations=1)
+
+    def huge_factory(generation, _population):
+        return tuple(
+            _v(
+                f"HUGE-{index}",
+                generation=generation,
+                parents=("H0-A",),
+                statement=f"Huge proposal {index} predicts a measurable bounded response",
+                mechanism=f"Huge proposal mechanism {index} changes the bounded response",
+            )
+            for index in range(4)
+        )
+
+    with pytest.raises(ValueError, match="proposal batch"):
+        run_evolution(
+            roots,
+            huge_factory,
+            generations=1,
+            policy=EvolutionPolicy(max_proposals_per_generation=3),
+        )
+
+
+def test_duplicate_ids_and_current_or_future_previous_variants_are_rejected():
     roots = _roots()
     duplicate = _v("H0-A", generation=1, parents=("H0-B",))
-    with pytest.raises(ValueError, match="ids must be unique"):
+    with pytest.raises(ValueError, match="unique across previous and proposals"):
         select_generation(roots, [duplicate], generation=1)
 
     future_previous = (
-        _v("FUTURE", generation=2),
+        _v("FUTURE", generation=2, parents=("H0-B",)),
         roots[1],
     )
     proposal = _v("H1", generation=1, parents=("H0-B",))
-    with pytest.raises(ValueError, match="future"):
+    with pytest.raises(ValueError, match="earlier generation"):
         select_generation(future_previous, [proposal], generation=1)
