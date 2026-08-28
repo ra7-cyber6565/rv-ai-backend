@@ -461,15 +461,38 @@ class PostDeploymentValidator:
         if observed_at < float(state["last_observed_at_epoch"]):
             raise ValueError("post-deployment batch timestamps must be monotonic")
 
+        # Validate known scientific fields before provenance fingerprinting.  A
+        # serializer error must never mask the actual domain failure (e.g. NaN).
+        if not isinstance(feature_samples, Mapping):
+            raise ValueError("feature_samples must be a mapping")
+        baseline_features = baseline.get("features") or {}
+        for raw_feature, values in feature_samples.items():
+            feature = str(raw_feature)
+            reference = baseline_features.get(feature)
+            if reference is not None:
+                _normalize_feature_values(feature, str(reference["kind"]), values)
+        if observed_metrics is not None:
+            if not isinstance(observed_metrics, Mapping):
+                raise ValueError("observed_metrics must be a mapping")
+            for raw_metric, value in observed_metrics.items():
+                metric = str(raw_metric)
+                _finite(value, f"observed_metrics[{metric}]")
+
         batch_key = f"{model_id}|{batch_id}"
         existing = self.load()["batches"].get(batch_key)
-        input_fingerprint = _hash({
+        fingerprint_payload = {
             "model_id": model_id,
             "batch_id": batch_id,
             "observed_at_epoch": observed_at,
             "feature_samples": feature_samples,
             "observed_metrics": observed_metrics,
-        })
+        }
+        try:
+            input_fingerprint = _hash(fingerprint_payload)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "batch inputs must be finite JSON-compatible values"
+            ) from exc
         if existing is not None:
             if existing.get("input_fingerprint") != input_fingerprint:
                 raise ValueError("batch_id is immutable and was already observed with different input")
