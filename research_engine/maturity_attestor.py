@@ -42,7 +42,7 @@ from .maturity_proof import ProofLedger
 
 _RECEIPT_SCHEMA_VERSION = 2
 _MAX_RECEIPT_BYTES = 2 * 1024 * 1024
-_MAX_RECEIPT_AGE_SECONDS = 6 * 60 * 60
+_MAX_RECEIPT_AGE_SECONDS = 2 * 60 * 60
 _MAX_FUTURE_SKEW_SECONDS = 5 * 60
 _MAX_STAGES = 2_000
 _GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
