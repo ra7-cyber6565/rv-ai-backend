@@ -52,6 +52,7 @@ def test_active_code_and_test_receipts_can_verify_software_capability(tmp_path):
     assert report.verified == 1
     assert status.integrity_valid is True
     assert status.active_receipts == 2
+    assert status.stale_revision_receipts == 0
     assert status.ledger_head_hash != "GENESIS"
     assert ledger.verify_chain() is True
 
@@ -86,7 +87,67 @@ def test_missing_current_file_hash_also_makes_code_test_proof_stale(tmp_path):
     assert status.active_receipts == 0
 
 
-def test_runtime_and_live_proofs_require_expiry_and_expire(tmp_path):
+def test_execution_and_reproducibility_proofs_require_exact_revision(tmp_path):
+    ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
+    digest = _sha(b"execution-receipt")
+
+    with pytest.raises(ValueError, match="implementation_revision"):
+        ledger.add(
+            receipt_id="exec-unbound",
+            capability_id=20,
+            proof_kind=ProofKind.EXECUTION,
+            subject="ci:wave6",
+            subject_sha256=digest,
+            verifier="ci",
+            observed_at=100.0,
+        )
+
+    ledger.add(
+        receipt_id="exec-rev-a",
+        capability_id=20,
+        proof_kind=ProofKind.EXECUTION,
+        subject="ci:wave6",
+        subject_sha256=digest,
+        verifier="ci",
+        observed_at=100.0,
+        reference="run:524",
+        implementation_revision="rev-A",
+    )
+    ledger.add(
+        receipt_id="repro-rev-a",
+        capability_id=20,
+        proof_kind=ProofKind.REPRODUCIBILITY,
+        subject="ci:wave6-repeat",
+        subject_sha256=_sha(b"repro-receipt"),
+        verifier="ci",
+        observed_at=101.0,
+        reference="run:524-repeat",
+        implementation_revision="rev-A",
+    )
+
+    evidence_a, status_a = ledger.evidence(
+        current_hashes={}, now=110.0, current_revision="rev-A"
+    )
+    assert evidence_a[20].has(ProofKind.EXECUTION)
+    assert evidence_a[20].has(ProofKind.REPRODUCIBILITY)
+    assert status_a.stale_revision_receipts == 0
+    assert status_a.active_receipts == 2
+
+    evidence_b, status_b = ledger.evidence(
+        current_hashes={}, now=110.0, current_revision="rev-B"
+    )
+    assert 20 not in evidence_b
+    assert status_b.stale_revision_receipts == 2
+    assert status_b.active_receipts == 0
+
+    evidence_missing, status_missing = ledger.evidence(
+        current_hashes={}, now=110.0
+    )
+    assert 20 not in evidence_missing
+    assert status_missing.stale_revision_receipts == 2
+
+
+def test_runtime_and_live_proofs_require_expiry_revision_and_expire(tmp_path):
     ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
     digest = _sha(b"runtime-receipt")
 
@@ -99,6 +160,19 @@ def test_runtime_and_live_proofs_require_expiry_and_expire(tmp_path):
             subject_sha256=digest,
             verifier="ci",
             observed_at=100.0,
+            implementation_revision="rev-A",
+        )
+
+    with pytest.raises(ValueError, match="implementation_revision"):
+        ledger.add(
+            receipt_id="runtime-no-revision",
+            capability_id=135,
+            proof_kind=ProofKind.RUNTIME,
+            subject="runtime:knowledge-watch",
+            subject_sha256=digest,
+            verifier="ci",
+            observed_at=100.0,
+            valid_until=120.0,
         )
 
     ledger.add(
@@ -110,15 +184,73 @@ def test_runtime_and_live_proofs_require_expiry_and_expire(tmp_path):
         verifier="ci",
         observed_at=100.0,
         valid_until=120.0,
+        implementation_revision="rev-A",
     )
-    evidence_before, status_before = ledger.evidence(current_hashes={}, now=110.0)
+    evidence_before, status_before = ledger.evidence(
+        current_hashes={}, now=110.0, current_revision="rev-A"
+    )
     assert evidence_before[135].has(ProofKind.RUNTIME)
     assert status_before.expired_receipts == 0
+    assert status_before.stale_revision_receipts == 0
 
-    evidence_after, status_after = ledger.evidence(current_hashes={}, now=120.0)
+    evidence_wrong_revision, status_wrong_revision = ledger.evidence(
+        current_hashes={}, now=110.0, current_revision="rev-B"
+    )
+    assert 135 not in evidence_wrong_revision
+    assert status_wrong_revision.stale_revision_receipts == 1
+
+    evidence_after, status_after = ledger.evidence(
+        current_hashes={}, now=120.0, current_revision="rev-A"
+    )
     assert 135 not in evidence_after
     assert status_after.expired_receipts == 1
     assert status_after.active_receipts == 0
+
+
+def test_all_non_file_verification_kinds_are_revision_bound(tmp_path):
+    ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
+    kinds = (
+        ProofKind.INDEPENDENT,
+        ProofKind.PERSISTENCE,
+        ProofKind.HARDWARE,
+        ProofKind.SAFETY,
+    )
+    for index, kind in enumerate(kinds):
+        with pytest.raises(ValueError, match="implementation_revision"):
+            ledger.add(
+                receipt_id=f"unbound-{index}",
+                capability_id=125,
+                proof_kind=kind,
+                subject=f"proof:{kind.value}",
+                subject_sha256=_sha(kind.value.encode()),
+                verifier="ci",
+                observed_at=100.0,
+            )
+
+
+def test_legacy_unbound_execution_event_is_chain_valid_but_never_active(tmp_path):
+    ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
+    # Simulate a historical schema-v1 ADD event created before revision binding.
+    # Its chain can still be cryptographically intact, but the proof must fail
+    # closed because it is not tied to the implementation being assessed.
+    ledger._append({
+        "event_type": "ADD",
+        "receipt_id": "legacy-exec",
+        "capability_id": 20,
+        "proof_kind": ProofKind.EXECUTION.value,
+        "subject": "ci:legacy",
+        "subject_sha256": _sha(b"legacy"),
+        "verifier": "ci",
+        "observed_at": 90.0,
+        "valid_until": None,
+        "reference": "run:old",
+    })
+    assert ledger.verify_chain() is True
+    evidence, status = ledger.evidence(
+        current_hashes={}, now=100.0, current_revision="rev-new"
+    )
+    assert 20 not in evidence
+    assert status.stale_revision_receipts == 1
 
 
 def test_revocation_removes_proof_and_is_persistent(tmp_path):
@@ -162,7 +294,7 @@ def test_duplicate_receipt_and_double_revocation_are_rejected(tmp_path):
         ledger.revoke("same", reason="again")
 
 
-def test_invalid_capability_sha_and_expiry_fail_closed(tmp_path):
+def test_invalid_capability_sha_revision_and_expiry_fail_closed(tmp_path):
     ledger = ProofLedger(str(tmp_path / "proofs.jsonl"))
     with pytest.raises(ValueError, match="unknown capability"):
         ledger.add(
@@ -194,6 +326,18 @@ def test_invalid_capability_sha_and_expiry_fail_closed(tmp_path):
             verifier="ci",
             observed_at=100.0,
             valid_until=100.0,
+            implementation_revision="rev-A",
+        )
+    with pytest.raises(ValueError, match="implementation_revision is invalid"):
+        ledger.add(
+            receipt_id="bad-revision",
+            capability_id=20,
+            proof_kind=ProofKind.EXECUTION,
+            subject="ci:x",
+            subject_sha256=_sha(b"x"),
+            verifier="ci",
+            observed_at=100.0,
+            implementation_revision="bad revision with spaces",
         )
 
 
