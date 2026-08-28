@@ -1124,5 +1124,17 @@ class ResearchResult:
     # Banane wala module: research_engine/media_study.py
     media_study: Dict = field(default_factory=dict)
 
+    # #134 — LISTENER STUDY ka record: sunne wale ke bhaav/vyavhaar ke bare me
+    # padhi hui research se kitni CITED baat mili, kaun se pehlu (bhaav, yaad,
+    # apnapan, dohraav, sanskriti, vyavhaar) chhoote, aur kitni line sirf isliye
+    # hataayi gayi ki wo VAADA kar rahi thi. Ye craft ki ginti se alag rehta hai
+    # — "hunar padha" aur "logon ka dil samjha" ek baat nahi hai.
+    # Isme `listener_tested`/`audience_measured`/`mind_read` hamesha False jaate
+    # hain: gaana kisi asli insaan par test nahi hota, koi audience naapi nahi
+    # jaati, kisi ka dil "padha" nahi jaata. `wanted: False` matlab farmaish
+    # gaane ki hi nahi thi; `ran: False` matlab kuch padha hi nahi gaya.
+    # Banane wala module: research_engine/listener_study.py
+    listener_study: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

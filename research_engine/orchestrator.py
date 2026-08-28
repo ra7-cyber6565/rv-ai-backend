@@ -49,6 +49,7 @@ from . import lab
 from . import craft
 from . import songcraft
 from . import media_study
+from . import listener_study
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -647,6 +648,72 @@ class DeepResearchEngine:
                     "note": ("media study andar ki galti se chal nahi paayi — "
                              "media se kuch padha nahi gaya")}
 
+    @staticmethod
+    def _listener_study(question: str, pack: Optional[EvidencePack]) -> Dict:
+        """
+        #134 — SUNNE WALE ki samajh: bhaav kaise kaam karta hai, log kyun judte
+        hain, yaad/dohraav/sanskriti ka kya role hai — jo padhi hui research me
+        mila, wahi CITE karke.
+
+        Ye `_songcraft_study` ki jagah NAHI leta: wo "gaana likhne ka hunar"
+        padhta hai, ye "sunne wale ka dil". Dono ki ginti alag rehti hai warna
+        report me pata hi nahi chalega ki kaunsi baat kahan se aayi.
+
+        Yahan bhi 0 Gemini call aur 0 network. Aur teen baat hamesha saath jaati
+        hain: kisi asli insaan par gaana test nahi hua, koi audience naapi nahi
+        gayi, kisi ka dil "padha" nahi gaya — research padhi gayi hai.
+
+        Lane sirf GAANE ki farmaish par khulti hai (planner ka wahi do-signal
+        gate: `craft.detect().is_request` + `form == SONG_FORM`). Warna
+        `not_asked()` aata hai, jisse physics ya exam wale jawab me "sunne wale
+        ka bhaav" wala block ya uski seema-line chipakti hi nahi.
+        """
+        try:
+            detection = craft.detect(question)
+            is_song = (bool(detection.get("is_request"))
+                       and str(detection.get("form") or "")
+                       == songcraft.SONG_FORM)
+        except Exception:
+            is_song = False
+        if not is_song:
+            return listener_study.not_asked()
+        try:
+            sources = list(getattr(pack, "sources", []) or []) if pack else []
+            return listener_study.study(question, sources=sources, wanted=True)
+        except Exception:
+            empty = {"ran": False, "lines": [], "source_count": 0,
+                     "sources_scanned": 0, "groups": [], "group_labels": [],
+                     "missing_groups": list(listener_study.GROUP_KEYS),
+                     "missing_group_labels": [
+                         listener_study.GROUP_LABELS[k]
+                         for k in listener_study.GROUP_KEYS],
+                     "promise_lines_dropped": 0,
+                     "listener_tested": listener_study.LISTENER_TESTED,
+                     "audience_measured": listener_study.AUDIENCE_MEASURED,
+                     "mind_read": listener_study.MIND_READ,
+                     "gemini_calls": 0, "network_used": False,
+                     "note": ("listener study andar ki galti se chal nahi paayi "
+                              "— sunne wale ke bare me kuch padha nahi gaya")}
+            # `wanted: True` jaan-boojh kar: farmaish gaane ki THI, isliye galti
+            # ke baad bhi report me seema dikhni chahiye — chup ho jaana yahan
+            # "sab theek tha" ka jhooth ban jaata.
+            return {"ran": False, "wanted": True, "guidance": empty,
+                    "queries": [],
+                    # Galti hone par bhi seema ki lines CHUPTI nahi: khaali list
+                    # padhne wale ko "koi seema nahi thi" jaisa dikhta hai.
+                    "prompt_block": listener_study.EMPTY_PROMPT_LINE,
+                    "section_lines": listener_study.section_lines(empty),
+                    "limits": listener_study.limits(empty),
+                    "policy": listener_study.policy(),
+                    "support_row": listener_study.support_row(empty),
+                    "listener_line_count": 0, "listener_source_count": 0,
+                    "listener_evidence_read": False,
+                    "listener_tested": listener_study.LISTENER_TESTED,
+                    "audience_measured": listener_study.AUDIENCE_MEASURED,
+                    "mind_read": listener_study.MIND_READ,
+                    "gemini_calls": 0, "network_used": False,
+                    "note": empty["note"]}
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
                     job_id: Optional[str] = None,
@@ -671,6 +738,11 @@ class DeepResearchEngine:
         # kitaab/paper par nahi lagti: frame/scene padha nahi gaya aur aawaz suni
         # nahi gayi. Media na mile to `ran: False` — "kuch galat nahi mila" nahi.
         media_guidance = self._media_study(question, pack)
+        # #134 — SUNNE WALE ki samajh (bhaav/yaad/dohraav/sanskriti/vyavhaar).
+        # Craft ke SAATH chalti hai, uski jagah nahi: uski ginti alag rehti hai.
+        # `listener_evidence_read: False` ka matlab "sunne wale ke bare me kuch
+        # padha nahi gaya" hai — "sab theek hai" nahi.
+        listener_guidance = self._listener_study(question, pack)
         out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
                "final": "", "errors": [], "calls": 0, "critique": {},
                "hypotheses": [],
@@ -715,6 +787,11 @@ class DeepResearchEngine:
                # "media theek tha" nahi. Isme frames_read/audio_listened jaise
                # naam se likhi hui NAA-kaabiliyat bhi jaati hai.
                "media_study": media_guidance,
+               # #134 — LISTENER STUDY ka record: sunne wale ke bhaav/vyavhaar ki
+               # kitni CITED baat padhi gayi. Teen jhande hamesha saath jaate
+               # hain (listener_tested / audience_measured / mind_read = False)
+               # taaki koi ise "logon ka dil naapa gaya" na samjhe.
+               "listener_study": listener_guidance,
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -929,6 +1006,15 @@ class DeepResearchEngine:
                 # us halat me bhi ek zaroori hidayat hai: "video me suna tha"
                 # jaisa daawa mat likho.
                 prompt += "\n\n" + media_study.prompt_block(media_guidance)
+                # #134 — sunne wale ki samajh ka block. Gaane ki farmaish par ye
+                # HAMESHA jaata hai (khaali haalat me bhi ek zaroori hidayat hai:
+                # "log aisa mehsoos karenge" jaisa vaada mat likho), aur bhari
+                # haalat me har baat ke saath uska source id. Nibandh/patra jaisi
+                # doosri farmaish par lane maangi hi nahi jaati — wahan
+                # `wanted` False hota hai aur block chup rehta hai.
+                if listener_guidance.get("wanted"):
+                    prompt += "\n\n" + listener_study.prompt_block(
+                        listener_guidance.get("guidance") or {})
             try:
                 text = brain.generate(prompt, "synthesis")
             except QuotaExhausted as exc:
@@ -1996,6 +2082,11 @@ class DeepResearchEngine:
             # kya padha gaya (samay/locator ke saath) aur kya NAHI hua (frame,
             # aawaz). Media na mile to na section chhapta hai, na audit line.
             media_report=passes.get("media_study") or {},
+            # #134 — LISTENER STUDY: sunne wale ke bhaav/vyavhaar ki cited
+            # samajh, aur uski alag seema ("kisi asli insaan par test nahi
+            # hua"). Ye craft ki ginti me nahi ghulta. Gaane ki farmaish na ho
+            # to `wanted` False hota hai aur na section chhapta hai na seema.
+            listener_report=passes.get("listener_study") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2264,6 +2355,14 @@ class DeepResearchEngine:
             # padhe, kaunse kism, aur naam se likha hua sach (frames_read /
             # audio_listened = False). Khaali dict = media padha hi nahi gaya.
             media_study=passes.get("media_study") or {},
+            # #134 — listener study ka JSON-safe record: kitni cited baat mili,
+            # kaun se pehlu chhoote, kitni vaada karne wali line hataayi gayi,
+            # aur naam se likha hua sach (listener_tested / audience_measured /
+            # mind_read = False). `public_record` isliye ki `study()` ke andar
+            # ka `ask` object API par na jaaye. Khaali dict = lane maangi hi
+            # nahi gayi thi.
+            listener_study=listener_study.public_record(
+                passes.get("listener_study") or {}),
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────
