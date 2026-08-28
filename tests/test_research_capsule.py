@@ -88,10 +88,50 @@ def test_undeclared_file_is_detected():
     assert any("undeclared" in error for error in result.errors)
 
 
-@pytest.mark.parametrize("path", ["../secret", "a/../secret", ".env", "keys/api_key.txt", "private_key.pem", "manifest.json"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "../secret",
+        "a/../secret",
+        ".env",
+        "nested/.env",
+        "keys/api_key.txt",
+        "keys/client-secret.json",
+        "keys/access_token.txt",
+        "keys/refresh-token.json",
+        "keys/password.txt",
+        "private_key.pem",
+        "/etc/passwd",
+        "C:/Users/test/secret.txt",
+        "manifest.json",
+        "MANIFEST.JSON",
+    ],
+)
 def test_unsafe_or_secret_like_paths_are_rejected(path):
     with pytest.raises(ValueError):
         build_capsule([CapsuleArtifact("data", path, b"x")], environment={})
+
+
+def test_normal_non_secret_names_are_not_overblocked():
+    capsule = build_capsule(
+        [
+            CapsuleArtifact("data", "analysis/tokenization_metrics.csv", b"x"),
+            CapsuleArtifact("source", "docs/keyboard_notes.txt", b"y"),
+        ],
+        environment={},
+    )
+    assert verify_capsule_bytes(capsule.bytes_data).valid is True
+
+
+def test_case_colliding_paths_fail_closed():
+    with pytest.raises(ValueError, match="case-colliding"):
+        build_capsule(
+            [
+                CapsuleArtifact("data", "data/X.csv", b"a"),
+                CapsuleArtifact("data", "data/x.csv", b"b"),
+            ],
+            environment={},
+        )
 
 
 def test_duplicate_paths_and_unknown_kinds_fail_closed():
