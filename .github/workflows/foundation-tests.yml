@@ -67,7 +67,12 @@ jobs:
             tests/test_scientist_society.py \
             tests/test_research_capsule.py \
             tests/test_procedural_memory.py \
-            tests/test_knowledge_watch.py
+            tests/test_knowledge_watch.py \
+            tests/test_code_sandbox.py \
+            tests/test_simulation_lab.py \
+            tests/test_data_forensics.py \
+            tests/test_tool_broker.py \
+            tests/test_maturity_proof.py
 
       # Always execute the comprehensive diagnostic gate after dependencies are
       # installed, even when the focused gate found a failure. A prior failed
