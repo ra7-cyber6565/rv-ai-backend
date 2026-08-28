@@ -43,6 +43,7 @@ from .capability_registry import (
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,200}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
+_B64URL_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _SCHEMA_VERSION = 1
 _ANCHOR_VERSION = 1
 _MAX_ANCHOR_CHARS = 8_192
@@ -81,8 +82,21 @@ def _b64(data: bytes) -> str:
 
 
 def _unb64(text: str) -> bytes:
-    padding = "=" * ((4 - len(text) % 4) % 4)
-    return base64.urlsafe_b64decode((text + padding).encode("ascii"))
+    """Decode only the one canonical unpadded base64url spelling.
+
+    ``urlsafe_b64decode`` accepts alternate final characters whose unused pad
+    bits decode to the same bytes. That makes a signed token textually malleable.
+    Re-encoding and constant-time comparison rejects those aliases as well as
+    padding/non-base64url input.
+    """
+    raw = str(text or "")
+    if not raw or not _B64URL_RE.fullmatch(raw):
+        raise ValueError("invalid base64url")
+    padding = "=" * ((4 - len(raw) % 4) % 4)
+    decoded = base64.urlsafe_b64decode((raw + padding).encode("ascii"))
+    if not hmac.compare_digest(_b64(decoded), raw):
+        raise ValueError("non-canonical base64url")
+    return decoded
 
 
 def _safe_id(value: str, field: str) -> str:
@@ -488,11 +502,13 @@ class ProofLedger:
             payload = json.loads(body.decode("utf-8"))
             if not isinstance(payload, dict) or payload.get("v") != _ANCHOR_VERSION:
                 return False
+            if not hmac.compare_digest(body, _canonical(payload)):
+                return False
             sequence = payload.get("sequence")
             head_hash = str(payload.get("head_hash") or "")
             anchor_revision = str(payload.get("implementation_revision") or "")
             issued_at = float(payload.get("issued_at"))
-            if not isinstance(sequence, int) or sequence <= 0:
+            if type(sequence) is not int or sequence <= 0:
                 return False
             if not _SHA_RE.fullmatch(head_hash) or not math.isfinite(issued_at):
                 return False
