@@ -68,6 +68,7 @@ jobs:
             tests/test_knowledge_watch.py \
             tests/test_code_sandbox.py \
             tests/test_simulation_lab.py \
+            tests/test_multiphysics_simulation.py \
             tests/test_data_forensics.py \
             tests/test_tool_broker.py \
             tests/test_maturity_proof.py \
