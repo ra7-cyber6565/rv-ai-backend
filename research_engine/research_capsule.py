@@ -1,13 +1,13 @@
 """Deterministic, self-verifying research capsule packaging.
 
 A research result is reproducible only if the inputs, code, environment and
-outputs can be tied to exact bytes.  This module packages those artifacts into a
+outputs can be tied to exact bytes. This module packages those artifacts into a
 stable ZIP with a canonical manifest and SHA-256 hashes, then independently
 verifies every declared member on read.
 
-The capsule intentionally rejects obvious secret-bearing filenames and unsafe
-paths.  It is an audit/reproducibility primitive, not a substitute for data
-licenses or access controls.
+The capsule intentionally rejects secret-bearing filenames, hidden/absolute
+paths and traversal/case-collision tricks. It is an audit/reproducibility
+primitive, not a substitute for data licenses or access controls.
 """
 from __future__ import annotations
 
@@ -17,6 +17,7 @@ import json
 import os
 import re
 import tempfile
+import unicodedata
 import zipfile
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
@@ -26,13 +27,18 @@ _ALLOWED_KINDS = {
     "source", "data", "code", "experiment", "graph", "claim", "hypothesis",
     "result", "environment", "report",
 }
-_SECRET_NAME = re.compile(
-    r"(^|[._-])(\.env|api[_-]?key|client[_-]?secret|private[_-]?key|credentials?|token)([._-]|$)",
+_SECRET_COMPONENT = re.compile(
+    r"(?:^|[._-])(?:\.env|api[_-]?key|client[_-]?secret|private[_-]?key|"
+    r"secret[_-]?key|credentials?|access[_-]?token|refresh[_-]?token|"
+    r"auth[_-]?token|token|password|passwd)(?:[._-]|$)",
     re.IGNORECASE,
 )
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:/")
 _MANIFEST_NAME = "manifest.json"
 _FIXED_ZIP_TIME = (1980, 1, 1, 0, 0, 0)
 _SCHEMA_VERSION = 1
+_MAX_PATH_CHARS = 1024
+_MAX_COMPONENT_CHARS = 255
 
 
 def _canonical(value: Any) -> bytes:
@@ -44,19 +50,28 @@ def _sha(data: bytes) -> str:
 
 
 def _safe_relative_path(value: str) -> str:
-    path = str(value or "").replace("\\", "/").strip("/")
-    if not path or path.startswith("."):
-        raise ValueError("artifact path must be a non-hidden relative path")
-    pieces = path.split("/")
+    raw = unicodedata.normalize("NFKC", str(value or "")).replace("\\", "/").strip()
+    if not raw:
+        raise ValueError("artifact path must be a non-empty relative path")
+    if raw.startswith("/") or _WINDOWS_DRIVE.match(raw):
+        raise ValueError("artifact path must be relative")
+    if len(raw) > _MAX_PATH_CHARS:
+        raise ValueError("artifact path is too long")
+
+    pieces = raw.split("/")
     if any(piece in {"", ".", ".."} for piece in pieces):
-        raise ValueError("artifact path contains unsafe traversal")
-    if any("\x00" in piece for piece in pieces):
-        raise ValueError("artifact path contains NUL")
-    if path == _MANIFEST_NAME:
+        raise ValueError("artifact path contains unsafe traversal or empty segments")
+    if any(len(piece) > _MAX_COMPONENT_CHARS for piece in pieces):
+        raise ValueError("artifact path component is too long")
+    if any(piece.startswith(".") for piece in pieces):
+        raise ValueError("hidden artifact path segments are not allowed")
+    if any(any(ord(char) < 32 or ord(char) == 127 for char in piece) for piece in pieces):
+        raise ValueError("artifact path contains control characters")
+    if raw.casefold() == _MANIFEST_NAME.casefold():
         raise ValueError("manifest.json is reserved")
-    if _SECRET_NAME.search(path):
+    if any(_SECRET_COMPONENT.search(piece) for piece in pieces):
         raise ValueError("secret-like artifact filenames are not allowed in research capsules")
-    return path
+    return raw
 
 
 @dataclass(frozen=True)
@@ -102,18 +117,21 @@ def build_capsule(
         raise ValueError("at least one artifact is required")
 
     prepared: Dict[str, Tuple[CapsuleArtifact, bytes]] = {}
+    prepared_casefold = set()
     manifest_rows = []
     for artifact in artifacts:
         kind = str(artifact.kind).strip().lower()
         if kind not in _ALLOWED_KINDS:
             raise ValueError(f"unsupported artifact kind: {artifact.kind}")
         path = _safe_relative_path(artifact.path)
-        if path in prepared:
-            raise ValueError(f"duplicate artifact path: {path}")
+        folded = path.casefold()
+        if path in prepared or folded in prepared_casefold:
+            raise ValueError(f"duplicate or case-colliding artifact path: {path}")
         if not isinstance(artifact.data, (bytes, bytearray)):
             raise ValueError(f"artifact {path} data must be bytes")
         data = bytes(artifact.data)
         prepared[path] = (artifact, data)
+        prepared_casefold.add(folded)
         manifest_rows.append({
             "kind": kind,
             "path": path,
@@ -173,8 +191,13 @@ def verify_capsule_bytes(payload: bytes) -> CapsuleVerification:
         names = archive.namelist()
         if len(names) != len(set(names)):
             errors.append("archive contains duplicate member names")
-        if _MANIFEST_NAME not in names:
-            return CapsuleVerification(False, None, tuple(errors + ["manifest.json missing"]), 0)
+        folded_names = [name.casefold() for name in names]
+        if len(folded_names) != len(set(folded_names)):
+            errors.append("archive contains case-colliding member names")
+        manifest_matches = [name for name in names if name.casefold() == _MANIFEST_NAME.casefold()]
+        if manifest_matches != [_MANIFEST_NAME]:
+            return CapsuleVerification(False, None, tuple(errors + ["canonical manifest.json missing or shadowed"]), 0)
+
         unsafe = []
         for name in names:
             if name == _MANIFEST_NAME:
@@ -215,8 +238,8 @@ def verify_capsule_bytes(payload: bytes) -> CapsuleVerification:
                 errors.append(f"hash mismatch: {path}")
             if row.get("bytes") != len(data):
                 errors.append(f"size mismatch: {path}")
-        if len(declared) != len(set(declared)):
-            errors.append("manifest declares duplicate artifact paths")
+        if len(declared) != len(set(declared)) or len([p.casefold() for p in declared]) != len(set(p.casefold() for p in declared)):
+            errors.append("manifest declares duplicate or case-colliding artifact paths")
         undeclared = sorted(set(names) - {_MANIFEST_NAME} - set(declared))
         if undeclared:
             errors.append(f"undeclared archive member(s): {', '.join(undeclared)}")
