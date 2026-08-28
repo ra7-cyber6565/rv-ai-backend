@@ -1115,5 +1115,14 @@ class ResearchResult:
     # likha rehta hai. Banane wala module: research_engine/craft.py
     craft: Dict = field(default_factory=dict)
 
+    # #133 — MEDIA STUDY ka record: user ke video/audio ke LIKHIT transcript
+    # (captions ya aawaz se bana text) me se kitni CITED craft-hidayat mili,
+    # kaunse kism ka media tha, aur kitne transcript user ne khud diye the.
+    # `ran: False` matlab media padha hi nahi gaya — "media theek tha" NAHI.
+    # Isme `frames_read`/`audio_listened` hamesha False jaate hain: video ka
+    # frame/scene kabhi nahi padha jaata aur aawaz kabhi suni nahi jaati.
+    # Banane wala module: research_engine/media_study.py
+    media_study: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

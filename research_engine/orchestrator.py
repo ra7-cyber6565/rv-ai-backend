@@ -48,6 +48,7 @@ from .knowledge_graph import KnowledgeGraphAdapter
 from . import lab
 from . import craft
 from . import songcraft
+from . import media_study
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -616,6 +617,36 @@ class DeepResearchEngine:
                     "audio_generated": songcraft.AUDIO_GENERATED,
                     "note": "songcraft study andar ki galti se chal nahi paayi"}
 
+    @staticmethod
+    def _media_study(question: str, pack: Optional[EvidencePack]) -> Dict:
+        """
+        #133 — user ke video/audio ke LIKHIT transcript me se craft padho.
+
+        Ye `_songcraft_study` ki JAGAH nahi leta: wo kitaab/paper/web se padhta
+        hai, ye media se. Dono ka apna label rehta hai, warna report me pata hi
+        nahi chalega ki kaunsi baat kahan se aayi.
+
+        Yahan bhi 0 Gemini call aur 0 network hai — sirf pehle se aaye sources
+        padhe jaate hain. `ran: False` ka matlab "media padha hi nahi gaya" hai,
+        "sab theek hai" nahi.
+        """
+        try:
+            sources = list(getattr(pack, "sources", []) or []) if pack else []
+            ask = songcraft.style_of(question)
+            return media_study.craft_guidance(sources, ask=ask)
+        except Exception:
+            return {"ran": False, "lines": [], "media_source_count": 0,
+                    "sources_scanned": 0, "kinds": [],
+                    "user_supplied_count": 0,
+                    "style_conventions_read": False,
+                    "numeric_conventions": [],
+                    "frames_read": media_study.FRAMES_READ,
+                    "audio_listened": media_study.AUDIO_LISTENED,
+                    "verified_allowed": media_study.USER_MEDIA_CAN_VERIFY,
+                    "gemini_calls": 0, "network_used": False,
+                    "note": ("media study andar ki galti se chal nahi paayi — "
+                             "media se kuch padha nahi gaya")}
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
                     job_id: Optional[str] = None,
@@ -635,6 +666,11 @@ class DeepResearchEngine:
         # baat quote hoti hai. Kuch na mile to block khaali nahi jaata — usme
         # saaf likha hota hai ki kuch padha nahi gaya.
         song_study = self._songcraft_study(question, pack)
+        # #133 — wahi padhna, par user ke video/audio ke LIKHIT transcript se.
+        # Alag rakha gaya hai kyunki iske saath do baatein hamesha jaati hain jo
+        # kitaab/paper par nahi lagti: frame/scene padha nahi gaya aur aawaz suni
+        # nahi gayi. Media na mile to `ran: False` — "kuch galat nahi mila" nahi.
+        media_guidance = self._media_study(question, pack)
         out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
                "final": "", "errors": [], "calls": 0, "critique": {},
                "hypotheses": [],
@@ -673,6 +709,12 @@ class DeepResearchEngine:
                # offline). Khaali dict matlab stage chala hi nahi — "naap pass
                # ho gaya" nahi.
                "craft": {},
+               # #133 — MEDIA STUDY ka record: user ke video/audio ke likhit
+               # transcript me se kitni CITED craft-hidayat mili. `ran: False`
+               # matlab media padha hi nahi gaya (koi transcript nahi tha) —
+               # "media theek tha" nahi. Isme frames_read/audio_listened jaise
+               # naam se likhi hui NAA-kaabiliyat bhi jaati hai.
+               "media_study": media_guidance,
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -882,6 +924,11 @@ class DeepResearchEngine:
                 block = str(song_study.get("prompt_block") or "")
                 if block:
                     prompt += "\n\n" + block
+                # #133 — media wala block iske SAATH jaata hai, jagah lene ke
+                # liye nahi. Ye hamesha jaata hai (khaali haalat par bhi), kyunki
+                # us halat me bhi ek zaroori hidayat hai: "video me suna tha"
+                # jaisa daawa mat likho.
+                prompt += "\n\n" + media_study.prompt_block(media_guidance)
             try:
                 text = brain.generate(prompt, "synthesis")
             except QuotaExhausted as exc:
@@ -1945,6 +1992,10 @@ class DeepResearchEngine:
             # record (hypothesis section me `###` block) aur audit me naapi hui
             # seema. Khaali hone par kuch chhapta hi nahi.
             craft_report=passes.get("craft") or {},
+            # #133 — MEDIA STUDY: user ke video/audio ke likhit transcript se
+            # kya padha gaya (samay/locator ke saath) aur kya NAHI hua (frame,
+            # aawaz). Media na mile to na section chhapta hai, na audit line.
+            media_report=passes.get("media_study") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2209,6 +2260,10 @@ class DeepResearchEngine:
             # nahi karna padega ki "kya naapa gaya"). Khaali dict = stage chala
             # hi nahi.
             craft=passes.get("craft") or {},
+            # #133 — media study bhi structured jaata hai: kitne transcript
+            # padhe, kaunse kism, aur naam se likha hua sach (frames_read /
+            # audio_listened = False). Khaali dict = media padha hi nahi gaya.
+            media_study=passes.get("media_study") or {},
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

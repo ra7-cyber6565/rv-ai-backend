@@ -47,6 +47,7 @@ from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
 from .lab import lab_limits, lab_report_section
 from .craft import craft_limits, craft_section
+from .media_study import media_limits, media_section
 from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
@@ -1491,7 +1492,8 @@ Ab jawab likho:"""
                        missing_sections: Optional[List[str]] = None,
                        lab_report: Optional[Dict] = None,
                        reject_report: Optional[Dict] = None,
-                       craft_report: Optional[Dict] = None) -> str:
+                       craft_report: Optional[Dict] = None,
+                       media_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1622,6 +1624,15 @@ Ab jawab likho:"""
         # creative kaam par ek generic line lagti thi jo aadhi galat hai.
         for craft_line in craft_limits(craft_report)[:5]:
             tail.append(f"- {craft_line}")
+        # #133 — media ki seema: frame/scene padha nahi gaya, aawaz suni nahi
+        # gayi, transcript me captions/STT ki galtiyan reh sakti hain, aur user
+        # ki copy se VERIFIED nahi hota. Ye line sirf tab aati hai jab media
+        # sach me padha gaya ho — warna har report me bekaar chipakti.
+        # Chhat 4 se 5 ki gayi (#133b): padhne waali 4 seemaon ke baad ek AUR
+        # alag seema aati hai — "kuch media sirf dhoondha gaya, padha nahi".
+        # 4 par rakhne se wahi nayi line kat jaati aur audit chup ho jaata.
+        for media_line in media_limits(media_report)[:5]:
+            tail.append(f"- {media_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1873,7 +1884,8 @@ Ab jawab likho:"""
                  calculations: Optional[List[Dict]] = None,
                  lab_report: Optional[Dict] = None,
                  reject_report: Optional[Dict] = None,
-                 craft_report: Optional[Dict] = None) -> str:
+                 craft_report: Optional[Dict] = None,
+                 media_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1935,6 +1947,16 @@ Ab jawab likho:"""
                 craft_text = craft_section(craft_report)
                 if craft_text:
                     parts.append(craft_text)
+                # #133 — MEDIA: user ke video/audio ke likhit transcript me se
+                # kya padha gaya, har line ke saath samay/locator. Ye craft ke
+                # block ki jagah nahi leta — wo kitaab/paper se aata hai, ye
+                # media se. Media na padha ho to yahan kuch chhapta hi nahi.
+                # #133b se ek aur haalat aayi: media sirf DHOONDHA gaya ho (uska
+                # transcript mila hi na ho) to bhi block chhapta hai, par saaf
+                # likha hota hai ki wo dekha/suna nahi gaya.
+                media_text = media_section(media_report)
+                if media_text:
+                    parts.append(media_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -1951,7 +1973,8 @@ Ab jawab likho:"""
                     missing_sections=missing_sections,
                     lab_report=lab_report,
                     reject_report=reject_report,
-                    craft_report=craft_report)
+                    craft_report=craft_report,
+                    media_report=media_report)
                 parts.append(engine_text)
             else:
                 if index == 1:

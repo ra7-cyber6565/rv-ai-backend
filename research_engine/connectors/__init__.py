@@ -13,6 +13,9 @@ Source connectors (Spec Section 2, 3, 11, 16)
                      EPO linked open data (keyless), USPTO ODP (key optional)
     MarketConnector  World Bank Indicators + ECB (keyless), FRED + Alpha Vantage
                      (free key, bina card) — TIME SERIES ka lane, catalogue nahi
+    MediaConnector   archive.org (keyless) — video/audio items ka PARICHAY
+                     (description). Media khud padha nahi jaata: read_level
+                     hamesha "snippet" rehta hai
 
 Naya provider add karna = BaseConnector ka ek naya subclass + facade list mein entry.
 """
@@ -56,6 +59,12 @@ from .market_connector import (
     FredSeriesConnector,
     MarketConnector,
     WorldBankSeriesConnector,
+)
+from .media_connector import (
+    MediaArchiveConnector,
+    MediaConnector,
+    build_query as media_search_query,
+    media_label,
 )
 from .paper_connector import (
     ArxivConnector,
@@ -104,4 +113,8 @@ __all__ = [
     # catalogue kaafi nahi, asli period→value chahiye
     "MarketConnector", "WorldBankSeriesConnector", "EcbSeriesConnector",
     "FredSeriesConnector", "AlphaVantageConnector",
+    # video/audio DHOONDHNE ka lane (#133b) — parichay padha jaata hai, media
+    # nahi. Isliye ye lane kabhi full_text nahi likhta.
+    "MediaConnector", "MediaArchiveConnector", "media_search_query",
+    "media_label",
 ]

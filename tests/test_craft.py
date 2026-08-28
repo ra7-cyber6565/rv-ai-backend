@@ -787,8 +787,24 @@ def test_synthesizer_puts_the_block_in_the_lab_section_and_the_audit_tail():
     lab_at = src.index("elif index == 5:")
     next_at = src.index("elif index == 9:")
     assert lab_at < src.index("craft_text = craft_section(craft_report)") < next_at
-    # assemble se _audit_section tak report pahunchti hai.
-    assert "craft_report=craft_report)" in src
+    # assemble se _audit_section tak report pahunchti hai. Naap CALL ke ANDAR
+    # hoti hai, poori file me kahin bhi needle dikh jaane par nahi: purana needle
+    # `"craft_report=craft_report)"` tha aur #133 me usi call me ek naya kwarg
+    # (`media_report=`) judte hi TOOT gaya — halaanki behaviour bilkul sahi tha.
+    call_at = src.index("self._audit_section(")
+    depth, end = 0, call_at
+    for pos in range(src.index("(", call_at), len(src)):
+        if src[pos] == "(":
+            depth += 1
+        elif src[pos] == ")":
+            depth -= 1
+            if depth == 0:
+                end = pos
+                break
+    args = src[call_at:end]
+    assert "craft_report=craft_report" in args
+    # ek hi baar — do jagah pass hone par ek copy chup-chaap purani reh jaati hai
+    assert args.count("craft_report=craft_report") == 1
 
 
 def test_result_object_keeps_the_craft_report():
