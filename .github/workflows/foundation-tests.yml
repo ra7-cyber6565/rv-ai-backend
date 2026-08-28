@@ -72,7 +72,9 @@ jobs:
             tests/test_simulation_lab.py \
             tests/test_data_forensics.py \
             tests/test_tool_broker.py \
-            tests/test_maturity_proof.py
+            tests/test_maturity_proof.py \
+            tests/test_experiment_intelligence.py \
+            tests/test_hypothesis_evolution.py
 
       # Always execute the comprehensive diagnostic gate after dependencies are
       # installed, even when the focused gate found a failure. A prior failed
