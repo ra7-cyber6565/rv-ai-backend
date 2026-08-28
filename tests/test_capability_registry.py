@@ -12,7 +12,9 @@ def test_registry_is_exactly_142_contiguous_unique_capabilities():
     assert len(CAPABILITIES) == 142
     assert [item.id for item in CAPABILITIES] == list(range(1, 143))
     assert len({item.name for item in CAPABILITIES}) == 142
+    assert CAPABILITY_BY_ID[23].name == "Code Sandbox"
     assert CAPABILITY_BY_ID[97].name == "Holdout Vault"
+    assert CAPABILITY_BY_ID[114].name == "Sandboxed Reality"
     assert CAPABILITY_BY_ID[142].name == "Final Evidence Packet"
 
 
@@ -40,6 +42,36 @@ def test_max_level_requires_more_than_code_and_test_for_real_world_capabilities(
     assert ProofKind.LIVE in continuous.required_proofs
 
 
+def test_sandbox_and_tool_authority_capabilities_require_safety_proof():
+    sandbox = CAPABILITY_BY_ID[23]
+    assert ProofKind.CODE in sandbox.required_proofs
+    assert ProofKind.TEST in sandbox.required_proofs
+    assert ProofKind.EXECUTION in sandbox.required_proofs
+    assert ProofKind.REPRODUCIBILITY in sandbox.required_proofs
+    assert ProofKind.SAFETY in sandbox.required_proofs
+
+    for capability_id in (111, 113, 114):
+        capability = CAPABILITY_BY_ID[capability_id]
+        assert ProofKind.SAFETY in capability.required_proofs
+
+
+def test_code_test_execution_cannot_fake_safe_sandbox():
+    evidence = {
+        23: CapabilityEvidence(
+            capability_id=23,
+            proofs={
+                ProofKind.CODE: ("research_engine/code_sandbox.py",),
+                ProofKind.TEST: ("tests/test_code_sandbox.py",),
+                ProofKind.EXECUTION: ("ci:run",),
+                ProofKind.REPRODUCIBILITY: ("ci:repeatable",),
+            },
+        )
+    }
+    result = assess_capabilities(evidence).results[22]
+    assert result.status == "INCOMPLETE"
+    assert result.missing_proofs == (ProofKind.SAFETY,)
+
+
 def test_a_filename_or_code_only_can_never_fake_verified():
     evidence = {
         16: CapabilityEvidence(
@@ -60,7 +92,10 @@ def test_100_score_only_when_every_required_proof_exists():
     for spec in CAPABILITIES:
         evidence[spec.id] = CapabilityEvidence(
             capability_id=spec.id,
-            proofs={proof: (f"verified:{spec.id}:{proof.value}",) for proof in spec.required_proofs},
+            proofs={
+                proof: (f"verified:{spec.id}:{proof.value}",)
+                for proof in spec.required_proofs
+            },
         )
     report = assess_capabilities(evidence)
     assert report.verified == 142
