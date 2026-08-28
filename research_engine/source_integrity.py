@@ -13,6 +13,7 @@ import hashlib
 import json
 import math
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, Mapping, Sequence, Tuple
 
@@ -398,3 +399,123 @@ def analyze_source_integrity(sources: Sequence[SourceObservation]) -> SourceInte
         consensus_proves_truth=False,
         fraud_proven=False,
     )
+
+
+def analyze_evidence_pack(pack: Any) -> Dict[str, Any]:
+    """Adapt a production EvidencePack without inventing missing provenance.
+
+    Sources without a usable publication year or visible content are reported
+    as unassessed.  They are never silently interpreted as clean.  This adapter
+    deliberately does not remove sources; the caller decides how review signals
+    affect release labels while preserving the complete evidence audit trail.
+    """
+    sources = list(getattr(pack, "sources", ()) or ())
+    passages: Dict[str, list[str]] = {}
+    for passage in list(getattr(pack, "passages", ()) or ()):
+        source_id = str(getattr(passage, "source_id", "") or "").strip()
+        text = str(getattr(passage, "text", "") or "").strip()
+        if source_id and text:
+            passages.setdefault(source_id, []).append(text)
+
+    observations = []
+    assessed_ids = []
+    unassessed = []
+    for index, source in enumerate(sources, 1):
+        source_id = str(getattr(source, "source_id", "") or f"source-{index}").strip()
+        year = getattr(source, "year", None)
+        visible = "\n".join(filter(None, (
+            str(getattr(source, "title", "") or "").strip(),
+            str(getattr(source, "snippet", "") or "").strip(),
+            *passages.get(source_id, ()),
+        )))
+        try:
+            year_value = int(year)
+            published = datetime(year_value, 1, 1, tzinfo=timezone.utc).timestamp()
+        except (TypeError, ValueError, OverflowError):
+            published = 0.0
+        reasons = []
+        if published <= 0:
+            reasons.append("publication_epoch_unavailable")
+        if not visible:
+            reasons.append("visible_content_unavailable")
+        if reasons:
+            unassessed.append({"source_id": source_id, "reasons": reasons})
+            continue
+
+        publisher_raw = (
+            str(getattr(source, "publisher", "") or "").strip()
+            or str(getattr(source, "venue", "") or "").strip()
+            or str(getattr(source, "domain", "") or "").strip()
+            or str(getattr(source, "connector", "") or "").strip()
+            or "unknown"
+        )
+        group_raw = str(getattr(source, "independence_key", "") or "").strip() or publisher_raw
+        publisher_id = "publisher-" + hashlib.sha256(publisher_raw.encode("utf-8")).hexdigest()[:20]
+        group_id = "group-" + hashlib.sha256(group_raw.encode("utf-8")).hexdigest()[:20]
+        observations.append(SourceObservation(
+            source_id=source_id,
+            publisher_id=publisher_id,
+            independence_group=group_id,
+            content_hash=hashlib.sha256(visible.encode("utf-8")).hexdigest(),
+            published_at_epoch=published,
+            primary_source=bool(getattr(source, "is_primary", False)),
+            provenance_complete=bool(
+                getattr(source, "url", "")
+                or str(getattr(source, "source_type", "")) == "SourceType.DOCUMENT"
+            ),
+        ))
+        assessed_ids.append(source_id)
+
+    if not observations:
+        return {
+            "ran": True,
+            "status": "INSUFFICIENT_METADATA",
+            "source_count": len(sources),
+            "assessed_source_count": 0,
+            "unassessed_sources": unassessed,
+            "findings": [],
+            "quarantine_candidates": [],
+            "high_risk": False,
+            "clean_bill_of_health": False,
+            "limitations": [
+                "publication year and visible content are required for this audit",
+                "absence of findings is not evidence that sources are clean",
+            ],
+        }
+
+    report = analyze_source_integrity(observations)
+    findings = [
+        {
+            "finding_id": item.finding_id,
+            "kind": item.kind,
+            "severity": item.severity,
+            "source_ids": list(item.source_ids),
+            "explanation": item.explanation,
+            "finding_hash": item.finding_hash,
+            "fraud_proven": item.fraud_proven,
+        }
+        for item in report.findings
+    ]
+    return {
+        "ran": True,
+        "status": "REVIEW_REQUIRED" if findings or unassessed else "NO_ANOMALY_DETECTED",
+        "source_count": len(sources),
+        "assessed_source_count": len(assessed_ids),
+        "assessed_source_ids": assessed_ids,
+        "unassessed_sources": unassessed,
+        "unique_content_count": report.unique_content_count,
+        "independence_group_count": report.independence_group_count,
+        "effective_independent_support": report.effective_independent_support,
+        "findings": findings,
+        "quarantine_candidates": list(report.quarantine_candidates),
+        "report_hash": report.report_hash,
+        "high_risk": any(item["severity"] == "HIGH" for item in findings),
+        "consensus_proves_truth": False,
+        "fraud_proven": False,
+        "clean_bill_of_health": False,
+        "limitations": [
+            "only sources with publication year and visible content were assessed",
+            "source-parent genealogy and claim fingerprints require explicit provider metadata",
+            "no anomaly detected does not prove truth or absence of manipulation",
+        ],
+    }

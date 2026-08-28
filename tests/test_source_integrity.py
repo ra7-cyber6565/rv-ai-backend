@@ -7,7 +7,9 @@ from research_engine.source_integrity import (
     ResolvedSourceOutcome,
     SourceObservation,
     analyze_source_integrity,
+    analyze_evidence_pack,
 )
+from research_engine.models import EvidencePack, SourceRecord, SourceType
 
 
 def _h(text):
@@ -182,3 +184,74 @@ def test_invalid_source_metadata_fails_closed():
         SourceObservation("s1", "p1", "g1", _h("x"), float("nan")).normalized()
     with pytest.raises(ValueError, match="cite itself"):
         SourceObservation("s1", "p1", "g1", _h("x"), 1000, parent_source_ids=("s1",)).normalized()
+
+
+def test_evidence_pack_adapter_flags_cross_origin_exact_duplication():
+    first = SourceRecord(
+        source_id="S1", title="Shared report", snippet="same exact measurement",
+        url="https://alpha.example/paper", year=2024, publisher="Alpha",
+        source_type=SourceType.PAPER,
+    )
+    second = SourceRecord(
+        source_id="S2", title="Shared report", snippet="same exact measurement",
+        url="https://beta.example/copy", year=2024, publisher="Beta",
+        source_type=SourceType.WEB,
+    )
+    result = analyze_evidence_pack(EvidencePack(sources=[first, second]))
+    assert result["ran"] is True
+    assert result["high_risk"] is True
+    assert result["effective_independent_support"] == 1
+    assert result["quarantine_candidates"] == ["S1", "S2"]
+    assert result["fraud_proven"] is False
+    assert result["consensus_proves_truth"] is False
+    assert result["clean_bill_of_health"] is False
+
+
+def test_evidence_pack_adapter_never_calls_missing_metadata_clean():
+    source = SourceRecord(source_id="S1", title="Undated source", snippet="visible")
+    result = analyze_evidence_pack(EvidencePack(sources=[source]))
+    assert result["status"] == "INSUFFICIENT_METADATA"
+    assert result["assessed_source_count"] == 0
+    assert result["clean_bill_of_health"] is False
+    assert result["unassessed_sources"][0]["source_id"] == "S1"
+
+
+def test_real_research_pipeline_invokes_source_integrity(monkeypatch):
+    from research_engine import orchestrator
+    from tests.benchmark_cross_domain import MATERIALS, _run, rounds_full
+
+    calls = []
+    original = orchestrator.analyze_evidence_pack
+
+    def observed(pack):
+        calls.append(tuple(source.source_id for source in pack.sources))
+        return original(pack)
+
+    monkeypatch.setattr(orchestrator, "analyze_evidence_pack", observed)
+    result, _discovery, _model = _run(MATERIALS, rounds_full(MATERIALS))
+    assert calls and calls[0]
+    assert result["source_integrity"]["ran"] is True
+    assert result["coverage"]["source_integrity"] == result["source_integrity"]
+    assert result["source_integrity"]["clean_bill_of_health"] is False
+
+
+def test_high_risk_runtime_signal_blocks_strong_label(monkeypatch):
+    from research_engine import orchestrator
+    from tests.benchmark_cross_domain import MATERIALS, _run, rounds_full
+
+    monkeypatch.setattr(
+        orchestrator,
+        "analyze_evidence_pack",
+        lambda pack: {
+            "ran": True,
+            "status": "REVIEW_REQUIRED",
+            "high_risk": True,
+            "clean_bill_of_health": False,
+            "findings": [{"kind": "DUPLICATE_OR_SYNDICATED_CONTENT", "severity": "HIGH"}],
+            "quarantine_candidates": [pack.sources[0].source_id],
+            "limitations": [],
+        },
+    )
+    result, _discovery, _model = _run(MATERIALS, rounds_full(MATERIALS))
+    assert not result["evidence_level"].startswith(("✅ VERIFIED", "✅ STRONG"))
+    assert any("Source-integrity audit" in warning for warning in result["warnings"])

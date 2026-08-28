@@ -72,6 +72,7 @@ from .research_state import inject_state_block, state_warnings
 from .run_status import COMPLETE, INCOMPLETE, evaluate as evaluate_status
 from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
+from .source_integrity import analyze_evidence_pack
 from .specialist_domains import build_evidence_lane_report
 from .synthesizer import FinalSynthesizer
 from .vector_search import VectorSearch
@@ -1187,6 +1188,29 @@ class DeepResearchEngine:
                 "abstract/snippet level par hai. Wajah: "
                 + (reading.get("entries", [{}])[0].get("reason", "unknown"))[:120])
 
+        # #115–#118 — production source-integrity audit runs on the exact pack
+        # that continues into contradiction/reasoning/synthesis. It is review
+        # evidence, not an automatic fraud verdict and not a silent delete gate.
+        try:
+            source_integrity = analyze_evidence_pack(pack)
+        except Exception as exc:
+            source_integrity = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "high_risk": False,
+                "clean_bill_of_health": False,
+                "findings": [],
+                "quarantine_candidates": [],
+                "limitations": ["source integrity assessment failed closed"],
+            }
+            round_error_details.append(
+                f"source integrity assessment: {type(exc).__name__}")
+        if source_integrity.get("high_risk"):
+            warnings.append(
+                "Source-integrity audit mein high-risk duplication/provenance "
+                "signal mila; ise fraud proof nahi maana gaya, par strong release "
+                "label human review tak blocked hai.")
+
         # Specialist topics get a deterministic, structured evidence boundary
         # before any model reasoning.  This does not upgrade source quality; it
         # only prevents official records, traditions, allegations and empirical
@@ -1734,6 +1758,7 @@ class DeepResearchEngine:
         }
         coverage["specialist_research"] = specialist_report
         coverage["research_assurance"] = research_assurance
+        coverage["source_integrity"] = source_integrity
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -1886,6 +1911,14 @@ class DeepResearchEngine:
             evidence_level = (
                 f"🟡 MIXED — MARATHON research-process coverage {percent}% rahi; "
                 "ye truth probability nahi hai aur process target poora nahi hua"
+            )
+
+        if (source_integrity.get("high_risk")
+                and any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))):
+            evidence_level = (
+                "🟡 MIXED — source-integrity audit mein high-risk review signal "
+                "mila; fraud prove nahi hua, par strong label blocked hai"
             )
 
         # §17 — reasoning pass ne jo calculation records nikaale the wahi aage
@@ -2182,6 +2215,7 @@ class DeepResearchEngine:
             discovery=discovery_analysis,
             specialist_research=specialist_report,
             research_assurance=research_assurance,
+            source_integrity=source_integrity,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

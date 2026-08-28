@@ -1058,6 +1058,9 @@ class ResearchResult:
     # MARATHON-only measured checklist. Iska percentage answer/hypothesis ki
     # truth, profitability ya real-world success probability nahi hai.
     research_assurance: Dict = field(default_factory=dict)
+    # Production source-poisoning/provenance audit. Empty means the stage did
+    # not run; NO_ANOMALY_DETECTED is never called proof of source truth.
+    source_integrity: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

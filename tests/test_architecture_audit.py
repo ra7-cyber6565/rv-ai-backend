@@ -24,6 +24,11 @@ def test_real_repository_audit_has_all_expected_check_names():
     assert "security:no-wildcard-cors" in names
     assert "security:no-obvious-credential-literals" in names
     assert any(name.startswith("pipeline-order:") for name in names)
+    assert any(
+        row["passed"] and "source-integrity" in row["detail"]
+        for row in report.checks
+        if row["name"].startswith("pipeline-order:")
+    )
 
 
 def test_architecture_audit_wires_cross_domain_and_network_safety_into_release_gate():
