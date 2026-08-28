@@ -156,6 +156,12 @@ _install_hypothesis_evidence_lineage()
 from .causal_chain_quality import install as _install_causal_chain_quality
 _install_causal_chain_quality()
 
+# Post-deployment batch fingerprints are provenance, not validation. Reject
+# NaN/Infinity through the validator's domain rules before JSON canonicalization
+# so malformed telemetry fails closed with stable scientific error semantics.
+from .post_deployment_input_guard import install as _install_post_deployment_input_guard
+_install_post_deployment_input_guard()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
