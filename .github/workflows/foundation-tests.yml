@@ -68,6 +68,7 @@ jobs:
             tests/test_holdout_vault.py \
             tests/test_holdout_vault_hardening.py \
             tests/test_scientist_society.py \
+            tests/test_triple_implementation.py \
             tests/test_research_capsule.py \
             tests/test_procedural_memory.py \
             tests/test_knowledge_watch.py \
