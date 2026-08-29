@@ -119,7 +119,9 @@ def install() -> None:
             report.note = (
                 f"{report.claims_checked} claims check hui: {report.passed_claims} pass, "
                 f"{report.uncertain_claims} uncertain, {report.failed_claims} fail. "
-                "A-E aur separate capture-integrity F gate dono required hain."
+                "A-E dimensions ko alag-alag citations se mix karke verification "
+                "nahi banayi gayi; same-source A-E ke saath separate capture-integrity "
+                "F gate bhi required hai."
             )
         return report
 
