@@ -1,8 +1,10 @@
 """Production audit wiring for #104 Historical Context Engine.
 
-Only the explicit ``historical_context_inputs`` structure is evaluated.  The
-adapter never extracts dates, actor knowledge, causal chronology, or period
-concepts from free-form answer/source prose.  Output is audit-only under
+Only an explicit ``historical_context_inputs`` structure is evaluated.  For API
+compatibility it may be supplied either top-level by an internal result builder
+or inside the already-existing ``coverage`` mapping.  The adapter never
+extracts dates, actor knowledge, causal chronology, or period concepts from
+free-form answer/source prose.  Output is audit-only under
 ``coverage.historical_context`` and cannot upgrade answer status or truth.
 """
 from __future__ import annotations
@@ -63,8 +65,9 @@ def _sources(values: Sequence[Any]) -> list[HistoricalSourceEvidence]:
     out = []
     for index, raw in enumerate(values):
         item = _mapping(raw, f"sources[{index}]")
-        refs = item.get("parent_source_ids")  # explicitly ignored; genealogy belongs elsewhere
-        _ = refs
+        # Parent/citation genealogy has its own SourceIntegrity engine.  Keeping
+        # this adapter narrow avoids silently treating a citation edge as a
+        # historical-knowledge relation.
         out.append(HistoricalSourceEvidence(
             source_id=item.get("source_id"),
             publication_year=item.get("publication_year"),
@@ -123,8 +126,17 @@ def _concepts(values: Sequence[Any]) -> list[PeriodConceptClaim]:
     return out
 
 
+def _historical_inputs(result: Mapping[str, Any]) -> object:
+    if result.get("historical_context_inputs") is not None:
+        return result.get("historical_context_inputs")
+    coverage = result.get("coverage")
+    if isinstance(coverage, Mapping):
+        return coverage.get("historical_context_inputs")
+    return None
+
+
 def build_historical_context_packet(result: Mapping[str, Any]) -> Dict[str, Any]:
-    raw = result.get("historical_context_inputs")
+    raw = _historical_inputs(result)
     if raw is None:
         return {
             "ran": True,
