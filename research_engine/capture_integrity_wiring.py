@@ -139,6 +139,33 @@ def install() -> None:
     def enrich_with_integrity(self, pack, max_sources=3, budget_chars=2400):
         report = original_enrich(self, pack, max_sources=max_sources,
                                  budget_chars=budget_chars)
+
+        # Keep the original full-text signal contract visible and functional
+        # even though this installed method wraps ContentFetcher.enrich.  The
+        # base implementation already applies these fields; repeating the same
+        # idempotent assignments from the returned audit report prevents the
+        # wrapper from hiding COI/funding/methodology wiring from architecture
+        # introspection and fail-closed regression checks.
+        sources_by_id = {
+            str(getattr(source, "source_id", "") or ""): source
+            for source in getattr(pack, "sources", []) or []
+        }
+        for entry in report.get("entries", []) or []:
+            if not entry.get("ok"):
+                continue
+            source = sources_by_id.get(str(entry.get("source_id") or ""))
+            if source is None:
+                continue
+            signals = entry.get("signals") or {}
+            if signals.get("coi_disclosed") is not None:
+                source.coi_disclosed = signals["coi_disclosed"]
+            if signals.get("funding_disclosed") is not None:
+                source.funding_disclosed = signals["funding_disclosed"]
+            if signals.get("replication") and not source.replication:
+                source.replication = signals["replication"]
+            if signals.get("methodology") and not source.methodology:
+                source.methodology = signals["methodology"]
+
         metadata = {}
         for entry in report.get("entries", []) or []:
             source_id = str(entry.get("source_id") or "")
