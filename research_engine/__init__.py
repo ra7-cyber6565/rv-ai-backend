@@ -120,6 +120,12 @@ _install_runtime_capability_wiring()
 from .literature_debate_wiring import install as _install_literature_debate_wiring
 _install_literature_debate_wiring()
 
+# #62-#65 discovery frontier runs only over explicit structured gaps,
+# contradictions, unexpected observations and evidence-backed mechanisms. It
+# creates research candidates, never facts, and cannot upgrade result status.
+from .discovery_frontier_wiring import install as _install_discovery_frontier_wiring
+_install_discovery_frontier_wiring()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
