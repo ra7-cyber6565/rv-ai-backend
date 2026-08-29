@@ -1164,6 +1164,17 @@ class ResearchResult:
     # nahi thi ya draft hi nahi mila. Banane wala module:
     # research_engine/songlab.py
     song_lab: Dict = field(default_factory=dict)
+    # #149 — BHAAV KI SHABDAWALI: `craft.MOODS` haath se likhi band list hai,
+    # isliye "aansu"/"viraha" jaise shabd naap se bahar reh jaate the. Ye record
+    # batata hai ki padhi hui source ke gloss-dhaanche se kitne naye bhaav-shabd
+    # seekhe gaye (`confirmed_count`, 2+ source ke saath), kitne sirf hint hain,
+    # aur kitni jodi kis naapi hui WAJAH se chhodi gayi (`rejects`). Do jhande
+    # hamesha saath jaate hain: `learned_cue_can_drop_a_line: False` (seekhe
+    # shabd se koi line hataayi nahi jaati — DROP ka haq sirf curated list ka
+    # hai) aur `feeling_proven: False` (shabd milna feeling ka saboot nahi).
+    # `ran: False` matlab kuch padha hi nahi gaya — "koi naya shabd nahi tha"
+    # nahi. Banane wala module: research_engine/mood_lexicon.py
+    mood_lexicon: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return asdict(self)

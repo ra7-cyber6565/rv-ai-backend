@@ -587,7 +587,17 @@ def test_mood_arc(draft: str, spec: Any = None) -> Dict[str, Any]:
         return _test_row(TEST_MOOD_ARC, DATA_MISSING,
                          reason="draft hi nahi mila")
     asked = [str(m) for m in (getattr(spec, "mood_asked", ()) or [])]
-    if not asked:
+    # #149: padhi hui source se seekhe bhaav SIRF "maanga bhaav mila" ginne me
+    # jodte hain. `opposites` neeche curated `asked` se hi banta hai — warna ek
+    # seekha hua shabd is test ko TESTED_FAIL bana deta, aur us fail se line
+    # hataane ki wajah ban jaati. Seekhe shabd par wo haq nahi hai.
+    learned_asked = [str(m) for m in
+                     (getattr(spec, "mood_asked_learned", ()) or [])
+                     if str(m) not in asked]
+    learned_pairs = [list(pair) for pair in
+                     (getattr(spec, "mood_learned", ()) or [])]
+    asked_all = asked + learned_asked
+    if not asked_all:
         return _test_row(TEST_MOOD_ARC, NOT_TESTABLE_HERE,
                          reason="user ne kisi bhaav ka naam hi nahi liya — "
                                 "isliye \"bhaav sahi hai\" naapa nahi ja sakta")
@@ -600,19 +610,27 @@ def test_mood_arc(draft: str, spec: Any = None) -> Dict[str, Any]:
     conflicts: List[Dict[str, Any]] = []
     arc: List[Dict[str, Any]] = []
     for index, stanza in enumerate(stanzas):
-        moods = craft.mood_hints("\n".join(stanza))
-        on = [mood for mood in asked if mood in moods]
+        block = "\n".join(stanza)
+        moods = craft.mood_hints(block)
+        wide = craft.mood_hints(block, learned=learned_pairs)
+        on = [mood for mood in asked_all if mood in wide]
         against = [mood for mood in moods if mood in opposites]
         if on:
             hits += 1
         if against:
             conflicts.append({"stanza": index + 1, "opposite_moods": against})
         arc.append({"stanza": index + 1, "moods": moods, "asked_present": on,
-                    "opposite_present": against})
+                    "opposite_present": against,
+                    "moods_wide": wide})
     share = round(hits / len(stanzas), 4)
     measured = {"stanzas": len(stanzas), "stanzas_with_asked_mood": hits,
-                "share": share, "asked": asked, "opposites": opposites,
+                "share": share, "asked": asked_all, "opposites": opposites,
                 "arc": arc, "conflicts": conflicts,
+                # Seekhe shabd alag se dikhte hain, taaki koi ye na samjhe ki
+                # curated list badal di gayi.
+                "asked_curated": asked,
+                "asked_learned": learned_asked,
+                "learned_cue_can_drop_a_line": False,
                 # Shabd dikhna bhaav aa jaana nahi hai — ye sach saath chalta hai.
                 "mood_list_is_not_exhaustive": craft.MOOD_LIST_IS_NOT_EXHAUSTIVE}
     expected = {"min_share": songcraft.MIN_MOOD_STANZA_SHARE,

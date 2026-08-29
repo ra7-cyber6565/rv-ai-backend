@@ -51,6 +51,7 @@ from . import songcraft
 from . import media_study
 from . import listener_study
 from . import music_study
+from . import mood_lexicon
 from . import songlab
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
@@ -791,6 +792,46 @@ class DeepResearchEngine:
                     "gemini_calls": 0, "network_used": False,
                     "note": empty["note"]}
 
+    @staticmethod
+    def _mood_lexicon(question: str, pack: Optional[EvidencePack]) -> Dict:
+        """
+        #149 — BHAAV KI SHABDAWALI padhi hui source se badhao.
+
+        `craft.MOODS` haath se likhi hui band list hai: usme "dukh" hai par
+        "aansu"/"viraha"/"tootna" nahi. Isliye ek bilkul theek sad gaane par
+        `mood_arc_across_stanzas` `DATA_MISSING` de deta tha. Ye pass sources me
+        se SIRF gloss ke dhaanche (`viraha (judaai)`, `aansu means dukh`) se naye
+        shabd seekhta hai — saath-saath aane se kuch nahi seekhta, warna wo
+        andaza hota.
+
+        Teen baat kabhi nahi badalti:
+        1. Purani curated list se kuch HATAYA nahi jaata — sirf jodta hai.
+        2. Do alag source (`CONFIRM_MIN`) chahiye tabhi shabd naap me lagta hai;
+           ek source ka shabd sirf hint rehta hai.
+        3. Seekha hua shabd kisi LINE KO HATA nahi sakta. Line hataana sabse
+           bhaari kaam hai aur uske liye padha hua paryaayvaachi kaafi saboot
+           nahi hai — DROP ka adhikaar curated list ke paas hi rehta hai.
+
+        Lane sirf GAANE ki farmaish par khulti hai (wahi do-signal gate). 0
+        Gemini call, 0 network. Andar kuch toot jaaye to `not_run(...)` — jiska
+        matlab "kuch padha hi nahi gaya" hai, "koi naya shabd nahi hai" nahi.
+        """
+        try:
+            detection = craft.detect(question)
+            is_song = (bool(detection.get("is_request"))
+                       and str(detection.get("form") or "")
+                       == songcraft.SONG_FORM)
+        except Exception:
+            is_song = False
+        if not is_song:
+            return mood_lexicon.not_run("farmaish gaane ki nahi thi")
+        try:
+            sources = list(getattr(pack, "sources", []) or []) if pack else []
+            return mood_lexicon.learn(sources, ask=question)
+        except Exception:
+            return mood_lexicon.not_run(
+                "mood shabdawali andar ki galti se seekhi nahi ja saki")
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
                     job_id: Optional[str] = None,
@@ -826,6 +867,10 @@ class DeepResearchEngine:
         # peeche koi padhi hui research CITE hui. Dono saath chalte hain — ek
         # doosre ki jagah nahi. Source ka BPM/key SOURCE-REPORTED rehta hai.
         music_guidance_pack = self._music_study(question, pack)
+        # #149 — bhaav ke SHABD padhi hui source se seekho (gloss dhaanche se
+        # hi, saath-aane se nahi). Isse sirf "maanga bhaav mila" wali POSITIVE
+        # naap chaudi hoti hai; kisi line ke hataane me iska koi haath nahi hai.
+        mood_ledger = self._mood_lexicon(question, pack)
         out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
                "final": "", "errors": [], "calls": 0, "critique": {},
                "hypotheses": [],
@@ -882,6 +927,11 @@ class DeepResearchEngine:
                # `music_evidence_read: False` matlab sur/saaz par kuch padha hi
                # nahi gaya — "music direction theek hai" nahi.
                "music_study": music_guidance_pack,
+               # #149 — MOOD LEXICON ka ledger: kaun se bhaav-shabd padhi hui
+               # source se seekhe gaye, kitne confirm hue (2+ source) aur kitne
+               # sirf hint hain. `learned_cue_can_drop_a_line: False` hamesha
+               # saath jaata hai — seekhe shabd se koi line hataayi nahi jaati.
+               "mood_lexicon": mood_ledger,
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -1235,7 +1285,8 @@ class DeepResearchEngine:
                     music_guidance_pack.get("guidance") or {}))
             out["craft"] = craft.run_craft(question, craft_text,
                                            reviser=reviser, study=song_study,
-                                           guidance_blocks=guidance_blocks)
+                                           guidance_blocks=guidance_blocks,
+                                           mood_ledger=mood_ledger)
             # Naya draft jeeta to jawab me bhi wahi dikhna chahiye, warna user
             # ek likhawat padhta hai aur naap doosri ki hoti hai. Yahan kuch
             # kaata nahi jaata — sirf draft wala hissa badalta hai.
@@ -2500,6 +2551,14 @@ class DeepResearchEngine:
             # sakta.
             song_lab=songlab.public_record(
                 songlab.report_of(passes.get("craft") or {})),
+            # #149 — MOOD LEXICON ka public record: kitne bhaav-shabd padhi hui
+            # source se seekhe gaye, kitne 2+ source se confirm hue, kitni jodi
+            # kis WAJAH se chhodi gayi, aur naam se likha hua sach
+            # (learned_cue_can_drop_a_line / feeling_proven = False,
+            # gemini_calls = 0). Khaali/ran-False = shabdawali badhi hi nahi —
+            # "koi naya shabd nahi tha" nahi.
+            mood_lexicon=mood_lexicon.public_record(
+                passes.get("mood_lexicon") or {}),
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

@@ -56,6 +56,8 @@ from .music_study import (MAX_AUDIT_LIMIT_LINES
 from .music_study import music_limits, music_section
 from .songlab import MAX_AUDIT_LIMIT_LINES as SONGLAB_MAX_AUDIT_LIMIT_LINES
 from .songlab import songlab_limits, songlab_section
+from .mood_lexicon import MAX_AUDIT_LIMIT_LINES as MOOD_MAX_AUDIT_LIMIT_LINES
+from .mood_lexicon import mood_limits, mood_section
 from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
@@ -1678,6 +1680,15 @@ Ab jawab likho:"""
         for songlab_line in songlab_limits(
                 craft_report)[:SONGLAB_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {songlab_line}")
+        # #149 — BHAAV KI SHABDAWALI ki seema. Ye alag se jaati hai kyunki iska
+        # jhooth alag kism ka hai: "app ne naye bhaav-shabd seekh liye" sun kar
+        # lagta hai ab bhaav ki poori samajh aa gayi. Sach ye hai ki shabd sirf
+        # utne hain jitna padha gaya, sirf gloss ke dhaanche se aaye hain, do
+        # alag source ke bina naap me lagte hi nahi, aur seekha hua shabd kisi
+        # likhi hui LINE KO HATA nahi sakta. Ceiling module se aati hai — haath
+        # se likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
+        for mood_line in mood_limits(craft_report)[:MOOD_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {mood_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -2036,6 +2047,18 @@ Ab jawab likho:"""
                 music_text = music_section(music_report)
                 if music_text:
                     parts.append(music_text)
+                # #149 — BHAAV KI SHABDAWALI: mood ke kaunse naye shabd PADHI
+                # HUI source se seekhe gaye (har shabd ke saath source id), aur
+                # kitni jodiyaan kis naapi hui wajah se chhod di gayi. Ye
+                # listener/music block ki jagah nahi leta: wo "bhaav kaise kaam
+                # karta hai" batate hain, ye sirf "kaunsa shabd kis bhaav ka
+                # ishaara hai" batata hai. Do saaf sach yahin likhe jaate hain —
+                # shabd mil jaana feeling ka saboot nahi, aur seekha hua shabd
+                # kisi likhi hui line ko HATA nahi sakta. Kuch seekha na gaya ho
+                # to yahan kuch chhapta hi nahi.
+                mood_text = mood_section(craft_report)
+                if mood_text:
+                    parts.append(mood_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)

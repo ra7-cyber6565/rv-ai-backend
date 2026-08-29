@@ -36,7 +36,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import lang_bridge, songcraft
+from . import lang_bridge, mood_lexicon, songcraft
 
 # ── check status vocabulary (LAB se alag rakha gaya hai jaan-boojh kar) ───────
 # LAB hypothesis ke SACH ke baare me bolta hai; CRAFT sirf draft ke DHAANCHE ke
@@ -748,8 +748,20 @@ def _cue_present(needle: str, *haystacks: str) -> bool:
     return any(pattern.search(h or "") for h in haystacks)
 
 
-def mood_hints(text: str) -> List[str]:
-    """Text me kaunse bhaav ke shabd mile (naam se — adhoori list se)."""
+def mood_hints(text: str,
+               learned: Sequence[Sequence[str]] = ()) -> List[str]:
+    """
+    Text me kaunse bhaav ke shabd mile (naam se — adhoori list se).
+
+    `learned` = `mood_lexicon.confirmed_pairs(...)` jaisa `(label, cue)` ka
+    jodaa: PADHI HUI source se seekhe shabd. Curated `MOODS` ka loop pehle
+    chalta hai aur usme se kuch HATAYA nahi gaya — learned cue sirf JODTE hain.
+
+    #149 ka sabse zaroori niyam: seekha hua shabd kabhi kisi line ko HATA nahi
+    sakta. Isliye jo raaste "ulta bhaav" dhoondhte hain (`_check_mood_conflict`,
+    `songlab` ka `line_mood_conflict`) wo is function ko `learned` ke BINA
+    bulate hain — unke liye curated list hi ek maatr adhikaar hai.
+    """
     plain = re.sub(r"\s+", " ", str(text or "").lower())
     roman = re.sub(r"\s+", " ", lang_bridge.roman(str(text or "")).lower())
     out: List[str] = []
@@ -758,6 +770,15 @@ def mood_hints(text: str) -> List[str]:
             if _cue_present(variant.lower(), plain, roman):
                 out.append(label)
                 break
+    for pair in learned or ():
+        try:
+            label, cue = str(pair[0] or ""), str(pair[1] or "")
+        except (IndexError, TypeError):
+            continue
+        if not label or not cue or label in out:
+            continue
+        if _cue_present(cue.lower(), plain, roman):
+            out.append(label)
     return out
 
 
@@ -796,6 +817,14 @@ class Spec:
     rhyme_required: bool = False
     hook_required: bool = False
     mood_asked: List[str] = field(default_factory=list)
+    # #149: PADHI HUI source se seekhe shabd ki wajah se jo bhaav EXTRA mile.
+    # Ye alag field isliye hai ki `mood_asked` khud na chaudi ho — warna
+    # `songlab._opposite_moods(spec.mood_asked)` bhi chaudi ho jaati aur ek
+    # seekha hua shabd line HATANE lagta. Wo hone nahi dena hai.
+    mood_asked_learned: List[str] = field(default_factory=list)
+    # `mood_lexicon.confirmed_pairs(...)` ka (label, cue) jodaa — do alag
+    # source se pakka hua ho tabhi yahaan aata hai.
+    mood_learned: List[List[str]] = field(default_factory=list)
     # #128: style/register/bhasha ki MAANG (songcraft.StyleAsk). Ye "us style ka
     # gyaan aa gaya" nahi hai — sirf "user ne kis cheez ka naam liya".
     style: Any = None
@@ -813,6 +842,8 @@ class Spec:
             "rhyme_required": self.rhyme_required,
             "hook_required": self.hook_required,
             "mood_asked": list(self.mood_asked),
+            "mood_asked_learned": list(self.mood_asked_learned),
+            "mood_learned": [list(pair) for pair in self.mood_learned],
             "style": (self.style.to_dict()
                       if hasattr(self.style, "to_dict") else {}),
             "notes": list(self.notes),
@@ -824,13 +855,19 @@ class Spec:
 
 
 def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
-               form: Optional[Form] = None) -> Optional[Spec]:
+               form: Optional[Form] = None,
+               mood_ledger: Optional[Dict[str, Any]] = None) -> Optional[Spec]:
     """
     Sawaal se SPEC banao — sirf jo SAAF maanga gaya ho.
 
     "shayad 8 line chahta hoga" wala andaza nahi lagate (requested.py ka wahi
     niyam). Jo user ne nahi bataya, uska target 0 rehta hai aur us par check
     `NOT_MEASURED` jaata hai — chuppi ko "sab theek" nahi padha jaana chahiye.
+
+    `mood_ledger` = `mood_lexicon.learn(sources)` ka report. Isse SIRF EXTRA
+    bhaav mil sakte hain (`spec.mood_asked_learned`); `spec.mood_asked` curated
+    list se hi banta hai, kyunki ulta-bhaav aur line-hataane wale raaste usi ko
+    padhte hain.
     """
     found = detection if detection is not None else detect(question)
     if not found.get("is_request"):
@@ -873,8 +910,19 @@ def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
         spec.notes.append("Sawaal roman me hai, isliye script ka check nahi "
                           "chalega (Devanagari ya Hinglish — dono chal sakte).")
 
+    spec.mood_learned = [list(pair)
+                         for pair in mood_lexicon.confirmed_pairs(mood_ledger)]
     spec.mood_asked = mood_hints(text)
-    if not spec.mood_asked:
+    spec.mood_asked_learned = [mood
+                               for mood in mood_hints(text,
+                                                      learned=spec.mood_learned)
+                               if mood not in spec.mood_asked]
+    if spec.mood_asked_learned:
+        spec.notes.append(
+            "Kuch bhaav padhi hui source ke shabd se mile (%s) — inse mood "
+            "MET ho sakta hai, par inse koi line HATAYI nahi jaayegi."
+            % ", ".join(spec.mood_asked_learned))
+    if not spec.mood_asked and not spec.mood_asked_learned:
         spec.notes.append("User ne mood/bhaav naam se nahi bataya — mood ka "
                           "check nahi chalega.")
     if spec.line_target and spec.line_target < picked.min_lines:
@@ -882,6 +930,11 @@ def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
                           "user ki ginti hi maani gayi.")
     # #128: style/bhasha/lehja ki maang padho (ADDRESSING only). Isse koi
     # MET/NOT_MET faisla nahi hota — sirf "user ne kya maanga" record hota hai.
+    # #149: yahaan JAAN-BOOJH kar sirf `mood_asked` jaata hai. `songcraft`
+    # `moods` ko `ask.moods` me rakhta hai aur `context_facts` usko
+    # `moods_asked` ke fallback ki tarah use karta hai — aur wahi `moods_asked`
+    # `_check_mood_conflict` ka ULTA-bhaav set banata hai. Seekha hua shabd
+    # wahaan pahunchne se line hataane ka khatra ban jaata.
     spec.style = songcraft.style_of(text, form=picked.form_id,
                                     moods=spec.mood_asked)
     for line in getattr(spec.style, "notes", ()) or ():
@@ -942,12 +995,17 @@ def _words(text: str) -> List[str]:
             if w.strip(_EDGE_PUNCT)]
 
 
-def draft_facts(draft: str) -> Dict[str, Any]:
+def draft_facts(draft: str,
+                learned: Sequence[Sequence[str]] = ()) -> Dict[str, Any]:
     """
     Draft ke saare kachche number ek jagah — checks isi par chalte hain.
 
     Ek hi jagah se number nikaalne ka fayda: report me jo number dikhta hai wahi
     check ne bhi use kiya. Do jagah alag-alag hisaab = do alag sach.
+
+    #149: `moods` HAMESHA curated list se hi banti hai — ulta-bhaav (`songcraft.
+    _check_mood_conflict`) aur line-DROP wale raaste isi key ko padhte hain.
+    Seekhe shabd sirf `moods_wide` me jaate hain, jo positive naap padhta hai.
     """
     lines = lines_of(draft)
     stanzas = stanzas_of(draft)
@@ -962,6 +1020,8 @@ def draft_facts(draft: str) -> Dict[str, Any]:
         roman_tokens = [w.lower() for w in words]
     unique_ratio = (round(len(set(roman_tokens)) / len(roman_tokens), 4)
                     if roman_tokens else 0.0)
+    curated_moods = mood_hints(draft)
+    wide_moods = mood_hints(draft, learned=learned)
     return {
         "lines": lines,
         "line_count": len(lines),
@@ -977,7 +1037,10 @@ def draft_facts(draft: str) -> Dict[str, Any]:
         "cliches": cliches_in(draft),
         "appeal_claims": appeal_claims_in(draft),
         "script": lang_bridge.dominant_script(draft),
-        "moods": mood_hints(draft),
+        "moods": curated_moods,
+        "moods_wide": wide_moods,
+        "moods_learned_only": [mood for mood in wide_moods
+                               if mood not in curated_moods],
     }
 
 
@@ -1192,15 +1255,24 @@ def _check_appeal_claim(spec: Spec, facts: Dict[str, Any]) -> Check:
 
 
 def _check_mood_words(spec: Spec, facts: Dict[str, Any]) -> Check:
-    if not spec.mood_asked:
+    """
+    Maanga hua bhaav draft me shabd ke roop me hai ya nahi.
+
+    #149: yahaan curated + seekhe hue, dono chalte hain — kyunki ye check
+    SIRF "mila/nahi mila" bolta hai, kisi line ko hataata nahi. Isliye padhi
+    hui source ka shabd bhi MET bana sakta hai.
+    """
+    asked = list(spec.mood_asked) + [mood for mood in spec.mood_asked_learned
+                                     if mood not in spec.mood_asked]
+    if not asked:
         return _skip("mood_words_present", "no_mood_asked",
                      "User ne bhaav naam se nahi maanga.")
-    got = facts["moods"]
-    hit = [m for m in spec.mood_asked if m in got]
+    got = facts.get("moods_wide") or facts["moods"]
+    hit = [m for m in asked if m in got]
     ok = bool(hit)
     return _check("mood_words_present", MET if ok else NOT_MET,
                   measured=", ".join(got) if got else "koi nahi",
-                  target=", ".join(spec.mood_asked),
+                  target=", ".join(asked),
                   reason="" if ok else "mood_words_missing",
                   note=("Maange gaye bhaav ke shabd draft me hain. Dhyaan do: "
                         "shabd milna \"feeling aa gayi\" nahi hota — wo naapa "
@@ -1263,16 +1335,23 @@ def measure(draft: str, spec: Optional[Spec], study: Any = None,
     if not body:
         return {"status": NO_DRAFT, "checks": [], "measured": {},
                 "note": "Naapne ke liye draft hi nahi mila."}
-    facts = draft_facts(body)
+    facts = draft_facts(body, learned=spec.mood_learned)
     # #131: gaane ke naye naap ke liye alag context (mood arc, register,
     # style-fit, music direction). Ye banane me kuch toot jaaye to bhi poora
     # naap nahi girna chahiye — us haalat me songcraft ke check khud
     # NOT_MEASURED ho jaate hain (fail-closed).
+    #
+    # #149: `stanza_moods` me seekhe shabd bhi jaate hain, kyunki `songcraft.
+    # _check_mood_spread` sirf GINTA hai ki kitne band me bhaav ka shabd hai —
+    # ye positive naap hai. `facts["moods"]` curated hi rehta hai, isliye
+    # `_check_mood_conflict` (ulta bhaav) chauda nahi hota.
     try:
         stanzas = stanzas_of(body)
         facts["songcraft"] = songcraft.context_facts(
             body, spec=spec, study=study, context=context,
-            stanza_moods=[mood_hints("\n".join(stanza)) for stanza in stanzas],
+            stanza_moods=[mood_hints("\n".join(stanza),
+                                     learned=spec.mood_learned)
+                          for stanza in stanzas],
             stanza_line_counts=[len(stanza) for stanza in stanzas],
         )
     except Exception:
@@ -1313,6 +1392,10 @@ def measure(draft: str, spec: Optional[Spec], study: Any = None,
             "cliches": facts["cliches"],
             "script": facts["script"],
             "moods_in_draft": facts["moods"],
+            "moods_in_draft_wide": list(facts.get("moods_wide") or []),
+            "moods_from_read_sources": list(
+                facts.get("moods_learned_only") or []),
+            "mood_cues_learned": [list(pair) for pair in spec.mood_learned],
             "stanza_moods": list(
                 (facts.get("songcraft") or {}).get("stanza_moods") or []),
             "guidance_source_count": int(
@@ -1763,7 +1846,8 @@ def _song_lab_pass(draft: str, spec: Optional[Spec], study: Any, context: str,
 def run_craft(question: str, answer_text: str,
               reviser: Optional[Callable[[str], str]] = None,
               study: Any = None,
-              guidance_blocks: Sequence[str] = ()) -> Dict[str, Any]:
+              guidance_blocks: Sequence[str] = (),
+              mood_ledger: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Poora CRAFT stage: farmaish pehchaano → SPEC → draft dhoondo → naapo →
     (zaroorat par) ek baar dobara likhwao → sach ke saath lauta do.
@@ -1784,6 +1868,10 @@ def run_craft(question: str, answer_text: str,
     music lane se). Ye sirf DOBARA likhwane ke prompt me jaate hain; khud kabhi
     dobara likhwane ki wajah nahi bante. Khaali chhod do to output bilkul purana
     hi rehta hai.
+
+    `mood_ledger` = `mood_lexicon.learn(sources)` ka report (#149). Nahi diya to
+    sab kuch bilkul pehle jaisa chalta hai. Diya to sirf POSITIVE naap chaudi
+    hoti hai — kisi line ke hataane me iska koi haath nahi hota.
     """
     detection = detect(question)
     if not detection.get("is_request"):
@@ -1791,7 +1879,7 @@ def run_craft(question: str, answer_text: str,
             str(detection.get("reason") or "not_a_craft_request"),
             "Ye kuch banane ki farmaish nahi lagi, isliye CRAFT ka naap chala "
             "hi nahi.")
-    spec = build_spec(question, detection=detection)
+    spec = build_spec(question, detection=detection, mood_ledger=mood_ledger)
     if spec is None:
         return _empty_report("no_spec",
                              "Farmaish se koi naapne laayak SPEC nahi bana.")
@@ -1890,6 +1978,14 @@ def run_craft(question: str, answer_text: str,
         "policy": POLICY.to_dict(),
         "songcraft": _songcraft_block(study, spec),
         "songcraft_policy": songcraft.policy(),
+        # #149: kaun se bhaav-shabd PADHI HUI source se seekhe gaye — ginti,
+        # reject ki wajah aur "feeling saabit nahi hui" ka saaf label. Poora
+        # ledger yahi baithta hai (source id ke saath), taaki synthesizer ko
+        # doosra pass na chahiye: jis ledger se naap chali usi ka record chhape.
+        "mood_lexicon": (dict(mood_ledger) if isinstance(mood_ledger, dict)
+                         else mood_lexicon.not_run(
+                             "craft ko koi mood ledger nahi diya gaya")),
+        "mood_lexicon_record": mood_lexicon.public_record(mood_ledger),
         # SONG LAB ki poori report — line ka naap, hataai ka ledger, chaar test.
         # Ye us draft ki hai jo `final_draft` me hai, kisi purane ki nahi.
         "song_lab": lab_report,
