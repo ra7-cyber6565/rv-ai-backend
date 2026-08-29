@@ -101,6 +101,12 @@ _install_hypothesis_evidence_lineage()
 from .causal_chain_quality import install as _install_causal_chain_quality
 _install_causal_chain_quality()
 
+# #11/#12 execute only explicit structured SCM/counterfactual contracts.  The
+# wiring never infers a causal graph from prose and never treats a model result
+# as empirical proof of causation or a measured real-world intervention.
+from .causal_counterfactual_wiring import install as _install_causal_counterfactual_wiring
+_install_causal_counterfactual_wiring()
+
 # OCR/translation capture integrity is separate from A-E and can only
 # downgrade/block accepted support.
 from .capture_integrity_wiring import install as _install_capture_integrity_wiring
