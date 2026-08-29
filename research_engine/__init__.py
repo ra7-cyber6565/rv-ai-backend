@@ -133,6 +133,13 @@ _install_discovery_frontier_wiring()
 from .historical_context_wiring import install as _install_historical_context_wiring
 _install_historical_context_wiring()
 
+# #85/#95/#110/#119/#120 are explicit structured epistemic-stress contracts.
+# The wrapper never infers hidden assumptions, synthetic lineage, conspiracy
+# labels or falsifiers from prose; it only audits caller-supplied structures and
+# can never upgrade result status/truth.
+from .epistemic_stress_wiring import install as _install_epistemic_stress_wiring
+_install_epistemic_stress_wiring()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
