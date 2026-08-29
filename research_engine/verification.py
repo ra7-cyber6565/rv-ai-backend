@@ -118,15 +118,15 @@ class VerificationEngine(_ClaudeVerificationEngine):
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
             report.warnings.append(
-                "Claim-level A-E + capture-integrity verification apply nahi ho saki "
-                "kyunki koi labelled factual/evidence claim detect nahi hui. Valid "
-                "citation ID ko akela source verification nahi maana gaya."
+                "Claim-level evidence verification (A-E + capture-integrity F) apply "
+                "nahi ho saki kyunki koi labelled factual/evidence claim detect nahi "
+                "hui. Valid citation ID ko akela source verification nahi maana gaya."
             )
         elif not gate_passed:
             report.warnings.append(
-                "Valid citation IDs mile, lekin same-source A-E aur separate "
-                "capture-integrity gate poori pass nahi hui. Isliye answer ko fully "
-                "source-verified nahi maana gaya."
+                "Claim-level evidence verification fail-closed rahi: valid citation IDs "
+                "mile, lekin same-source A-E aur separate capture-integrity F gate poori "
+                "pass nahi hui. Isliye answer ko fully source-verified nahi maana gaya."
             )
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
