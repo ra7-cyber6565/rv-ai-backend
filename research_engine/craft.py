@@ -1373,6 +1373,42 @@ _VERSE_MAX_LINE_CHARS = 70
 _NOT_VERSE_RE = re.compile(r"^\s*(?:#{1,6}\s|>|\||\d{1,2}[.)]\s|[-*•]\s|\*\*|"
                            r"https?://|Sources\b|VERIFIED\b|PARTIAL\b)")
 
+# Gaana antare me likha jaata hai aur antare ke BEECH ek khaali line hoti hai.
+# Pehle koi bhi khaali line run tod deti thi, isliye poore gaane me se sirf
+# PEHLA antara naapa jaata tha — aise haal me "antare-dar-antare bhaav ka arc"
+# jaisa test apne hi naam ka mazaak ban jaata hai. Ab ek khaali line antare ka
+# gap maani jaati hai; do ya zyada khaali line matlab "hissa yahan khatam".
+_VERSE_STANZA_GAP_LINES = 1
+
+# Gap ke BAAD aane wali pehli line par ek extra shart hai: agar wo samjhaane
+# wali prose lagti hai (poore vaakya ka viraam + kaafi shabd), to hum use
+# antara nahi maante aur hissa wahin khatam kar dete hain. Wajah wahi purani
+# hai — audit/explanation ka text naapna sabse bada khatra hai, kyunki tab
+# number sahi hote hain par kisi galat cheez ke. Ye shart sirf gap ke baad
+# lagti hai, antare ke andar ki line par nahi — isliye ek-antare wale draft ka
+# naap pehle jaisa hi rehta hai.
+_PROSE_AFTER_GAP_RE = re.compile(r"[.!?:;]\s*$")
+_PROSE_AFTER_GAP_WORDS = 5
+
+# Gap ke PEHLE ka hissa bhi antara jaisa hona chahiye: kam se kam do line. Ek
+# akeli line ("ye jawab hai" jaisi bhoomika) ke baad wala gap NAHI jodta —
+# warna jawab ki bhoomika hi draft me ghus jaati aur naap galat cheez par hoti.
+# Gaane ke beech aane wali ek-line wali tek se dikkat nahi hoti, kyunki tab tak
+# chalta hua hissa do line se bada ho chuka hota hai.
+_VERSE_MIN_BRIDGE_LINES = 2
+
+
+def _verse_len(rows: Sequence[str]) -> int:
+    """Run ki lambaai = sirf asli line, gap wali khaali line nahi."""
+    return sum(1 for row in rows if str(row).strip())
+
+
+def _looks_like_prose_after_gap(line: str) -> bool:
+    text = str(line or "").strip()
+    if not _PROSE_AFTER_GAP_RE.search(text):
+        return False
+    return len(text.split()) >= _PROSE_AFTER_GAP_WORDS
+
 
 def _verse_block(text: str) -> str:
     """
@@ -1381,29 +1417,53 @@ def _verse_block(text: str) -> str:
     Ye ANDAAZA hai, isliye source `verse_shape_guess` likha jaata hai aur report
     me saaf bola jaata hai ki draft marked block me nahi tha. Heading, bullet,
     quote, link aur status shabd (VERIFIED/PARTIAL) wali line verse nahi maani
-    jaati — warna audit ka text hi naapa jaane lagta hai.
+    jaati — warna audit ka text hi naapa jaane lagta hai. Antare ke beech ki ek
+    khaali line hissa nahi todti (dekho `_VERSE_STANZA_GAP_LINES`), taaki poora
+    gaana naapa jaaye, sirf pehla antara nahi.
     """
     best: List[str] = []
     current: List[str] = []
+    blanks = 0
     for raw in str(text or "").splitlines():
         line = raw.strip()
-        ok = (line and len(line) <= _VERSE_MAX_LINE_CHARS
+        if not line:
+            if current and _verse_len(current) >= _VERSE_MIN_BRIDGE_LINES:
+                blanks += 1
+                if blanks > _VERSE_STANZA_GAP_LINES:
+                    if _verse_len(current) > _verse_len(best):
+                        best = current
+                    current, blanks = [], 0
+                continue
+            if _verse_len(current) > _verse_len(best):
+                best = current
+            current, blanks = [], 0
+            continue
+        ok = (len(line) <= _VERSE_MAX_LINE_CHARS
               and not _NOT_VERSE_RE.match(raw))
+        if ok and blanks and _looks_like_prose_after_gap(line):
+            ok = False
         if ok:
+            if current and blanks:
+                current.append("")
+            blanks = 0
             current.append(line)
             continue
-        if len(current) > len(best):
+        if _verse_len(current) > _verse_len(best):
             best = current
-        current = []
-    if len(current) > len(best):
+        current, blanks = [], 0
+    if _verse_len(current) > _verse_len(best):
         best = current
-    if len(best) < _VERSE_MIN_RUN:
+    if _verse_len(best) < _VERSE_MIN_RUN:
         return ""
-    return "\n".join(best)
+    return "\n".join(best).strip("\n")
 
 
 # ── reject + dobara likhwana (ek hi round, bounded) ─────────────────────────
 MAX_REVISION_ROUNDS = 1
+
+# SONG LAB ki note prompt me bandhi hui hain — warna ek lambe gaane ki poori
+# line-list prompt me chali jaati aur asli naap ka feedback usme dab jaata.
+MAX_LAB_NOTES_IN_PROMPT = 10
 
 
 def revision_notes(measured: Optional[Dict[str, Any]]) -> List[str]:
@@ -1419,16 +1479,27 @@ def revision_notes(measured: Optional[Dict[str, Any]]) -> List[str]:
 
 
 def revision_prompt_block(spec: Optional[Spec],
-                          measured: Optional[Dict[str, Any]]) -> str:
+                          measured: Optional[Dict[str, Any]],
+                          guidance_blocks: Sequence[str] = (),
+                          lab_notes: Sequence[str] = ()) -> str:
     """
     Dobara likhne ke liye seedha, naapa hua feedback.
 
     Isme koi "acha likho" jaisi khaali baat nahi hai — sirf wahi baat jo naapi
     ja chuki hai, number ke saath. Jo cheez naapi nahi ja sakti (pasand, viral)
     uska zikr yahan bhi nahi hota.
+
+    `guidance_blocks` = padhi hui baat (craft-study/media/listener/music lane se
+    aaye hue block). Ye khud kabhi dobara-likhwane ki WAJAH nahi bante — wajah
+    sirf naap ka fail hona hai — par jab dobara likhwaya jaa raha ho to padhi
+    hui baat saath jaani chahiye, warna doosra draft pehle se kam padha hua
+    hoga. `lab_notes` = SONG LAB ki line-level naapi hui note.
+
+    Dono default me khaali hain, isliye purana output bilkul waisa hi rehta hai.
     """
     notes = revision_notes(measured)
-    if spec is None or not notes:
+    lab = [str(note).strip() for note in (lab_notes or []) if str(note).strip()]
+    if spec is None or not (notes or lab):
         return ""
     lines = ["DOBARA LIKHO — pehle draft ka naap poora nahi utra.", ""]
     lines.append("Kya banana hai: " + spec.label)
@@ -1450,10 +1521,21 @@ def revision_prompt_block(spec: Optional[Spec],
     if spec.mood_asked:
         lines.append("Bhaav: " + ", ".join(spec.mood_asked))
     lines.append("")
-    lines.append("Naap me ye cheezein pass nahi hui:")
-    for note in notes:
-        lines.append("- " + note)
-    lines.append("")
+    if notes:
+        lines.append("Naap me ye cheezein pass nahi hui:")
+        for note in notes:
+            lines.append("- " + note)
+        lines.append("")
+    if lab:
+        lines.append("SONG LAB ki line-level naap (har baat naapi hui hai):")
+        for note in lab[:MAX_LAB_NOTES_IN_PROMPT]:
+            lines.append(note if note.startswith(("-", "*")) else "- " + note)
+        lines.append("")
+    for block in (guidance_blocks or []):
+        text = str(block or "").strip()
+        if text:
+            lines.append(text)
+            lines.append("")
     lines.append("Sirf naya draft bhejo, isi shakal me (koi explanation nahi):")
     lines.append("```" + DRAFT_FENCE)
     lines.append("<naya draft>")
@@ -1620,6 +1702,10 @@ def _empty_report(reason: str, note: str) -> Dict[str, Any]:
         "policy": POLICY.to_dict(),
         "songcraft": _songcraft_block(None),
         "songcraft_policy": songcraft.policy(),
+        # Shape dono raaston me ek jaisi rahe — warna padhne wale ko "key hi
+        # nahi hai" aur "stage chala hi nahi" me farq karna padta.
+        "song_lab": {"ran": False, "status": NOT_RUN,
+                     "reason": "craft_stage_not_run"},
         "cannot_measure": list(CANNOT_MEASURE)
                           + list(songcraft.CANNOT_MEASURE_EXTRA),
         "disclaimer": CRAFT_DISCLAIMER,
@@ -1628,9 +1714,56 @@ def _empty_report(reason: str, note: str) -> Dict[str, Any]:
     }
 
 
+def _songlab_module() -> Any:
+    """
+    songlab ko function ke andar import kiya jaata hai — jaan-boojh kar.
+
+    songlab khud craft ko import karta hai (matra, cliché, score, line ki
+    definition — sab ek hi jagah se aane chahiye). Top par import karne se cycle
+    ban jaata. Import na ho paaye to stage `ran: False` ke saath wajah likhta
+    hai, chup-chaap skip nahi hota.
+    """
+    try:
+        from . import songlab as _songlab
+    except Exception:
+        return None
+    return _songlab
+
+
+def _song_lab_pass(draft: str, spec: Optional[Spec], study: Any, context: str,
+                   measured: Dict[str, Any]
+                   ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+    """
+    SONG LAB chalao aur uska saaf kiya hua draft aage le jao.
+
+    Teen cheez wapas: lab ki report, (mumkin hai badla hua) draft, aur us draft
+    ki taaza craft naap. Gaane ke alawa kisi form par SONG LAB khud hi `NOT_RUN`
+    lauta deta hai, isliye gate do jagah nahi likha gaya.
+
+    Line hatti hai to naap DOBARA hoti hai — purani naap naye draft par chipka
+    dena sabse aasaan jhooth hota, aur wahi yahan mumkin nahi.
+    """
+    songlab = _songlab_module()
+    if songlab is None:
+        return ({"ran": False, "status": NOT_RUN,
+                 "reason": "song_lab_module_import_failed"}, draft, measured)
+    report = songlab.run_song_lab(draft, spec=spec, study=study,
+                                  context=context)
+    if not report.get("ran"):
+        return report, draft, measured
+    new_draft = str(report.get("draft_out") or "")
+    if report.get("draft_changed") and new_draft.strip():
+        new_context = (context.replace(draft, new_draft, 1)
+                       if draft and draft in context else context)
+        measured = measure(new_draft, spec, study=study, context=new_context)
+        draft = new_draft
+    return report, draft, measured
+
+
 def run_craft(question: str, answer_text: str,
               reviser: Optional[Callable[[str], str]] = None,
-              study: Any = None) -> Dict[str, Any]:
+              study: Any = None,
+              guidance_blocks: Sequence[str] = ()) -> Dict[str, Any]:
     """
     Poora CRAFT stage: farmaish pehchaano → SPEC → draft dhoondo → naapo →
     (zaroorat par) ek baar dobara likhwao → sach ke saath lauta do.
@@ -1646,6 +1779,11 @@ def run_craft(question: str, answer_text: str,
     `study` (songcraft.study(...) ka nateeja) sirf tab kuch badalta hai jab usme
     ASLI padhi hui baat ho. Nahi diya gaya to gaane wale naye naap NOT_MEASURED
     rehte hain — "padha hi nahi" ko "theek hai" nahi likha jaata.
+
+    `guidance_blocks` = padhi hui baat ke block (craft-study / media / listener /
+    music lane se). Ye sirf DOBARA likhwane ke prompt me jaate hain; khud kabhi
+    dobara likhwane ki wajah nahi bante. Khaali chhod do to output bilkul purana
+    hi rehta hai.
     """
     detection = detect(question)
     if not detection.get("is_request"):
@@ -1661,18 +1799,29 @@ def run_craft(question: str, answer_text: str,
     draft, source = extract_draft(answer_text, spec)
     first_draft = draft
     measured = measure(draft, spec, study=study, context=answer_text)
+    # SONG LAB dobara-likhwane se PEHLE chalta hai, taaki uski line-level note
+    # usi ek bounded call me jaa sake. Baad me chalane par ya to note bekaar
+    # jaati, ya doosri Gemini call lagti — dono galat.
+    lab_report, draft, measured = _song_lab_pass(draft, spec, study,
+                                                 answer_text, measured)
+    lab_notes = [str(note) for note in (lab_report.get("redraft_notes") or [])]
     revision: Dict[str, Any] = {"attempted": False, "ran": False, "rounds": 0,
                                 "kept": "pehla", "notes": [], "reason": ""}
     gemini_calls = 0
     notes = revision_notes(measured)
     revision["notes"] = notes
+    revision["lab_notes"] = lab_notes
 
-    if measured.get("status") == DRAFT_WEAK and notes:
+    # Do alag wajah, ek hi bounded call: craft ka naap fail hua, YA SONG LAB ne
+    # line-level kuch naapa hua nikala. Doosri wajah sirf gaane par aati hai.
+    if ((measured.get("status") == DRAFT_WEAK and notes) or lab_notes):
         if reviser is None:
             revision["reason"] = "reviser_not_available"
         else:
             revision["attempted"] = True
-            prompt = revision_prompt_block(spec, measured)
+            prompt = revision_prompt_block(spec, measured,
+                                           guidance_blocks=guidance_blocks,
+                                           lab_notes=lab_notes)
             new_text = ""
             try:
                 new_text = str(reviser(prompt) or "")
@@ -1697,8 +1846,13 @@ def run_craft(question: str, answer_text: str,
                 new_measured = measure(new_draft, spec, study=study,
                                        context=new_context)
                 revision["second_status"] = new_measured.get("status")
+                # Naye draft par bhi SONG LAB — "test jis draft par pass hua" aur
+                # "jo draft diya gaya" kabhi alag nahi ho sakte.
+                new_lab, new_draft, new_measured = _song_lab_pass(
+                    new_draft, spec, study, new_context, new_measured)
                 if _revision_is_better(new_measured, measured):
                     draft, source, measured = new_draft, new_source, new_measured
+                    lab_report = new_lab
                     revision["kept"] = "doosra"
                 else:
                     revision["kept"] = "pehla"
@@ -1736,6 +1890,9 @@ def run_craft(question: str, answer_text: str,
         "policy": POLICY.to_dict(),
         "songcraft": _songcraft_block(study, spec),
         "songcraft_policy": songcraft.policy(),
+        # SONG LAB ki poori report — line ka naap, hataai ka ledger, chaar test.
+        # Ye us draft ki hai jo `final_draft` me hai, kisi purane ki nahi.
+        "song_lab": lab_report,
         "cannot_measure": list(CANNOT_MEASURE)
                           + list(songcraft.CANNOT_MEASURE_EXTRA),
         "disclaimer": CRAFT_DISCLAIMER,

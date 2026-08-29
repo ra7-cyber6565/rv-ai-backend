@@ -51,6 +51,7 @@ from . import songcraft
 from . import media_study
 from . import listener_study
 from . import music_study
+from . import songlab
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -1219,8 +1220,22 @@ class DeepResearchEngine:
                         return brain.generate(prompt, "craft_redraft")
                     except QuotaExhausted:
                         return ""
+            # #141 — dobara likhwane ke prompt me PADHI HUI baat bhi jaani
+            # chahiye. Pehle ye sirf PEHLE draft ke prompt me jaati thi, isliye
+            # doosra draft pehle se KAM padha hua hota tha — yahi ek chhupi hui
+            # kamzori thi. Yahan koi nayi call nahi hoti: wahi ek bounded redraft
+            # call hai, bas usme ye block saath jaate hain.
+            guidance_blocks = [str(song_study.get("prompt_block") or ""),
+                               media_study.prompt_block(media_guidance)]
+            if listener_guidance.get("wanted"):
+                guidance_blocks.append(listener_study.prompt_block(
+                    listener_guidance.get("guidance") or {}))
+            if music_guidance_pack.get("wanted"):
+                guidance_blocks.append(music_study.prompt_block(
+                    music_guidance_pack.get("guidance") or {}))
             out["craft"] = craft.run_craft(question, craft_text,
-                                           reviser=reviser, study=song_study)
+                                           reviser=reviser, study=song_study,
+                                           guidance_blocks=guidance_blocks)
             # Naya draft jeeta to jawab me bhi wahi dikhna chahiye, warna user
             # ek likhawat padhta hai aur naap doosri ki hoti hai. Yahan kuch
             # kaata nahi jaata — sirf draft wala hissa badalta hai.
@@ -2475,6 +2490,16 @@ class DeepResearchEngine:
             # par na jaaye. Khaali dict = lane maangi hi nahi gayi thi.
             music_study=music_study.public_record(
                 passes.get("music_study") or {}),
+            # #141 — SONG LAB ka public record: chaar test ka nateeja, kitni line
+            # hataayi gayi, kitni hataai ROKI gayi, aur naam se likha hua sach
+            # (audio_generated / tune_made / heard / human_reaction_tested =
+            # False, gemini_calls = 0). Ye craft ke record ke SAATH jaata hai,
+            # uski jagah nahi — craft "kya bana" ka hisaab hai, ye "khud test
+            # karke kya nikla" ka. Report craft ke andar `song_lab` par hoti hai,
+            # isliye source wahi ek hai; do jagah do draft ka record nahi ban
+            # sakta.
+            song_lab=songlab.public_record(
+                songlab.report_of(passes.get("craft") or {})),
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

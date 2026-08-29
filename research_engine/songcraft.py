@@ -849,7 +849,23 @@ _MUSIC_CLAIM_RE = re.compile(
     r"\b(?:dhun|tune|melody)\b"
     r"|\bchartbuster\b|\bguaranteed\s+hit\b"
     r"|\bsunne\s+me\s+(?:maza|mast|kamaal)\b"
-    r"|\bhar\s+koi\s+(?:pasand|gaayega|sunega)\b", re.I)
+    r"|\bhar\s+koi\s+(?:pasand|gaayega|sunega)\b"
+    # "Iski dhun bahut sureeli LAGEGI" — ye bhi bina-naap daawa hai, sirf narm
+    # shabd me. Isko pakadne ke liye do cheez chahiye: music ka noun + tareef ka
+    # shabd + AANE WALE waqt ka kriya. Aakhri shart jaan-boojh kar hai: "dhun
+    # sureeli rakhein" ek hidaayat hai (kya banana hai), daawa nahi (kaisa
+    # banega) — hidaayat ko FAIL karna khud ek galat naap hoga.
+    r"|\b(?:dhun|tune|melody|music|arrangement|beat|awaaz)\b[^.\n]{0,40}?"
+    r"\b(?:sureeli|sureela|surili|surila|madhur|melodious|soulful|catchy|"
+    r"dilkash|rooh|magical|jaadui)\w*\b[^.\n]{0,20}?"
+    r"\b(?:lagegi|lagega|lagenge|banegi|banega|hogi|hoga|rahegi|rahega|"
+    r"aayegi|aayega|niklegi|will\s+(?:be|sound))\b"
+    # Angrezi me kram ulta hota hai: "the melody WILL BE soulful".
+    r"|\b(?:dhun|tune|melody|music|arrangement|beat)\b[^.\n]{0,30}?"
+    r"\b(?:will\s+(?:be|sound)|is\s+going\s+to\s+(?:be|sound)|sounds)\b"
+    r"[^.\n]{0,20}?"
+    r"\b(?:sureeli|sureela|surili|surila|madhur|melodious|soulful|catchy|"
+    r"dilkash|magical|jaadui|mast|zabardast|amazing|perfect|best)\w*\b", re.I)
 
 
 def music_claims_in(text: str) -> List[str]:

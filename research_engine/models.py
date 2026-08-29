@@ -1149,5 +1149,21 @@ class ResearchResult:
     # gaya. Banane wala module: research_engine/music_study.py
     music_study: Dict = field(default_factory=dict)
 
+    # #141 — SONG LAB ka record: gaane ke DRAFT ko app ne khud chaar alag naap se
+    # test kiya (dhaancha dobara ginna, bhaav ka arc, hook kitni baar aur kitni
+    # jaldi lauta, aur padhi hui riwaayat se milaan), phir kamzor line par
+    # KEEP/FIX/DROP faisla diya. Yahan do cheezein alag-alag hain: `drops` matlab
+    # line HATAAYI gayi (sirf toote niyam par — jhootha daawa), aur
+    # `redraft_notes` matlab line rakhi gayi par sudhaarne ko kaha gaya. Har DROP
+    # ke saath wajah likhi jaati hai, aur jo DROP mana kiya gaya uska code bhi
+    # (`refusals`) — kitni line hataayi ja sakti hai uski chhat hai, refrain
+    # kabhi nahi hataya jaata, aur naap kharaab ho to DROP palat diya jaata hai.
+    # `tests_pass` kisi bhi soorat me PROOF nahi hai: ye sirf likhe hue draft ki
+    # andaruni naap hai — na koi dhun bani, na kuch bajaakar sunaa gaya, na kisi
+    # asli sunne wale par aazmaaya gaya. `ran: False` matlab farmaish gaane ki
+    # nahi thi ya draft hi nahi mila. Banane wala module:
+    # research_engine/songlab.py
+    song_lab: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

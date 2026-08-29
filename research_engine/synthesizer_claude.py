@@ -54,6 +54,8 @@ from .listener_study import listener_limits, listener_section
 from .music_study import (MAX_AUDIT_LIMIT_LINES
                           as MUSIC_MAX_AUDIT_LIMIT_LINES)
 from .music_study import music_limits, music_section
+from .songlab import MAX_AUDIT_LIMIT_LINES as SONGLAB_MAX_AUDIT_LIMIT_LINES
+from .songlab import songlab_limits, songlab_section
 from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
@@ -1667,6 +1669,15 @@ Ab jawab likho:"""
         for music_line in music_limits(
                 music_report)[:MUSIC_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {music_line}")
+        # #141 — SONG LAB ki seema. Ye craft ki seema se alag hai: wahan "kya
+        # naapa gaya" tha, yahan "khud ke test ka matlab kitna hai" — aur jawab
+        # har haalat me ye rehta hai ki TESTED_PASS achha gaana hone ka saboot
+        # nahi, hataayi gayi line "kharaab" hone ka saboot nahi, aur bhaav ka
+        # test shabd se hua hai dil se nahi. Ceiling module se aati hai, haath se
+        # likhi ginti se nahi — warna nayi seema-line chup-chaap kat jaayegi.
+        for songlab_line in songlab_limits(
+                craft_report)[:SONGLAB_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {songlab_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1983,6 +1994,16 @@ Ab jawab likho:"""
                 craft_text = craft_section(craft_report)
                 if craft_text:
                     parts.append(craft_text)
+                # #141 — aur uske TURANT baad SONG LAB: app ne khud us gaane ko
+                # chaar alag naap se test kiya, kaunsi line kis naapi hui wajah
+                # se hataayi (ya kyun NAHI hataayi ja saki), aur hataane ke baad
+                # poore draft ki naap dobara chali. Ye craft ke dhaanche wale
+                # naap ki jagah nahi leta — craft "kya bana" batata hai, SONG LAB
+                # "usko khud test karke kya nikla" batata hai. Gaane ke alawa
+                # kisi farmaish par yahan kuch chhapta hi nahi.
+                songlab_text = songlab_section(craft_report)
+                if songlab_text:
+                    parts.append(songlab_text)
                 # #133 — MEDIA: user ke video/audio ke likhit transcript me se
                 # kya padha gaya, har line ke saath samay/locator. Ye craft ke
                 # block ki jagah nahi leta — wo kitaab/paper se aata hai, ye
