@@ -1,23 +1,22 @@
 """Independence-aware autonomous literature debate foundation (#103).
 
 The engine debates *documented literature positions*, not model personalities.
-It is deliberately neutral about which position is true.  Exact/syndicated
+It is deliberately neutral about which position is true. Exact/syndicated
 content, declared independence groups and genealogy are collapsed before an
-independent-position count is produced.  Retraction, incomplete provenance or
+independent-position count is produced. Retraction, incomplete provenance or
 explicitly weak evidence may remain visible for audit but cannot become strong
 independent support.
 
-This is a deterministic debate/audit engine.  It does not prove truth,
+This is a deterministic debate/audit engine. It does not prove truth,
 scientific consensus, replication, or independent validation merely by running.
 """
 from __future__ import annotations
 
 import hashlib
 import json
-import math
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Mapping, Sequence, Tuple
+from typing import Any, Dict, Sequence, Tuple
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,240}$")
@@ -25,6 +24,7 @@ _MAX_POSITIONS = 10_000
 _MAX_PARENTS = 100
 _MAX_TEXT = 20_000
 _QUALITY = {"STRONG", "USABLE", "WEAK", "UNKNOWN"}
+_AMBIGUOUS = "AMBIGUOUS_DEPENDENT_COMPONENT"
 
 
 def _canonical(value: Any) -> bytes:
@@ -118,11 +118,13 @@ class LiteraturePosition:
 class DebateComponent:
     component_id: str
     position_id: str
+    position_ids: Tuple[str, ...]
     source_ids: Tuple[str, ...]
     evidence_refs: Tuple[str, ...]
     eligible_source_ids: Tuple[str, ...]
     collapsed_copy_count: int
     strong_count_eligible: bool
+    internally_conflicted: bool
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,7 @@ class PropositionDebate:
     position_count: int
     effective_components: int
     eligible_components: int
+    ambiguous_components: int
     components: Tuple[DebateComponent, ...]
     cross_examinations: Tuple[CrossExamination, ...]
     status: str
@@ -168,11 +171,13 @@ class LiteratureDebateReport:
 
 
 def _components(rows: Sequence[LiteraturePosition]) -> Tuple[DebateComponent, ...]:
-    """Collapse dependence transitively by declared group, exact content, genealogy.
+    """Collapse dependence before stance/position counting.
 
-    Genealogy edges are conservative: if one included source names another
-    included source as a parent, both are a single effective evidence component.
-    This prevents a citation chain from masquerading as independent replication.
+    Sources connected by declared independence key, exact content, or an
+    in-scope genealogy edge form ONE evidence component. If that single
+    dependent component contains conflicting positions, it is marked ambiguous
+    and cannot supply either side of an independent debate. This prevents two
+    mirrors/versions of the same evidence family from becoming fake opponents.
     """
     by_id = {row.source_id: row for row in rows}
     parent: Dict[str, str] = {row.source_id: row.source_id for row in rows}
@@ -208,28 +213,33 @@ def _components(rows: Sequence[LiteraturePosition]) -> Tuple[DebateComponent, ..
             if parent_id in by_id:
                 union(row.source_id, parent_id)
 
-    grouped: Dict[Tuple[str, str], list[LiteraturePosition]] = {}
+    grouped: Dict[str, list[LiteraturePosition]] = {}
     for row in rows:
-        grouped.setdefault((row.position_id, find(row.source_id)), []).append(row)
+        grouped.setdefault(find(row.source_id), []).append(row)
 
     output = []
-    for (position_id, _root), members in sorted(grouped.items()):
+    for _root, members in sorted(grouped.items()):
         source_ids = tuple(sorted(item.source_id for item in members))
+        position_ids = tuple(sorted({item.position_id for item in members}))
+        conflicted = len(position_ids) != 1
+        position_id = position_ids[0] if not conflicted else _AMBIGUOUS
         eligible = tuple(sorted(item.source_id for item in members if item.eligible_for_strong_count))
         refs = tuple(sorted({item.evidence_ref for item in members}))
         digest = _hash({
-            "position_id": position_id,
+            "position_ids": position_ids,
             "source_ids": source_ids,
             "evidence_refs": refs,
         })
         output.append(DebateComponent(
             component_id=f"component-{digest[:16]}",
             position_id=position_id,
+            position_ids=position_ids,
             source_ids=source_ids,
             evidence_refs=refs,
             eligible_source_ids=eligible,
             collapsed_copy_count=max(0, len(source_ids) - 1),
-            strong_count_eligible=bool(eligible),
+            strong_count_eligible=bool(eligible) and not conflicted,
+            internally_conflicted=conflicted,
         ))
     return tuple(output)
 
@@ -273,13 +283,9 @@ def debate_literature(positions: Sequence[LiteraturePosition]) -> LiteratureDeba
     if not 1 <= len(positions) <= _MAX_POSITIONS:
         raise ValueError(f"positions must contain 1..{_MAX_POSITIONS} items")
     normalized = tuple(item.normalized() for item in positions)
-    if len({item.source_id for item in normalized}) != len(normalized):
-        # One source may have multiple positions across propositions, so the true
-        # unique key includes proposition.  Duplicate same-source same-proposition
-        # rows are ambiguous and rejected below.
-        keys = {(item.source_id, item.proposition_id) for item in normalized}
-        if len(keys) != len(normalized):
-            raise ValueError("same source cannot submit multiple positions for one proposition")
+    keys = [(item.source_id, item.proposition_id) for item in normalized]
+    if len(set(keys)) != len(keys):
+        raise ValueError("same source cannot submit multiple positions for one proposition")
 
     by_prop: Dict[str, list[LiteraturePosition]] = {}
     for row in normalized:
@@ -292,20 +298,18 @@ def debate_literature(positions: Sequence[LiteraturePosition]) -> LiteratureDeba
         components = _components(rows)
         eligible_components = [item for item in components if item.strong_count_eligible]
         eligible_positions = {item.position_id for item in eligible_components}
+        ambiguous_components = sum(1 for item in components if item.internally_conflicted)
         cross = _cross_examinations(proposition_id, components)
 
         if len(eligible_components) < 2:
             status = "INSUFFICIENT_INDEPENDENT_EVIDENCE"
             insufficient.append(proposition_id)
-            is_unresolved = True
         elif len(eligible_positions) < 2:
             status = "ONE_SIDED_LITERATURE"
             insufficient.append(proposition_id)
-            is_unresolved = True
         else:
             status = "DISPUTED_UNRESOLVED"
             unresolved.append(proposition_id)
-            is_unresolved = True
 
         payload = {
             "proposition_id": proposition_id,
@@ -315,8 +319,10 @@ def debate_literature(positions: Sequence[LiteraturePosition]) -> LiteratureDeba
                 {
                     "component_id": item.component_id,
                     "position_id": item.position_id,
+                    "position_ids": item.position_ids,
                     "source_ids": item.source_ids,
                     "eligible": item.strong_count_eligible,
+                    "internally_conflicted": item.internally_conflicted,
                 }
                 for item in components
             ],
@@ -329,10 +335,11 @@ def debate_literature(positions: Sequence[LiteraturePosition]) -> LiteratureDeba
             position_count=len({item.position_id for item in rows}),
             effective_components=len(components),
             eligible_components=len(eligible_components),
+            ambiguous_components=ambiguous_components,
             components=components,
             cross_examinations=cross,
             status=status,
-            unresolved=is_unresolved,
+            unresolved=True,
             report_hash=_hash(payload),
         ))
 
@@ -363,15 +370,18 @@ def report_to_dict(report: LiteratureDebateReport) -> Dict[str, Any]:
                 "position_count": debate.position_count,
                 "effective_components": debate.effective_components,
                 "eligible_components": debate.eligible_components,
+                "ambiguous_components": debate.ambiguous_components,
                 "components": [
                     {
                         "component_id": component.component_id,
                         "position_id": component.position_id,
+                        "position_ids": list(component.position_ids),
                         "source_ids": list(component.source_ids),
                         "evidence_refs": list(component.evidence_refs),
                         "eligible_source_ids": list(component.eligible_source_ids),
                         "collapsed_copy_count": component.collapsed_copy_count,
                         "strong_count_eligible": component.strong_count_eligible,
+                        "internally_conflicted": component.internally_conflicted,
                     }
                     for component in debate.components
                 ],
