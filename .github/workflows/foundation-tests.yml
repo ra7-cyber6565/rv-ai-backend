@@ -67,6 +67,7 @@ jobs:
             tests/test_capture_integrity_wiring.py \
             tests/test_literature_debate.py \
             tests/test_literature_debate_wiring.py \
+            tests/test_literature_debate_attestor.py \
             tests/test_discovery_frontier.py \
             tests/test_discovery_frontier_wiring.py \
             tests/test_holdout_vault.py \
