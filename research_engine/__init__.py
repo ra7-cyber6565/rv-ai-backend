@@ -114,6 +114,12 @@ _install_evidence_capture_integrity()
 from .runtime_capability_wiring import install as _install_runtime_capability_wiring
 _install_runtime_capability_wiring()
 
+# #103 is an audit-only literature debate over explicit structured
+# contradictions. It never invents an opposing view from prose and can only
+# expose unresolved/insufficient evidence; it never upgrades result status.
+from .literature_debate_wiring import install as _install_literature_debate_wiring
+_install_literature_debate_wiring()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
