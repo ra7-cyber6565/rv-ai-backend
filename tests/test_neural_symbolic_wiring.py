@@ -1,6 +1,8 @@
+from research_engine.models import ResearchResult
 from research_engine.neural_symbolic_wiring import (
     apply_neural_symbolic_wiring,
     build_neural_symbolic_packet,
+    install,
 )
 
 
@@ -57,3 +59,32 @@ def test_bad_explicit_contract_fails_closed():
     assert packet["status"] == "ASSESSMENT_ERROR"
     assert packet["truth_proven"] is False
     assert result["status"] == "PARTIAL"
+
+
+def test_normal_research_result_serialization_activates_neural_symbolic_wiring():
+    result = ResearchResult(
+        question="neural symbolic audit",
+        answer="partial",
+        status="PARTIAL",
+        coverage={"neural_symbolic_inputs": _inputs()},
+    ).to_dict()
+    packet = result["coverage"]["neural_symbolic"]
+    assert packet["ran"] is True
+    assert packet["status"] == "AUDITED"
+    assert packet["audits"][0]["hybrid_gate_passed"] is True
+    assert packet["neural_inference_executed_by_this_function"] is False
+    assert packet["result_status_upgraded"] is False
+    assert packet["truth_proven"] is False
+    assert result["status"] != "COMPLETE"
+
+
+def test_install_is_idempotent():
+    from research_engine import result_coverage_gate
+
+    before = result_coverage_gate.enforce
+    install()
+    after_first = result_coverage_gate.enforce
+    install()
+    after_second = result_coverage_gate.enforce
+    assert before is after_first
+    assert after_first is after_second
