@@ -50,6 +50,7 @@ from . import craft
 from . import songcraft
 from . import media_study
 from . import listener_study
+from . import music_study
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -714,6 +715,81 @@ class DeepResearchEngine:
                     "gemini_calls": 0, "network_used": False,
                     "note": empty["note"]}
 
+    @staticmethod
+    def _music_study(question: str, pack: Optional[EvidencePack]) -> Dict:
+        """
+        #140 — MUSIC DIRECTION ke peeche ki padhi hui baat: kaunsi chaal (tempo),
+        kaunsa scale/raag, kaunse vaadya, kaisi aawaz aur kitna bhara arrangement
+        kis bhaav ke saath jodha jaata hai — jo padhi hui research me mila, wahi
+        CITE karke.
+
+        Ye `_songcraft_study` ki jagah NAHI leta aur songcraft ke
+        `music_direction_present` naap ko chhuta bhi nahi: wahan sawaal hai
+        "chaar khaane likhe gaye?", yahan sawaal hai "unke peeche padhi hui baat
+        hai?". Do alag sawaal, do alag ginti — mila dena hi wo jhooth hai jo
+        #133/#134 me bhi rokha gaya tha.
+
+        Yahan bhi 0 Gemini call aur 0 network. Aur chaar baat hamesha saath jaati
+        hain: koi audio nahi bani, koi dhun nahi bani, app ne kuch suna nahi, aur
+        kisi ne bajaakar test nahi kiya. Source ka BPM/key SOURCE-REPORTED rehta
+        hai — app khud koi number tay nahi karta.
+
+        Lane sirf GAANE ki farmaish par khulti hai (planner ka wahi do-signal
+        gate: `craft.detect().is_request` + `form == SONG_FORM`). Warna
+        `not_asked()` aata hai, jisse physics ya exam wale jawab me "kaunsa raag
+        lagao" wala block ya uski seema-line chipakti hi nahi.
+        """
+        try:
+            detection = craft.detect(question)
+            is_song = (bool(detection.get("is_request"))
+                       and str(detection.get("form") or "")
+                       == songcraft.SONG_FORM)
+        except Exception:
+            is_song = False
+        if not is_song:
+            return music_study.not_asked()
+        try:
+            sources = list(getattr(pack, "sources", []) or []) if pack else []
+            return music_study.study(question, sources=sources, wanted=True)
+        except Exception:
+            empty = {"ran": False, "lines": [], "source_count": 0,
+                     "sources_scanned": 0, "full_text_source_count": 0,
+                     "fields": [], "field_labels": [],
+                     "missing_fields": list(music_study.FIELD_KEYS),
+                     "missing_field_labels": [
+                         music_study.FIELD_LABELS[k]
+                         for k in music_study.FIELD_KEYS],
+                     "reported_numbers": [], "reported_number_count": 0,
+                     "claim_lines_dropped": 0,
+                     "audio_generated": music_study.AUDIO_GENERATED,
+                     "tune_made": music_study.TUNE_MADE,
+                     "heard": music_study.HEARD,
+                     "play_tested": music_study.PLAY_TESTED,
+                     "gemini_calls": 0, "network_used": False,
+                     "note": ("music study andar ki galti se chal nahi paayi — "
+                              "sur/taal/saaz ke bare me kuch padha nahi gaya")}
+            # `wanted: True` jaan-boojh kar: farmaish gaane ki THI, isliye galti
+            # ke baad bhi report me seema dikhni chahiye — chup ho jaana yahan
+            # "sab theek tha" ka jhooth ban jaata.
+            return {"ran": False, "wanted": True, "guidance": empty,
+                    "queries": [],
+                    # Galti hone par bhi seema ki lines CHUPTI nahi: khaali list
+                    # padhne wale ko "koi seema nahi thi" jaisa dikhta hai.
+                    "prompt_block": music_study.EMPTY_PROMPT_LINE,
+                    "section_lines": music_study.section_lines(empty),
+                    "limits": music_study.limits(empty),
+                    "policy": music_study.policy(),
+                    "support_row": music_study.support_row(empty),
+                    "music_line_count": 0, "music_source_count": 0,
+                    "music_evidence_read": False,
+                    "reported_number_count": 0,
+                    "audio_generated": music_study.AUDIO_GENERATED,
+                    "tune_made": music_study.TUNE_MADE,
+                    "heard": music_study.HEARD,
+                    "play_tested": music_study.PLAY_TESTED,
+                    "gemini_calls": 0, "network_used": False,
+                    "note": empty["note"]}
+
     def _run_passes(self, question: str, pack: EvidencePack, plan: Dict, config,
                     contradiction_dicts: List[Dict], memory_note: str,
                     job_id: Optional[str] = None,
@@ -743,6 +819,12 @@ class DeepResearchEngine:
         # `listener_evidence_read: False` ka matlab "sunne wale ke bare me kuch
         # padha nahi gaya" hai — "sab theek hai" nahi.
         listener_guidance = self._listener_study(question, pack)
+        # #140 — MUSIC DIRECTION ke peeche ki padhi hui baat (chaal/scale-raag/
+        # vaadya/aawaz/arrangement). Songcraft ka `music_direction_present` naap
+        # sirf ye dekhta hai ki chaar khaane LIKHE gaye; ye dekhta hai ki unke
+        # peeche koi padhi hui research CITE hui. Dono saath chalte hain — ek
+        # doosre ki jagah nahi. Source ka BPM/key SOURCE-REPORTED rehta hai.
+        music_guidance_pack = self._music_study(question, pack)
         out = {"analysis": "", "critique_raw": "", "hypothesis_raw": "",
                "final": "", "errors": [], "calls": 0, "critique": {},
                "hypotheses": [],
@@ -792,6 +874,13 @@ class DeepResearchEngine:
                # hain (listener_tested / audience_measured / mind_read = False)
                # taaki koi ise "logon ka dil naapa gaya" na samjhe.
                "listener_study": listener_guidance,
+               # #140 — MUSIC STUDY ka record: music direction ke peeche kitni
+               # CITED research padhi gayi. Chaar jhande hamesha saath jaate hain
+               # (audio_generated / tune_made / heard / play_tested = False)
+               # taaki koi ise "dhun ban gayi ya bajaakar dekh li" na samjhe.
+               # `music_evidence_read: False` matlab sur/saaz par kuch padha hi
+               # nahi gaya — "music direction theek hai" nahi.
+               "music_study": music_guidance_pack,
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -1015,6 +1104,15 @@ class DeepResearchEngine:
                 if listener_guidance.get("wanted"):
                     prompt += "\n\n" + listener_study.prompt_block(
                         listener_guidance.get("guidance") or {})
+                # #140 — music direction ke peeche padhi hui baat ka block. Ye
+                # bhi gaane ki farmaish par HAMESHA jaata hai: khaali haalat me
+                # bhi ek zaroori hidayat isme hai — "dhun/BPM/raag apni marzi se
+                # tay mat karo, aur jo source ne kaha wo SOURCE-REPORTED likho".
+                # Songcraft ka apna block (upar wala `song_study`) isse alag
+                # rehta hai — dono jaate hain, ek doosre ki jagah nahi.
+                if music_guidance_pack.get("wanted"):
+                    prompt += "\n\n" + music_study.prompt_block(
+                        music_guidance_pack.get("guidance") or {})
             try:
                 text = brain.generate(prompt, "synthesis")
             except QuotaExhausted as exc:
@@ -2087,6 +2185,12 @@ class DeepResearchEngine:
             # hua"). Ye craft ki ginti me nahi ghulta. Gaane ki farmaish na ho
             # to `wanted` False hota hai aur na section chhapta hai na seema.
             listener_report=passes.get("listener_study") or {},
+            # #140 — MUSIC STUDY: music direction ke peeche ki cited research,
+            # aur uski alag seema ("koi dhun nahi bani, kuch suna nahi gaya").
+            # Ye songcraft ke `music_direction_present` naap ki jagah nahi leta;
+            # dono naap saath dikhte hain. Gaane ki farmaish na ho to `wanted`
+            # False hota hai aur na section chhapta hai na seema.
+            music_report=passes.get("music_study") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2363,6 +2467,14 @@ class DeepResearchEngine:
             # nahi gayi thi.
             listener_study=listener_study.public_record(
                 passes.get("listener_study") or {}),
+            # #140 — MUSIC STUDY ka public record: kitni CITED music-research
+            # padhi gayi, kaunse khaane (chaal/scale/vaadya/aawaz/arrangement)
+            # bhare, kitne number SOURCE-REPORTED the, aur naam se likha hua
+            # sach (audio_generated / tune_made / heard / play_tested = False).
+            # `public_record` isliye ki `study()` ke andar ka `ask` object API
+            # par na jaaye. Khaali dict = lane maangi hi nahi gayi thi.
+            music_study=music_study.public_record(
+                passes.get("music_study") or {}),
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

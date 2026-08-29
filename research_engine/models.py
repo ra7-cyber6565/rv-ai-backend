@@ -1136,5 +1136,18 @@ class ResearchResult:
     # Banane wala module: research_engine/listener_study.py
     listener_study: Dict = field(default_factory=dict)
 
+    # #140 — MUSIC STUDY ka record: music direction (chaal/tempo, scale ya raag,
+    # vaadya, aawaz, arrangement) ke PEECHE kitni CITED research padhi gayi,
+    # kaunse khaane khaali reh gaye, kitne number sirf SOURCE-REPORTED the, aur
+    # kitni line isliye hataayi gayi ki wo "dhun hit hogi" jaisa daawa kar rahi
+    # thi. Ye songcraft ke `music_direction_present` naap ki jagah NAHI leta:
+    # wahan sawaal hai "chaar khaane likhe gaye?", yahan "unke peeche padha hua
+    # kuch hai?". Isme `audio_generated`/`tune_made`/`heard`/`play_tested`
+    # hamesha False jaate hain: koi audio ya dhun nahi banti, app kuch sunta
+    # nahi, aur koi bajaakar test nahi karta. `wanted: False` matlab farmaish
+    # gaane ki hi nahi thi; `ran: False` matlab sur/saaz par kuch padha hi nahi
+    # gaya. Banane wala module: research_engine/music_study.py
+    music_study: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

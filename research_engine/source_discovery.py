@@ -45,6 +45,7 @@ from .models import SourceRecord
 from .network_safety import public_error
 from . import songcraft
 from . import listener_study
+from . import music_study
 
 
 class SourceDiscovery:
@@ -330,6 +331,48 @@ class SourceDiscovery:
                               self._single(connector, clean, listener_limit)))
             elif plan.get("web", True):
                 tasks.append(("listener_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # MUSIC DIRECTION ki research (#140c) — craft aur listener tier ke SAATH,
+        # dono ke slot cheene bina. Teesra tier isliye ki intel ki maang ka
+        # teesra hissa hai: "konsa tone bnega music kaisa bnega" — tempo, scale/
+        # raag, vaadya, aawaz aur arrangement ke peeche PADHI HUI baat. Iski
+        # ginti craft/listener me mila dena wahi jhooth hota jise #133/#134 me
+        # rokha gaya tha, isliye label bhi alag hai: `music_study_<lane>`.
+        #
+        # Budget jaan-boojh kar chhota (`MAX_MUSIC_QUERIES`, per-connector 2 tak).
+        music_limit = max(1, min(2, max_per_connector))
+        seen_music = set()
+        for entry in list(plan.get("music_study", []))[
+                :music_study.MAX_MUSIC_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "web").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), "web"
+            key = clean.casefold()
+            if not clean or key in seen_music or key in seen_craft \
+                    or key in seen_listener:
+                # Dono purane tier bhi dekhe jaate hain: ek hi query teen label
+                # ke saath teen baar bhejna network aur budget dono ka nuksaan.
+                continue
+            # Chauthi deewar (planner + craft + listener tier ke baad) — bol/
+            # karaoke wali query yahan se bhi network par nahi jaati.
+            if songcraft.is_lyrics_hunt(clean):
+                continue
+            seen_music.add(key)
+            connector = None
+            if lane == "books" and book_name:
+                connector = self.books.by_name(book_name)
+            elif lane == "papers" and paper_name:
+                connector = self.papers.by_name(paper_name)
+            elif lane == "media" and media_name:
+                connector = self.media.by_name(media_name)
+            if connector is not None:
+                tasks.append(("music_study_" + lane,
+                              self._single(connector, clean, music_limit)))
+            elif plan.get("web", True):
+                tasks.append(("music_study_web",
                               self._web_chain(clean, max(1, min(2, max_web)))))
 
         return tasks

@@ -51,6 +51,9 @@ from .media_study import media_limits, media_section
 from .listener_study import (MAX_AUDIT_LIMIT_LINES
                             as LISTENER_MAX_AUDIT_LIMIT_LINES)
 from .listener_study import listener_limits, listener_section
+from .music_study import (MAX_AUDIT_LIMIT_LINES
+                          as MUSIC_MAX_AUDIT_LIMIT_LINES)
+from .music_study import music_limits, music_section
 from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
@@ -1497,7 +1500,8 @@ Ab jawab likho:"""
                        reject_report: Optional[Dict] = None,
                        craft_report: Optional[Dict] = None,
                        media_report: Optional[Dict] = None,
-                       listener_report: Optional[Dict] = None) -> str:
+                       listener_report: Optional[Dict] = None,
+                       music_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1652,6 +1656,17 @@ Ab jawab likho:"""
         for listener_line in listener_limits(
                 listener_report)[:LISTENER_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {listener_line}")
+        # #140 — MUSIC STUDY ki apni naapi hui seema (kitni cited music-research
+        # padhi gayi, kaunse khaane khaali reh gaye, kitne number sirf source ke
+        # kahe hue the, aur ye ki koi dhun na bani na suni na bajaakar test hui).
+        # Ye listener/craft ki ginti me nahi ghulti — warna "chaar khaane likh
+        # diye" aur "unke peeche padha hua kuch hai" ek dikhne lagte, jo jhooth
+        # hai. Ceiling module se aati hai (`MAX_AUDIT_LIMIT_LINES`), yahan haath
+        # se likhi hui ginti nahi: nayi seema-line jud jaaye to purani kat kar
+        # audit chup-chaap jhootha ho jaata.
+        for music_line in music_limits(
+                music_report)[:MUSIC_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {music_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1905,7 +1920,8 @@ Ab jawab likho:"""
                  reject_report: Optional[Dict] = None,
                  craft_report: Optional[Dict] = None,
                  media_report: Optional[Dict] = None,
-                 listener_report: Optional[Dict] = None) -> str:
+                 listener_report: Optional[Dict] = None,
+                 music_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1989,6 +2005,16 @@ Ab jawab likho:"""
                 listener_text = listener_section(listener_report)
                 if listener_text:
                     parts.append(listener_text)
+                # #140 — aur uske SAATH music direction ke peeche padhi hui
+                # research: kaunsi chaal/scale/vaadya/aawaz/arrangement kis
+                # bhaav ke saath jodi jaati hai, har baat apne [source_id] ke
+                # saath. Ye songcraft ke "chaar khaane likhe gaye" naap ki jagah
+                # nahi leta aur listener/craft ki ginti me nahi ghulta. Isme
+                # source ka BPM/key sirf SOURCE-REPORTED likha jaata hai — app
+                # khud koi number tay nahi karta, aur dhun banti hi nahi.
+                music_text = music_section(music_report)
+                if music_text:
+                    parts.append(music_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -2007,7 +2033,8 @@ Ab jawab likho:"""
                     reject_report=reject_report,
                     craft_report=craft_report,
                     media_report=media_report,
-                    listener_report=listener_report)
+                    listener_report=listener_report,
+                    music_report=music_report)
                 parts.append(engine_text)
             else:
                 if index == 1:

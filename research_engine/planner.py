@@ -24,6 +24,7 @@ from .domain import detect as domain_detect
 from . import facets as facets_mod
 from . import lenses as lens_mod
 from . import listener_study
+from . import music_study
 from .local_language import normalize
 from .market_data import market_intent
 from .patents import patent_intent
@@ -777,6 +778,31 @@ class ResearchPlanner:
                 f"research dhoondhne ke liye {len(listener_queries)} query "
                 f"bani (kisi insaan par koi test nahi hua)")
 
+        # ── sur/taal/saaz ka MUSIC-STUDY lane (#140c) ───────────────────────
+        # Craft aur listener ke SAATH chalti hai, kisi ki jagah nahi: iska
+        # budget alag hai (`MAX_MUSIC_QUERIES`) taaki craft ki 6 aur listener ki
+        # 3 slot me se ek bhi na chhine. Yahan bhi koi gyaan nahi khulta — ye
+        # sirf query hai. Isliye `music_evidence_read` kabhi True nahi hota, aur
+        # `audio_generated`/`heard` naam se hi bata dete hain ki na koi dhun
+        # bani, na kuch suna gaya.
+        music_queries: List[Dict] = []
+        music_reason = ("farmaish gaane jaisi nahi lagi, isliye music-study "
+                        "band")
+        if not is_song:
+            pass
+        elif songcraft.is_lyrics_hunt(song_text):
+            music_reason = ("gaane ke BOL maange ja rahe the — us haalat me "
+                            "music direction ki research bhi nahi maangi jaati")
+        else:
+            m_budget = (1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else music_study.MAX_MUSIC_QUERIES)
+            music_queries = list(music_study.study_queries(
+                style_ask, limit=m_budget))
+            music_reason = (
+                f"gaane ki farmaish mili — kaunsa sur/taal/saaz kis bhaav ke "
+                f"saath, iski research dhoondhne ke liye {len(music_queries)} "
+                f"query bani (koi dhun nahi bani, kuch suna nahi gaya)")
+
         return {
             "web": True,
             "papers": papers,
@@ -872,6 +898,27 @@ class ResearchPlanner:
                 "mind_read": listener_study.MIND_READ,
                 "gemini_calls": listener_study.GEMINI_CALLS,
                 "reason": listener_reason},
+            # Music direction ka lane (#140c) — craft/listener se ALAG ginti,
+            # alag label. `music_evidence_read` yahan kabhi True nahi hota, aur
+            # chaar jhande naam se hi seema batate hain: koi audio nahi bani,
+            # koi dhun nahi bani, kuch suna nahi gaya, kisi ne bajaakar dekha
+            # nahi. Ye songcraft ke `music_direction_present` ki JAGAH nahi hai.
+            "music_study": music_queries,
+            "music_study_lane": {
+                "wanted": bool(music_queries),
+                "is_song_request": bool(is_song),
+                "query_count": len(music_queries),
+                "lanes": [str(row.get("lane") or "") for row in music_queries],
+                "reasons": [str(row.get("why") or "") for row in music_queries],
+                "lyrics_hunt_blocked": True,
+                "music_evidence_read": False,
+                "audio_generated": music_study.AUDIO_GENERATED,
+                "tune_made": music_study.TUNE_MADE,
+                "heard": music_study.HEARD,
+                "play_tested": music_study.PLAY_TESTED,
+                "replaces_music_direction_present": False,
+                "gemini_calls": music_study.GEMINI_CALLS,
+                "reason": music_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────

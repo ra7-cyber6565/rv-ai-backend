@@ -756,7 +756,26 @@ def test_the_orchestrator_and_result_wiring_stay_in_place():
     assert "listener_study=listener_study.public_record(" in orch
     syn = _read_source("synthesizer_claude.py")
     assert "listener_text = listener_section(listener_report)" in syn
-    assert "listener_report=listener_report)" in syn
+    # assemble se _audit_section tak report pahunchti hai. Naap CALL ke ANDAR
+    # hoti hai, poori file me kahin bhi needle dikh jaane par nahi: purana needle
+    # `"listener_report=listener_report)"` tha aur #140 me usi call me ek naya
+    # kwarg (`music_report=`) judte hi TOOT gaya — jabki wiring bilkul sahi thi.
+    call_at = syn.index("self._audit_section(")
+    depth, end = 0, call_at
+    for pos in range(syn.index("(", call_at), len(syn)):
+        if syn[pos] == "(":
+            depth += 1
+        elif syn[pos] == ")":
+            depth -= 1
+            if depth == 0:
+                end = pos
+                break
+    args = syn[call_at:end]
+    assert "listener_report=listener_report" in args
+    # ek hi baar — do jagah pass hone par ek copy chup-chaap purani reh jaati hai
+    assert args.count("listener_report=listener_report") == 1
+    # signature dono jagah zinda: audit-section aur assemble, dono me param ho
+    assert syn.count("listener_report: Optional[Dict] = None") == 2
     models = _read_source("models.py")
     assert "listener_study: Dict = field(default_factory=dict)" in models
 
