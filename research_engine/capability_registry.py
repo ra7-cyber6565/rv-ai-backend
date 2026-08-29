@@ -74,10 +74,9 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
     """Evidence classes required before a capability can be called max-level."""
     required = {ProofKind.CODE, ProofKind.TEST}
 
-    # These capabilities otherwise need only CODE+TEST evidence.  Their current
-    # implementations are standalone libraries, so they must additionally prove
-    # that a production entry point actually invokes them before being VERIFIED.
-    production_wiring = {14, 112}
+    # Standalone libraries are not enough for these capabilities. They must
+    # prove an actual production result/claim path invokes the implementation.
+    production_wiring = {14, 105, 106, 112}
 
     execution = {
         18, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35,
