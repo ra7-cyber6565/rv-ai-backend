@@ -10,6 +10,7 @@ from research_engine.wiring_attestor import attest_foundation_wiring_proofs
 
 KEY = b"W" * 32
 NOW = 20_000.0
+_BASELINE_TEST = "tests/test_baseline.py"
 
 
 def _git(root, *args):
@@ -48,6 +49,9 @@ def _repo(tmp_path, *, include_wiring=True, subject="tests/test_runtime_wiring.p
     (root / subject).write_text(
         "def test_production_wiring():\n    assert True\n", encoding="utf-8"
     )
+    (root / _BASELINE_TEST).write_text(
+        "def test_baseline():\n    assert True\n", encoding="utf-8"
+    )
     policy = {"schema_version": 1, "rules": []}
     if include_wiring:
         policy["rules"].append(_rule(14, subject))
@@ -84,6 +88,9 @@ def _stage(name, command):
 
 def _receipt_value(root, revision, *, focused_tests, created=19_900):
     py = "python"
+    tests = list(focused_tests)
+    if _BASELINE_TEST not in tests:
+        tests.append(_BASELINE_TEST)
     return {
         "schema_version": 2,
         "created_at_epoch": created,
@@ -97,7 +104,7 @@ def _receipt_value(root, revision, *, focused_tests, created=19_900):
         "failed_stages": [],
         "stages": [
             _stage("compileall", [py, "-m", "compileall", "-q", "."]),
-            _stage("focused_pytest", [py, "-m", "pytest", "-q", *focused_tests]),
+            _stage("focused_pytest", [py, "-m", "pytest", "-q", *tests]),
             _stage("all_pytest", [py, "-m", "pytest", "-q", "tests"]),
             _stage("offline_api_smoke", [py, "scripts/run_offline_api_smoke.py"]),
             _stage("core_regression", [py, "test_research_engine.py"]),
@@ -126,12 +133,7 @@ def _write_receipt(tmp_path, root, revision, *, focused_tests, created=19_900):
 
 def test_green_focused_integration_test_mints_revision_bound_wiring_only(tmp_path):
     root, revision, subject = _repo(tmp_path)
-    receipt = _write_receipt(
-        tmp_path, root, revision, focused_tests=[subject, "tests/test_other.py"]
-    )
-    # The focused command may list another test that does not exist in this tiny
-    # fixture because the receipt validator checks canonical command identity;
-    # the actual wiring subject itself must be tracked and hashable.
+    receipt = _write_receipt(tmp_path, root, revision, focused_tests=[subject])
     ledger_path = tmp_path / "proofs.jsonl"
     result = attest_foundation_wiring_proofs(
         repo_root=root,
@@ -145,6 +147,7 @@ def test_green_focused_integration_test_mints_revision_bound_wiring_only(tmp_pat
     assert result.receipts_added == 1
     assert result.receipts_reused == 0
     assert subject in result.focused_tests
+    assert _BASELINE_TEST in result.focused_tests
     assert result.audit.audit_valid is True
 
     capability = result.audit.maturity_report.results[13]
