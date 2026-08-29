@@ -16,6 +16,7 @@ def test_registry_is_exactly_142_contiguous_unique_capabilities():
     assert CAPABILITY_BY_ID[23].name == "Code Sandbox"
     assert CAPABILITY_BY_ID[79].name == "Cryptographic Evidence Integrity"
     assert CAPABILITY_BY_ID[97].name == "Holdout Vault"
+    assert CAPABILITY_BY_ID[104].name == "Historical Context Engine"
     assert CAPABILITY_BY_ID[114].name == "Sandboxed Reality"
     assert CAPABILITY_BY_ID[142].name == "Final Evidence Packet"
 
@@ -93,6 +94,24 @@ def test_evolutionary_idea_search_still_requires_execution_and_reproducibility()
     assert ProofKind.TEST in evolution.required_proofs
     assert ProofKind.EXECUTION in evolution.required_proofs
     assert ProofKind.REPRODUCIBILITY in evolution.required_proofs
+
+
+def test_historical_context_requires_real_production_wiring():
+    historical = CAPABILITY_BY_ID[104]
+    for proof in (ProofKind.CODE, ProofKind.TEST, ProofKind.WIRING):
+        assert proof in historical.required_proofs
+    evidence = {
+        104: CapabilityEvidence(
+            capability_id=104,
+            proofs={
+                ProofKind.CODE: ("research_engine/historical_context.py",),
+                ProofKind.TEST: ("tests/test_historical_context.py",),
+            },
+        )
+    }
+    result = assess_capabilities(evidence).results[103]
+    assert result.status == "INCOMPLETE"
+    assert result.missing_proofs == (ProofKind.WIRING,)
 
 
 def test_cryptographic_integrity_requires_execution_persistence_repro_and_safety():
