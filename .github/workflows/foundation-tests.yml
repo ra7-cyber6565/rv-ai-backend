@@ -62,6 +62,9 @@ jobs:
             tests/test_formal_logic.py \
             tests/test_runtime_capability_wiring.py \
             tests/test_wiring_attestor.py \
+            tests/test_extraction_integrity.py \
+            tests/test_translation_verification.py \
+            tests/test_capture_integrity_wiring.py \
             tests/test_holdout_vault.py \
             tests/test_holdout_vault_hardening.py \
             tests/test_scientist_society.py \
