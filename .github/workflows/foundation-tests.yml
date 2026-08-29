@@ -60,6 +60,7 @@ jobs:
             tests/test_scientific_memory.py \
             tests/test_statistical_validation.py \
             tests/test_formal_logic.py \
+            tests/test_runtime_capability_wiring.py \
             tests/test_holdout_vault.py \
             tests/test_holdout_vault_hardening.py \
             tests/test_scientist_society.py \
