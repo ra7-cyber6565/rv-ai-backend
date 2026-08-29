@@ -1,4 +1,5 @@
 from research_engine.capture_integrity_wiring import IntegrityPassage
+from research_engine.capability_registry import CAPABILITY_BY_ID, ProofKind
 from research_engine.claim_verification import (
     GENUINE_SUPPORT,
     SOURCE_REPORTED,
@@ -71,6 +72,11 @@ def _low_ocr():
         language="eng",
         dpi=200,
     )
+
+
+def test_registry_requires_production_wiring_for_translation_and_ocr():
+    assert ProofKind.WIRING in CAPABILITY_BY_ID[105].required_proofs
+    assert ProofKind.WIRING in CAPABILITY_BY_ID[106].required_proofs
 
 
 def test_integrity_passage_serializes_capture_metadata():
