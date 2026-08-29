@@ -126,6 +126,13 @@ _install_literature_debate_wiring()
 from .discovery_frontier_wiring import install as _install_discovery_frontier_wiring
 _install_discovery_frontier_wiring()
 
+# #104 Historical Context uses only explicit structured chronology transported
+# through the existing result/coverage path. It preserves uncertain ranges,
+# blocks hindsight/anachronism/impossible causal order, and never infers dates
+# or historical actor knowledge from prose.
+from .historical_context_wiring import install as _install_historical_context_wiring
+_install_historical_context_wiring()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
