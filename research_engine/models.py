@@ -999,127 +999,689 @@ class EvidencePack:
                 [s for s in self.sources if s.coi_disclosed is not None]),
             "quality_signal_note": self.quality_signal_note(),
             # ── patent evidence, scientific evidence se ALAG ginti mein ──
-            # Ye keys hamesha rehti hain (0 bhi ek imaandaar jawab hai), taaki
-            # audit padhne wale ko pata rahe ki patent tier dekha gaya tha.
-            "patent_sources": len(self.patent_sources()),
-            "patent_families": self.patent_family_count(),
-            "patent_read_levels": self.patent_read_depth_counts(),
-            "science_sources": len(self.science_sources()),
-            "patent_note": self.patent_note(),
+            # Ye keys hamesha rehti hain (…26475 tokens truncated…n        if report.used_legacy_url_match:
+            warnings.append("Model ne [S#] format use nahi kiya — citations URL "
+                            "match se nikaali gayi hain, isliye kam bharosemand hain.")
+
+        # 8. verification (Spec Section 11)
+        self._track(job_id, "SAFETY_CHECK", "verification + honesty checks")
+        verification = self.verifier.verify(
+            gemini_answer, pack,
+            citation_ok=not report.invalid_ids,
+            ungrounded_count=len(report.ungrounded_claims),
+            hypotheses=passes["hypotheses"],
+            cited_ids=[c.get("source_id") for c in report.cited if c.get("source_id")],
+            # point 12 — sanity checks sirf quantitative sawal par chalein,
+            # isliye sawal bhi bhejna zaroori hai.
+            question=question,
+        ).to_dict()
+        # §13 — A–E ka poora record API/Android tak bhi jaana chahiye, sirf
+        # report ke text mein nahi. `verification` dict pehle se result mein
+        # jaata hai, isliye naya top-level field banane ki zaroorat nahi.
+        verification["claim_checks"] = claim_checks
+        verification["evidence_first_audit"] = evidence_first_audit
+        verification["evidence_first_manifest"] = (
+            passes.get("evidence_first_manifest") or {})
+        try:
+            epistemic_packet = build_runtime_evidence_packet(
+                question=question,
+                claim_checks=claim_checks,
+                pack=pack,
+                disconfirming_search_performed=axis_counter_search is True,
+            )
+        except Exception as exc:
+            epistemic_packet = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "assessments": [],
+                "all_standards_passed": False,
+                "truth_proven": False,
+                "confidence_is_truth_probability": False,
+                "limitations": ["epistemic governance failed closed"],
+            }
+            technical_errors.append(f"epistemic governance: {type(exc).__name__}")
+        try:
+            experiment_packet = build_runtime_experiment_packet(
+                passes["hypotheses"])
+        except Exception as exc:
+            experiment_packet = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "selection_performed": False,
+                "recommended_experiment": None,
+                "truth_proven": False,
+                "real_world_approval_implied": False,
+                "blockers": ["experiment intelligence failed closed"],
+            }
+            technical_errors.append(f"experiment intelligence: {type(exc).__name__}")
+        # point 11 — kitni hypotheses evidence ke hisaab se banayi ja sakti thi,
+        # ye ginti bhi API/Android tak jaani chahiye (report ke text ke alawa).
+        if passes.get("hypothesis_gate"):
+            verification["hypothesis_gate"] = passes["hypothesis_gate"]
+        if passes.get("hypothesis_plan"):
+            verification["hypothesis_plan"] = passes["hypothesis_plan"]
+
+        # 9. grading + coverage
+        # Pack-level counts alone must never print VERIFIED/STRONG when the
+        # answer's actual conclusion claims failed A-E.  Both final reports are
+        # passed only here; the earlier pre-reasoning grade intentionally remains
+        # a source-pack diagnostic for hypothesis planning.
+        evidence_level = self.evidence.grade_evidence(
+            pack,
+            claims,
+            label_report=label_report,
+            claim_checks=claim_checks,
+        )
+
+        # Advanced Scientific Discovery Engine.  This is a deterministic
+        # assessment of the evidence/hypotheses already produced above: no new
+        # provider/network call and no arbitrary code execution.  It stays a
+        # structured API field so the human-first answer is not cluttered.
+        remembered_hypotheses = (
+            self.memory.known_hypotheses(question, limit=12)
+            if self.memory else []
+        )
+        try:
+            discovery_analysis = self.scientific_discovery.analyze(
+                question=question,
+                plan=plan,
+                pack=pack,
+                hypotheses=passes["hypotheses"],
+                contradictions=contradiction_dicts,
+                verification=verification,
+                remembered_hypotheses=remembered_hypotheses,
+            )
+        except Exception as exc:
+            # Research answer must survive an auxiliary assessment failure, but
+            # the failure is explicit and never promoted to a successful gate.
+            discovery_analysis = {
+                "schema_version": "1.0",
+                "status": "ASSESSMENT_ERROR",
+                "reason": "advanced discovery assessment poora nahi ho paaya",
+                "human_review_required": True,
+            }
+            technical_errors.append(
+                f"advanced discovery assessment: {type(exc).__name__}")
+        research_assurance = build_research_assurance(
+            config=config,
+            pack=pack,
+            discovered=discovered,
+            reading=reading,
+            passes=passes,
+            verification=verification,
+            discovery_analysis=discovery_analysis,
+        )
+        if (research_assurance.get("active")
+                and not research_assurance.get("target_met")):
+            percent = research_assurance.get("research_process_coverage_percent", 0)
+            target = research_assurance.get("target_percent", 0)
+            gaps = ", ".join(research_assurance.get("gaps") or [])
+            warnings.append(
+                f"MARATHON research-process coverage {percent}% rahi (target "
+                f"{target}%). Ye truth/success probability nahi hai."
+                + (f" Bachi process gaps: {gaps}." if gaps else "")
+            )
+        coverage = pack.coverage_report()
+        coverage["evidence_table"] = self.evidence.evidence_table(claims)
+        coverage["independence"] = self.evidence.independence_report(pack)
+        # Patent evidence ka apna block — science ke numbers mein mila kar nahi.
+        # UI/Android isse padh kar "prior-art signal" dikha sakte hain bina
+        # report ka text parse karne ke.
+        coverage["prior_art"] = dict(prior_art)
+        by_type: Dict[str, int] = {}
+        for source in pack.sources:
+            key = source.source_type.value
+            by_type[key] = by_type.get(key, 0) + 1
+        coverage["by_source_type"] = by_type
+        # §5 — coverage dict machine-readable hai (UI/Android/final gate isse
+        # padhte hain). Yahan "kitne mile" ke saath "kaunsa raasta khaali hai"
+        # bhi jaata hai, aur khaali record par sab `None` rehta hai.
+        coverage["evidence_axes"] = {
+            "axes": axis_records,
+            "summary": axis_summary,
+            "queries": dict(discovered.get("axis_queries") or {}),
+            "note": axis_note,
+        }
+        coverage["peer_reviewed"] = sum(1 for s in pack.sources if s.peer_reviewed is True)
+        coverage["full_text_available"] = sum(1 for s in pack.sources
+                                              if s.full_text_available)
+        # Spec Section 2 — "search kiya" vs "padha" ka farq numbers mein
+        coverage["reading"] = {
+            "attempted": reading.get("attempted", 0),
+            "succeeded": reading.get("succeeded", 0),
+            "failed": reading.get("failed", 0),
+            "skipped_over_budget": reading.get("skipped", 0),
+            "chars_read": reading.get("chars_read", 0),
+            "note": reading.get("note", ""),
+            "per_source": [
+                {"source_id": e.get("source_id", ""), "read": bool(e.get("ok")),
+                 "chars": e.get("chars", 0), "reason": e.get("reason", "")}
+                for e in reading.get("entries", [])
+            ],
+        }
+        coverage["specialist_research"] = specialist_report
+        coverage["research_assurance"] = research_assurance
+        coverage["source_integrity"] = source_integrity
+        coverage["epistemic_governance"] = epistemic_packet
+        coverage["experiment_intelligence"] = experiment_packet
+        honesty = {
+            "citations_verified": len(report.cited),
+            "cited": report.cited,
+            "summary": self.citations.honesty_report(report, pack),
         }
 
+        # Spec Section 7 — retracted/withdrawn source ka warning top level par.
+        # Ye sirf coverage ke andar dabaana theek nahi hoga: agar jawab kisi
+        # retracted paper par tika hai, to ye sabse pehle dikhne wali baat hai.
+        retracted = pack.retracted_sources()
+        if retracted:
+            cited_ids = {c.get("source_id") for c in report.cited}
+            cited_retracted = [s.source_id for s in retracted if s.source_id in cited_ids]
+            detail = (f"aur inme se {len(cited_retracted)} ko jawab mein cite bhi kiya "
+                      f"gaya hai ({', '.join(cited_retracted)})"
+                      if cited_retracted else
+                      "inhe jawab mein cite nahi kiya gaya")
+            warnings.append(
+                f"{len(retracted)} source par retraction/withdrawal ka signal hai "
+                f"({', '.join(s.source_id for s in retracted if s.source_id)}) — "
+                f"{detail}. Retracted kaam ko evidence ki tarah use nahi karna chahiye.")
 
-    def to_dict(self) -> Dict:
-        return {
-            "question": self.question,
-            "sources": [s.to_dict() for s in self.sources],
-            "passages": [p.to_dict() for p in self.passages],
-            "coverage": self.coverage_report(),
+        # 9b. REQUESTED vs DELIVERED ledger. Delivered ko answer ke TEXT se
+        # naapa jaata hai, "humne maang liya tha" se nahi — pichhla run isi wajah
+        # se jhooth bol gaya tha. Wajah bhi asli record se aati hai (reasoning
+        # note + Gemini errors), andaaze se nahi.
+        ledger_reasons: List[str] = []
+        if not pack.reasoning_complete:
+            ledger_reasons.append(pack.reasoning_note())
+        # §9 — ledger ka "why" bhi user ko dikhta hai, isliye insaani wajah hi
+        # jaati hai (pehle yahan poora `passes["errors"]` raw chala jaata tha).
+        if failure_reason:
+            ledger_reasons.append(failure_reason)
+        ledger_reasons.extend(human_errors)
+        ledger = build_ledger(
+            requests,
+            delivered={
+                "hypotheses": len(passes["hypotheses"]),
+                "math_model": looks_like_math_model(gemini_answer),
+                "second_order": looks_like_chain(gemini_answer),
+                "red_team": bool(passes["critique_raw"]),
+            },
+            reasons=ledger_reasons,
+        )
+        for item in ledger.get("unmet", []):
+            warnings.append(
+                f"Aapki request poori nahi hui: {item.get('what')} → "
+                f"{item.get('got')}."
+                + (f" {item.get('why')}" if item.get("why") else ""))
+
+        # 10. final answer assemble
+        #
+        # §1 — status pehle nikalta hai, phir report banti hai. Pehle report
+        # "poori" lagti thi chahe 3 mein se 1 hi pass chala ho; ab UI ko
+        # `RESEARCH INCOMPLETE` machine-readable roop mein milta hai aur wahi
+        # baat report ke top par insaani bhasha mein bhi likhi jaati hai.
+        run_status = evaluate_status(
+            planned_passes=passes["planned_passes"],
+            done_passes=passes["done_passes"],
+            failure_kind=passes.get("failure_kind", ""),
+            failure_reason=passes.get("failure_reason", ""),
+            source_count=len(pack.sources),
+            errors=passes["errors"],
+            technical_details=list(passes.get("technical_details") or [])
+            + technical_errors,
+        )
+        status_dict = run_status.to_dict()
+
+        # §15 — crashed search round ka RAW text bhi report se gayab nahi hota,
+        # par uska ghar sirf sabse neeche wala "Technical details" block hai.
+        # Ye jaan-boojh kar `evaluate_status()` ko NAHI diya jaata: wo LLM ke
+        # failure_kind ka faisla karta hai, aur network/connector ka crash LLM
+        # ka dosh nahi hai — warna banner galat wajah bata deta.
+        technical_lines = list(run_status.technical) + round_error_details
+
+        # A provider/model may fail first and a later free fallback may still
+        # complete every planned pass. Keep those failures in the structured
+        # result (`technical_details` + sanitized `api_accounting.failure_events`)
+        # for developer audit, but do not re-inject raw provider bodies into a
+        # successful public answer.  Both channels used by `_audit_section` must
+        # be cleared: its explicit `technical_details` argument *and* the copy
+        # nested in `status`.
+        public_technical_lines = list(technical_lines)
+        public_status_dict = dict(status_dict)
+        if run_status.code == COMPLETE:
+            public_technical_lines = []
+            public_status_dict["technical_details"] = []
+
+        # §1 — adhoore run par top label "VERIFIED" nahi ho sakta, chahe
+        # citations theek hon. Grading already reasoning-gate lagata hai, ye
+        # doosra taala hai taaki koi bhi raasta bacha na rah jaaye. Grader ki
+        # apni wajah MITAYI nahi jaati — sirf status uske aage lag jaata hai.
+        if run_status.code == INCOMPLETE and INCOMPLETE not in evidence_level:
+            base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
+            evidence_level = f"⚠️ {INCOMPLETE} — {base}" if base else f"⚠️ {INCOMPLETE}"
+
+        # §10 — counter-side search ke BINA top label ("VERIFIED"/"STRONG") mana
+        # hai. Wajah seedhi hai: sirf support-side dhoond kar "verified" kehna
+        # apne hi nateeje ki taraf jhukna hai. `axis_counter_search` teen haalat
+        # rakhta hai — True (counter axis par query gayi), False (nahi gayi),
+        # None (axes hi naape nahi gaye). True ke alawa dono mein label girta
+        # hai, par wajah dono ki alag likhi jaati hai (jhooth se bachne ke liye).
+        #
+        # Match "✅ " ke saath hai, sirf shabd se nahi: "UNVERIFIED" ke andar bhi
+        # "VERIFIED" chhupa hai, aur usse MIXED banana ULTA upgrade ho jaata.
+        top_label = any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))
+        if top_label and axis_counter_search is not True:
+
+            why = ("counter-side (criticism/replication) search nahi chali"
+                   if axis_counter_search is False else
+                   "counter-side search ka koi record nahi hai")
+            base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
+            evidence_level = f"🟡 MIXED — {why}, isliye 'verified' nahi keh sakta"
+            if base:
+                evidence_level += f" (ginti se banta tha: {base})"
+            warnings.append(
+                "Top label isliye nahi diya gaya: " + why + ". §10 ke hisaab se "
+                "support aur counter side dono par search zaroori hai.")
+
+        # §5 — zaroori evidence axis khaali ho to bhi top label mana hai. Ye
+        # counter-search gate se ALAG taala hai: counter-side chal chuki ho phir
+        # bhi CMB/BBN/lensing jaise raaste khaali reh sakte hain, aur us haalat
+        # mein "verified" kehna sirf source-ginti par bharosa karna hai — yahi
+        # pichhli dark-matter report ki sabse badi galti thi.
+        if man_missing and any((evidence_level or "").startswith(f"✅ {word}")
+                               for word in ("VERIFIED", "STRONG")):
+            base = re.sub(r"^[^A-Za-z]+", "", (evidence_level or "").strip())
+            labels = ", ".join((axis_summary.get("missing_labels") or [])[:4])
+            evidence_level = (
+                f"🟡 MIXED — saboot ke {man_missing} zaroori raaste khaali hain, "
+                f"isliye 'verified' nahi keh sakta")
+            if base:
+                evidence_level += f" (ginti se banta tha: {base})"
+            warnings.append(
+                f"Top label isliye nahi diya gaya: {man_missing} zaroori evidence "
+                f"raaste khaali hain"
+                + (f" ({labels})" if labels else "")
+                + ". Source ki ginti is kami ko nahi dhakti.")
+
+        # MARATHON ka 90% target sirf process coverage hai, phir bhi target
+        # miss hua ho to top VERIFIED/STRONG label dena misleading hoga. Useful
+        # answer bachta hai, par label MIXED rehta hai aur exact gaps structured
+        # `research_assurance` mein dikhte hain.
+        if (research_assurance.get("active")
+                and not research_assurance.get("target_met")
+                and any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))):
+            percent = research_assurance.get("research_process_coverage_percent", 0)
+            evidence_level = (
+                f"🟡 MIXED — MARATHON research-process coverage {percent}% rahi; "
+                "ye truth probability nahi hai aur process target poora nahi hua"
+            )
+
+        if (source_integrity.get("high_risk")
+                and any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))):
+            evidence_level = (
+                "🟡 MIXED — source-integrity audit mein high-risk review signal "
+                "mila; fraud prove nahi hua, par strong label blocked hai"
+            )
+
+        # §17 — reasoning pass ne jo calculation records nikaale the wahi aage
+        # jaate hain (ek hi jagah se: answer aur audit dono, warna do alag
+        # ginti dikhti). `None` matlab extraction chali hi nahi.
+        calc_records = passes.get("calculations")
+        if not calc_records:
+            # LLM na chala ho (offline reasoning) to bhi hisaab dhoondhna hai —
+            # warna quota marne par calculation ka record chup-chaap gayab ho
+            # jaata. Yahan bhi kuch "bhara" nahi jaata: text mein hisaab nahi
+            # hoga to list khaali hi rahegi.
+            calc_records = physics_checks.calculation_records(
+                gemini_answer, question=question,
+                evidence_text=self._evidence_text(pack))
+
+        answer = self.synthesizer.assemble(
+            gemini_answer=annotated,
+            pack=pack,
+            evidence_level=evidence_level,
+            confidence_note=self._confidence_note(pack, config, passes["calls"],
+                                                  sufficiency),
+            contradictions=contradiction_dicts,
+            hypotheses=passes["hypotheses"],
+            verification=verification,
+            coverage=coverage,
+            honesty=honesty,
+            consensus=consensus,
+            discovery_note=discovery_note,
+            quota_note=f"{passes['calls']}/{config.gemini_calls} calls used "
+                       f"({quota_note(config)})",
+            critique=passes["critique"],
+            warnings=warnings,
+            ledger=ledger,
+            label_report=label_report,
+            notes=engine_notes,
+            usage_note=passes.get("usage_note", ""),
+            requests=requests,
+            status=public_status_dict,
+            technical_details=public_technical_lines,
+            api_accounting=passes.get("api_accounting") or {},
+            claim_checks=claim_checks,
+            hypothesis_plan=passes.get("hypothesis_plan") or {},
+            specialist_report=specialist_report,
+            # §17 — jo hisaab sach mein mila, uska poora record jawab mein bhi
+            # dikhta hai (formula, inputs+units, assumptions, result, aur teen
+            # alag check). Khaali/None hone par section chhapta hi nahi.
+            calculations=calc_records,
+            # #116 — LAB stage ka apna record. Ye hypothesis section ke andar
+            # `###` block banata hai aur audit ki limits me NAAPI hui line
+            # jodta hai ("kitne pass/fail, kaunsa test data ke bina ruk gaya").
+            lab_report=passes.get("lab") or {},
+            # #117 — reject ledger. Isse answer me alag `###` block banta hai
+            # ("kya hataya, kis naap par, wapas kab aa sakti hai") aur audit me
+            # ginti wali line jaati hai. Khaali hone par kuch chhapta nahi.
+            reject_report=passes.get("rejects") or {},
+            # #121 — CRAFT ka naap: jo likhawat banai gayi uske dhaanche ka
+            # record (hypothesis section me `###` block) aur audit me naapi hui
+            # seema. Khaali hone par kuch chhapta hi nahi.
+            craft_report=passes.get("craft") or {},
+        )
+        # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
+        # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
+        run_status.missing_sections = list(
+            getattr(self.synthesizer, "last_missing_sections", []) or [])
+
+        # 10b. §4 + §7 + §19 — quality contract, counters aur quality_context.
+        #
+        # Teen alag cheezein, jaan-boojh kar alag:
+        #   • contract     = is sawaal se KYA maanga gaya tha (upfront rule)
+        #   • quality_ctx  = asal mein KYA hua (counters + tri-state checks)
+        #   • c_ledger     = dono ka milaan (kya poora hua, kya nahi, kya pata nahi)
+        #
+        # Sabse ahem baat: jo check chala hi nahi uska jawab `None` rehta hai,
+        # `0` nahi. Pichhli dark-matter report isi jhooth par gir gayi thi —
+        # "counter-search: 0" padh kar lagta tha ki dhoonda aur kuch nahi mila,
+        # jabki dhoondha hi nahi gaya tha.
+        contract = quality_contract(question, config=config, requests=requests)
+        # §17 ke records upar ek hi baar nikle hain (`calc_records`) — yahan
+        # dobara extraction jaan-boojh kar nahi ki jaati, warna answer aur audit
+        # mein do alag ginti aa sakti thi.
+        quality_ctx = quality.quality_context(
+            pack=pack,
+            # Counters model ke apne text se — final answer ke "Sources" block
+            # mein har source ka [S#] hota hai, usse ginne par har uncited
+            # source "cited" ban jaata (§7 ka asli bug).
+            answer_text=annotated,
+            verification=claim_checks,
+            evidence_first_audit=evidence_first_audit,
+            # §10 ka pehla hissa: counter-side search SACH mein chali ya nahi.
+            # Ye axis record se aata hai (counter axis par kam se kam ek query),
+            # "kisi source mein criticism shabd tha" se nahi. Axes naape na gaye
+            # hon to `None` hi rehta hai — "nahi chali" nahi.
+            counter_search=axis_counter_search,
+            # §17 — asli calculation records (formula, inputs, units,
+            # assumptions, result + unit/recalculation/sanity/invented check).
+            # Khaali list ka matlab "dekha, koi hisaab nahi mila" hai; `None`
+            # ka matlab "dekha hi nahi gaya" — dono alag baatein hain.
+            calculations=calc_records,
+            # §19 (2026-08-22 self-audit): pehle yahan `bool(recovered) or None`
+            # tha — yaani recovery na lagi ho to field `None` ho jaati thi aur
+            # audit use "check HO HI NAHI SAKA" mein gin leta tha. Wo galat tha:
+            # `_recover_extras` HAR run mein chalta hai, to "recovery lagi ya
+            # nahi" hamesha NAAPA hua sach hai. Ab `False` ka matlab "dekha,
+            # recovery ki zaroorat nahi padi" — aur ye un-run check se alag
+            # dikhta hai. Server-side recovery (job layer) baad mein isi field
+            # ko OR karke True kar sakta hai, to jhooth banne ka rasta nahi hai.
+            recovery_used=bool(recovered),
+            # Ye JAAN-BOOJH KAR `None` hai: snapshot job-server (ChatGPT-owned
+            # layer) sambhalta hai, engine ke andar uska koi record hi nahi hai.
+            # `False` likhna "dekha, snapshot nahi bacha" ka jhootha dava hoga.
+            progress_snapshot_preserved=None,
+            hypotheses=passes["hypotheses"],
+            contradictions=contradiction_dicts,
+            contradiction_rejections=contradiction_rejections,
+            axis_coverage=axis_records or None,
+        )
+        # Section titles / access-depth ke dave / hypothesis-fact mix sirf
+        # assembled answer mein dikhte hain, isliye doosra scan wahan par.
+        quality_ctx = quality.rescan_final_answer(quality_ctx, pack=pack,
+                                                  final_answer=answer)
+        # §19 — "check hi nahi hua" sirf audit dict mein reh jaata tha, user ke
+        # jawab mein nahi. Live dark-matter report ki galti yahi thi: counter par
+        # "0" chhapa jabki wo check chala hi nahi tha. Inject rescan ke BAAD hota
+        # hai (warna block ka apna text hi dobara scan ho jaata) aur §20 state
+        # block se PEHLE, taaki chaar state audit ke sabse upar hi rahein.
+        answer = quality.inject_unknown_block(answer, quality_ctx)
+        # §7 — "retrieved ≠ cited ≠ support dene wale" ki ginti bhi user ke jawab
+        # mein. Ye producer (`context_block`) bana hua tha par isse production
+        # mein koi bulaata hi nahi tha — sirf tests padhte the. Live report
+        # sirf "N sources use hue" likhti thi, jo bilkul wahi galti hai jo §7
+        # mana karta hai ("18 retrieved ko 18 used mat banao"). Inject unknown
+        # block ke BAAD hota hai taaki ginti uske upar rahe, aur §20 state block
+        # se PEHLE taaki chaar state sabse upar hi rahein.
+        answer = quality.inject_context_block(answer, quality_ctx)
+        # §9 — paanch claim-nateeje bhi jawab mein. Ye sirf `verification`
+        # JSON mein pade rehte the, isliye user ko "citation mil gayi" aur "dava
+        # sach nikla" ka farak kabhi dikhta hi nahi tha.
+        answer = quality.inject_claim_block(answer, quality_ctx)
+
+        delivered: Dict = {
+            "sections_present": list(quality_ctx.get("sections_present") or []),
+            "hypotheses": len(passes["hypotheses"]),
+            "math_model": looks_like_math_model(gemini_answer),
+            "second_order": looks_like_chain(gemini_answer),
+            "red_team": bool(passes["critique_raw"]),
         }
+        # Sirf wahi key bhejte hain jinka jawab humein SACH mein pata hai.
+        # `counter_search_performed` aur `original_hypotheses` aage ke steps
+        # (§10/§13) mein aayenge — tab tak ledger inhe "pata nahi" likhega, jo
+        # "0 mila" se alag aur imaandaar baat hai.
+        #
+        # §17 — calculations ki ginti POORE hisaab ki hai (formula + inputs +
+        # units + result, aur koi check fail na hua ho). Adhoora hisaab ledger
+        # mein "bani" nahi ginta.
+        calc_count = physics_checks.usable_calculation_count(calc_records)
+        if calc_count is not None:
+            delivered["calculations"] = calc_count
+        for key in ("counter_search_performed", "directly_relevant_sources",
+                    "average_relevance"):
+            if quality_ctx.get(key) is not None:
+                delivered[key] = quality_ctx[key]
+        # §5 — axis coverage ledger tak jaata hai, sirf warning tak nahi. Ek bhi
+        # zaroori raasta khaali ho to `answer_complete` aur `verified_allowed`
+        # dono False ho jaate hain (DEEP/MAXIMUM mein). Naapa hi na gaya ho to
+        # key bheji hi nahi jaati — ledger use "check nahi hua" likhega.
+        for key in ("axes_mandatory_missing", "axes_total", "axes_covered"):
+            if quality_ctx.get(key) is not None:
+                delivered[key] = quality_ctx[key]
+        if quality_ctx.get("axes_missing_labels"):
+            delivered["axes_missing_labels"] = list(
+                quality_ctx["axes_missing_labels"])
+        # §4 ki saat naye demands (units, experiment design, falsification,
+        # confidence, readiness, source depth, tulna ke pehlu, naam se maange
+        # gaye target). Ye FINAL answer ke text par naapi jaati hain — kisi step
+        # ke "ho gaya" keh dene par nahi. Jo naapi na ja sake uski key aati hi
+        # nahi, isliye ledger us par "check nahi hua" likhta hai, "nahi mila"
+        # nahi. `hypotheses=` tabhi bhejte hain jab hypothesis engine sach mein
+        # chala ho — warna experiment design/falsification par False likhna
+        # jhooth hoga.
+        delivered.update(delivery_evidence(
+            contract, answer,
+            hypotheses=(passes["hypotheses"]
+                        if (passes.get("hypothesis_requested")
+                            or passes.get("hypotheses")) else None),
+            calculations=list(calc_records or []),
+            source_titles=[getattr(s, "title", "") for s in pack.sources]))
+        c_ledger = contract_ledger(contract, delivered=delivered,
+                                   reasons=ledger_reasons)
+        # §4 — asked vs delivered ledger user ko DIKHNA chahiye, sirf result JSON
+        # mein nahi. Ye assemble ke baad hi ban sakta hai (delivered counts final
+        # answer par tike hain), isliye inject yahan hota hai — ginti wale block
+        # ke upar, aur §20 state block ke neeche.
+        answer = quality.inject_ledger_block(answer, c_ledger)
 
+        # 10c. §20 — chaar ALAG state + unke beech ke conflicts.
+        #
+        # Yahan (assemble ke BAAD) banti hai kyunki ye c_ledger aur quality_ctx
+        # ke FINAL numbers par tiki hai; pehle banane par audit mein do alag
+        # ginti aa jaati. Block report ke audit section ke top par inject hota
+        # hai — user ke jawab ke section chhoote bhi nahi, badalte bhi nahi.
+        claim_counts = dict(quality_ctx.get("claim_results") or {})
+        supported = None
+        if quality_ctx.get("claim_results") is not None:
+            supported = (claim_counts.get("SUPPORTED", 0)
+                         + claim_counts.get("PARTIALLY SUPPORTED", 0))
+        unsupported = None
+        if quality_ctx.get("claim_results") is not None:
+            unsupported = (claim_counts.get("UNSUPPORTED", 0)
+                           + claim_counts.get("CONTRADICTED", 0)
+                           + claim_counts.get("UNABLE TO VERIFY", 0))
+        research_state = build_research_state(
+            ledger=c_ledger,
+            answer_text=answer,
+            source_count=len(pack.sources),
+            usable_source_count=quality_ctx.get("directly_relevant_sources"),
+            # Tri-state: claim check chala hi nahi to `None` — "0 supported"
+            # nahi. Yahi farq §20 ke conflict rule ko sach bolne deta hai.
+            verification_ran=(None if quality_ctx.get("claim_results") is None
+                              else True),
+            supported_claims=supported,
+            unsupported_claims=unsupported,
+            contradictions=len(contradiction_dicts or []),
+            counter_search=axis_counter_search,
+            # prior-art ka record hypotheses ke andar hi hota hai
+            # (`novelty_search.performed`), isliye yahan kuch pass nahi karte —
+            # `build_state` khud wahi record padhta hai. Na chali ho to `None`
+            # rehta hai, jhoota True nahi.
+            hypotheses=passes["hypotheses"],
+            top_label=evidence_level,
+            recovered=bool(recovered),
+        )
+        state_dict = research_state.to_dict()
+        # Conflict chhupta nahi: warning list mein bhi jaata hai (UI banner) aur
+        # audit block mein bhi (report). Dono ek hi object se — do jagah do baat
+        # nahi.
+        for line in state_warnings(research_state):
+            if line not in warnings:
+                warnings.append(line)
+        answer = inject_state_block(answer, research_state)
 
-# ── ResearchResult ───────────────────────────────────────────────────────────
-@dataclass
-class ResearchResult:
-    """
-    Final output. Purane API contract ke saare keys yahan preserve hain
-    (question, answer, sources, safety_flags, evidence_level, mode,
-    question_types, relevant_fields) — plus naye research fields.
-    """
-    question: str = ""
-    answer: str = ""
-    sources: List[Dict] = field(default_factory=list)
-    safety_flags: List[Dict] = field(default_factory=list)
-    evidence_level: str = ""
-    mode: str = "DEEP"
-    question_types: List[str] = field(default_factory=list)
-    relevant_fields: List[str] = field(default_factory=list)
+        # 11. memory + graph write (best effort)
+        if self.memory:
+            self.memory.remember_run(
+                question=question, evidence_level=evidence_level,
+                source_count=len(pack.sources), mode=config.name,
+                connectors=discovered["connectors"],
+                summary=(passes["analysis"] or "")[:400])
+            if passes["hypotheses"]:
+                self.memory.remember_hypotheses(question, passes["hypotheses"])
+            self.memory.remember_discovery(question, discovery_analysis)
+            self.memory.remember_urls(discovered["urls"])
+            # Dead ends bhi yaad rakho (Spec Section 16). Ye sirf ek note hai,
+            # block nahi — agli baar prompt mein dikh jaata hai ki is topic par
+            # kya pehle bekaar gaya tha, taaki wahi galti dohrayi na jaaye.
+            self._remember_dead_ends(question, discovered, reading)
+            self.memory.save()
+        # Concept ledger (task #83): jo kriti/vyakti ke naam is run me app ne
+        # KHUD pehchane, wo agli baar bina cue wale sawaal par bhi kaam aayein.
+        # Ye ResearchMemory se alag rehta hai kyunki ye project-specific nahi
+        # hai — naam ek baar seekha, har project me hint ban jaata hai.
+        # Jaan-boojhkar `self.memory` ke bahar aur try ke andar: ledger ki koi
+        # kharaabi kabhi kisi answer ko nahi rok sakti, aur ye HINT layer hai —
+        # yahan se koi claim, evidence level ya confidence nahi banta.
+        try:
+            concept_ledger.remember_question(question)
+            concept_ledger.remember_sources(list(pack.sources or []))
+        except Exception:                                  # pragma: no cover
+            pass
+        self.graph.store(question, passes["analysis"] or gemini_answer, self.project_id)
 
-    citations: List[Dict] = field(default_factory=list)
-    uncited_sources: List[Dict] = field(default_factory=list)
-    invalid_citations: List[str] = field(default_factory=list)
-    ungrounded_claims: List[str] = field(default_factory=list)
-    contradictions: List[Dict] = field(default_factory=list)
-    hypotheses: List[Dict] = field(default_factory=list)
-    verification: Dict = field(default_factory=dict)
-    coverage: Dict = field(default_factory=dict)
-    # "maanga vs mila" ka ledger aur label-gate ka report. Ye answer text mein
-    # bhi chhapte hain, par API/UI ko structured roop mein bhi chahiye — warna
-    # frontend ko dobara text parse karna padta.
-    requested_ledger: Dict = field(default_factory=dict)
-    label_report: Dict = field(default_factory=dict)
-    # Advanced scientific-discovery assessment.  Structured and optional so
-    # older Android clients that ignore unknown fields remain compatible.
-    discovery: Dict = field(default_factory=dict)
-    # Specialist evidence lanes keep empirical science, official/declassified
-    # records, historical/traditional texts, allegations and app-original
-    # hypotheses machine-readably separate.  Optional for old clients.
-    specialist_research: Dict = field(default_factory=dict)
-    # MARATHON-only measured checklist. Iska percentage answer/hypothesis ki
-    # truth, profitability ya real-world success probability nahi hai.
-    research_assurance: Dict = field(default_factory=dict)
-    # Production source-poisoning/provenance audit. Empty means the stage did
-    # not run; NO_ANOMALY_DETECTED is never called proof of source truth.
-    source_integrity: Dict = field(default_factory=dict)
-    # Critical-claim governance packet. It records measured/inferred/report
-    # separation and unresolved standards without claiming truth probability.
-    epistemic_packet: Dict = field(default_factory=dict)
-    gemini_calls_used: int = 0
-    warnings: List[str] = field(default_factory=list)
+        self._track(job_id, "COMPLETE",
+                    f"{len(pack.sources)} sources, {passes['calls']} gemini calls")
 
-    # §1 — run ka imaandaar status, UI ke liye machine-readable.
-    # "COMPLETE" / "PARTIAL" / "RESEARCH INCOMPLETE". Pehle adhoora run bhi
-    # normal jawab jaisa dikhta tha; ab frontend seedha `status` dekh kar
-    # warning banner laga sakta hai bina answer text parse kiye.
-    status: str = "COMPLETE"
-    status_reason: str = ""              # ek line, insaani bhasha (raw error nahi)
-    failure_kind: str = ""               # daily_quota / auth_failure / ...
-    missing_passes: List[str] = field(default_factory=list)
-    missing_sections: List[str] = field(default_factory=list)
-    # §9 — raw API/protobuf text SIRF yahan (aur report ke sabse neeche).
-    # Ye kabhi bhi user-facing jawab ka hissa nahi banta.
-    technical_details: List[str] = field(default_factory=list)
-    api_accounting: Dict = field(default_factory=dict)
+        cited_sources = [c for c in report.cited]
+        return ResearchResult(
+            question=question,
+            answer=answer,
+            sources=cited_sources or [s.to_dict() for s in pack.sources],
+            safety_flags=safety.get("flags", []),
+            evidence_level=evidence_level,
+            mode=config.name,
+            question_types=plan.get("question_types", []),
+            relevant_fields=plan.get("relevant_fields", []),
+            citations=report.cited,
+            uncited_sources=report.uncited,
+            invalid_citations=report.invalid_ids,
+            ungrounded_claims=report.ungrounded_claims,
+            contradictions=contradiction_dicts,
+            hypotheses=passes["hypotheses"],
+            verification=verification,
+            coverage=coverage,
+            requested_ledger=ledger,
+            label_report=label_report,
+            discovery=discovery_analysis,
+            specialist_research=specialist_report,
+            research_assurance=research_assurance,
+            source_integrity=source_integrity,
+            epistemic_packet=epistemic_packet,
+            experiment_intelligence=experiment_packet,
+            gemini_calls_used=passes["calls"],
+            warnings=warnings,
+            status=run_status.code,
+            status_reason=run_status.reason,
+            failure_kind=run_status.failure_kind,
+            missing_passes=list(run_status.missing_passes),
+            missing_sections=list(run_status.missing_sections),
+            technical_details=list(technical_lines),
+            api_accounting=passes.get("api_accounting") or {},
+            # §4/§7/§19 — ye teen dict machine-readable hain aur final gate
+            # (ChatGPT-owned) inhe hi padhta hai. Inme koi bhi 0/True aisa nahi
+            # hai jo "check nahi hua" ko chhupa raha ho.
+            quality_contract=contract,
+            quality_context=quality_ctx,
+            contract_ledger=c_ledger,
+            research_state=state_dict,
+            # #116 — LAB ka structured record UI/API ke liye. Text parse
+            # karne ki zaroorat na pade (wahi galti pehle audit ke numbers
+            # me do alag ginti laayi thi). Stage na chale to khaali dict.
+            lab=passes.get("lab") or {},
+            # #117 — reject ledger bhi structured hi jaata hai, taaki UI ko
+            # answer ka text parse karke "kya hataya" na dhoondhna pade.
+            rejects=passes.get("rejects") or {},
+            # #121 — CRAFT ka naap bhi structured jaata hai (UI ko text parse
+            # nahi karna padega ki "kya naapa gaya"). Khaali dict = stage chala
+            # hi nahi.
+            craft=passes.get("craft") or {},
+        ).to_dict()
 
-    # §4 + §7/§19 — "kya maanga gaya tha" (quality_contract), "kya asli mein
-    # mila" (quality_context) aur dono ka aamna-saamna (contract_ledger).
-    # Ye teen structured roop mein API/UI/final-gate tak jaate hain, taaki koi
-    # bhi in numbers ke liye answer ka text parse na kare — text parse karna hi
-    # wo raasta tha jisse audit ke andar ek doosre se ulte numbers aa gaye the.
-    quality_contract: Dict = field(default_factory=dict)
-    quality_context: Dict = field(default_factory=dict)
-    contract_ledger: Dict = field(default_factory=dict)
-
-    # §20 — chaar ALAG state ek hi dict mein: job_status / answer_state /
-    # evidence_state / novelty_state, plus `conflicts` aur `verified_allowed`.
-    # UI ko inme se kisi ek ka matlab doosre se nikaalna mana hai — pehle yahi
-    # hota tha ("job FINISHED" ko "jawab COMPLETE" padh liya jaata tha).
-    # Banane wala module: research_engine/research_state.py
-    research_state: Dict = field(default_factory=dict)
-
-    # #116 — LAB stage ka record: app ne apni hi hypothesis par kaunse
-    # computable test KHUD chalaye aur kya nikla. Khaali dict ka matlab
-    # "stage chala hi nahi" hai — "sab pass ho gaya" nahi. Isme koi bhi
-    # verdict real-world proof nahi hai (`real_world_experiment_pending`
-    # hamesha True aata hai), aur `TESTED_PASS` ka matlab sirf "app ke
-    # andar ka hisaab mila" hai. Banane wala module: research_engine/lab.py
-    lab: Dict = field(default_factory=dict)
-
-    # #117 — reject ledger: kaunsi hypothesis aage nahi badhi aur kis NAAP par
-    # (LAB ka fail, safety risks ki kami, ya "na test plan na prediction"), plus
-    # "wapas kab aa sakti hai". Khaali dict matlab ledger bana hi nahi — "kuch
-    # reject nahi hua" NAHI. Kisi bhi record me `is_disproved` hamesha False
-    # rehta hai: reject app ka faisla hai, duniya ka nahi.
-    # Banane wala module: research_engine/rejects.py
-    rejects: Dict = field(default_factory=dict)
-
-    # #121 — CRAFT stage ka record: jab farmaish kuch BANANE ki thi (gaana/
-    # kavita/letter/kahani/nibandh/slogan), to app ne apne hi draft ka DHAANCHA
-    # khud naapa — matra, tuk, hook ki jagah, dohraav, ghise phrase. Khaali dict
-    # matlab stage chala hi nahi. Yahan ka koi bhi number "likhawat acchi hai"
-    # ya "logon ko pasand aayegi" nahi kehta: wo `cannot_measure` me naam se
-    # likha rehta hai. Banane wala module: research_engine/craft.py
-    craft: Dict = field(default_factory=dict)
-
-    def to_dict(self) -> Dict:
-        return asdict(self)
+    # ── confidence note ──────────────────────────────────────────────────────
+    def _confidence_note(self, pack: EvidencePack, config, calls_used: int,
+                         sufficiency: Dict) -> str:
+        if not pack.sources:
+            return ("Koi source retrieve nahi hua. Is jawab ko unverified maanein.")
+        parts = [
+            f"{len(pack.sources)} sources use hue, jinke "
+            f"{pack.independent_source_count} independent origins hain.",
+        ]
+        peer = sum(1 for s in pack.sources if s.peer_reviewed is True)
+        if peer:
+            # §14 — denominator ke bina "4 peer-reviewed hain" zyada mazboot
+            # lagta hai jitna hai. Kul ginti saath likhna hi imaandaar hai.
+            parts.append(f"{peer}/{len(pack.sources)} peer-reviewed hain.")
+        if pack.full_text_read_count:
+            parts.append(f"{pack.full_text_read_count}/{len(pack.sources)} ka poora "
+                         f"text padha gaya.")
+        if not sufficiency.get("sufficient", True):
+            parts.append("Evidence threshold poora nahi hua — confidence kam rakhein.")
+        # Retrieval ka sach — "kitne sources mile" se zyada zaroori hai "wo
+        # sawaal ke the ya nahi". Pichhli report mein 5 sources the aur ek bhi
+        # topic ka nahi tha, par confidence note usme se kuch nahi kehta tha.
+        parts.append(pack.relevance_note())
+        if pack.full_text_read_count < 1:
+            parts.append("Kisi source ka poora text nahi padha ja saka — ye jawab "
+                         "abstract/snippet level ka hai.")
+        # Budget (config.gemini_calls) ke bajaye ASLI planned passes se compare
+        # karo: 2-call mode mein critique plan hi nahi hota, use "nahi chala"
+        # batana galat hai.
+        if not pack.reasoning_complete:
+            parts.append(pack.reasoning_note())
+        parts.append("Ye confidence retrieved evidence par hai, poore literature par nahi.")
+        return " ".join(parts)

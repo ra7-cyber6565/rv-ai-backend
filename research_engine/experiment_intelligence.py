@@ -16,11 +16,89 @@ import hashlib
 import json
 import math
 from dataclasses import dataclass
-from typing import Dict, Mapping, Optional, Sequence, Tuple
+from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 
 _EPS = 1e-12
 _SAFETY_STATES = {"APPROVED", "REVIEW_REQUIRED", "BLOCKED"}
+_RUNTIME_EXPERIMENT_FIELDS = (
+    "dataset_or_sample",
+    "control_or_baseline",
+    "measured_variables",
+    "parameter_range",
+    "statistical_metric",
+    "success_threshold",
+    "failure_threshold",
+    "falsification_condition",
+)
+
+
+def _meaningful(value: object) -> bool:
+    if value is None or isinstance(value, bool):
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping):
+        return bool(value)
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
+        return bool(value)
+    return True
+
+
+def build_runtime_experiment_packet(
+    hypotheses: Sequence[Mapping[str, Any]],
+) -> Mapping[str, object]:
+    """Audit production hypothesis test plans without inventing Bayes inputs.
+
+    The ordinary research pipeline produces falsification contracts, not
+    calibrated priors or per-outcome likelihood tables.  This adapter records
+    exactly what is present and blocks Bayesian experiment selection until a
+    future caller supplies those assumptions explicitly.  It therefore wires
+    Experiment Intelligence into the real job path while keeping a test-plan
+    audit distinct from a claimed information-gain recommendation.
+    """
+    rows = []
+    for index, hypothesis in enumerate(hypotheses or (), 1):
+        item = hypothesis if isinstance(hypothesis, Mapping) else {}
+        experiment = item.get("experiment")
+        experiment = experiment if isinstance(experiment, Mapping) else {}
+        missing = [
+            field for field in _RUNTIME_EXPERIMENT_FIELDS
+            if not _meaningful(experiment.get(field))
+        ]
+        rows.append({
+            "hypothesis_id": str(item.get("id") or item.get("hypothesis_id") or f"H{index}"),
+            "contract_complete": not missing,
+            "missing_contract_fields": missing,
+        })
+
+    complete = sum(bool(row["contract_complete"]) for row in rows)
+    blockers = []
+    if len(rows) < 2:
+        blockers.append("at_least_two_competing_hypotheses_required")
+    if complete != len(rows):
+        blockers.append("experiment_contract_incomplete")
+    # These values are intentionally never inferred from confidence bands or
+    # tournament priority scores: neither is a Bayesian prior/likelihood.
+    blockers.extend(("explicit_priors_missing", "outcome_likelihoods_missing"))
+    payload = {
+        "ran": True,
+        "status": "BLOCKED_MISSING_EXPLICIT_ASSUMPTIONS",
+        "hypotheses_seen": len(rows),
+        "complete_experiment_contracts": complete,
+        "contracts": rows,
+        "selection_performed": False,
+        "recommended_experiment": None,
+        "blockers": blockers,
+        "truth_proven": False,
+        "real_world_approval_implied": False,
+        "note": (
+            "Test-plan completeness was audited. Bayesian selection was not run "
+            "because priors and outcome likelihoods were not explicitly supplied."
+        ),
+    }
+    payload["packet_hash"] = _canonical_hash(payload)
+    return payload
 
 
 def _finite(value: float, field: str) -> float:

@@ -2,6 +2,7 @@ import pytest
 
 from research_engine.experiment_intelligence import (
     ExperimentDesign,
+    build_runtime_experiment_packet,
     choose_active_learning_step,
     choose_discriminating_experiment,
     rank_discriminating_experiments,
@@ -9,6 +10,63 @@ from research_engine.experiment_intelligence import (
     update_posterior,
     update_posterior_with_receipt,
 )
+
+
+def _runtime_hypothesis(hid="H1", *, omit=()):
+    fields = {
+        "dataset_or_sample": "held-out cohort",
+        "control_or_baseline": "matched baseline",
+        "measured_variables": ["response"],
+        "parameter_range": "0..10 units",
+        "statistical_metric": "pre-registered mean difference",
+        "success_threshold": ">= 2 units",
+        "failure_threshold": "< 2 units",
+        "falsification_condition": "effect remains below 2 units",
+    }
+    for field in omit:
+        fields.pop(field, None)
+    return {"id": hid, "experiment": fields}
+
+
+def test_runtime_packet_audits_real_contract_but_never_invents_bayes_inputs():
+    packet = build_runtime_experiment_packet([
+        _runtime_hypothesis("H1"),
+        _runtime_hypothesis("H2"),
+    ])
+    assert packet["ran"] is True
+    assert packet["complete_experiment_contracts"] == 2
+    assert packet["selection_performed"] is False
+    assert packet["recommended_experiment"] is None
+    assert packet["status"] == "BLOCKED_MISSING_EXPLICIT_ASSUMPTIONS"
+    assert "explicit_priors_missing" in packet["blockers"]
+    assert "outcome_likelihoods_missing" in packet["blockers"]
+    assert packet["truth_proven"] is False
+    assert packet["real_world_approval_implied"] is False
+
+
+def test_runtime_packet_mutation_changes_hash_and_fails_incomplete_contract():
+    complete = build_runtime_experiment_packet([
+        _runtime_hypothesis("H1"), _runtime_hypothesis("H2")])
+    incomplete = build_runtime_experiment_packet([
+        _runtime_hypothesis("H1", omit=("falsification_condition",)),
+        _runtime_hypothesis("H2"),
+    ])
+    assert complete["packet_hash"] != incomplete["packet_hash"]
+    assert incomplete["complete_experiment_contracts"] == 1
+    assert "experiment_contract_incomplete" in incomplete["blockers"]
+    assert incomplete["contracts"][0]["missing_contract_fields"] == [
+        "falsification_condition"]
+
+
+def test_real_research_pipeline_exposes_fail_closed_experiment_packet():
+    from tests.benchmark_cross_domain import MATERIALS, _run, rounds_full
+
+    result, _discovery, _model = _run(MATERIALS, rounds_full(MATERIALS))
+    packet = result["experiment_intelligence"]
+    assert packet["ran"] is True
+    assert packet["selection_performed"] is False
+    assert packet["truth_proven"] is False
+    assert result["coverage"]["experiment_intelligence"] == packet
 
 
 def _priors():
