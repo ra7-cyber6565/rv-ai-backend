@@ -13,6 +13,7 @@ from research_engine.translation_verification import (
     TranslationVerifier,
     source_text_hash,
 )
+from research_engine.verification import VerificationEngine
 
 
 CLAIM = "The measured temperature was 300 K and pressure was 5 GPa in the experiment."
@@ -201,6 +202,26 @@ def test_translation_disagreement_blocks_verified_support_but_not_a_to_e():
     assert path["passes_ae"] is True
     assert path["capture_integrity"]["blocks_strong_claim"] is True
     assert path["passes_verified_support"] is False
+
+
+def test_integrated_verification_engine_exposes_f_capture_gate():
+    high = VerificationEngine().verify(
+        _line(), _pack(_high_ocr()), citation_ok=True, ungrounded_count=0,
+        hypotheses=[], cited_ids=["S1"], question="What was measured?",
+    )
+    high_ev = high.evidence_verification
+    assert high_ev["checks"]["F_capture_integrity"] is True
+    assert high_ev["gate_passed"] is True
+
+    low = VerificationEngine().verify(
+        _line(), _pack(_low_ocr()), citation_ok=True, ungrounded_count=0,
+        hypotheses=[], cited_ids=["S1"], question="What was measured?",
+    )
+    low_ev = low.evidence_verification
+    assert low_ev["checks"]["F_capture_integrity"] is False
+    assert low_ev["gate_passed"] is False
+    assert low_ev["items"][0]["capture_integrity"] is False
+    assert low.status != "SOURCE GROUNDED"
 
 
 def test_content_fetcher_excerpt_preserves_chunk_integrity_metadata():
