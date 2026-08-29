@@ -417,3 +417,153 @@ def build_final_evidence_packet(
         all_standards_passed=all(item.standard_passed for item in ordered),
         truth_proven=False,
     )
+
+
+def build_runtime_evidence_packet(
+    *,
+    question: str,
+    claim_checks: Mapping[str, Any],
+    pack: Any,
+    disconfirming_search_performed: bool,
+) -> Dict[str, Any]:
+    """Build governance from exact production claim-verification records.
+
+    Missing alternatives, falsifiers, or exact spans remain blockers.  This
+    adapter never manufactures them and never converts A-E support into a truth
+    probability.
+    """
+    rows = claim_checks.get("critical_claim_spans") if isinstance(claim_checks, Mapping) else None
+    if not isinstance(rows, list) or not rows:
+        return {
+            "ran": True,
+            "status": "NOT_APPLICABLE",
+            "reason": "no critical labelled claims were available for governance",
+            "assessments": [],
+            "all_standards_passed": False,
+            "truth_proven": False,
+            "confidence_is_truth_probability": False,
+        }
+
+    by_id = {
+        str(getattr(source, "source_id", "") or ""): source
+        for source in list(getattr(pack, "sources", ()) or ())
+        if str(getattr(source, "source_id", "") or "")
+    }
+    assessments = []
+    for index, row in enumerate(rows, 1):
+        if not isinstance(row, Mapping):
+            continue
+        raw_claim_id = str(row.get("claim_id") or f"CL{index:03d}")
+        claim_id = raw_claim_id if _ID_RE.fullmatch(raw_claim_id) else f"CL{index:03d}"
+        statement = str(row.get("text") or row.get("claim") or "").strip()
+        if len(statement) < 5:
+            continue
+        raw_type = str(row.get("epistemic_type") or "").upper()
+        if "MEASURED" in raw_type:
+            claim_type = "MEASURED"
+        elif "OBSERVED" in raw_type:
+            claim_type = "OBSERVED"
+        elif "DERIVED" in raw_type:
+            claim_type = "DERIVED"
+        elif "INFER" in raw_type:
+            claim_type = "INFERRED"
+        elif "SPECUL" in raw_type or "HYPOTH" in raw_type:
+            claim_type = "SPECULATIVE"
+        else:
+            claim_type = "LITERATURE_REPORT"
+
+        spans = row.get("evidence_spans") or row.get("spans") or []
+        evidence = []
+        seen = set()
+        for span_index, span in enumerate(spans, 1):
+            if not isinstance(span, Mapping):
+                continue
+            source_id = str(span.get("source_id") or "").strip()
+            passage = str(span.get("passage") or span.get("text") or "").strip()
+            if not source_id or len(passage) < 3 or source_id in seen:
+                continue
+            source = by_id.get(source_id)
+            group_raw = str(getattr(source, "independence_key", "") or source_id)
+            group = "group-" + hashlib.sha256(group_raw.encode("utf-8")).hexdigest()[:20]
+            contradicted = bool(row.get("contradicted")) or str(row.get("result") or "").upper() == "CONTRADICTED"
+            evidence.append(EvidenceItem(
+                evidence_id=f"{claim_id}-E{span_index}",
+                description=passage[:20_000],
+                epistemic_type="LITERATURE_REPORT",
+                source_id=source_id,
+                independent_group=group,
+                supports_claim=not contradicted,
+                primary_source=bool(getattr(source, "is_primary", False)),
+            ))
+            seen.add(source_id)
+
+        assessment = assess_claim(
+            claim_id=claim_id,
+            statement=statement,
+            claim_epistemic_type=claim_type,
+            confidence=0.0,
+            uncertainty=UncertaintyDecomposition(
+                epistemic=1.0,
+                unknown_unknown_allowance=1.0,
+            ),
+            evidence=evidence,
+            alternatives=(),
+            what_would_change_my_mind=(),
+            evidence_frontier=(),
+            open_questions=(),
+            disconfirming_search_performed=bool(disconfirming_search_performed),
+        )
+        assessments.append(assessment)
+
+    if not assessments:
+        return {
+            "ran": True,
+            "status": "INSUFFICIENT_CLAIM_METADATA",
+            "assessments": [],
+            "all_standards_passed": False,
+            "truth_proven": False,
+            "confidence_is_truth_probability": False,
+        }
+
+    packet_seed = hashlib.sha256(str(question or "").encode("utf-8")).hexdigest()[:20]
+    packet = build_final_evidence_packet(f"runtime-{packet_seed}", assessments)
+    serialized = []
+    for item in packet.assessments:
+        serialized.append({
+            "claim_id": item.claim_id,
+            "statement": item.statement,
+            "claim_epistemic_type": item.claim_epistemic_type,
+            "hierarchical_status": item.hierarchical_status,
+            "supporting_evidence_ids": list(item.supporting_evidence_ids),
+            "contradicting_evidence_ids": list(item.contradicting_evidence_ids),
+            "independent_support_groups": list(item.independent_support_groups),
+            "primary_support_count": item.primary_support_count,
+            "what_would_change_my_mind": list(item.what_would_change_my_mind),
+            "evidence_frontier": list(item.evidence_frontier),
+            "open_questions": list(item.open_questions),
+            "anti_confirmation_complete": item.anti_confirmation_complete,
+            "standard_passed": item.standard_passed,
+            "blockers": list(item.blockers),
+            "assessment_hash": item.assessment_hash,
+            "confidence_is_truth_probability": False,
+            "truth_proven": False,
+        })
+    return {
+        "ran": True,
+        "status": "STANDARDS_PASSED" if packet.all_standards_passed else "REVIEW_REQUIRED",
+        "packet_id": packet.packet_id,
+        "packet_hash": packet.packet_hash,
+        "assessments": serialized,
+        "counts_by_hierarchical_status": dict(packet.counts_by_hierarchical_status),
+        "measured_claim_ids": list(packet.measured_claim_ids),
+        "inferred_claim_ids": list(packet.inferred_claim_ids),
+        "unresolved_claim_ids": list(packet.unresolved_claim_ids),
+        "all_standards_passed": packet.all_standards_passed,
+        "truth_proven": False,
+        "confidence_is_truth_probability": False,
+        "limitations": [
+            "confidence is not estimated as a truth probability",
+            "missing alternatives and falsifiers remain explicit blockers",
+            "A-E source support does not prove the claim is universally true",
+        ],
+    }

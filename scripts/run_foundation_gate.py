@@ -130,6 +130,7 @@ FOCUSED_PYTEST = (
     "tests/test_windows_launchers.py",
     "tests/test_foundation_gate_runner.py",
     "tests/test_source_integrity.py",
+    "tests/test_epistemic_governance.py",
 )
 
 

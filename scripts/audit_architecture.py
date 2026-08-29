@@ -419,6 +419,7 @@ def run_audit() -> AuditReport:
         "research_engine/advanced_discovery.py",
         "research_engine/research_assurance.py",
         "research_engine/source_integrity.py",
+        "research_engine/epistemic_governance.py",
         "research_engine/specialist_domains.py",
         "research_engine/multilingual_research.py",
         "research_engine/exam_intelligence.py",
@@ -468,6 +469,7 @@ def run_audit() -> AuditReport:
         "tests/test_specialist_research.py",
         "tests/test_research_assurance.py",
         "tests/test_source_integrity.py",
+        "tests/test_epistemic_governance.py",
         "tests/test_marathon_all_rounds.py",
         "tests/test_exam_intelligence.py",
         "tests/test_resumable_reading.py",
@@ -505,6 +507,7 @@ def run_audit() -> AuditReport:
             "self.verifier.verify(",
             "self.scientific_discovery.analyze(",
             "source_integrity = analyze_evidence_pack(pack)",
+            "epistemic_packet = build_runtime_evidence_packet(",
             "self.synthesizer.assemble(",
         ),
         _ordered(

@@ -42,6 +42,7 @@ from .evidence_drafting import (
     audit_claims_against_manifest, build_critical_evidence_sections,
     build_evidence_draft_manifest,
 )
+from .epistemic_governance import build_runtime_evidence_packet
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
@@ -1651,6 +1652,24 @@ class DeepResearchEngine:
         verification["evidence_first_audit"] = evidence_first_audit
         verification["evidence_first_manifest"] = (
             passes.get("evidence_first_manifest") or {})
+        try:
+            epistemic_packet = build_runtime_evidence_packet(
+                question=question,
+                claim_checks=claim_checks,
+                pack=pack,
+                disconfirming_search_performed=axis_counter_search is True,
+            )
+        except Exception as exc:
+            epistemic_packet = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "assessments": [],
+                "all_standards_passed": False,
+                "truth_proven": False,
+                "confidence_is_truth_probability": False,
+                "limitations": ["epistemic governance failed closed"],
+            }
+            technical_errors.append(f"epistemic governance: {type(exc).__name__}")
         # point 11 — kitni hypotheses evidence ke hisaab se banayi ja sakti thi,
         # ye ginti bhi API/Android tak jaani chahiye (report ke text ke alawa).
         if passes.get("hypothesis_gate"):
@@ -1759,6 +1778,7 @@ class DeepResearchEngine:
         coverage["specialist_research"] = specialist_report
         coverage["research_assurance"] = research_assurance
         coverage["source_integrity"] = source_integrity
+        coverage["epistemic_governance"] = epistemic_packet
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -2216,6 +2236,7 @@ class DeepResearchEngine:
             specialist_research=specialist_report,
             research_assurance=research_assurance,
             source_integrity=source_integrity,
+            epistemic_packet=epistemic_packet,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

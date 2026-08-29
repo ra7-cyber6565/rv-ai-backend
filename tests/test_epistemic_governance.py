@@ -9,7 +9,9 @@ from research_engine.epistemic_governance import (
     UncertaintyDecomposition,
     assess_claim,
     build_final_evidence_packet,
+    build_runtime_evidence_packet,
 )
+from research_engine.models import EvidencePack, SourceRecord, SourceType
 
 
 def _support(eid="e1", *, group="g1", primary=True, epistemic_type="MEASURED"):
@@ -269,3 +271,78 @@ def test_duplicate_evidence_claims_and_invalid_types_fail_closed():
             uncertainty=UncertaintyDecomposition(),
             evidence=(),
         )
+
+
+def _runtime_claim_checks(*, with_span=True, contradicted=False):
+    spans = ([{
+        "source_id": "S1",
+        "passage": "The measured endpoint changed in the registered experiment.",
+    }] if with_span else [])
+    return {
+        "critical_claim_spans": [{
+            "claim_id": "CL001",
+            "text": "The measured endpoint changed in the registered experiment.",
+            "epistemic_type": "LITERATURE_REPORT",
+            "result": "CONTRADICTED" if contradicted else "SUPPORTED",
+            "contradicted": contradicted,
+            "evidence_spans": spans,
+        }]
+    }
+
+
+def _runtime_pack():
+    return EvidencePack(sources=[SourceRecord(
+        source_id="S1",
+        title="Registered experiment",
+        snippet="The measured endpoint changed.",
+        url="https://example.org/study",
+        year=2024,
+        publisher="Example Lab",
+        source_type=SourceType.PAPER,
+        is_primary=True,
+    )])
+
+
+def test_runtime_packet_keeps_missing_alternatives_and_falsifier_as_blockers():
+    result = build_runtime_evidence_packet(
+        question="Did the endpoint change?",
+        claim_checks=_runtime_claim_checks(),
+        pack=_runtime_pack(),
+        disconfirming_search_performed=True,
+    )
+    assert result["status"] == "REVIEW_REQUIRED"
+    assessment = result["assessments"][0]
+    assert assessment["hierarchical_status"] == "INFERENCE_OR_REPORT"
+    assert "alternative_explanation_missing" in assessment["blockers"]
+    assert "what_would_change_my_mind_missing" in assessment["blockers"]
+    assert result["truth_proven"] is False
+    assert result["confidence_is_truth_probability"] is False
+
+
+def test_runtime_packet_mutation_cannot_preserve_supported_assessment_hash():
+    supported = build_runtime_evidence_packet(
+        question="Did the endpoint change?",
+        claim_checks=_runtime_claim_checks(),
+        pack=_runtime_pack(),
+        disconfirming_search_performed=True,
+    )
+    unsupported = build_runtime_evidence_packet(
+        question="Did the endpoint change?",
+        claim_checks=_runtime_claim_checks(with_span=False),
+        pack=_runtime_pack(),
+        disconfirming_search_performed=True,
+    )
+    assert supported["packet_hash"] != unsupported["packet_hash"]
+    assert unsupported["assessments"][0]["hierarchical_status"] == "UNSUPPORTED"
+    assert "insufficient_supporting_evidence" in unsupported["assessments"][0]["blockers"]
+
+
+def test_real_research_pipeline_exposes_epistemic_packet():
+    from tests.benchmark_cross_domain import MATERIALS, _run, rounds_full
+
+    result, _discovery, _model = _run(MATERIALS, rounds_full(MATERIALS))
+    packet = result["epistemic_packet"]
+    assert packet["ran"] is True
+    assert packet["truth_proven"] is False
+    assert packet["confidence_is_truth_probability"] is False
+    assert result["coverage"]["epistemic_governance"] == packet
