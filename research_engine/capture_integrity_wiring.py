@@ -1,9 +1,15 @@
 """Production wiring for OCR/translation capture integrity (#105/#106).
 
-This layer preserves the existing Passage API while allowing transformed text to
-carry structured extraction integrity all the way through ContentFetcher and
-claim verification.  A-E remain separate evidence checks; this gate is an
-additional prerequisite for *accepted strong support* and never upgrades truth.
+Capture integrity is deliberately NOT folded into the A-E evidence vocabulary.
+A-E answers citation/relevance/entailment/read-depth/source-quality questions.
+OCR/translation integrity answers a different question: whether the exact text
+capture/transformation is trustworthy enough to be used unattended.
+
+Therefore ``passes_ae`` is never rewritten by this layer.  Instead each source
+path receives ``capture_integrity_passed`` and ``passes_verified_support``.
+Accepted strong support requires both same-source A-E and capture integrity.
+This avoids a mixed semantic score while still failing closed on weak or lost
+OCR/translation provenance.
 """
 from __future__ import annotations
 
@@ -45,6 +51,34 @@ def _integrity_for_span(pack, span: Mapping[str, object]) -> Dict:
     return {}
 
 
+def _transformation_hint(span: Mapping[str, object]) -> str:
+    locator = str(span.get("locator") or "").casefold()
+    provenance = str(span.get("passage_provenance") or "").casefold()
+    if "ocr" in locator or "ocr" in provenance:
+        return "ocr"
+    if "translat" in locator or "translat" in provenance:
+        return "translation"
+    return ""
+
+
+def _capture_gate(span: Mapping[str, object]) -> Dict:
+    integrity = dict(span.get("extraction_integrity") or {})
+    if integrity:
+        return passage_integrity_gate(integrity)
+
+    # Losing metadata must not turn explicitly transformed evidence into a
+    # legacy-native passage.  Locator/provenance are conservative hints only:
+    # they can block, never upgrade.
+    hinted = _transformation_hint(span)
+    if hinted:
+        return {
+            "status": "missing_integrity_metadata",
+            "blocks_strong_claim": True,
+            "reason": f"{hinted} passage declared by provenance/locator but integrity ledger is missing",
+        }
+    return passage_integrity_gate({})
+
+
 def _check_objects_from_path(claim_mod, path: Mapping[str, object]):
     out = []
     for raw in path.get("checks", []) or []:
@@ -57,6 +91,10 @@ def _check_objects_from_path(claim_mod, path: Mapping[str, object]):
             detail=str(raw.get("detail") or ""),
         ))
     return out
+
+
+def _path_verified(path: Mapping[str, object]) -> bool:
+    return bool(path.get("passes_ae")) and bool(path.get("capture_integrity_passed"))
 
 
 def install() -> None:
@@ -73,6 +111,7 @@ def install() -> None:
     original_enrich = fetch_mod.ContentFetcher.enrich
     original_evidence_spans = claim_mod.evidence_spans
     original_verify_claim = claim_mod.verify_claim
+    original_claim_to_dict = claim_mod.ClaimCheck.to_dict
 
     def best_excerpts_with_integrity(self, chunks, question, budget_chars):
         picked = original_best_excerpts(self, chunks, question, budget_chars)
@@ -139,7 +178,7 @@ def install() -> None:
             integrity = _integrity_for_span(pack, span)
             if integrity:
                 span["extraction_integrity"] = integrity
-                span["capture_integrity"] = passage_integrity_gate(integrity)
+            span["capture_integrity"] = _capture_gate(span)
         return spans
 
     def verify_claim_with_integrity(line, pack=None, claim_id="", critical=None,
@@ -147,22 +186,33 @@ def install() -> None:
         cc = original_verify_claim(line, pack, claim_id=claim_id,
                                    critical=critical, section=section)
         if not cc.source_checks:
+            cc.capture_integrity_passed = False
+            cc.passes_verified_support = False
             return cc
 
         accepted = []
         blocked_reasons = []
         for path in cc.source_checks:
             span = dict(path.get("canonical_span") or {})
-            integrity = dict(span.get("extraction_integrity") or {})
-            gate = passage_integrity_gate(integrity)
+            gate = _capture_gate(span)
+            capture_passed = not bool(gate.get("blocks_strong_claim"))
             path["capture_integrity"] = gate
-            if bool(path.get("passes_ae")) and gate.get("blocks_strong_claim"):
-                path["passes_ae"] = False
+            path["capture_integrity_passed"] = capture_passed
+            path["passes_verified_support"] = bool(path.get("passes_ae")) and capture_passed
+            if bool(path.get("passes_ae")) and not capture_passed:
                 blocked_reasons.append(
                     f"{path.get('source_id')}: {gate.get('reason') or 'capture review required'}"
                 )
-            if bool(path.get("passes_ae")):
+            if _path_verified(path):
                 accepted.append(path)
+
+        cc.capture_integrity_passed = False
+        cc.passes_verified_support = False
+
+        # Contradiction always wins.  Keep capture audit fields, but never revive
+        # a contradicted path merely because its OCR/translation capture is good.
+        if cc.contradicted:
+            return cc
 
         if accepted:
             current = next(
@@ -182,13 +232,18 @@ def install() -> None:
             rebuilt = _check_objects_from_path(claim_mod, chosen)
             if rebuilt:
                 cc.checks = rebuilt
+            cc.capture_integrity_passed = True
+            cc.passes_verified_support = True
             cc.verdict = claim_mod.GENUINE_SUPPORT
             return cc
 
-        # A-E may have passed on transformed text, but transformed capture itself
-        # did not pass.  Keep it visible as source-reported/cited, never verified.
+        # A-E may have passed on transformed text, while capture integrity did
+        # not. Preserve the true A-E result for audit and block only the final
+        # accepted-support gate.
         if blocked_reasons:
             cc.supporting_source_id = ""
+            cc.capture_integrity_passed = False
+            cc.passes_verified_support = False
             if cc.status("C") == claim_mod.PASS:
                 cc.verdict = claim_mod.SOURCE_REPORTED
             else:
@@ -199,7 +254,20 @@ def install() -> None:
             )
         return cc
 
+    def claim_to_dict_with_capture(self):
+        payload = original_claim_to_dict(self)
+        path_rows = [dict(row) for row in getattr(self, "source_checks", []) or []]
+        verified = bool(getattr(self, "passes_verified_support", False))
+        capture_passed = bool(getattr(self, "capture_integrity_passed", False))
+        payload["source_checks"] = path_rows
+        payload["same_source_ae_passed"] = bool(self.passes_ae and not self.contradicted)
+        payload["capture_integrity_passed"] = capture_passed
+        payload["passes_verified_support"] = verified
+        payload["verified_support"] = verified
+        return payload
+
     fetch_mod.ContentFetcher.best_excerpts = best_excerpts_with_integrity
     fetch_mod.ContentFetcher.enrich = enrich_with_integrity
     claim_mod.evidence_spans = evidence_spans_with_integrity
     claim_mod.verify_claim = verify_claim_with_integrity
+    claim_mod.ClaimCheck.to_dict = claim_to_dict_with_capture
