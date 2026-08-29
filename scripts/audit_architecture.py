@@ -513,6 +513,13 @@ def run_audit() -> AuditReport:
             "experiment_packet = build_runtime_experiment_packet(",
             "self.synthesizer.assemble(",
         ),
+        _contains(
+            "research_engine/lab.py",
+            "from . import simulation_lab",
+            "simulation_lab.black_swan_suite(",
+            '"synthetic_only": stress.synthetic_only',
+            '"future_guarantee": stress.future_guarantee',
+        ),
         _ordered(
             "research_engine/orchestrator.py",
             (

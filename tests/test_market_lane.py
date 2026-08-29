@@ -620,6 +620,36 @@ def test_backtest_run_stays_free_and_offline():
     assert report["hypotheses"][0]["is_established_fact"] is False
 
 
+def test_walk_forward_runs_seeded_black_swan_stress_on_the_same_real_series():
+    pack = _Pack(_Src("S10B", _meta(_rising(14), provider="fred")))
+    first = _walk_test(lab.run_lab("q", [_hyp("RV-HYP-H2")], pack=pack))
+    second = _walk_test(lab.run_lab("q", [_hyp("RV-HYP-H2")], pack=pack))
+    stress = first["stress_test"]
+    assert stress["ran"] is True
+    assert stress["scenario_count"] == 4
+    assert [row["name"] for row in stress["scenarios"]] == [
+        "tail_crash", "volatility_cluster", "regime_reversal",
+        "liquidity_freeze_gap"]
+    assert stress["scenario_hash"] == second["stress_test"]["scenario_hash"]
+    assert stress["source_ids"] == ["S10B"]
+    assert stress["synthetic_only"] is True
+    assert stress["future_guarantee"] is False
+
+
+def test_stress_receipt_mutates_with_series_and_never_appears_without_data():
+    first = _walk_test(lab.run_lab(
+        "q", [_hyp("RV-HYP-H3")], pack=_Pack(_Src("S1", _meta(_rising(14))))))
+    changed_values = _rising(14)
+    changed_values[8] += 17.0
+    changed = _walk_test(lab.run_lab(
+        "q", [_hyp("RV-HYP-H3")],
+        pack=_Pack(_Src("S1", _meta(changed_values)))))
+    missing = _walk_test(lab.run_lab("q", [_hyp("RV-HYP-H3")]))
+    assert first["stress_test"]["scenario_hash"] != \
+        changed["stress_test"]["scenario_hash"]
+    assert missing["stress_test"] == {}
+
+
 def test_lab_limits_names_the_backtest_that_ran():
     pack = _Pack(_Src("S11", _meta(_rising(14))))
     report = lab.run_lab("q", [_hyp("RV-HYP-I")], pack=pack)

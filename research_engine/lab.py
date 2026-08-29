@@ -35,6 +35,7 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import physics_checks
 from . import market_data
+from . import simulation_lab
 from .advanced_discovery import NumericExecutionPolicy, SafeNumericExecutor
 
 # ── status vocabulary ────────────────────────────────────────────────────────
@@ -229,6 +230,7 @@ class TestResult:
     evidence_ids: List[str] = field(default_factory=list)
     computed: Optional[float] = None
     requires_risk_review: bool = False
+    stress_test: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -244,6 +246,7 @@ class TestResult:
             "evidence_ids": list(self.evidence_ids),
             "computed": self.computed,
             "requires_risk_review": self.requires_risk_review,
+            "stress_test": dict(self.stress_test),
             # Ye do line kabhi badalti nahi: lab ka pass hona sabooti nahi hai.
             "is_established_fact": False,
             "real_world_experiment_pending": True,
@@ -856,6 +859,38 @@ def _run_walk_forward(spec: TestSpec, policy: LabPolicy,
                        detail=_wf_detail(market_data.FLAT_HOLDOUT))
 
     passed = bool(beats)
+    # The same measured series can be stressed without inventing a digital
+    # twin, transition matrix, or physical calibration.  These scenarios are
+    # synthetic falsification probes only; they never change the historical
+    # walk-forward verdict or claim future robustness.
+    try:
+        stress = simulation_lab.black_swan_suite(
+            series.values(), seed=policy.seed)
+        stress_test = {
+            "ran": True,
+            "scenario_hash": stress.scenario_hash,
+            "scenario_count": len(stress.scenarios),
+            "scenarios": [
+                {
+                    "name": row.name,
+                    "max_abs_step": row.max_abs_step,
+                    "max_drawdown_abs": row.max_drawdown_abs,
+                    "finite": row.finite,
+                }
+                for row in stress.scenarios
+            ],
+            "synthetic_only": stress.synthetic_only,
+            "future_guarantee": stress.future_guarantee,
+            "source_ids": source_ids,
+        }
+    except Exception:
+        stress_test = {
+            "ran": False,
+            "reason": "stress_suite_failed_closed",
+            "synthetic_only": True,
+            "future_guarantee": False,
+            "source_ids": source_ids,
+        }
     return _result(
         spec, TESTED_PASS if passed else TESTED_FAIL,
         observed=observed,
@@ -863,6 +898,7 @@ def _run_walk_forward(spec: TestSpec, policy: LabPolicy,
         computed=ratio, evidence_ids=source_ids,
         reason_code=("model_beats_naive_baseline" if passed
                      else "model_loses_to_naive_baseline"),
+        stress_test=stress_test,
         detail=((f"Held-out {outcome.n_test} period par model ki galti naive "
                  f"baseline se kam rahi (MAE {outcome.model_mae:.4g} < "
                  f"{outcome.naive_mae:.4g}). "
