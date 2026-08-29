@@ -95,6 +95,11 @@ jobs:
             tests/test_benchmark_lab.py \
             tests/test_physical_lab_boundary.py \
             tests/test_epistemic_governance.py \
+            tests/test_unknown_unknown_hunter.py \
+            tests/test_claim_insurance.py \
+            tests/test_synthetic_data_boundary.py \
+            tests/test_belief_sandbox.py \
+            tests/test_conspiracy_discipline.py \
             tests/test_autonomous_debugging.py \
             tests/test_source_integrity.py
 
