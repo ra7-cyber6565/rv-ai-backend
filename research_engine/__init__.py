@@ -158,6 +158,12 @@ _install_historical_context_wiring()
 from .epistemic_stress_wiring import install as _install_epistemic_stress_wiring
 _install_epistemic_stress_wiring()
 
+# #100 Economic Reality executes only explicit structured cash-flow/scenario
+# assumptions. It never guesses demand/pricing/costs from prose and never turns
+# positive model economics into proof of profitability or real-world viability.
+from .economic_reality_wiring import install as _install_economic_reality_wiring
+_install_economic_reality_wiring()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
