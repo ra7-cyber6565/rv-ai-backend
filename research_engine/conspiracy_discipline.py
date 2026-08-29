@@ -13,9 +13,10 @@ import hashlib
 import json
 import re
 from dataclasses import dataclass
-from typing import Any, Sequence, Tuple
+from typing import Any, Tuple
 
 _ID = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,240}$")
+_MAX_EVIDENCE = 10_000
 
 
 def _id(value: object, field: str) -> str:
@@ -100,8 +101,13 @@ def assess_conspiracy_hypothesis(
     alternatives = tuple(sorted({_text(value, "alternative_explanation") for value in item.alternative_explanations_considered}))
     if type(minimum_independent_support_groups) is not int or not 1 <= minimum_independent_support_groups <= 100:
         raise ValueError("minimum_independent_support_groups must be 1..100")
+    if len(item.evidence) > _MAX_EVIDENCE:
+        raise ValueError("evidence exceeds bounded size")
 
-    evidence = tuple(row.normalized() for row in item.evidence)
+    evidence = tuple(sorted(
+        (row.normalized() for row in item.evidence),
+        key=lambda row: row.evidence_id,
+    ))
     ids = [row.evidence_id for row in evidence]
     if len(ids) != len(set(ids)):
         raise ValueError("evidence_id values must be unique")
@@ -147,7 +153,6 @@ def assess_conspiracy_hypothesis(
         blockers.append("contradicting_evidence_present")
 
     blockers = tuple(sorted(set(blockers)))
-    # Neutral research remains allowed even when strong-label criteria fail.
     eligible_for_research = bool(statement)
     strong = not blockers
     payload = {
@@ -157,6 +162,18 @@ def assess_conspiracy_hypothesis(
         "falsifier": falsifier,
         "predictions": predictions,
         "alternatives": alternatives,
+        "evidence": [
+            {
+                "evidence_id": row.evidence_id,
+                "source_id": row.source_id,
+                "independence_group": row.independence_group,
+                "supports": row.supports,
+                "direct_observation": row.direct_observation,
+                "absence_of_expected_evidence": row.absence_of_expected_evidence,
+                "provenance_complete": row.provenance_complete,
+            }
+            for row in evidence
+        ],
         "support_groups": sorted(support_groups),
         "contradiction_groups": sorted(contradiction_groups),
         "disconfirming_search": bool(item.disconfirming_search_performed),
