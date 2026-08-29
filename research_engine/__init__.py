@@ -101,11 +101,15 @@ _install_hypothesis_evidence_lineage()
 from .causal_chain_quality import install as _install_causal_chain_quality
 _install_causal_chain_quality()
 
-# OCR/translation capture integrity is a separate gate from A-E. It can only
-# downgrade/block strong support when transformed text is weak or unverified;
-# it never upgrades source truth, evidence quality, or scientific confidence.
+# OCR/translation capture integrity is separate from A-E and can only
+# downgrade/block accepted support.
 from .capture_integrity_wiring import install as _install_capture_integrity_wiring
 _install_capture_integrity_wiring()
+
+# The integrated VerificationEngine uses a second A-E facade. Bind the same
+# capture-integrity contract there as explicit F_capture_integrity.
+from .evidence_capture_integrity import install as _install_evidence_capture_integrity
+_install_evidence_capture_integrity()
 
 from .runtime_capability_wiring import install as _install_runtime_capability_wiring
 _install_runtime_capability_wiring()
