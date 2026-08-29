@@ -421,6 +421,7 @@ def run_audit() -> AuditReport:
         "research_engine/source_integrity.py",
         "research_engine/epistemic_governance.py",
         "research_engine/experiment_intelligence.py",
+        "research_engine/knowledge_watch.py",
         "research_engine/specialist_domains.py",
         "research_engine/multilingual_research.py",
         "research_engine/exam_intelligence.py",
@@ -511,6 +512,7 @@ def run_audit() -> AuditReport:
             "source_integrity = analyze_evidence_pack(pack)",
             "epistemic_packet = build_runtime_evidence_packet(",
             "experiment_packet = build_runtime_experiment_packet(",
+            "knowledge_watch = update_from_research_run(",
             "self.synthesizer.assemble(",
         ),
         _contains(

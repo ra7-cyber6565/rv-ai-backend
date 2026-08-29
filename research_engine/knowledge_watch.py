@@ -21,6 +21,84 @@ _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,240}$")
 _ALLOWED_STATUS = {"ACTIVE", "CORRECTED", "RETRACTED", "REMOVED", "UNKNOWN"}
 
 
+def _stable_token(prefix: str, value: str) -> str:
+    digest = hashlib.sha256(" ".join(str(value or "").split()).casefold().encode(
+        "utf-8")).hexdigest()[:24]
+    return f"{prefix}:{digest}"
+
+
+def update_from_research_run(
+    watch: "KnowledgeWatch",
+    *,
+    pack: Any,
+    claim_checks: Mapping[str, Any],
+) -> Dict[str, Any]:
+    """Persist stable A-E claim/source dependencies from a real run.
+
+    Run-local ``S1``/``CL001`` labels are deliberately not persisted as global
+    identity.  Claims use normalized text hashes and sources use DOI/URL/title
+    identity.  Only same-source A-E support is linked.  The observation hashes
+    stable provider metadata, not query-selected passages, so a different
+    question cannot manufacture a content-change event.
+    """
+    sources = {str(getattr(row, "source_id", "") or ""): row
+               for row in (getattr(pack, "sources", None) or [])}
+    observed: set[str] = set()
+    linked = 0
+    queued: set[str] = set()
+    skipped = 0
+    for claim in list(claim_checks.get("claims") or []):
+        if not isinstance(claim, Mapping) or not claim.get("same_source_ae_passed"):
+            continue
+        local_sid = str(claim.get("supporting_source_id") or "")
+        source = sources.get(local_sid)
+        text = str(claim.get("text") or claim.get("claim") or "").strip()
+        if source is None or not text:
+            skipped += 1
+            continue
+        identity = (str(getattr(source, "doi", "") or "").strip()
+                    or str(getattr(source, "url", "") or "").strip()
+                    or str(getattr(source, "title", "") or "").strip())
+        if not identity:
+            skipped += 1
+            continue
+        stable_sid = _stable_token("source", identity)
+        stable_cid = _stable_token("claim", text)
+        watch.link_claim(stable_cid, [stable_sid])
+        linked += 1
+        if stable_sid not in observed:
+            metadata = {
+                "identity": identity,
+                "title": str(getattr(source, "title", "") or ""),
+                "doi": str(getattr(source, "doi", "") or ""),
+                "url": str(getattr(source, "url", "") or ""),
+            }
+            status = ("RETRACTED" if getattr(source, "retracted", None) is True
+                      else "ACTIVE")
+            receipt = watch.observe_source(
+                stable_sid,
+                content=json.dumps(metadata, sort_keys=True, separators=(",", ":")),
+                status=status,
+                version_label=str(getattr(source, "year", "") or ""),
+                locator=str(getattr(source, "locator", "") or ""),
+                note="stable metadata observation; selected passages excluded",
+            )
+            queued.update(receipt.get("queued_claim_ids") or [])
+            observed.add(stable_sid)
+    watch.save()
+    return {
+        "ran": True,
+        "linked_claims": linked,
+        "observed_sources": len(observed),
+        "skipped_unstable_rows": skipped,
+        "newly_queued_claims": sorted(queued),
+        "pending_revalidations": len(watch.pending_revalidations()),
+        "stable_identity": True,
+        "selected_passages_hashed_as_source_content": False,
+        "truth_proven": False,
+    }
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 

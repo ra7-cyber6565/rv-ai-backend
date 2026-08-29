@@ -1067,6 +1067,8 @@ class ResearchResult:
     # Production hypothesis test-plan audit. Bayesian recommendations remain
     # blocked unless explicit priors and outcome likelihoods are supplied.
     experiment_intelligence: Dict = field(default_factory=dict)
+    # Durable stable claim/source dependency watch for later revalidation.
+    knowledge_watch: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

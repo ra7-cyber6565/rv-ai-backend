@@ -1,6 +1,32 @@
 import pytest
 
-from research_engine.knowledge_watch import KnowledgeWatch, sha256_content
+from research_engine.knowledge_watch import (
+    KnowledgeWatch, sha256_content, update_from_research_run,
+)
+
+
+class _Source:
+    def __init__(self, source_id="S1", *, retracted=False):
+        self.source_id = source_id
+        self.title = "Stable paper"
+        self.doi = "10.1234/stable"
+        self.url = "https://doi.org/10.1234/stable"
+        self.year = 2025
+        self.locator = "p. 4"
+        self.retracted = retracted
+
+
+class _Pack:
+    def __init__(self, source):
+        self.sources = [source]
+
+
+def _checks(local_sid="S1"):
+    return {"claims": [{
+        "text": "The measured endpoint increased under the stated protocol.",
+        "same_source_ae_passed": True,
+        "supporting_source_id": local_sid,
+    }]}
 
 
 def _watch(tmp_path):
@@ -99,3 +125,43 @@ def test_unknown_revalidation_or_source_fails_closed(tmp_path):
         watch.resolve_revalidation("C1", "S1", outcome="CONFIRMED")
     with pytest.raises(KeyError):
         watch.source_history("S1")
+
+
+def test_runtime_adapter_uses_stable_identity_not_run_local_labels(tmp_path):
+    first = update_from_research_run(
+        _watch(tmp_path), pack=_Pack(_Source("S1")), claim_checks=_checks("S1"))
+    second = update_from_research_run(
+        _watch(tmp_path), pack=_Pack(_Source("S9")), claim_checks=_checks("S9"))
+    assert first["linked_claims"] == second["linked_claims"] == 1
+    watch = _watch(tmp_path)
+    assert len(watch.load()["sources"]) == 1
+    assert len(watch.load()["claim_sources"]) == 1
+    assert second["pending_revalidations"] == 0
+    assert second["selected_passages_hashed_as_source_content"] is False
+    assert second["truth_proven"] is False
+
+
+def test_runtime_retraction_queues_the_exact_dependent_claim(tmp_path):
+    update_from_research_run(
+        _watch(tmp_path), pack=_Pack(_Source()), claim_checks=_checks())
+    receipt = update_from_research_run(
+        _watch(tmp_path), pack=_Pack(_Source(retracted=True)),
+        claim_checks=_checks())
+    assert receipt["newly_queued_claims"]
+    assert receipt["pending_revalidations"] == 1
+    pending = _watch(tmp_path).pending_revalidations()[0]
+    assert pending["trigger"] == "RETRACTED"
+
+
+def test_real_research_pipeline_exposes_knowledge_watch_receipt(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setenv("RESEARCH_MEMORY_DIR", str(tmp_path))
+    from tests.benchmark_cross_domain import MATERIALS, _run, rounds_full
+
+    result, _discovery, _model = _run(MATERIALS, rounds_full(MATERIALS))
+    receipt = result["knowledge_watch"]
+    assert receipt["ran"] is True
+    assert receipt["stable_identity"] is True
+    assert receipt["truth_proven"] is False
+    assert result["coverage"]["knowledge_watch"] == receipt

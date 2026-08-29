@@ -47,6 +47,7 @@ from .experiment_intelligence import build_runtime_experiment_packet
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
+from .knowledge_watch import KnowledgeWatch, update_from_research_run
 from . import lab
 from . import craft
 from . import songcraft
@@ -1787,6 +1788,22 @@ class DeepResearchEngine:
         verification["evidence_first_manifest"] = (
             passes.get("evidence_first_manifest") or {})
         try:
+            watch_directory = (
+                self.memory.directory if self.memory is not None else
+                __import__("utils.storage_paths", fromlist=["ensure_layout"])
+                .ensure_layout()["research_memory"])
+            knowledge_watch = update_from_research_run(
+                KnowledgeWatch(watch_directory, self.project_id),
+                pack=pack, claim_checks=claim_checks)
+        except Exception as exc:
+            knowledge_watch = {
+                "ran": False,
+                "pending_revalidations": None,
+                "truth_proven": False,
+                "error": "knowledge watch failed closed",
+            }
+            technical_errors.append(f"knowledge watch: {type(exc).__name__}")
+        try:
             epistemic_packet = build_runtime_evidence_packet(
                 question=question,
                 claim_checks=claim_checks,
@@ -1928,6 +1945,7 @@ class DeepResearchEngine:
         coverage["source_integrity"] = source_integrity
         coverage["epistemic_governance"] = epistemic_packet
         coverage["experiment_intelligence"] = experiment_packet
+        coverage["knowledge_watch"] = knowledge_watch
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -2396,6 +2414,7 @@ class DeepResearchEngine:
             source_integrity=source_integrity,
             epistemic_packet=epistemic_packet,
             experiment_intelligence=experiment_packet,
+            knowledge_watch=knowledge_watch,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,
