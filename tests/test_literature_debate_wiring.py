@@ -76,7 +76,7 @@ def test_missing_source_metadata_fails_closed_instead_of_creating_ghost_position
     assert packet["accepted_contradictions"] == 0
 
 
-def test_same_domain_is_conservatively_one_independence_family():
+def test_same_domain_opponents_collapse_into_ambiguous_dependent_component():
     packet = build_literature_debate_packet({
         "sources": [
             _source("S1", "same.example", snippet="different text A"),
@@ -85,10 +85,11 @@ def test_same_domain_is_conservatively_one_independence_family():
         "contradictions": [_contradiction()],
     })
     debate = packet["debates"][0]
-    assert debate["effective_components"] == 2
-    # Components remain position-specific for audit, but neither pair is
-    # independently validated by this software packet; the top-level boundary
-    # is always explicit.
+    assert debate["effective_components"] == 1
+    assert debate["eligible_components"] == 0
+    assert debate["ambiguous_components"] == 1
+    assert debate["status"] == "INSUFFICIENT_INDEPENDENT_EVIDENCE"
+    assert debate["components"][0]["internally_conflicted"] is True
     assert packet["independent_validation_proven"] is False
 
 
