@@ -7,7 +7,7 @@ from research_engine.claim_verification import (
 )
 from research_engine.content_fetcher import ContentFetcher
 from research_engine.extraction_integrity import assess_ocr_confidences
-from research_engine.models import EvidencePack, SourceRecord, SourceType
+from research_engine.models import EvidencePack, Passage, SourceRecord, SourceType
 from research_engine.translation_verification import (
     TranslationCandidate,
     TranslationVerifier,
@@ -37,16 +37,18 @@ def _source():
     )
 
 
-def _pack(integrity):
+def _pack(integrity, *, locator="p.1", passage_cls=IntegrityPassage):
     source = _source()
-    passage = IntegrityPassage(
+    kwargs = dict(
         source_id="S1",
         text=PASSAGE_TEXT,
-        locator="p.1",
+        locator=locator,
         provenance="full_text_excerpt",
         read_level_at_capture="full_text",
-        extraction_integrity=dict(integrity),
     )
+    if passage_cls is IntegrityPassage:
+        kwargs["extraction_integrity"] = dict(integrity)
+    passage = passage_cls(**kwargs)
     return EvidencePack(question="What was measured?", sources=[source], passages=[passage])
 
 
@@ -86,28 +88,69 @@ def test_integrity_passage_serializes_capture_metadata():
     assert payload["extraction_integrity"]["quality_label"] == "high"
 
 
-def test_high_ocr_can_pass_same_source_ae_plus_capture_gate():
+def test_high_ocr_can_pass_same_source_ae_plus_separate_capture_gate():
     checked = verify_claim(_line(), _pack(_high_ocr()))
     assert checked.verdict == GENUINE_SUPPORT
     assert checked.passes_ae is True
+    assert checked.passes_verified_support is True
+    assert checked.capture_integrity_passed is True
     assert checked.supporting_source_id == "S1"
-    assert checked.source_checks[0]["capture_integrity"]["status"] == "pass"
-    assert checked.source_checks[0]["capture_integrity"]["blocks_strong_claim"] is False
+    path = checked.source_checks[0]
+    assert path["passes_ae"] is True
+    assert path["capture_integrity"]["status"] == "pass"
+    assert path["capture_integrity_passed"] is True
+    assert path["passes_verified_support"] is True
+    payload = checked.to_dict()
+    assert payload["same_source_ae_passed"] is True
+    assert payload["capture_integrity_passed"] is True
+    assert payload["verified_support"] is True
 
 
-def test_low_ocr_blocks_verified_support_even_when_a_to_e_pass():
+def test_low_ocr_blocks_verified_support_without_rewriting_a_to_e_truth():
     checked = verify_claim(_line(), _pack(_low_ocr()))
     statuses = {
         item["check"]: item["status"]
         for item in checked.source_checks[0]["checks"]
     }
     assert statuses == {"A": "pass", "B": "pass", "C": "pass", "D": "pass", "E": "pass"}
-    assert checked.source_checks[0]["capture_integrity"]["blocks_strong_claim"] is True
-    assert checked.source_checks[0]["passes_ae"] is False
-    assert checked.passes_ae is False
+    path = checked.source_checks[0]
+    assert path["passes_ae"] is True
+    assert checked.passes_ae is True
+    assert path["capture_integrity"]["blocks_strong_claim"] is True
+    assert path["capture_integrity_passed"] is False
+    assert path["passes_verified_support"] is False
+    assert checked.capture_integrity_passed is False
+    assert checked.passes_verified_support is False
     assert checked.verdict == SOURCE_REPORTED
     assert checked.supporting_source_id == ""
     assert "capture/transformation integrity" in checked.reason
+    payload = checked.to_dict()
+    assert payload["same_source_ae_passed"] is True
+    assert payload["capture_integrity_passed"] is False
+    assert payload["verified_support"] is False
+
+
+def test_declared_ocr_with_missing_integrity_ledger_fails_closed():
+    checked = verify_claim(
+        _line(),
+        _pack({}, locator="p.1 (OCR)", passage_cls=IntegrityPassage),
+    )
+    path = checked.source_checks[0]
+    assert path["passes_ae"] is True
+    assert path["capture_integrity"]["status"] == "missing_integrity_metadata"
+    assert path["capture_integrity"]["blocks_strong_claim"] is True
+    assert checked.passes_verified_support is False
+    assert checked.verdict == SOURCE_REPORTED
+
+
+def test_legacy_native_passage_without_transform_hint_keeps_compatibility():
+    checked = verify_claim(_line(), _pack({}, passage_cls=Passage))
+    path = checked.source_checks[0]
+    assert path["passes_ae"] is True
+    assert path["capture_integrity"]["status"] == "unknown"
+    assert path["capture_integrity"]["blocks_strong_claim"] is False
+    assert checked.passes_verified_support is True
+    assert checked.verdict == GENUINE_SUPPORT
 
 
 def _translation_payload(*, good=True):
@@ -144,15 +187,20 @@ def _translation_payload(*, good=True):
 def test_independently_verified_translation_can_pass_capture_gate():
     checked = verify_claim(_line(), _pack(_translation_payload(good=True)))
     assert checked.passes_ae is True
+    assert checked.passes_verified_support is True
     assert checked.verdict == GENUINE_SUPPORT
     assert checked.source_checks[0]["capture_integrity"]["status"] == "pass"
 
 
-def test_translation_disagreement_blocks_verified_support():
+def test_translation_disagreement_blocks_verified_support_but_not_a_to_e():
     checked = verify_claim(_line(), _pack(_translation_payload(good=False)))
-    assert checked.passes_ae is False
+    assert checked.passes_ae is True
+    assert checked.passes_verified_support is False
     assert checked.verdict == SOURCE_REPORTED
-    assert checked.source_checks[0]["capture_integrity"]["blocks_strong_claim"] is True
+    path = checked.source_checks[0]
+    assert path["passes_ae"] is True
+    assert path["capture_integrity"]["blocks_strong_claim"] is True
+    assert path["passes_verified_support"] is False
 
 
 def test_content_fetcher_excerpt_preserves_chunk_integrity_metadata():
