@@ -1,5 +1,3 @@
-import math
-
 import pytest
 
 from research_engine.causal_counterfactual import (
@@ -44,8 +42,9 @@ def test_counterfactual_uses_abduction_action_prediction_same_unit_disturbances(
         intervention={"X": 4.0},
         targets=["M", "Y"],
     )
-    assert result.predicted_values == {"M": 10.0, "Y": 35.0}
-    assert result.deltas == {"M": 4.0, "Y": 15.0}
+    # Same factual unit: U_M=1 and U_Y=1 remain fixed after do(X=4).
+    assert result.predicted_values == {"M": 10.0, "Y": 34.0}
+    assert result.deltas == {"M": 4.0, "Y": 14.0}
     assert result.exogenous_disturbances == disturbances
     assert result.causal_graph_empirically_proven is False
     assert result.real_world_effect_proven is False
@@ -150,6 +149,8 @@ def test_public_contract_never_claims_causal_discovery_or_real_world_truth():
         "targets": ["Y"],
     })
     assert payload["status"] == "MODELED_COUNTERFACTUAL"
+    assert payload["predicted_values"]["Y"] == 16.0
+    assert payload["deltas"]["Y"] == 7.0
     assert payload["natural_language_causal_discovery_performed"] is False
     assert payload["causal_graph_empirically_proven"] is False
     assert payload["real_world_effect_proven"] is False
