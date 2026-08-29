@@ -126,6 +126,24 @@ _install_literature_debate_wiring()
 from .discovery_frontier_wiring import install as _install_discovery_frontier_wiring
 _install_discovery_frontier_wiring()
 
+# #67 Neural+Symbolic audits only caller-supplied model outputs plus explicit
+# propositional contracts. It never turns prose into logic, never treats model
+# confidence as proof, and never upgrades truth/status.
+from .neural_symbolic_wiring import install as _install_neural_symbolic_wiring
+_install_neural_symbolic_wiring()
+
+# #68 World Model executes only explicit bounded software dynamics supplied in
+# a structured contract. Its rollouts/counterfactuals remain model predictions;
+# they do not claim reality or close sim-to-reality by themselves.
+from .world_model_wiring import install as _install_world_model_wiring
+_install_world_model_wiring()
+
+# #70 Technology Readiness evaluates explicit evidence receipts only. Feature
+# names, prose and model confidence cannot manufacture maturity, certification,
+# hardware observation or operational evidence.
+from .technology_readiness_wiring import install as _install_technology_readiness_wiring
+_install_technology_readiness_wiring()
+
 # #104 Historical Context uses only explicit structured chronology transported
 # through the existing result/coverage path. It preserves uncertain ranges,
 # blocks hindsight/anachronism/impossible causal order, and never infers dates
