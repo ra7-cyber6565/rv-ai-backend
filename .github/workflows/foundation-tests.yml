@@ -89,6 +89,13 @@ jobs:
             tests/test_experiment_intelligence.py \
             tests/test_experiment_intelligence_hardening.py \
             tests/test_hypothesis_evolution.py \
+            tests/test_neural_symbolic_hybrid.py \
+            tests/test_neural_symbolic_wiring.py \
+            tests/test_world_model.py \
+            tests/test_world_model_wiring.py \
+            tests/test_technology_readiness.py \
+            tests/test_technology_readiness_wiring.py \
+            tests/test_model_wiring_proof_contracts.py \
             tests/test_visual_science.py \
             tests/test_post_deployment_validation.py \
             tests/test_post_deployment_input_guard.py \
