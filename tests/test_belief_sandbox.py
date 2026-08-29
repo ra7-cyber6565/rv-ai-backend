@@ -29,19 +29,25 @@ def test_passing_sandbox_only_allows_promotion_proposal_not_canonical_mutation()
 
 
 @pytest.mark.parametrize(
-    "field,value,blocker",
+    "overrides,blocker",
     [
-        ("evidence_ids", ("E1",), "insufficient_evidence"),
-        ("independent_groups", ("G1",), "insufficient_independence"),
-        ("falsifier", "", "falsifier_missing"),
-        ("preregistered_predictions", (), "preregistered_prediction_missing"),
-        ("resolved_predictions", 0, "insufficient_resolved_predictions"),
-        ("falsification_attempts", 0, "insufficient_falsification_attempts"),
-        ("contradictions", ("credible contradiction remains unresolved",), "unresolved_contradictions"),
+        ({"evidence_ids": ("E1",)}, "insufficient_evidence"),
+        ({"independent_groups": ("G1",)}, "insufficient_independence"),
+        ({"falsifier": ""}, "falsifier_missing"),
+        (
+            {"preregistered_predictions": (), "resolved_predictions": 0},
+            "preregistered_prediction_missing",
+        ),
+        ({"resolved_predictions": 0}, "insufficient_resolved_predictions"),
+        ({"falsification_attempts": 0}, "insufficient_falsification_attempts"),
+        (
+            {"contradictions": ("credible contradiction remains unresolved",)},
+            "unresolved_contradictions",
+        ),
     ],
 )
-def test_each_missing_promotion_condition_blocks(field, value, blocker):
-    result = assess_sandbox_belief(_belief(**{field: value}))
+def test_each_missing_promotion_condition_blocks(overrides, blocker):
+    result = assess_sandbox_belief(_belief(**overrides))
     assert blocker in result.blockers
     assert result.promotion_proposal_eligible is False
     assert result.canonical_state_mutated is False
