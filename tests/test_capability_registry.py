@@ -140,6 +140,26 @@ def test_a_filename_or_code_only_can_never_fake_verified():
     assert ProofKind.INDEPENDENT in result.missing_proofs
 
 
+def test_literature_debate_requires_real_wiring_and_independent_validation():
+    debate = CAPABILITY_BY_ID[103]
+    for proof in (ProofKind.CODE, ProofKind.TEST, ProofKind.WIRING, ProofKind.INDEPENDENT):
+        assert proof in debate.required_proofs
+
+    evidence = {
+        103: CapabilityEvidence(
+            capability_id=103,
+            proofs={
+                ProofKind.CODE: ("research_engine/literature_debate.py",),
+                ProofKind.TEST: ("tests/test_literature_debate.py",),
+                ProofKind.WIRING: ("tests/test_literature_debate_wiring.py",),
+            },
+        )
+    }
+    result = assess_capabilities(evidence).results[102]
+    assert result.status == "INCOMPLETE"
+    assert result.missing_proofs == (ProofKind.INDEPENDENT,)
+
+
 def test_100_score_only_when_every_required_proof_exists():
     evidence = {}
     for spec in CAPABILITIES:
