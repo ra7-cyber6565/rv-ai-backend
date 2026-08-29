@@ -105,6 +105,7 @@ def _receipt_value(root, revision, *, focused_tests, created=19_900):
             _stage("architecture_audit", [py, "scripts/audit_architecture.py"]),
             _stage("benchmark_cross_domain", [py, "tests/benchmark_cross_domain.py"]),
             _stage("benchmark_superconductivity_v2", [py, "tests/benchmark_superconductivity.py"]),
+            _stage("benchmark_dark_matter_acceptance", [py, "tests/benchmark_dark_matter_acceptance.py"]),
         ],
     }
 
