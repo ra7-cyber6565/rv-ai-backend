@@ -156,6 +156,13 @@ _install_hypothesis_evidence_lineage()
 from .causal_chain_quality import install as _install_causal_chain_quality
 _install_causal_chain_quality()
 
+# Runtime capability wiring is audit-only.  Formal logic runs only for explicit
+# structured propositional contracts; capability discovery exposes registered
+# result-path components without claiming execution, permission, truth or live
+# availability.  Install last so older fail-closed delivery gates remain intact.
+from .runtime_capability_wiring import install as _install_runtime_capability_wiring
+_install_runtime_capability_wiring()
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
