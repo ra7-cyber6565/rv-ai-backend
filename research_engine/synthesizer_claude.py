@@ -47,6 +47,10 @@ from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
 from .lab import lab_limits, lab_report_section
 from .craft import craft_limits, craft_section
+from .media_study import media_limits, media_section
+from .listener_study import (MAX_AUDIT_LIMIT_LINES
+                            as LISTENER_MAX_AUDIT_LIMIT_LINES)
+from .listener_study import listener_limits, listener_section
 from .rejects import reject_limits, reject_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
@@ -1491,7 +1495,9 @@ Ab jawab likho:"""
                        missing_sections: Optional[List[str]] = None,
                        lab_report: Optional[Dict] = None,
                        reject_report: Optional[Dict] = None,
-                       craft_report: Optional[Dict] = None) -> str:
+                       craft_report: Optional[Dict] = None,
+                       media_report: Optional[Dict] = None,
+                       listener_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1622,6 +1628,30 @@ Ab jawab likho:"""
         # creative kaam par ek generic line lagti thi jo aadhi galat hai.
         for craft_line in craft_limits(craft_report)[:5]:
             tail.append(f"- {craft_line}")
+        # #133 — media ki seema: frame/scene padha nahi gaya, aawaz suni nahi
+        # gayi, transcript me captions/STT ki galtiyan reh sakti hain, aur user
+        # ki copy se VERIFIED nahi hota. Ye line sirf tab aati hai jab media
+        # sach me padha gaya ho — warna har report me bekaar chipakti.
+        # Chhat 4 se 5 ki gayi (#133b): padhne waali 4 seemaon ke baad ek AUR
+        # alag seema aati hai — "kuch media sirf dhoondha gaya, padha nahi".
+        # 4 par rakhne se wahi nayi line kat jaati aur audit chup ho jaata.
+        for media_line in media_limits(media_report)[:5]:
+            tail.append(f"- {media_line}")
+        # #134 — sunne wale ki seema. Ye craft/media ki seema se ALAG hai aur
+        # unme ghol di nahi ja sakti: wahan sawaal "hunar theek padha kya" tha,
+        # yahan "kisi asli insaan par test hua kya" — jawab hamesha NAHI hai.
+        # Chhat listener_study se aati hai (MAX_AUDIT_LIMIT_LINES): 4 line hamesha
+        # (test nahi hua / audience naapi nahi gayi / research dusre sample par
+        # thi / cue-list adhoori) + 4 haalat wali (ek bhi cited baat nahi mili,
+        # kaun se bhaav chhoot gaye, kitni vaada karne wali line hataayi gayi,
+        # sirf snippet padha gaya). Yahan chhoti ginti likhne ka matlab hai ek
+        # naapi hui seema chup-chaap kat jaayegi aur audit jhootha ho jaayega —
+        # isliye ginti wahi module deta hai jo lines banata hai.
+        # Lane maangi hi na gayi ho (gaane ki farmaish nahi thi) to yahan se
+        # kuch nahi aata — bekaar chipki hui seema padhna band kara deti hai.
+        for listener_line in listener_limits(
+                listener_report)[:LISTENER_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {listener_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1873,7 +1903,9 @@ Ab jawab likho:"""
                  calculations: Optional[List[Dict]] = None,
                  lab_report: Optional[Dict] = None,
                  reject_report: Optional[Dict] = None,
-                 craft_report: Optional[Dict] = None) -> str:
+                 craft_report: Optional[Dict] = None,
+                 media_report: Optional[Dict] = None,
+                 listener_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1935,6 +1967,28 @@ Ab jawab likho:"""
                 craft_text = craft_section(craft_report)
                 if craft_text:
                     parts.append(craft_text)
+                # #133 — MEDIA: user ke video/audio ke likhit transcript me se
+                # kya padha gaya, har line ke saath samay/locator. Ye craft ke
+                # block ki jagah nahi leta — wo kitaab/paper se aata hai, ye
+                # media se. Media na padha ho to yahan kuch chhapta hi nahi.
+                # #133b se ek aur haalat aayi: media sirf DHOONDHA gaya ho (uska
+                # transcript mila hi na ho) to bhi block chhapta hai, par saaf
+                # likha hota hai ki wo dekha/suna nahi gaya.
+                media_text = media_section(media_report)
+                if media_text:
+                    parts.append(media_text)
+                # #134 — SUNNE WALE ka hissa: bhaav kaise kaam karta hai, log
+                # kyun judte hain, yaad/dohraav/sanskriti ka role — sirf wahi
+                # baat jo padhi gayi research me mili, har line ke saath
+                # [source_id]. Ye craft/media block ki jagah nahi leta aur unki
+                # ginti me nahi ghulta (warna "hunar padha" aur "dil samjha" ek
+                # dikhne lagte, jo jhooth hai). Ye block "log aisa mehsoos
+                # karenge" ka vaada nahi karta — vaada karne wali line to yahan
+                # se hata di jaati hai aur uski ginti audit me chhapti hai.
+                # Gaane ki farmaish na ho to yahan kuch chhapta hi nahi.
+                listener_text = listener_section(listener_report)
+                if listener_text:
+                    parts.append(listener_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -1951,7 +2005,9 @@ Ab jawab likho:"""
                     missing_sections=missing_sections,
                     lab_report=lab_report,
                     reject_report=reject_report,
-                    craft_report=craft_report)
+                    craft_report=craft_report,
+                    media_report=media_report,
+                    listener_report=listener_report)
                 parts.append(engine_text)
             else:
                 if index == 1:

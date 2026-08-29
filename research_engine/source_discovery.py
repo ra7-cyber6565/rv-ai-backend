@@ -39,11 +39,12 @@ from concurrent.futures import TimeoutError as FuturesTimeout
 from typing import Callable, Dict, List, Optional, Tuple
 
 from .connectors import (BaseConnector, BookConnector, ClassicTextConnector,
-                         DatasetConnector, MarketConnector, PaperConnector,
-                         PatentDiscoveryConnector, WebConnector)
+                         DatasetConnector, MarketConnector, MediaConnector,
+                         PaperConnector, PatentDiscoveryConnector, WebConnector)
 from .models import SourceRecord
 from .network_safety import public_error
 from . import songcraft
+from . import listener_study
 
 
 class SourceDiscovery:
@@ -71,6 +72,13 @@ class SourceDiscovery:
         # test chalata hai — bina khud koi network call kiye. Plan me `markets`
         # key na ho to ye tier chalta hi nahi.
         self.markets = MarketConnector()
+        # Video/audio ka lane bhi ALAG hai (#133b). Book lane CATALOGUE deta hai
+        # aur classics lane MOOL TEXT — ye lane un dono se alag cheez laata hai:
+        # kisi lecture/interview/recording ka LIKHA HUA parichay. Media khud
+        # padha nahi jaata (na dekha, na suna), isliye har record par
+        # `read_level="snippet"` hi rehta hai. Ye lane sirf craft-study tier se
+        # chalta hai, aur wahan bhi tab jab planner ne `craft_study` bhara ho.
+        self.media = MediaConnector()
         self.max_workers = max_workers
 
     # ── task builders ────────────────────────────────────────────────────────
@@ -241,6 +249,12 @@ class SourceDiscovery:
         if not paper_name:
             paper_name = next((c.name for c in getattr(self.papers,
                                                        "connectors", [])), "")
+        # Media lane ka naam kisi plan tier se nahi aata — ye tier plan me hota
+        # hi nahi (koi `plan["media"]` nahi hai). Wajah: media sirf craft padhne
+        # ke liye chahiye, asli sawaal ke evidence ke liye nahi. Isliye naam
+        # seedha facade se, aur budget wahi chhota `craft_limit`.
+        media_name = next((c.name for c in getattr(self.media,
+                                                   "connectors", [])), "")
         for entry in list(plan.get("craft_study", []))[
                 :songcraft.MAX_STUDY_QUERIES]:
             if isinstance(entry, dict):
@@ -261,6 +275,12 @@ class SourceDiscovery:
                 connector = self.books.by_name(book_name)
             elif lane == "papers" and paper_name:
                 connector = self.papers.by_name(paper_name)
+            elif lane == "media" and media_name:
+                # #133b — lecture/interview/recording ka parichay. Ye lane WEB
+                # par fallback nahi karta jab media connector maujood ho: web
+                # chain se aaya webpage media nahi hota, aur use
+                # "craft_study_media" naam dena label ka jhooth hota.
+                connector = self.media.by_name(media_name)
             if connector is not None:
                 tasks.append(("craft_study_" + lane,
                               self._single(connector, clean, craft_limit)))
@@ -268,6 +288,48 @@ class SourceDiscovery:
                 # lane band ho (QUICK mode) to chup na baitho — web chain se
                 # padho, aur naam se saaf rahe ki ye craft-study thi.
                 tasks.append(("craft_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # SUNNE WALE ki samajh (#134b) — craft tier ke SAATH, uske slot cheene
+        # bina. Ye alag tier isliye hai ki intel ki maang ke do hisse hain:
+        # (1) gaana likhne ka hunar (upar wala craft tier), aur (2) sunne wale ka
+        # dil/bhaav — psychology, human behaviour, nostalgia, dohraav. Dono ki
+        # ginti mila dena wahi jhooth hota jise #133 me bhi rokha gaya tha,
+        # isliye label bhi alag hai: `listener_study_<lane>`.
+        #
+        # Budget jaan-boojh kar chhota (`MAX_LISTENER_QUERIES`, aur per-connector
+        # 2 tak): asli sawaal ka discovery bhookha nahi rehna chahiye.
+        listener_limit = max(1, min(2, max_per_connector))
+        seen_listener = set()
+        for entry in list(plan.get("listener_study", []))[
+                :listener_study.MAX_LISTENER_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "web").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), "web"
+            key = clean.casefold()
+            if not clean or key in seen_listener or key in seen_craft:
+                # `seen_craft` bhi dekha jaata hai: ek hi query do label ke saath
+                # do baar bhejna network aur budget dono ka nuksaan hai.
+                continue
+            # Teesri deewar (planner + craft tier ke baad) — bol/karaoke wali
+            # query yahan se bhi network par nahi jaati.
+            if songcraft.is_lyrics_hunt(clean):
+                continue
+            seen_listener.add(key)
+            connector = None
+            if lane == "books" and book_name:
+                connector = self.books.by_name(book_name)
+            elif lane == "papers" and paper_name:
+                connector = self.papers.by_name(paper_name)
+            elif lane == "media" and media_name:
+                connector = self.media.by_name(media_name)
+            if connector is not None:
+                tasks.append(("listener_study_" + lane,
+                              self._single(connector, clean, listener_limit)))
+            elif plan.get("web", True):
+                tasks.append(("listener_study_web",
                               self._web_chain(clean, max(1, min(2, max_web)))))
 
         return tasks

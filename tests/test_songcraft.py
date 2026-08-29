@@ -282,7 +282,7 @@ def test_every_generated_query_passes_the_guard_itself():
         for row in rows:
             assert sc.is_lyrics_hunt(row["query"]) is False, row
             assert len(row["query"]) >= sc.MIN_STUDY_QUERY_CHARS, row
-            assert row["lane"] in ("web", "books", "papers"), row
+            assert row["lane"] in sc.STUDY_LANES, row
             assert row["why"], row
 
 
@@ -840,7 +840,7 @@ def test_every_planned_query_is_a_craft_query_not_a_lyrics_query():
     plan = _plan_for("gangstar type punjabi gaana likho")
     for entry in plan["craft_study"]:
         assert sc.is_lyrics_hunt(entry["query"]) is False, entry
-        assert entry["lane"] in ("web", "books", "papers")
+        assert entry["lane"] in sc.STUDY_LANES
 
 
 class _Spy:

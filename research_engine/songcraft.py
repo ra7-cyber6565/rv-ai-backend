@@ -407,7 +407,22 @@ def is_lyrics_hunt(query: str) -> bool:
 
 # Har seed ke saath `why` jaata hai, taaki report me dikhe "ye query kis liye
 # chali". Lane ke naam planner/source_discovery ke tier naam hain.
+#
+# Lane ka poora vocabulary EK hi jagah (ye list), taaki naya lane jodte waqt
+# test aur code do alag sach na bolein. `source_discovery._tasks()` inhi naamon
+# par route karta hai; is list se bahar ka lane wahan koi connector nahi paata
+# aur web fallback par chala jaata hai (chup-chaap gum nahi hota).
+STUDY_LANES: Tuple[str, ...] = ("web", "books", "papers", "media")
+
 CRAFT_STUDY_SEEDS: Tuple[Tuple[str, str, str], ...] = (
+    # Media seed PEHLA hai jaan-boojh kar. Wajah naapi hui hai: dynamic queries
+    # (style + bhasha + mood) 4 slot le sakti hain, isliye jo seed peeche hai wo
+    # bure haalat me chalta hi nahi. intel ki maang me "logo ki recording" bhi
+    # hai, sirf kitaab nahi — to us lane ko pehla slot milta hai. Ye media
+    # DEKHNE/SUNNE ka daawa nahi hai: lane sirf recording ka LIKHA HUA parichay
+    # padhta hai (`connectors/media_connector.py`).
+    ("songwriting masterclass interview lecture recording", "media",
+     "gaana likhne walon ki apni baat — lecture/interview recording se"),
     ("songwriting craft lyric writing guide", "books",
      "gaana likhne ka hunar — kitaab se"),
     ("prosody meter syllable stress in song lyrics", "papers",
@@ -421,7 +436,12 @@ CRAFT_STUDY_SEEDS: Tuple[Tuple[str, str, str], ...] = (
 )
 
 
-MAX_STUDY_QUERIES = 5
+# 5 se 6 kiya gaya (#133b): ek naya lane (media) juda hai, aur purane paanch me
+# se kisi ki jagah lena galat hota — kitaab/paper/web ki coverage waisi hi rehni
+# chahiye jaisi #129 me naapi gayi thi. Chhat phir bhi chhoti hai: har query par
+# `craft_limit` 1-2 hi hai (source_discovery), yaani ye tier asli sawaal ka
+# budget nahi kha sakta.
+MAX_STUDY_QUERIES = 6
 MIN_STUDY_QUERY_CHARS = 8
 
 

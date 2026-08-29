@@ -28,9 +28,17 @@ from .models import (
     SourceType,
 )
 from .relevance import RelevanceEngine
+from . import media_study
 
-# rag/pipeline.py aise headers banata hai: "[Source: file.pdf, Page 12]"
-_DOC_HEADER_RE = re.compile(r"\[Source:\s*([^,\]]+),\s*Page\s*(\d+)\]")
+# rag/pipeline.py aise headers banata hai: "[Source: file.pdf, Page 12]" — par
+# transcript par locator SAMAY hota hai: "[Source: talk.vtt, Page 12:30]".
+# Purani parse `Page\s*(\d+)` thi, isliye timestamped header ek baar bhi match
+# nahi hota tha aur poora transcript neeche wali "header parse fail" branch me
+# gir kar EK record ban jaata tha, locator KHAALI. Naap kar dekha gaya: 2
+# timestamped block -> 1 record, locator "". Ab locator koi bhi token ho sakta
+# hai aur uska kism `media_study.locator_kind()` naapta hai; label bhi wahi se
+# aata hai, taaki "12:30" par "Page" ka jhooth na chhape.
+_DOC_HEADER_RE = media_study.HEADER_RE
 
 
 class EvidenceEngine:
@@ -75,7 +83,10 @@ class EvidenceEngine:
                 snippet=body,
                 connector="user_pdf",
                 source_type=SourceType.DOCUMENT,
-                locator=f"Page {page}",
+                # "Page 12" page par, "Samay 12:30" transcript par, "Hissa 3"
+                # chunk par. Kism pata na chale to raw token — galat prefix se
+                # khaali locator behtar hai.
+                locator=media_study.locator_label(page),
                 full_text_available=True,
                 is_primary=None,
                 # read_level YAHAN explicitly set hota hai, models.py mein guess

@@ -23,6 +23,7 @@ from .depth import DepthConfig
 from .domain import detect as domain_detect
 from . import facets as facets_mod
 from . import lenses as lens_mod
+from . import listener_study
 from .local_language import normalize
 from .market_data import market_intent
 from .patents import patent_intent
@@ -727,6 +728,7 @@ class ResearchPlanner:
         craft_queries: List[str] = []
         craft_reason = "farmaish gaane jaisi nahi lagi, isliye craft-study band"
         craft_ask: Dict = {}
+        style_ask = None
         song_text = question or cls.get("question") or ""
         try:
             detection = craft_mod.detect(song_text)
@@ -742,6 +744,7 @@ class ResearchPlanner:
         elif is_song:
             ask = songcraft.style_of(song_text)
             craft_ask = ask.to_dict()
+            style_ask = ask
             # Depth lane band nahi karti, chhoti karti hai — padhna hi maksad
             # hai, aur jitna padh nahi sakte utni query maangna bekaar hai.
             budget = 2 if int(getattr(config, "max_fulltext", 3) or 1) <= 1 else \
@@ -750,6 +753,29 @@ class ResearchPlanner:
             craft_reason = (f"gaane ki farmaish mili — craft-study lane chali "
                             f"({len(craft_queries)} query; style/bhasha ki maang "
                             f"padhi gayi, gyaan nahi maana gaya)")
+
+        # ── sunne wale ki samajh ka LISTENER-STUDY lane (#134b) ─────────────
+        # Craft lane ke SAATH chalti hai, uski jagah nahi: uska budget alag hai
+        # (`MAX_LISTENER_QUERIES`) taaki craft ki naapi hui coverage se ek bhi
+        # slot na chhine. Yahan bhi koi gyaan nahi khulta — ye sirf query hai,
+        # aur `listener_evidence_read` isliye kabhi True nahi hota.
+        listener_queries: List[Dict] = []
+        listener_reason = ("farmaish gaane jaisi nahi lagi, isliye "
+                           "listener-study band")
+        if not is_song:
+            pass
+        elif songcraft.is_lyrics_hunt(song_text):
+            listener_reason = ("gaane ke BOL maange ja rahe the — us haalat me "
+                               "sunne wale ki research bhi nahi maangi jaati")
+        else:
+            l_budget = (1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else listener_study.MAX_LISTENER_QUERIES)
+            listener_queries = list(listener_study.study_queries(
+                style_ask, limit=l_budget))
+            listener_reason = (
+                f"gaane ki farmaish mili — sunne wale ke bhaav/vyavhaar ki "
+                f"research dhoondhne ke liye {len(listener_queries)} query "
+                f"bani (kisi insaan par koi test nahi hua)")
 
         return {
             "web": True,
@@ -827,6 +853,25 @@ class ResearchPlanner:
                                  "audio_generated": songcraft.AUDIO_GENERATED,
                                  "gemini_calls": 0,
                                  "reason": craft_reason},
+            # Sunne wale ki samajh ka lane (#134b) — craft se ALAG ginti, alag
+            # label. `listener_evidence_read` yahan kabhi True nahi hota (query
+            # banana padhna nahi hai), aur teen jhande naam se hi seema batate
+            # hain: kisi insaan par test nahi hua, koi audience naapi nahi gayi,
+            # kisi ka dil padha nahi gaya.
+            "listener_study": listener_queries,
+            "listener_study_lane": {
+                "wanted": bool(listener_queries),
+                "is_song_request": bool(is_song),
+                "query_count": len(listener_queries),
+                "lanes": [str(row.get("lane") or "") for row in listener_queries],
+                "reasons": [str(row.get("why") or "") for row in listener_queries],
+                "lyrics_hunt_blocked": True,
+                "listener_evidence_read": False,
+                "listener_tested": listener_study.LISTENER_TESTED,
+                "audience_measured": listener_study.AUDIENCE_MEASURED,
+                "mind_read": listener_study.MIND_READ,
+                "gemini_calls": listener_study.GEMINI_CALLS,
+                "reason": listener_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────
