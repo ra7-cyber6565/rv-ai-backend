@@ -76,6 +76,7 @@
     {"capability_id":100,"proof_kind":"reproducibility","subjects":["economic-reality-benchmark"],"verifiers":["trusted-operator"],"reference_prefixes":["economic-reality:"]},
     {"capability_id":103,"proof_kind":"code","subjects":["research_engine/literature_debate.py"],"verifiers":["github-actions"],"reference_prefixes":[]},
     {"capability_id":103,"proof_kind":"test","subjects":["tests/test_literature_debate.py"],"verifiers":["github-actions"],"reference_prefixes":[]},
+    {"capability_id":103,"proof_kind":"independent_validation","subjects":["literature-debate-independent-validation"],"verifiers":["trusted-operator"],"reference_prefixes":["literature-debate:"]},
     {"capability_id":104,"proof_kind":"code","subjects":["research_engine/historical_context.py","research_engine/historical_context_wiring.py"],"verifiers":["github-actions"],"reference_prefixes":[]},
     {"capability_id":104,"proof_kind":"test","subjects":["tests/test_historical_context.py","tests/test_historical_context_wiring.py"],"verifiers":["github-actions"],"reference_prefixes":[]},
     {"capability_id":105,"proof_kind":"code","subjects":["research_engine/translation_verification.py","research_engine/capture_integrity_wiring.py"],"verifiers":["github-actions"],"reference_prefixes":[]},
