@@ -66,6 +66,35 @@ def test_hypothesis_evolution_requires_executed_reproducible_proof():
     assert ProofKind.REPRODUCIBILITY in result.missing_proofs
 
 
+def test_discovery_frontier_capabilities_require_real_production_wiring():
+    for capability_id in (62, 63, 64, 65):
+        capability = CAPABILITY_BY_ID[capability_id]
+        assert ProofKind.CODE in capability.required_proofs
+        assert ProofKind.TEST in capability.required_proofs
+        assert ProofKind.WIRING in capability.required_proofs
+
+        evidence = {
+            capability_id: CapabilityEvidence(
+                capability_id=capability_id,
+                proofs={
+                    ProofKind.CODE: ("research_engine/discovery_frontier.py",),
+                    ProofKind.TEST: ("tests/test_discovery_frontier.py",),
+                },
+            )
+        }
+        result = assess_capabilities(evidence).results[capability_id - 1]
+        assert result.status == "INCOMPLETE"
+        assert result.missing_proofs == (ProofKind.WIRING,)
+
+
+def test_evolutionary_idea_search_still_requires_execution_and_reproducibility():
+    evolution = CAPABILITY_BY_ID[66]
+    assert ProofKind.CODE in evolution.required_proofs
+    assert ProofKind.TEST in evolution.required_proofs
+    assert ProofKind.EXECUTION in evolution.required_proofs
+    assert ProofKind.REPRODUCIBILITY in evolution.required_proofs
+
+
 def test_cryptographic_integrity_requires_execution_persistence_repro_and_safety():
     crypto = CAPABILITY_BY_ID[79]
     for proof in (
