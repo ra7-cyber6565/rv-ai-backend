@@ -96,6 +96,9 @@ jobs:
             tests/test_technology_readiness.py \
             tests/test_technology_readiness_wiring.py \
             tests/test_model_wiring_proof_contracts.py \
+            tests/test_economic_reality.py \
+            tests/test_economic_reality_registry.py \
+            tests/test_economic_reality_attestor.py \
             tests/test_visual_science.py \
             tests/test_post_deployment_validation.py \
             tests/test_post_deployment_input_guard.py \
