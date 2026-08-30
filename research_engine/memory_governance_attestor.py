@@ -10,7 +10,9 @@ The attestor binds to an exact clean Git revision, verifies the imported module
 is the tracked file, executes a real out-of-repo write/fsync/reload/tamper-check
 benchmark, recomputes deterministic decay/consolidation outputs, checks the
 committed proof policy, and mints only the explicitly required proof classes.
-It does not claim LIVE evidence, scientific truth, or cross-machine durability.
+Runtime evidence is deliberately short-lived and refreshable; persistence
+receipts remain stable.  It does not claim LIVE evidence, scientific truth, or
+cross-machine durability.
 """
 from __future__ import annotations
 
@@ -22,7 +24,7 @@ import shutil
 import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, Mapping, Tuple
+from typing import Any, Dict, Mapping, Optional, Tuple
 
 from utils.release_identity import repository_identity
 
@@ -43,6 +45,7 @@ from .maturity_proof import ProofLedger
 _MODEL_SUBJECT = "research_engine/memory_governance.py"
 _VERIFIER = "trusted-operator"
 _SUBJECT = "memory-governance-runtime"
+_RUNTIME_PROOF_TTL_SECONDS = 3600.0
 _REQUIRED: Mapping[int, Tuple[ProofKind, ...]] = {
     49: (ProofKind.PERSISTENCE, ProofKind.RUNTIME),
     53: (ProofKind.PERSISTENCE,),
@@ -64,6 +67,15 @@ def _canonical(value: Any) -> bytes:
 
 def _sha(value: Any) -> str:
     return hashlib.sha256(_canonical(value)).hexdigest()
+
+
+def _runtime_bucket(now: float) -> int:
+    return int(math.floor(now / _RUNTIME_PROOF_TTL_SECONDS))
+
+
+def _runtime_valid_until(now: float) -> float:
+    """Return the exclusive end of the current runtime-proof time bucket."""
+    return float((_runtime_bucket(now) + 1) * _RUNTIME_PROOF_TTL_SECONDS)
 
 
 def run_memory_governance_benchmark(storage_root: str | os.PathLike[str]) -> Mapping[str, Any]:
@@ -184,7 +196,16 @@ class MemoryGovernanceAttestation:
     truth_proven: bool = False
 
 
-def _same_receipt(row: Mapping[str, Any], *, capability_id: int, kind: ProofKind, digest: str, reference: str, revision: str) -> bool:
+def _same_receipt(
+    row: Mapping[str, Any],
+    *,
+    capability_id: int,
+    kind: ProofKind,
+    digest: str,
+    reference: str,
+    revision: str,
+    valid_until: Optional[float],
+) -> bool:
     expected = {
         "capability_id": capability_id,
         "proof_kind": kind.value,
@@ -193,6 +214,7 @@ def _same_receipt(row: Mapping[str, Any], *, capability_id: int, kind: ProofKind
         "verifier": _VERIFIER,
         "reference": reference,
         "implementation_revision": revision,
+        "valid_until": valid_until,
     }
     return all(row.get(key) == value for key, value in expected.items())
 
@@ -286,12 +308,26 @@ def attest_memory_governance(
     ledger = ProofLedger(str(ledger_target), integrity_key=integrity_key)
     existing = _existing_adds(ledger)
     added = reused = 0
+    runtime_bucket = _runtime_bucket(current_time)
+    runtime_expiry = _runtime_valid_until(current_time)
     for capability_id, kinds in _REQUIRED.items():
         for kind in kinds:
-            receipt_id = f"memory:{revision[:12]}:c{capability_id}:{kind.value}"
+            valid_until = runtime_expiry if kind is ProofKind.RUNTIME else None
+            bucket_suffix = f":b{runtime_bucket}" if kind is ProofKind.RUNTIME else ""
+            receipt_id = (
+                f"memory:{revision[:12]}:c{capability_id}:{kind.value}{bucket_suffix}"
+            )
             previous = existing.get(receipt_id)
             if previous is not None:
-                if not _same_receipt(previous, capability_id=capability_id, kind=kind, digest=receipt_digest, reference=reference, revision=revision):
+                if not _same_receipt(
+                    previous,
+                    capability_id=capability_id,
+                    kind=kind,
+                    digest=receipt_digest,
+                    reference=reference,
+                    revision=revision,
+                    valid_until=valid_until,
+                ):
                     raise ValueError("deterministic memory governance receipt_id collision")
                 reused += 1
                 continue
@@ -303,6 +339,7 @@ def attest_memory_governance(
                 subject_sha256=receipt_digest,
                 verifier=_VERIFIER,
                 observed_at=current_time,
+                valid_until=valid_until,
                 reference=reference,
                 implementation_revision=revision,
             )
