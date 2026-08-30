@@ -3,7 +3,8 @@
 This module is intentionally stricter than ordinary two-run replication. A
 "triple implementation" result requires exactly three pre-committed execution
 paths with distinct runner identities, implementation families and SHA-256 code
-digests. All three receive the same frozen protocol independently and every
+digests. All three receive the same frozen protocol independently, each path is
+executed twice to reject internally non-reproducible implementations, and every
 required metric is compared across all three pairs.
 
 Agreement is evidence of cross-implementation reproducibility, not proof that
@@ -245,6 +246,32 @@ class TripleImplementationEngine:
                 return field
         return ""
 
+    def _execute_once(
+        self,
+        spec: TripleImplementationSpec,
+        protocol: Mapping[str, Any],
+        tolerances: Mapping[str, float],
+        protocol_hash: str,
+    ) -> tuple[Dict[str, float], str]:
+        raw = spec.runner(copy.deepcopy(dict(protocol)))
+        if not isinstance(raw, Mapping):
+            raise ValueError("runner must return a mapping")
+        mismatch = self._identity_mismatch(spec, raw)
+        if mismatch:
+            raise ValueError(
+                f"runner attempted to override pre-committed {mismatch}"
+            )
+        metrics = self._metrics(raw.get("metrics"), tolerances)
+        payload = {
+            "implementation_id": spec.implementation_id,
+            "runner_id": spec.runner_id,
+            "implementation_family": spec.implementation_family,
+            "code_digest": spec.code_digest,
+            "protocol_hash": protocol_hash,
+            "metrics": metrics,
+        }
+        return metrics, _hash(payload)
+
     def run(
         self,
         frozen_protocol: Mapping[str, Any],
@@ -261,23 +288,16 @@ class TripleImplementationEngine:
         reasons = []
         for spec in self.implementations:
             try:
-                raw = spec.runner(copy.deepcopy(protocol))
-                if not isinstance(raw, Mapping):
-                    raise ValueError("runner must return a mapping")
-                mismatch = self._identity_mismatch(spec, raw)
-                if mismatch:
+                first_metrics, first_hash = self._execute_once(
+                    spec, protocol, tolerances, protocol_hash
+                )
+                second_metrics, second_hash = self._execute_once(
+                    spec, protocol, tolerances, protocol_hash
+                )
+                if first_metrics != second_metrics or first_hash != second_hash:
                     raise ValueError(
-                        f"runner attempted to override pre-committed {mismatch}"
+                        "implementation is not reproducible across repeated execution"
                     )
-                metrics = self._metrics(raw.get("metrics"), tolerances)
-                payload = {
-                    "implementation_id": spec.implementation_id,
-                    "runner_id": spec.runner_id,
-                    "implementation_family": spec.implementation_family,
-                    "code_digest": spec.code_digest,
-                    "protocol_hash": protocol_hash,
-                    "metrics": metrics,
-                }
                 results.append(
                     TripleImplementationResult(
                         implementation_id=spec.implementation_id,
@@ -285,8 +305,8 @@ class TripleImplementationEngine:
                         implementation_family=spec.implementation_family,
                         code_digest=spec.code_digest,
                         protocol_hash=protocol_hash,
-                        metrics=metrics,
-                        result_hash=_hash(payload),
+                        metrics=first_metrics,
+                        result_hash=first_hash,
                     )
                 )
             except Exception as exc:
