@@ -86,6 +86,7 @@ jobs:
             tests/test_double_blind_attestor.py \
             tests/test_scientist_society.py \
             tests/test_triple_implementation.py \
+            tests/test_triple_implementation_reproducibility.py \
             tests/test_triple_implementation_attestor.py \
             tests/test_research_capsule.py \
             tests/test_procedural_memory.py \
