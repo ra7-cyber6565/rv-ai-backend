@@ -1,23 +1,20 @@
 """Cryptographic multi-evaluator double-blind strategy evaluation (#98).
 
-This module strengthens the application-level holdout boundary with an explicit
-multi-arm, multi-evaluator protocol.  It is deliberately conservative:
+Application-level fail-closed double-blind evaluation core.
 
-* candidate/theory identities are never present in evaluator packets;
-* arm IDs are deterministic HMAC pseudonyms derived from a protected assignment
-  key and the frozen study protocol;
-* at least two structurally distinct evaluators are required before a study can
-  be sealed;
-* every evaluator must score every arm before any candidate/theory mapping may
-  be revealed;
-* metric names and tolerances are frozen before scoring starts;
-* reproducibility is computed from all evaluator pairs, not self-reported;
-* completion/blinding/agreement never prove that a strategy is scientifically
-  true or economically profitable.
+Security / epistemic boundaries:
+* candidate/theory identities are absent from evaluator packets;
+* blind arm IDs are HMAC pseudonyms bound to study+protocol+artifact;
+* protocol, metric tolerances and evaluator instructions freeze at seal;
+* at least two structurally distinct evaluators are required;
+* every evaluator must score every arm before reveal;
+* result cells are immutable;
+* reproducibility is measured across all evaluator pairs;
+* completion/blinding/agreement do NOT prove scientific truth or profitability.
 
-This is still an application boundary.  A privileged host administrator or an
-artifact whose own bytes disclose its identity can defeat operational blinding;
-production use should isolate evaluator artifacts/processes accordingly.
+This remains an application boundary: a privileged host administrator or an
+artifact that reveals its own identity can defeat operational blinding.
+Production use therefore still needs isolated evaluator processes/artifacts.
 """
 from __future__ import annotations
 
@@ -27,7 +24,7 @@ import hmac
 import json
 import math
 import re
-from typing import Any, Dict, Mapping, Sequence, Tuple
+from typing import Any, Dict, Mapping, Tuple
 
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,200}$")
@@ -36,6 +33,7 @@ _MAX_ARMS = 32
 _MAX_EVALUATORS = 16
 _MAX_METRICS = 256
 _MAX_RESULT_BYTES = 256 * 1024
+_MAX_INSTRUCTIONS_BYTES = 128 * 1024
 
 
 def _canonical(value: Any) -> bytes:
@@ -136,7 +134,7 @@ class DoubleBlindReport:
 
 
 class DoubleBlindStudy:
-    """State machine for a frozen multi-arm/multi-evaluator blind study."""
+    """State machine for one frozen multi-arm/multi-evaluator blind study."""
 
     def __init__(
         self,
@@ -150,6 +148,7 @@ class DoubleBlindStudy:
         self.study_id = _id(study_id, "study_id")
         self.protocol_hash = _digest(protocol_hash, "protocol_hash")
         self._assignment_key = _assignment_key(assignment_key)
+
         if not isinstance(metric_tolerances, Mapping) or not metric_tolerances:
             raise ValueError("metric_tolerances must be a non-empty mapping")
         if len(metric_tolerances) > _MAX_METRICS:
@@ -162,25 +161,25 @@ class DoubleBlindStudy:
             tolerances[name] = _number(
                 raw_value, f"metric tolerance {name}", non_negative=True
             )
+
         if not isinstance(evaluator_instructions, Mapping):
             raise ValueError("evaluator_instructions must be a mapping")
-        # Bound and canonicalize the evaluator-facing protocol before any arm is
-        # registered, so later mutation cannot silently alter the study.
-        instructions = dict(evaluator_instructions)
-        encoded = _canonical(instructions)
-        if len(encoded) > 128 * 1024:
+        instructions_bytes = _canonical(dict(evaluator_instructions))
+        if len(instructions_bytes) > _MAX_INSTRUCTIONS_BYTES:
             raise ValueError("evaluator_instructions are too large")
+
         self._tolerances = dict(sorted(tolerances.items()))
-        self._instructions = json.loads(encoded.decode("utf-8"))
+        self._instructions = json.loads(instructions_bytes.decode("utf-8"))
         self._candidates: Dict[str, Dict[str, str]] = {}
         self._evaluators: Dict[str, Dict[str, str]] = {}
         self._results: Dict[Tuple[str, str], Dict[str, float]] = {}
         self._sealed = False
         self._revealed = False
+        self._seal_hash = ""
 
     @property
     def assignment_commitment(self) -> str:
-        return _sha(self._assignment_key)
+        return _sha(b"double-blind-assignment-key-v1\x00" + self._assignment_key)
 
     def _arm_id(self, candidate_id: str, artifact_digest: str) -> str:
         body = (
@@ -250,10 +249,11 @@ class DoubleBlindStudy:
     def seal(self) -> str:
         if self._sealed:
             raise ValueError("study is already sealed")
-        if len(self._candidates) < 2 or len(self._candidates) > _MAX_ARMS:
+        if not (2 <= len(self._candidates) <= _MAX_ARMS):
             raise ValueError("double-blind study requires 2..32 candidates")
-        if len(self._evaluators) < 2 or len(self._evaluators) > _MAX_EVALUATORS:
+        if not (2 <= len(self._evaluators) <= _MAX_EVALUATORS):
             raise ValueError("double-blind study requires 2..16 evaluators")
+
         evaluator_rows = list(self._evaluators.values())
         for field in (
             "evaluator_id",
@@ -264,25 +264,29 @@ class DoubleBlindStudy:
                 raise ValueError(
                     f"{field} must be distinct across independent evaluators"
                 )
-        self._sealed = True
+
+        arm_rows = [
+            {
+                "arm_id": row["arm_id"],
+                "artifact_digest": row["artifact_digest"],
+            }
+            for row in self._candidates.values()
+        ]
         payload = {
             "study_id": self.study_id,
             "protocol_hash": self.protocol_hash,
             "assignment_commitment": self.assignment_commitment,
-            "arms": sorted(
-                {
-                    "arm_id": row["arm_id"],
-                    "artifact_digest": row["artifact_digest"],
-                }
-                for row in self._candidates.values()
-            , key=lambda row: row["arm_id"]),
+            "arms": sorted(arm_rows, key=lambda row: row["arm_id"]),
             "evaluators": sorted(
-                self._evaluators.values(), key=lambda row: row["evaluator_id"]
+                (dict(row) for row in evaluator_rows),
+                key=lambda row: row["evaluator_id"],
             ),
             "metric_tolerances": self._tolerances,
             "instructions_hash": _sha(_canonical(self._instructions)),
         }
-        return _sha(_canonical(payload))
+        self._seal_hash = _sha(_canonical(payload))
+        self._sealed = True
+        return self._seal_hash
 
     def evaluator_packet(self, evaluator_id: str) -> EvaluatorPacket:
         if not self._sealed:
@@ -297,9 +301,11 @@ class DoubleBlindStudy:
                 arm_id=row["arm_id"],
                 artifact_digest=row["artifact_digest"],
                 protocol_hash=self.protocol_hash,
-                instructions=dict(self._instructions),
+                instructions=json.loads(_canonical(self._instructions).decode("utf-8")),
             )
-            for row in sorted(self._candidates.values(), key=lambda item: item["arm_id"])
+            for row in sorted(
+                self._candidates.values(), key=lambda item: item["arm_id"]
+            )
         )
         return EvaluatorPacket(
             study_id=self.study_id,
@@ -357,8 +363,6 @@ class DoubleBlindStudy:
             "evaluator_count": len(self._evaluators),
             "completed_results": state["completed_results"],
             "expected_results": state["expected_results"],
-            # No result values and no evaluator-to-result mapping are exposed
-            # before reveal.
             "results_visible": self._revealed,
         }
 
@@ -369,32 +373,37 @@ class DoubleBlindStudy:
         if self._revealed:
             raise ValueError("study can only be revealed once")
 
-        comparisons = []
         evaluator_ids = sorted(self._evaluators)
         arm_ids = sorted(row["arm_id"] for row in self._candidates.values())
+        comparisons = []
         reproducible = True
         for arm_id in arm_ids:
             for metric, tolerance in sorted(self._tolerances.items()):
                 for left_index, left_id in enumerate(evaluator_ids):
-                    for right_id in evaluator_ids[left_index + 1:]:
+                    for right_id in evaluator_ids[left_index + 1 :]:
                         left = self._results[(left_id, arm_id)][metric]
                         right = self._results[(right_id, arm_id)][metric]
                         delta = abs(left - right)
                         passed = delta <= tolerance or math.isclose(
-                            delta, tolerance, rel_tol=1e-12, abs_tol=1e-15
+                            delta,
+                            tolerance,
+                            rel_tol=1e-12,
+                            abs_tol=1e-15,
                         )
                         reproducible = reproducible and passed
-                        comparisons.append({
-                            "arm_id": arm_id,
-                            "metric": metric,
-                            "left_evaluator_id": left_id,
-                            "right_evaluator_id": right_id,
-                            "left_value": left,
-                            "right_value": right,
-                            "tolerance": tolerance,
-                            "absolute_delta": delta,
-                            "passed": passed,
-                        })
+                        comparisons.append(
+                            {
+                                "arm_id": arm_id,
+                                "metric": metric,
+                                "left_evaluator_id": left_id,
+                                "right_evaluator_id": right_id,
+                                "left_value": left,
+                                "right_value": right,
+                                "tolerance": tolerance,
+                                "absolute_delta": delta,
+                                "passed": passed,
+                            }
+                        )
 
         candidate_rows = tuple(
             {
@@ -403,7 +412,9 @@ class DoubleBlindStudy:
                 "artifact_digest": row["artifact_digest"],
                 "theory_hash": _sha(row["builder_theory"].encode("utf-8")),
             }
-            for row in sorted(self._candidates.values(), key=lambda item: item["candidate_id"])
+            for row in sorted(
+                self._candidates.values(), key=lambda item: item["candidate_id"]
+            )
         )
         evaluator_rows = tuple(
             dict(row)
@@ -416,12 +427,17 @@ class DoubleBlindStudy:
                 "evaluator_id": evaluator_id,
                 "arm_id": arm_id,
                 "metrics": dict(self._results[(evaluator_id, arm_id)]),
-                "result_hash": _sha(_canonical({
-                    "evaluator_id": evaluator_id,
-                    "arm_id": arm_id,
-                    "metrics": self._results[(evaluator_id, arm_id)],
-                    "protocol_hash": self.protocol_hash,
-                })),
+                "result_hash": _sha(
+                    _canonical(
+                        {
+                            "evaluator_id": evaluator_id,
+                            "arm_id": arm_id,
+                            "metrics": self._results[(evaluator_id, arm_id)],
+                            "protocol_hash": self.protocol_hash,
+                            "seal_hash": self._seal_hash,
+                        }
+                    )
+                ),
             }
             for evaluator_id in evaluator_ids
             for arm_id in arm_ids
@@ -437,13 +453,10 @@ class DoubleBlindStudy:
             "execution_complete": True,
             "blinding_structure_satisfied": True,
             "independence_structure_satisfied": True,
-            "reproducibility_satisfied": reproducible,
+            "reproducibility_satisfied": bool(reproducible),
             "truth_proven": False,
             "profitability_proven": False,
         }
         report_hash = _sha(_canonical(report_payload))
         self._revealed = True
-        return DoubleBlindReport(
-            **report_payload,
-            report_hash=report_hash,
-        )
+        return DoubleBlindReport(**report_payload, report_hash=report_hash)
