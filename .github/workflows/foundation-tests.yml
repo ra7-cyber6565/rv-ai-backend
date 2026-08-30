@@ -64,6 +64,8 @@ jobs:
             tests/test_reality_oracle_memory.py \
             tests/test_reality_oracle_attestor.py \
             tests/test_confidence_governance.py \
+            tests/test_memory_governance.py \
+            tests/test_memory_governance_attestor.py \
             tests/test_statistical_validation.py \
             tests/test_formal_logic.py \
             tests/test_runtime_capability_wiring.py \
