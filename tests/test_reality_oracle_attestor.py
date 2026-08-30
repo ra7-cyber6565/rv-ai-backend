@@ -23,6 +23,7 @@ KEY = b"R" * 32
 OBSERVER_KEY = b"O" * 32
 OBSERVER_ID = "lab-observer-1"
 NOW = 2_000_000_000
+LIVE_VALID_UNTIL = NOW - 60 + (2 * 60 * 60)
 
 
 def _root() -> Path:
@@ -99,6 +100,8 @@ def test_valid_signed_live_receipt_recomputes_everything(tmp_path):
     assert receipt.observation_id == "obs-live-1"
     assert len(receipt.evaluation_hash) == 64
     assert len(receipt.sha256) == 64
+    assert receipt.live_valid_until_epoch == LIVE_VALID_UNTIL
+    assert receipt.live_valid_until_epoch > NOW
 
 
 def test_wrong_key_or_tampered_observation_fails_signature(tmp_path):
@@ -172,7 +175,9 @@ def test_wrong_revision_fails_before_any_proof(tmp_path):
 
 def test_tampered_evaluation_cannot_be_self_asserted(tmp_path):
     payload = _payload()
-    payload["evaluation"]["status"] = "MATCH" if payload["evaluation"]["status"] == "MISS" else "MISS"
+    payload["evaluation"]["status"] = (
+        "MATCH" if payload["evaluation"]["status"] == "MISS" else "MISS"
+    )
     path = _write(tmp_path, payload)
     with pytest.raises(ValueError, match="evaluation"):
         validate_live_oracle_receipt(
@@ -213,7 +218,11 @@ def test_trusted_attestor_mints_only_required_reality_oracle_proofs(tmp_path):
     assert ProofKind.TEST in capability.missing_proofs
 
     ledger = ProofLedger(str(ledger_path), integrity_key=KEY)
-    rows = [row for row in ledger._events() if row.get("event_type") == "ADD"]  # noqa: SLF001
+    rows = [
+        row
+        for row in ledger._events()  # noqa: SLF001
+        if row.get("event_type") == "ADD"
+    ]
     assert {row["proof_kind"] for row in rows} == {
         ProofKind.EXECUTION.value,
         ProofKind.REPRODUCIBILITY.value,
@@ -221,8 +230,27 @@ def test_trusted_attestor_mints_only_required_reality_oracle_proofs(tmp_path):
         ProofKind.LIVE.value,
     }
     assert {row["verifier"] for row in rows} == {"trusted-live-observer"}
-    assert ProofKind.HARDWARE.value not in {row["proof_kind"] for row in rows}
-    assert ProofKind.INDEPENDENT.value not in {row["proof_kind"] for row in rows}
+    by_kind = {row["proof_kind"]: row for row in rows}
+    assert by_kind[ProofKind.EXECUTION.value]["valid_until"] is None
+    assert by_kind[ProofKind.REPRODUCIBILITY.value]["valid_until"] is None
+    assert by_kind[ProofKind.RUNTIME.value]["valid_until"] == LIVE_VALID_UNTIL
+    assert by_kind[ProofKind.LIVE.value]["valid_until"] == LIVE_VALID_UNTIL
+    assert ProofKind.HARDWARE.value not in by_kind
+    assert ProofKind.INDEPENDENT.value not in by_kind
+
+    evidence, status = ledger.evidence(
+        current_hashes={},
+        now=LIVE_VALID_UNTIL,
+        current_revision=result.revision,
+        anchor_token=result.anchor_token,
+        require_cryptographic_integrity=True,
+    )
+    assert status.expired_receipts == 2
+    proofs = evidence[41].proofs
+    assert ProofKind.EXECUTION in proofs
+    assert ProofKind.REPRODUCIBILITY in proofs
+    assert ProofKind.RUNTIME not in proofs
+    assert ProofKind.LIVE not in proofs
 
 
 def test_existing_ledger_requires_prior_anchor_and_is_idempotent(tmp_path):
@@ -260,6 +288,42 @@ def test_existing_ledger_requires_prior_anchor_and_is_idempotent(tmp_path):
     )
     assert second.receipts_added == 0
     assert second.receipts_reused == 4
+
+
+def test_replaying_same_observation_cannot_extend_live_validity(tmp_path):
+    receipt_path = _write(tmp_path, _payload())
+    ledger_path = tmp_path / "reality-proof.jsonl"
+    first = attest_reality_oracle_live(
+        repo_root=_root(),
+        receipt_path=receipt_path,
+        ledger_path=ledger_path,
+        integrity_key=KEY,
+        observer_keys={OBSERVER_ID: OBSERVER_KEY},
+        run_reference="reality-oracle:ci-replay",
+        now=NOW,
+    )
+    second = attest_reality_oracle_live(
+        repo_root=_root(),
+        receipt_path=receipt_path,
+        ledger_path=ledger_path,
+        integrity_key=KEY,
+        observer_keys={OBSERVER_ID: OBSERVER_KEY},
+        run_reference="reality-oracle:ci-replay",
+        now=NOW + 120,
+        prior_anchor_token=first.anchor_token,
+        prior_revision=first.revision,
+    )
+    assert second.receipts_added == 0
+    assert second.receipts_reused == 4
+    ledger = ProofLedger(str(ledger_path), integrity_key=KEY)
+    rows = [
+        row
+        for row in ledger._events()  # noqa: SLF001
+        if row.get("event_type") == "ADD"
+        and row.get("proof_kind") in {ProofKind.RUNTIME.value, ProofKind.LIVE.value}
+    ]
+    assert len(rows) == 2
+    assert {row["valid_until"] for row in rows} == {LIVE_VALID_UNTIL}
 
 
 def test_wrong_reference_prefix_fails_before_ledger_creation(tmp_path):
