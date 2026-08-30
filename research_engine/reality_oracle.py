@@ -381,10 +381,9 @@ def evaluate_reality(
         "observation_authenticity_proven": False,
         "live_observation_proven": False,
         "truth_proven": False,
-        "reasons": reasons,
+        "reasons": tuple(reasons),
     }
     return OracleEvaluation(
         **payload,
-        reasons=tuple(reasons),
         evaluation_hash=_sha(payload),
     )
