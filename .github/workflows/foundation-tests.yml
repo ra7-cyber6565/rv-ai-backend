@@ -116,6 +116,10 @@ jobs:
             tests/test_economic_reality.py \
             tests/test_economic_reality_registry.py \
             tests/test_economic_reality_attestor.py \
+            tests/test_mechanistic_reasoning.py \
+            tests/test_mechanistic_reasoning_wiring.py \
+            tests/test_mechanistic_reasoning_registry.py \
+            tests/test_mechanistic_reasoning_attestor.py \
             tests/test_visual_science.py \
             tests/test_post_deployment_validation.py \
             tests/test_post_deployment_input_guard.py \
