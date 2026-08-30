@@ -60,6 +60,9 @@ jobs:
             tests/test_ui_hygiene.py \
             tests/test_capability_registry.py \
             tests/test_scientific_memory.py \
+            tests/test_reality_oracle.py \
+            tests/test_reality_oracle_memory.py \
+            tests/test_reality_oracle_attestor.py \
             tests/test_statistical_validation.py \
             tests/test_formal_logic.py \
             tests/test_runtime_capability_wiring.py \
