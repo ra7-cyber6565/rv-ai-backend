@@ -107,6 +107,13 @@ _install_causal_chain_quality()
 from .causal_counterfactual_wiring import install as _install_causal_counterfactual_wiring
 _install_causal_counterfactual_wiring()
 
+# #101/#102 require an explicit structural mechanism contract with observables,
+# falsifiers and evidence references before bounded simulation can run. The
+# resulting trajectories/interventions are model consequences only and never
+# self-upgrade into proof that a real causal mechanism exists.
+from .mechanistic_reasoning_wiring import install as _install_mechanistic_reasoning_wiring
+_install_mechanistic_reasoning_wiring()
+
 # OCR/translation capture integrity is separate from A-E and can only
 # downgrade/block accepted support.
 from .capture_integrity_wiring import install as _install_capture_integrity_wiring
