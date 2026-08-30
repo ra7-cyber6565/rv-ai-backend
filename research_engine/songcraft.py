@@ -763,6 +763,35 @@ def study(question: str, sources: Iterable[Any] = (), form: str = "",
     }
 
 
+def not_asked(reason: str = "kuch banane ki farmaish nahi thi") -> Dict[str, Any]:
+    """#155c — lane ka taala: craft ki farmaish hi nahi thi.
+
+    `study()` ka dhaancha wahi rehta hai, par `ran: False` aur khaali
+    `prompt_block`/`queries` ke saath. Kyun zaroori hai: pehle ye study HAR
+    sawaal par chal jaati thi, isliye trading ka model maangne par bhi "GAANA
+    LIKHNE KI HIDAYAT" wala block aur songwriting wali search queries ban jaati
+    thi. `wanted: False` isi baat ka naapa hua record hai — "kuch mila nahi"
+    nahi, "maanga hi nahi gaya".
+    """
+    return {
+        "ran": False,
+        "wanted": False,
+        "ask": None,
+        "ask_dict": {},
+        "queries": [],
+        "plan": {},
+        "guidance": {},
+        "prompt_block": "",
+        "guidance_source_count": 0,
+        "style_conventions_read": False,
+        "gemini_calls": GEMINI_CALLS,
+        "network_used": NETWORK_USED,
+        "audio_generated": AUDIO_GENERATED,
+        "cannot_measure": list(CANNOT_MEASURE_EXTRA),
+        "note": str(reason or ""),
+    }
+
+
 # ── #131 NAAP ─────────────────────────────────────────────────────────────────
 # Ulta bhaav. Sirf wahi jode jo sach me aapas me katte hain: "judaai + pyaar"
 # ek hi sad gaane me normal hai, isliye wo jodi YAHAN NAHI hai.

@@ -53,6 +53,7 @@ from . import listener_study
 from . import music_study
 from . import mood_lexicon
 from . import songlab
+from . import deliverable_guard
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -600,6 +601,21 @@ class DeepResearchEngine:
         return "\n".join(parts)
 
     @staticmethod
+    def _craft_asked(question: str) -> bool:
+        """#155c — lane ka ek hi taala, ek hi jagah.
+
+        `craft.detect()` ka wahi do-signal faisla jo prompt-side (`is_request`)
+        pehle se use karta hai. Alag-alag jagah alag-alag shart likhne se hi wo
+        asymmetry bani thi jisme kuch lane gate ke peeche thi aur kuch khuli —
+        aur khuli lane hi trading/physics ke jawab me gaane ki cheezein le aati
+        thi. Andar kuch toot jaaye to `False`: shak me lane BAND rehti hai.
+        """
+        try:
+            return bool(craft.detect(question).get("is_request"))
+        except Exception:                                  # pragma: no cover
+            return False
+
+    @staticmethod
     def _songcraft_study(question: str, pack: Optional[EvidencePack]) -> Dict:
         """
         #130 — gaane ka "hunar" padho: jo sources mil chuke hain, unme se craft
@@ -609,7 +625,17 @@ class DeepResearchEngine:
         sirf pehle se aaye sources ko padhta hai. Andar kuch toot jaaye to
         khaali (par imaandaar) pack lautta hai: `ran: False` ka matlab "padha
         nahi gaya" hai, "sab theek hai" nahi.
+
+        #155c — lane sirf BANANE ki farmaish par khulti hai. Pehle ye study har
+        sawaal par chalti thi; uska prompt-block gate ke peeche tha, par uski
+        queries aur record bahar aa jaate the. Craft ki farmaish na ho to ab
+        `songcraft.not_asked()` aata hai — "maanga hi nahi gaya", "mila nahi"
+        nahi.
         """
+        if not DeepResearchEngine._craft_asked(question):
+            return songcraft.not_asked(
+                "banane ki koi farmaish nahi thi — gaane ka hunar padhne wali "
+                "lane maangi hi nahi gayi")
         try:
             sources = list(getattr(pack, "sources", []) or []) if pack else []
             return songcraft.study(question, sources=sources)
@@ -633,7 +659,18 @@ class DeepResearchEngine:
         Yahan bhi 0 Gemini call aur 0 network hai — sirf pehle se aaye sources
         padhe jaate hain. `ran: False` ka matlab "media padha hi nahi gaya" hai,
         "sab theek hai" nahi.
+
+        #155c — ye lane bhi sirf BANANE ki farmaish par khulti hai. Pehle ye har
+        sawaal par chalti thi, aur `media_section()`/`media_limits()` synthesizer
+        me BINA shart lagte hain — to trading ya physics ke sawaal par ek
+        transcript source hi kaafi tha ki jawab me craft/media ka block chipak
+        jaaye. `not_asked()` ka record `ran: False` + khaali `discovered` deta
+        hai, isliye wo dono kuch nahi likhte.
         """
+        if not DeepResearchEngine._craft_asked(question):
+            return media_study.not_asked(
+                "banane ki koi farmaish nahi thi — media se craft padhne wali "
+                "lane maangi hi nahi gayi")
         try:
             sources = list(getattr(pack, "sources", []) or []) if pack else []
             ask = songcraft.style_of(question)
@@ -1219,7 +1256,16 @@ class DeepResearchEngine:
             # (confidence band, validation, novelty) chhui nahi jaati; lab ka
             # nateeja unke SAATH `lab`/`lab_verdict` key me jodta hai. Koi
             # Gemini call nahi, koi network nahi, kharcha ₹0.
-            out["lab"] = lab.run_lab(question, out["hypotheses"], pack=pack)
+            # #155e — agar user ne kuch BANWANE ko kaha hai (gaana/kavita) to LAB
+            # ko ye bata dena zaroori hai. Warna insaan par naapi jaane wali
+            # hypothesis ("shrota ka GSR 20% badhega") ki spec ban jaati hai aur
+            # `threshold` recipe evidence me se KISI aur number ko utha kar
+            # PASS/FAIL de deti — kisi ke shareer ka naap app ke andar ho hi
+            # nahi sakta. Wahi ek hi taala (`_craft_asked`) yahan bhi lagta hai,
+            # isliye science/trading run ek akshar nahi badalta.
+            out["lab"] = lab.run_lab(
+                question, out["hypotheses"], pack=pack,
+                craft_ask=DeepResearchEngine._craft_asked(question))
             out["hypotheses"] = lab.merge_into_hypotheses(out["hypotheses"],
                                                           out["lab"])
             # #117 REJECT LEDGER — "weak ko hatao, par naapi hui wajah ke saath".
@@ -2392,6 +2438,29 @@ class DeepResearchEngine:
         # ke upar, aur §20 state block ke neeche.
         answer = quality.inject_ledger_block(answer, c_ledger)
 
+        # 10b-2. #155 — maanga hua deliverable chup-chaap gayab na ho.
+        # Kyun yahan: evidence-first boundary ka "6c-3" block poora answer surface
+        # `local_reasoning.compose(...)` se dobara banata hai, aur us rebuild me
+        # CRAFT ka bana gaana kahin nahi hota — isliye guard ko us rebuild ke,
+        # claim verification ke aur label pass ke BAAD chalna hai, warna wahi
+        # hissa phir kat jaayega. Aur kyun §20 state block se PEHLE (#155d): jo
+        # guard ne NAAPA hai — "maangi hui cheez jawab me hai ya nahi" — wo usi
+        # state block me dikhna chahiye. Baad me chalane par state block ek
+        # purani baat chhaap deta aur report apne aap se ulti lagti.
+        # Guard khud kuch NAHI banata: jo `craft.run_craft(...)` ne apne naap ke
+        # saath lauta diya wahi, apne alag `[CREATIVE-DELIVERABLE]` label ke
+        # saath. Wo label `models._LABEL_TO_CLAIM` me jaan-boojh kar nahi hai,
+        # isliye is hisse se na claim ki ginti badhti hai na evidence level.
+        # Non-craft farmaish (jaise trading model) par `ensure()` answer ko
+        # chhoota hi nahi — text byte-identical laut jaata hai.
+        deliverable_record = deliverable_guard.capture(passes.get("craft") or {})
+        answer, deliverable_audit = deliverable_guard.ensure(
+            answer, deliverable_record)
+        deliverable_public = deliverable_guard.public_record(deliverable_audit)
+        for line in deliverable_guard.warnings(deliverable_audit):
+            if line not in warnings:
+                warnings.append(line)
+
         # 10c. §20 — chaar ALAG state + unke beech ke conflicts.
         #
         # Yahan (assemble ke BAAD) banti hai kyunki ye c_ledger aur quality_ctx
@@ -2428,6 +2497,20 @@ class DeepResearchEngine:
             hypotheses=passes["hypotheses"],
             top_label=evidence_level,
             recovered=bool(recovered),
+            # #155d — do ALAG ginti, waisi hi jaisi mili. `source_count` kachche
+            # (dhoondhe/padhe) source hain aur `directly_relevant_sources` sawaal
+            # ke seedhe kaam ke. Pichhle live run me report ne `EVIDENCE NONE`
+            # ke saath "40 sources" bhi chhaap diya tha — dono sach the, par
+            # wajah likhi nahi thi. Yahan dono bhej dete hain; state block ek
+            # line me farak samjha deta hai. Ek bhi ginti na aaye to wo line
+            # chhapti hi nahi ("pata nahi" kabhi 0 nahi likha jaata).
+            raw_source_count=len(pack.sources),
+            directly_relevant_count=quality_ctx.get("directly_relevant_sources"),
+            # Guard ka NAAPA hua record — chaar research state me ye ginta nahi,
+            # apni alag row banata hai. "Jawab COMPLETE" + "maangi hui cheez
+            # MISSING/BLOCKED" ek saath ho to conflict likha jaata hai aur
+            # `verified_allowed` apne aap False ho jaata hai.
+            deliverable=deliverable_public,
         )
         state_dict = research_state.to_dict()
         # Conflict chhupta nahi: warning list mein bhi jaata hai (UI banner) aur
@@ -2559,6 +2642,14 @@ class DeepResearchEngine:
             # "koi naya shabd nahi tha" nahi.
             mood_lexicon=mood_lexicon.public_record(
                 passes.get("mood_lexicon") or {}),
+            # #155 — DELIVERABLE GUARD ka public record: maanga hua deliverable
+            # jawab me tha, wapas lagaya gaya, bana hi nahi, ya (label bachne
+            # par) jaan-boojh kar nahi lagaya — chaar-paanch alag haalat, chaaron
+            # ka matlab alag. Naam se likha hua sach: is_evidence /
+            # counts_as_claim / guard_wrote_deliverable / quality_proven = False,
+            # gemini_calls = 0. `DELIVERABLE_NOT_ASKED` = kuch banane ki farmaish
+            # hi nahi thi (answer chhua bhi nahi gaya) — "nahi mila" nahi.
+            deliverable=deliverable_public,
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────

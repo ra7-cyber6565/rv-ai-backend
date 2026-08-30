@@ -1175,6 +1175,20 @@ class ResearchResult:
     # `ran: False` matlab kuch padha hi nahi gaya — "koi naya shabd nahi tha"
     # nahi. Banane wala module: research_engine/mood_lexicon.py
     mood_lexicon: Dict = field(default_factory=dict)
+    # #155 — DELIVERABLE GUARD ka record. Ye "kya bana" ka hisaab NAHI hai (wo
+    # `craft` me hai); ye is baat ka hisaab hai ki maanga hua deliverable JAWAB
+    # ME PAHUNCHA YA NAHI. Asli dikkat jisne isse janma: evidence-first boundary
+    # answer surface dobara banata tha aur CRAFT ka bana gaana us rebuild me
+    # gayab ho jaata tha. `state` ke paanch matlab alag-alag hain —
+    # DELIVERABLE_NOT_ASKED (farmaish hi nahi thi, answer chhua bhi nahi gaya),
+    # _PRESENT (pehle se tha), _RESTORED (gayab tha, wapas lagaya),
+    # _MISSING (bana hi nahi — guard ne naapi hui wajah likhi, khud kuch nahi
+    # banaya), _BLOCKED (ban gaya tha par usme evidence-label bacha tha, isliye
+    # jaan-boojh kar nahi lagaya). Naam se likha hua sach hamesha saath jaata
+    # hai: `is_evidence: False`, `counts_as_claim: False`,
+    # `guard_wrote_deliverable: False`, `quality_proven: False`,
+    # `gemini_calls: 0`. Banane wala module: research_engine/deliverable_guard.py
+    deliverable: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return asdict(self)

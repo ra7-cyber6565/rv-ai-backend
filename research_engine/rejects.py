@@ -51,6 +51,18 @@ REJECT_CODES = (OVER_EVIDENCE_CAP, NO_STATEMENT_IN_BLOCK, LAB_TEST_FAILED,
                 NOT_TESTABLE_NO_PREDICTION, SAFETY_RISKS_MISSING,
                 UNEXPLAINED_DROP)
 
+# ── "naapi hi nahi ja saki" — reject se ALAG baat ────────────────────────────
+# #155e — gaana/creative maang par bani hypothesis jinka naap ASLI INSAAN par
+# hota hai (GSR, EEG, dil ki dhadkan, 100 logon ka listening panel). Ye code
+# jaan-boojh kar `REJECT_CODES` me NAHI hai: aisi hypothesis na hataayi jaati
+# hai, na `rejected` list me jaati hai, na `kept` se nikalti hai. Ledger me wo
+# apni alag `unmeasured` list me jaati hai — "yahan naapi nahi ja sakti" bolna
+# aur "kamzor thi isliye nikaal di" bolna do bilkul alag baatein hain, aur dono
+# ko ek list me daalna hi jhooth hota.
+HUMAN_SUBJECT_ON_CRAFT_ASK = "human_subject_on_craft_ask"
+
+UNMEASURED_CODES = (HUMAN_SUBJECT_ON_CRAFT_ASK,)
+
 # Padhne wale ki bhasha me wajah. Har line me "kya naapa" ka ishaara hai —
 # "adhoori thi" jaisa bemaani jumla yahan nahi chalega.
 _REASON_TEXT: Dict[str, str] = {
@@ -72,6 +84,11 @@ _REASON_TEXT: Dict[str, str] = {
     UNEXPLAINED_DROP:
         "Ye hypothesis list se nikal gayi par iski koi NAAPI HUI wajah nahi "
         "mili — ise bug maano, chup-chaap drop nahi chalega.",
+    HUMAN_SUBJECT_ON_CRAFT_ASK:
+        "Is daawe ko naapne ke liye ASLI INSAAN chahiye (body signal ya "
+        "listening panel) — app ke paas na koi insaan hai na uska data, isliye "
+        "iska PASS/FAIL yahan banana jhooth hota. Idea galat sabit NAHI hua; "
+        "bane hue draft ka apna naap alag se hota hai.",
 }
 
 # Reject ka matlab "hamesha ke liye khatam" nahi. Kis naap par wapas aa sakti
@@ -91,6 +108,10 @@ _REOPEN_IF: Dict[str, str] = {
     SAFETY_RISKS_MISSING:
         "Risks + safety checks likhe jaayein aur qualified review ho, tab hi.",
     UNEXPLAINED_DROP: "Pehle wajah naapo — tab tak ise khula bug maano.",
+    HUMAN_SUBJECT_ON_CRAFT_ASK:
+        "Asli insaano par (ya kisi padhe hue published study ke apne numbers "
+        "par) ye naap ho jaaye, to nateeja seedha jud sakta hai — tab tak ye "
+        "khuli hui, na-naapi hui baat hai.",
 }
 
 # Ye codes delivered answer me hypothesis ko "aage nahi badhaya" bana dete hain.
@@ -264,6 +285,80 @@ def lab_rejects(hypotheses: Optional[Sequence[Dict[str, Any]]]) -> List[Reject]:
 MIN_RISK_CHARS = 15
 
 
+UNMEASURED_SUBHEADING = "### Jo yahan NAAPI hi nahi ja saki (reject nahi)"
+
+UNMEASURED_DISCLAIMER = (
+    "Neeche wali hypotheses hataayi NAHI gayi — wo answer me apni jagah hain. "
+    "Farq sirf itna hai ki inka test is machine ke andar ban hi nahi sakta, "
+    "isliye inke saath koi PASS/FAIL nahi lagaya gaya. 'Naapi nahi ja saki' "
+    "aur 'kamzor nikli' do alag baatein hain."
+)
+
+
+def unmeasured_records(hypotheses: Optional[Sequence[Dict[str, Any]]]
+                       ) -> List[Dict[str, Any]]:
+    """
+    #155e — jinka LAB test ban hi nahi saka, unka apna alag record.
+
+    Ye `rejected` list NAHI hai: yahan aane wali hypothesis `kept` me bhi rehti
+    hai aur `apply_to_hypotheses` use `rejected=True` bhi nahi karta. Naap LAB
+    ke apne block se uthaayi jaati hai (`human_subject_phrase`) — apni taraf se
+    koi wajah nahi gadhi jaati, aur phrase wahi chhapta hai jo asli text me tha.
+    """
+    out: List[Dict[str, Any]] = []
+    for position, hypothesis in enumerate(hypotheses or [], 1):
+        if not isinstance(hypothesis, dict):
+            continue
+        block = hypothesis.get("lab")
+        if not isinstance(block, dict) or not block.get("needs_human_subjects"):
+            continue
+        phrase = str(block.get("human_subject_phrase") or "").strip()
+        out.append({
+            "hypothesis_id": str(hypothesis.get("hypothesis_id") or ""),
+            "statement": str(hypothesis.get("statement") or ""),
+            "stage": STAGE_LAB,
+            "reason_code": HUMAN_SUBJECT_ON_CRAFT_ASK,
+            "reason": _REASON_TEXT[HUMAN_SUBJECT_ON_CRAFT_ASK],
+            "reopen_if": _REOPEN_IF[HUMAN_SUBJECT_ON_CRAFT_ASK],
+            "measured": {
+                "lab_verdict": str(block.get("verdict") or ""),
+                "rukne_wala_shabd": phrase,
+                "test_bane": len(block.get("tests") or []),
+            },
+            # Ye chaar line kabhi nahi badalti — na reject, na proof, na faisla.
+            "rejected": False,
+            "removed_from_answer": False,
+            "is_disproved": False,
+            "app_decision_only": True,
+            "index": position,
+        })
+    return out
+
+
+def unmeasured_section(ledger: Optional[Dict[str, Any]]) -> str:
+    """Ledger ki `unmeasured` list ka `###` block. Khaali par "" (koi shor nahi).
+
+    `###` hi rehta hai — `##` karne par answer_order ek naya top-level section
+    gin leta hai (#116/#117 ka wahi purana trap).
+    """
+    if not isinstance(ledger, dict) or not ledger.get("unmeasured"):
+        return ""
+    lines: List[str] = [UNMEASURED_SUBHEADING, "", UNMEASURED_DISCLAIMER, ""]
+    for row in ledger["unmeasured"]:
+        title = str(row.get("hypothesis_id") or "").strip() or "hypothesis"
+        lines.append(f"**{title}** — naap yahan mumkin nahi")
+        statement = str(row.get("statement") or "").strip()
+        if statement:
+            lines.append(f"- Daawa: {statement}")
+        lines.append(f"- Kyun: {row.get('reason')}")
+        measured = _measured_line(row.get("measured"))
+        if measured:
+            lines.append(f"- Naap: {measured}")
+        lines.append(f"- Wapas kab: {row.get('reopen_if')}")
+        lines.append("")
+    return "\n".join(lines).rstrip() + "\n"
+
+
 def quality_rejects(hypotheses: Optional[Sequence[Dict[str, Any]]]) -> List[Reject]:
     """
     Deterministic quality reject — sirf do haalat, dono naapi hui.
@@ -388,13 +483,19 @@ def build_ledger(hypotheses: Optional[Sequence[Dict[str, Any]]] = None,
     for row in rejected:
         code = str(row.get("reason_code") or UNEXPLAINED_DROP)
         counts[code] = counts.get(code, 0) + 1
-    return _finish_ledger(rejected, kept, counts, rows, requested, gate)
+    # #155e — ye list `rejected` se BAAHAR hai aur `kept` ko chhoti nahi karti:
+    # jo yahan hai wo answer me bhi hai. Isliye counts me bhi nahi jodi jaati,
+    # warna "itni reject hui" ki ginti jhoothi ho jaati.
+    return _finish_ledger(rejected, kept, counts, rows, requested, gate,
+                          unmeasured_records(rows))
 
 
 def _finish_ledger(rejected: List[Dict[str, Any]], kept: List[Dict[str, Any]],
                    counts: Dict[str, int], rows: List[Dict[str, Any]],
                    requested: int,
-                   gate: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+                   gate: Optional[Dict[str, Any]],
+                   unmeasured: Optional[List[Dict[str, Any]]] = None
+                   ) -> Dict[str, Any]:
     """Ledger ka aakhiri hissa: warnings, note aur imaandaar disclaimer."""
     warnings: List[str] = []
     unexplained = [row.get("hypothesis_id") or row.get("statement") or "?"
@@ -425,6 +526,10 @@ def _finish_ledger(rejected: List[Dict[str, Any]], kept: List[Dict[str, Any]],
         "checked": len(rows),
         "rejected": rejected,
         "kept": kept,
+        # #155e — na reject, na proof: sirf "yahan naapi nahi ja saki". Khaali
+        # list bhi jaati hai taaki UI ko "key hi nahi hai" ka andaaza na lagana
+        # pade (wahi niyam jo `apply_to_hypotheses` me hai).
+        "unmeasured": list(unmeasured or []),
         "counts": counts,
         "blocking": len([r for r in rejected if r.get("blocking")]),
         "unexplained": len(unexplained),

@@ -45,6 +45,7 @@ from .claim_labels import LABEL_RULE_PROMPT
 from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
+from .lab import MAX_AUDIT_LIMIT_LINES as LAB_MAX_AUDIT_LIMIT_LINES
 from .lab import lab_limits, lab_report_section
 from .craft import craft_limits, craft_section
 from .media_study import media_limits, media_section
@@ -58,7 +59,7 @@ from .songlab import MAX_AUDIT_LIMIT_LINES as SONGLAB_MAX_AUDIT_LIMIT_LINES
 from .songlab import songlab_limits, songlab_section
 from .mood_lexicon import MAX_AUDIT_LIMIT_LINES as MOOD_MAX_AUDIT_LIMIT_LINES
 from .mood_lexicon import mood_limits, mood_section
-from .rejects import reject_limits, reject_section
+from .rejects import reject_limits, reject_section, unmeasured_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
@@ -1624,7 +1625,10 @@ Ab jawab likho:"""
         # #116 — LAB ki seema NAAPI hui hai: kitne test pass/fail hue aur kaunsa
         # test data ke bina chala hi nahi. Ye line general disclaimer nahi hai,
         # isliye ye us run ke asli nateeje se banti hai.
-        for lab_line in lab_limits(lab_report)[:4]:
+        # Chhat #155e me `lab.MAX_AUDIT_LIMIT_LINES` se aane lagi: INSAAN par
+        # naapi jaane wali seema list me sabse aakhir me judti hai, aur purani
+        # `[:4]` par theek wahi line kat jaati thi.
+        for lab_line in lab_limits(lab_report)[:LAB_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {lab_line}")
         # #117 — reject ki ginti bhi audit me. "Kitni hataayi, kis wajah se,
         # kitni bina naap ke nikli" — teesri line hi wo bug pakadti hai jisme
@@ -1997,6 +2001,17 @@ Ab jawab likho:"""
                 reject_text = reject_section(reject_report)
                 if reject_text:
                     parts.append(reject_text)
+                # #155e — aur reject-list ke TURANT baad ek ALAG block: wo
+                # hypotheses jo naapi hi nahi ja sakti thin (jinka naap asli
+                # insaan ya uske body-signal par hota hai). Ye reject-list ke
+                # andar jaan-boojh kar NAHI daali gayi — "hataayi gayi" aur
+                # "yahan naapi nahi ja sakti" do bilkul alag baatein hain, aur
+                # dono ko ek list me daalna hi jhooth hota. Ye hypotheses jawab
+                # me apni jagah par bani rehti hain; yahan sirf ye likha hai ki
+                # unke saath koi PASS/FAIL kyun nahi lagaya gaya.
+                unmeasured_text = unmeasured_section(reject_report)
+                if unmeasured_text:
+                    parts.append(unmeasured_text)
                 # #121 — CRAFT: agar is run me kuch BANAYA gaya tha (gaana/
                 # kavita/letter...), to us draft ka naapa hua record bhi yahin
                 # `###` block me aata hai. Ye "acha bana hai" nahi kehta —

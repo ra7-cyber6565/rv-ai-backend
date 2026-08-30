@@ -30,12 +30,16 @@ from __future__ import annotations
 import math
 import re
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dataclass_replace
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import physics_checks
 from . import market_data
 from .advanced_discovery import NumericExecutionPolicy, SafeNumericExecutor
+# #155e — reject ka code ek hi jagah rehta hai (`rejects.py` leaf module hai,
+# isliye yahan import karne se koi cycle nahi banta). Naam yahan chhota rakha
+# gaya hai par value wahi hai — do jagah do string rakhna hi purani galti hai.
+from .rejects import HUMAN_SUBJECT_ON_CRAFT_ASK as HUMAN_SUBJECT_ON_CRAFT
 
 # ── status vocabulary ────────────────────────────────────────────────────────
 # Chaar asli nateeje + ek "chala hi nahi". NOT_RUN alag rakha gaya hai kyunki
@@ -85,6 +89,12 @@ class LabPolicy:
     min_series_points: int = market_data.MIN_SERIES_POINTS
     min_holdout_points: int = market_data.MIN_HOLDOUT_POINTS
     train_fraction: float = market_data.TRAIN_FRACTION
+    # #155e — ye run "kuch bana kar do" wali farmaish hai (gaana/kavita/script)?
+    # Default False rakha gaya hai jaan-boojh kar: science aur trading ke run me
+    # LAB ka bartaav ek bit bhi nahi badalta. True hone par sirf ITNA hota hai ki
+    # jis hypothesis ka test INSAAN ya uske body-signal se hoga, uske liye spec
+    # banti hi nahi — kyunki wo naap yahan ho hi nahi sakti.
+    craft_ask: bool = False
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -97,6 +107,7 @@ class LabPolicy:
             "min_series_points": self.min_series_points,
             "min_holdout_points": self.min_holdout_points,
             "train_fraction": self.train_fraction,
+            "craft_ask": self.craft_ask,
             "randomness_used": False,
             "network_used": False,
             "model_written_code_executed": False,
@@ -153,6 +164,70 @@ _HUMAN_LAB_RE = re.compile(
     r"\bpatients?\b|\bparticipants?\b|\banimal model\b|\bcell line\b|"
     r"\bsynthesi[sz]e\b|\bfabricat(?:e|ion)\b|\bprototype\b|\bwind tunnel\b|"
     r"\btelescope time\b|\bbeam\s?line\b", re.IGNORECASE)
+
+# ── #155e — gaane ki farmaish par LAB gaane ko test kare, INSAAN ko nahi ─────
+# Kyun (measured, live song run 2026-08-30): gaana maangne par jo hypotheses
+# bani unme "listeners ki GSR 20% badhegi", "EEG alpha girega", "10 logon ka
+# 7-din journaling" jaisi baatein thin. Un par LAB ne apna threshold/proportion
+# test chalane ki koshish ki aur evidence text ke kisi bhi number se "naap" kar
+# verdict de diya — jabki naapa gaya insaan ka body-signal tha hi nahi. Ye do
+# tarah se galat tha: (1) jis cheez ka data hi nahi hai uska PASS/FAIL dena
+# jhooth hai, (2) maanga gaya tha GAANA, aur test insaan par ho raha tha.
+#
+# Isliye ye alag list rakhi gayi hai (`_HUMAN_LAB_RE` se juda): wo "asli lab
+# chahiye" batati hai, ye "insaan/uska body-signal chahiye" batati hai — dono ki
+# wajah aur dono ka reopen_if alag hai. Ye sirf CRAFT farmaish par lagti hai
+# (`LabPolicy.craft_ask`), taaki science/trading ke run ka ek akshar na badle.
+_HUMAN_SUBJECT_RE = re.compile(
+    # body/brain signal (sensor lagega — machine ke andar nahi ho sakta)
+    r"\bg\.?s\.?r\b|\bgalvanic skin\b|\bskin conductance\b|\bE\.?D\.?A\b|"
+    r"\be\.?e\.?g\b|\bf?\.?m\.?r\.?i\b|\bmeg\b|\bfnirs\b|\bneuroimaging\b|"
+    r"\bbrain (?:scan|activity|wave)\b|\balpha (?:wave|power|band)\b|"
+    r"\bheart rate\b|\bh\.?r\.?v\b|\bpulse\b|\bblood pressure\b|\bcortisol\b|"
+    r"\bsaliva\b|\bpupil (?:dilation|diameter)\b|\beye[-\s]?track\w*\b|"
+    r"\bbiometric\w*\b|\bwearable\b|\bskin temperature\b|\bgoosebumps?\b|"
+    r"\bfrisson\b|\bchills\b|"
+    # insaan ko bulakar poochhna/dekhna (log chahiye — text nahi)
+    r"\blisten(?:er|ing) (?:test|study|panel|experiment|session)s?\b|"
+    r"\bfocus group\b|\bsurvey\b|\bquestionnaire\b|\blikert\b|\bself[-\s]?report\w*\b|"
+    r"\bjournal(?:ing|ling)\b|\bdiary study\b|\binterview\w*\b|"
+    r"\brecruit (?:\d+\s+)?(?:people|listeners|participants|volunteers)\b|"
+    r"\bvolunteers?\b|\brespondents?\b|\bsubjects?\b|"
+    r"\bA/?B test\w*\s+(?:on|with)\s+(?:listeners?|users?|people)\b|"
+    # Hinglish/Hindi
+    r"\b\d+\s*logon\s+(?:par|pe|ko|se)\b|\blogon\s+(?:par|pe)\s+test\b|"
+    r"\bshrota\w*\b|\bsunne\s+walon\s+(?:par|pe|se|ko)\b|"
+    r"\bdil\s*ki\s*dhadkan\b|\bpaseena\b",
+    re.IGNORECASE)
+
+
+def human_subject_hit(*texts: str) -> str:
+    """Pehla jo phrase INSAAN/uske body-signal ki maang karta hai (warna "").
+
+    Ek hi jagah se naapa jaata hai taaki "kis shabd par roka" report me,
+    reject-list me aur test me — teeno jagah bilkul wahi phrase chhape.
+    """
+    for text in texts:
+        found = _HUMAN_SUBJECT_RE.search(str(text or ""))
+        if found:
+            return found.group(0).strip()
+    return ""
+
+
+# Hypothesis ke SAB likhe hue field ek hi kram me — spec ka darwaza, wajah ki
+# line aur reject-list teeno YAHI function poochhte hain, isliye teeno jagah
+# bilkul ek hi phrase chhapta hai. Do jagah do kram rakhna hi purani galti hai.
+_HUMAN_SUBJECT_FIELDS = ("statement", "prediction", "prediction_text",
+                         "reasoning", "experiment", "how_to_test",
+                         "falsification_test")
+
+
+def human_subject_phrase(hypothesis: Dict[str, Any]) -> str:
+    """Is hypothesis me se wo pehla phrase jo INSAAN par naap maangta hai."""
+    if not isinstance(hypothesis, dict):
+        return ""
+    return human_subject_hit(*(_text_of(hypothesis, key)
+                               for key in _HUMAN_SUBJECT_FIELDS))
 
 
 @dataclass
@@ -347,6 +422,16 @@ def plan_specs(hypothesis: Dict[str, Any], pack: Any = None,
     safety = bool(hypothesis.get("safety_sensitive"))
     claim = _text_of(hypothesis, "statement", "prediction", "prediction_text")
     reason = _text_of(hypothesis, "reasoning", "statement", "prediction")
+    # #155e — CRAFT farmaish par: jis daawe ka naap INSAAN ya uske body-signal se
+    # hoga (GSR, EEG, heart rate, journaling, survey, "10 logon par"), uski spec
+    # yahan BANTI HI NAHI. Ye filter nahi, darwaza band hai: spec ban jaati to
+    # `threshold`/`proportion_interval` recipe evidence text ke kisi aur number
+    # ko utha kar PASS/FAIL de deti — aur wo number kisi ke shareer ka nahi hota.
+    # Wajah `_why_not_testable` wahi phrase utha kar likhta hai, isliye chup-chaap
+    # kuch nahi girta. Gaane ke SHABD ka naap is module ka kaam hi nahi — wo SONG
+    # LAB (#141) karta hai; ye stage sirf apne andar ka hisaab naapta hai.
+    if policy.craft_ask and human_subject_phrase(hypothesis):
+        return []
     ev_text = evidence_text(pack, policy)
     specs: List[TestSpec] = []
 
@@ -936,9 +1021,23 @@ _ROLLUP_REASON: Dict[str, str] = {
 }
 
 
-def _why_not_testable(hypothesis: Dict[str, Any]) -> Tuple[str, str]:
-    """Koi test hi nahi ban paayi — wajah do me se ek, aur wo saaf likhi jaaye."""
+def _why_not_testable(hypothesis: Dict[str, Any],
+                      craft_ask: bool = False) -> Tuple[str, str]:
+    """Koi test hi nahi ban paayi — wajah teen me se ek, aur wo saaf likhi jaaye."""
     plan = _text_of(hypothesis, "experiment", "how_to_test", "falsification_test")
+    # #155e sabse pehle: gaane ki farmaish par insaan/body-signal wali maang ko
+    # uske ASLI shabd ke saath likha jaata hai. Ye "idea galat hai" nahi kehta.
+    if craft_ask:
+        phrase = human_subject_phrase(hypothesis)
+        if phrase:
+            return (HUMAN_SUBJECT_ON_CRAFT,
+                    f"Is daawe ko naapne ke liye INSAAN chahiye — text me "
+                    f"\"{phrase}\" likha hai (log, unka body-signal ya unka "
+                    f"jawab). Wo naap is machine ke andar ho hi nahi sakti, "
+                    f"aur maanga gaya tha banaya hua deliverable — isliye iska "
+                    f"koi test banaya hi nahi gaya. Idea galat sabit nahi hua; "
+                    f"sirf yahan naapa nahi ja sakta. Bane hue draft ka apna "
+                    f"naap SONG LAB alag se karta hai.")
     if _HUMAN_LAB_RE.search(plan or ""):
         return ("needs_real_world_experiment",
                 "Iska test asli lab/field me hoga (samples, insaan, hardware "
@@ -951,13 +1050,22 @@ def _why_not_testable(hypothesis: Dict[str, Any]) -> Tuple[str, str]:
 
 def run_lab(question: str, hypotheses: Sequence[Dict[str, Any]],
             pack: Any = None, policy: Optional[LabPolicy] = None,
-            kill_switch: bool = False) -> Dict[str, Any]:
+            kill_switch: bool = False, craft_ask: bool = False) -> Dict[str, Any]:
     """LAB stage: hypothesis → test spec → asli hisaab → imaandaar nateeja.
 
     Input dicts ko chhua nahi jaata (copy bhi nahi banate — sirf padhte hain),
     isliye ye stage confidence, validation ya novelty kabhi nahi badalta.
+
+    `craft_ask=True` sirf tab bhejo jab user ne kuch BANWANE ko kaha ho (gaana,
+    kavita). Us haalat me insaan par naapi jaane wali hypothesis ka test banta
+    hi nahi — default False hai, isliye science/trading run ek akshar nahi
+    badalta.
     """
     policy = policy or LabPolicy()
+    if craft_ask and not policy.craft_ask:
+        # Caller ki di hui policy ko jagah par nahi badalte (wo dobara use ho
+        # sakti hai) — uski ek copy banti hai.
+        policy = dataclass_replace(policy, craft_ask=True)
     executor = SafeNumericExecutor(NumericExecutionPolicy())
     rows = [h for h in (hypotheses or []) if isinstance(h, dict)]
     report: Dict[str, Any] = {
@@ -1002,10 +1110,17 @@ def run_lab(question: str, hypotheses: Sequence[Dict[str, Any]],
         else:
             specs = plan_specs(hypothesis, pack, policy, question)
             if not specs:
-                code, detail = _why_not_testable(hypothesis)
+                code, detail = _why_not_testable(hypothesis, policy.craft_ask)
                 block["verdict"] = NOT_TESTABLE_HERE
                 block["verdict_reason"] = code
                 block["detail"] = detail
+                # Jis SHABD par ruke, wo bhi record hota hai — "naapa nahi ja
+                # saka" bolna aur ye na batana ki kis wajah se, wahi purana
+                # bemaani jumla hota. Reject-list isi field se banti hai.
+                if code == HUMAN_SUBJECT_ON_CRAFT:
+                    block["human_subject_phrase"] = human_subject_phrase(
+                        hypothesis)
+                    block["needs_human_subjects"] = True
             else:
                 results = run_specs(specs, policy, executor, deadline)
                 block["tests"] = [r.to_dict() for r in results]
@@ -1136,7 +1251,34 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
             "future ka waada NAHI hai, aur ye financial advice nahi hai.")
     if report.get("budget_exhausted"):
         limits.append("Lab ka time budget khatam hua — kuch test adhoore rahe.")
+    # #155e — jo hypothesis INSAAN par naapi jaani thi, uska yahan test hi nahi
+    # bana. Ye seema LAB ke baad bhi sach hai, isliye audit me jaati hai. "Test
+    # nahi chala" ko "hypothesis kamzor thi" padhna sabse aasaan galti hai —
+    # line khud us farq ko bolti hai.
+    human_blocked = [
+        str(block.get("human_subject_phrase") or "")
+        for block in report["hypotheses"] if block.get("needs_human_subjects")]
+    if human_blocked:
+        named = sorted({phrase for phrase in human_blocked if phrase})
+        limits.append(
+            f"{len(human_blocked)} hypothesis ka naap ASLI INSAAN par hota hai"
+            + (" (" + ", ".join(named) + ")" if named else "")
+            + " — app ke paas na insaan hai na uska data, isliye uska koi test "
+            "banaya hi nahi gaya. Ye 'hypothesis kamzor thi' NAHI hai; ye "
+            "'yahan naapi nahi ja sakti' hai. Gaane ke shabd ka apna naap SONG "
+            "LAB alag se karta hai.")
     return limits
+
+
+# #155e — audit me LAB ki seemaon ki chhat. Pehle ye ginti synthesizer me
+# `[:4]` bankar hard-code thi, aur INSAAN wali seema list me SABSE AAKHIR me
+# judti hai — 4 par rakhne se theek wahi nayi line kat jaati aur audit us baare
+# me chup ho jaata (yahi galti #133b me media ke saath ho chuki hai). Ginti
+# usi file me rehti hai jahan line banti hai, taaki naya branch jodte waqt ek
+# hi jagah badalni pade. `tests/test_deliverable_guard.py` ise upar ki asli
+# append-sites ki ginti se pin karta hai, isliye ye chupchaap purani nahi ho
+# sakti.
+MAX_AUDIT_LIMIT_LINES = 7
 
 
 def verdict_for(report: Optional[Dict[str, Any]], hypothesis_id: str) -> str:

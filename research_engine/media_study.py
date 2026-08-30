@@ -263,6 +263,36 @@ def _user_supplied(source: Any) -> bool:
     return "document" in kind
 
 
+def not_asked(reason: str = "kuch banane ki farmaish nahi thi") -> Dict[str, Any]:
+    """#155c — lane ka taala: craft ki farmaish hi nahi thi.
+
+    Kyun zaroori hai: ye lane pehle HAR sawaal par chalti thi. Trading ka model
+    ya physics ka sawaal poochne par bhi, agar kisi lecture-video ka transcript
+    sources me aa gaya, to jawab me "user ke video/audio se craft padha" wala
+    block chipak jaata tha. `wanted: False` ka matlab "maanga hi nahi gaya" hai
+    — "media mila nahi" nahi. `discovered` yahan jaan-boojh kar khaali hai,
+    taaki `media_section()` khaali laut aaye aur audit me koi seema-line na jude.
+    """
+    return {
+        "ran": False,
+        "wanted": False,
+        "lines": [],
+        "media_source_count": 0,
+        "sources_scanned": 0,
+        "discovered": {},
+        "kinds": [],
+        "user_supplied_count": 0,
+        "style_conventions_read": False,
+        "numeric_conventions": [],
+        "frames_read": FRAMES_READ,
+        "audio_listened": AUDIO_LISTENED,
+        "verified_allowed": USER_MEDIA_CAN_VERIFY,
+        "gemini_calls": GEMINI_CALLS,
+        "network_used": NETWORK_USED,
+        "note": str(reason or ""),
+    }
+
+
 def craft_guidance(sources: Iterable[Any],
                    ask: Optional[Any] = None) -> Dict[str, Any]:
     """Media transcript me se CITED craft-hidayat + media ka imaandaar label.
