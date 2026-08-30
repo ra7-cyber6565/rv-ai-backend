@@ -67,6 +67,13 @@ def test_trusted_attestor_mints_only_required_memory_proofs(tmp_path):
     assert ProofKind.HARDWARE.value not in kinds
     assert {row["verifier"] for row in rows} == {"trusted-operator"}
 
+    runtime_rows = [row for row in rows if row["proof_kind"] == ProofKind.RUNTIME.value]
+    persistence_rows = [row for row in rows if row["proof_kind"] == ProofKind.PERSISTENCE.value]
+    assert len(runtime_rows) == 1
+    assert runtime_rows[0]["valid_until"] > runtime_rows[0]["observed_at"]
+    assert runtime_rows[0]["valid_until"] == 61_200.0
+    assert all(row.get("valid_until") is None for row in persistence_rows)
+
 
 def test_existing_ledger_requires_prior_anchor_and_is_idempotent(tmp_path):
     storage = tmp_path / "runtime"
@@ -100,6 +107,48 @@ def test_existing_ledger_requires_prior_anchor_and_is_idempotent(tmp_path):
     )
     assert second.receipts_added == 0
     assert second.receipts_reused == 5
+
+
+def test_expired_runtime_receipt_refreshes_without_duplicating_persistence(tmp_path):
+    storage = tmp_path / "runtime"
+    ledger_path = tmp_path / "proofs.jsonl"
+    first = attest_memory_governance(
+        repo_root=_root(),
+        storage_root=storage,
+        ledger_path=ledger_path,
+        integrity_key=KEY,
+        run_reference="memory-governance:ci-fixture-refresh",
+        now=NOW,
+    )
+
+    refreshed_at = 61_201.0
+    second = attest_memory_governance(
+        repo_root=_root(),
+        storage_root=storage,
+        ledger_path=ledger_path,
+        integrity_key=KEY,
+        run_reference="memory-governance:ci-fixture-refresh",
+        now=refreshed_at,
+        prior_anchor_token=first.anchor_token,
+        prior_revision=first.revision,
+    )
+    assert second.audit.audit_valid is True
+    assert second.receipts_added == 1
+    assert second.receipts_reused == 4
+
+    c49 = second.audit.maturity_report.results[48]
+    assert ProofKind.RUNTIME not in c49.missing_proofs
+    assert ProofKind.PERSISTENCE not in c49.missing_proofs
+
+    ledger = ProofLedger(str(ledger_path), integrity_key=KEY)
+    rows = [row for row in ledger._events() if row.get("event_type") == "ADD"]  # noqa: SLF001
+    runtime_rows = [row for row in rows if row["proof_kind"] == ProofKind.RUNTIME.value]
+    persistence_rows = [row for row in rows if row["proof_kind"] == ProofKind.PERSISTENCE.value]
+    assert len(runtime_rows) == 2
+    assert len(persistence_rows) == 4
+    assert len({row["receipt_id"] for row in runtime_rows}) == 2
+    assert sorted(row["valid_until"] for row in runtime_rows) == [61_200.0, 64_800.0]
+    assert runtime_rows[-1]["valid_until"] > refreshed_at
 
 
 def test_wrong_reference_prefix_fails_before_ledger_creation(tmp_path):
