@@ -640,6 +640,19 @@ _MARKET_RE = re.compile(
     r"\btrading\b|\btrader\b|\bportfolio\b|\breturns?\b|\bbacktest\b|"
     r"\bbazaar\b|\bshare\s+bazar\b|\bnivesh\b|\bmehngai\b|\bbyaaj\s+dar\b",
     re.IGNORECASE)
+# Ticker/symbol ke naam (#150d) — "US100", "XAUUSD", "NAS100" me na "stock"
+# aata hai na "index", isliye purani list inhe pehchanti hi nahi thi aur trading
+# model ki farmaish par series lane band reh jaati thi. Ye list `trademodel` se
+# import NAHI hoti (wo module isi file se import karta hai — ulta import cycle
+# ban jaata). Yahan bhi wahi ehtiyaat: sirf saaf ticker, "gold"/"es"/"nq" jaise
+# do-matlab wale shabd nahi (unme se kuch pehle se `_MARKET_RE` me hain).
+_TICKER_RE = re.compile(
+    r"\bus\s?100\b|\busa100\b|\bnas\s?100\b|\bnasdaq[\s-]?100\b|\bustec\b|"
+    r"\btech100\b|\bxau\s?/?\s?usd\b|\bus\s?500\b|\bspx\s?500?\b|"
+    r"\bs&p\s?500\b|\bsp500\b|\bus\s?30\b|\bdow\s?30\b|\beur\s?/?\s?usd\b|"
+    r"\bgbp\s?/?\s?usd\b|\busd\s?/?\s?jpy\b|\bbtc\s?/?\s?usd\b|\busoil\b|"
+    r"\bbank\s?nifty\b|\bnifty\s?50\b",
+    re.IGNORECASE)
 # Sawaal me "waqt ke saath number" ki maang — iske bina market shabd sirf
 # topic hai, series ki zaroorat nahi.
 _SERIES_ASK_RE = re.compile(
@@ -653,23 +666,38 @@ _SERIES_ASK_RE = re.compile(
     re.IGNORECASE)
 
 
-def market_intent(question: str, domain_key: str = "") -> Dict[str, Any]:
+def market_intent(question: str, domain_key: str = "",
+                  trade_ask: bool = False) -> Dict[str, Any]:
     """Market/economic series lane khulegi ya nahi — aur KYUN (dono likhte hain).
 
     Do signal chahiye, ek nahi: (a) market/economic cheez ka naam, aur (b) waqt
     ke saath number ki maang. Sirf "price" likha hona kaafi nahi — warna har
     aam sawaal par ye API call jaati aur budget yahin kharch ho jaata.
+
+    `trade_ask` (#150d) doosre signal ki JAGAH le sakta hai, aur ye chhoot ek
+    naapi hui wajah se hai: trading model banane ki farmaish me user "historical
+    data" shabd nahi likhta, par bina purane number ke us model ko naapa hi nahi
+    ja sakta. Ye faisla yahan khud nahi hota — caller (planner) `trademodel.
+    is_request()` se poochh kar bhejta hai, taaki do jagah do list na banein.
     """
     text = str(question or "")
-    market = bool(_MARKET_RE.search(text))
+    market = bool(_MARKET_RE.search(text)) or bool(_TICKER_RE.search(text))
     ask = bool(_SERIES_ASK_RE.search(text))
+    model = bool(trade_ask)
     econ = str(domain_key or "").strip().lower() in ("economics", "finance")
-    wanted = bool((market and ask) or (econ and ask))
+    wanted = bool(((market or econ) and model) or (market and ask)
+                  or (econ and ask))
     if wanted:
-        which = ("sawaal me market/economic cheez ka naam bhi hai aur waqt ke "
-                 "saath number ki maang bhi" if market and ask else
-                 "field economics/finance nikla aur sawaal waqt ke saath "
-                 "number maang raha hai")
+        if market and ask:
+            which = ("sawaal me market/economic cheez ka naam bhi hai aur waqt ke "
+                     "saath number ki maang bhi")
+        elif econ and ask:
+            which = ("field economics/finance nikla aur sawaal waqt ke saath "
+                     "number maang raha hai")
+        else:
+            which = ("trading model banane ki farmaish hai — model purane number "
+                     "par hi naapa jaata hai, isliye series maangi gayi (ye "
+                     "financial advice nahi hai)")
         reason = f"market data lane chali — {which}"
     elif market and not ask:
         reason = ("market/economic shabd hai par waqt ke saath number ki maang "
@@ -682,4 +710,8 @@ def market_intent(question: str, domain_key: str = "") -> Dict[str, Any]:
     return {"wanted": wanted, "reason": reason,
             "market_signal": market, "series_ask": ask,
             "domain_economics": econ,
+            # #150d — ye key alag isliye hai ki "user ne khud series maangi" aur
+            # "model banane ke liye series chahiye" do alag baatein hain. Dono ko
+            # ek key me mila dena wahi jhooth hota jise #133/#134 me rokha tha.
+            "model_ask": model,
             "not_financial_advice": NOT_ADVICE_NOTE}

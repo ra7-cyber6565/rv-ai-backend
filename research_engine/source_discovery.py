@@ -46,6 +46,7 @@ from .network_safety import public_error
 from . import songcraft
 from . import listener_study
 from . import music_study
+from . import trademodel
 
 
 class SourceDiscovery:
@@ -373,6 +374,45 @@ class SourceDiscovery:
                               self._single(connector, clean, music_limit)))
             elif plan.get("web", True):
                 tasks.append(("music_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # TRADING MODEL ka TRADE-STUDY (#150d) — SIRF tab jab planner ne
+        # `trade_study` bhara ho. Ye tier gaane ke teen tier se poori tarah ALAG
+        # hai: alag label (`trade_study_<lane>`), alag budget, aur `is_lyrics_hunt`
+        # ka guard yahan JAAN-BOOJH KAR nahi hai — wo gaane ki lane ka pehra hai,
+        # trading ki query par use lagana lane mixing hi hota (intel ki shart:
+        # "sab mix mt kr dena"). Isi wajah se yahan `seen_craft`/`seen_listener`/
+        # `seen_music` bhi nahi dekhe jaate: un teen se koi query milti hi nahi.
+        #
+        # Kram planner se aata hai aur wo institutional-first hai — exchange/
+        # regulator ka document pehle (web lane), phir theory/paper, phir concept
+        # ki kitaab. Yahan wo kram badla nahi jaata.
+        trade_limit = max(1, min(2, max_per_connector))
+        seen_trade = set()
+        for entry in list(plan.get("trade_study", []))[
+                :trademodel.MAX_STUDY_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "web").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), "web"
+            key = clean.casefold()
+            if not clean or key in seen_trade:
+                continue
+            seen_trade.add(key)
+            connector = None
+            if lane == "books" and book_name:
+                connector = self.books.by_name(book_name)
+            elif lane == "papers" and paper_name:
+                connector = self.papers.by_name(paper_name)
+            if connector is not None:
+                tasks.append(("trade_study_" + lane,
+                              self._single(connector, clean, trade_limit)))
+            elif plan.get("web", True):
+                # `lane == "web"` ka asli raasta yahi hai (exchange/regulator ka
+                # document webpage hai, paper nahi), aur lane band hone par bhi
+                # naam se saaf rahe ki ye trade-study thi.
+                tasks.append(("trade_study_web",
                               self._web_chain(clean, max(1, min(2, max_web)))))
 
         return tasks
