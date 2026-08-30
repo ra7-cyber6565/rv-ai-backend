@@ -87,6 +87,15 @@ def test_committed_policy_maps_every_registry_required_production_wiring_route()
     assert report.invalid_file_subjects == ()
 
 
+def test_capability_98_committed_policy_maps_every_required_route():
+    root = Path(__file__).resolve().parents[1]
+    report = audit_repository_policy_coverage(root, capability_ids=[98])
+    assert report.gaps == ()
+    assert report.invalid_file_subjects == ()
+    assert report.required_routes == 5
+    assert report.mapped_routes == 5
+
+
 def test_report_is_machine_readable_and_never_equates_route_with_evidence():
     report = load_policy_coverage(
         _policy(_rule(1, ProofKind.CODE, "research_engine/question.py")),
