@@ -998,11 +998,13 @@ def deeply_read(sources: Iterable[Any] = ()) -> List[str]:
 
 
 # ── LAB report se kaam ka nateeja nikaalna ───────────────────────────────────
-# Ye naam `lab.py` ke recipe naam hain. `monte_carlo`, `robustness` aur
-# `baseline_tournament` abhi lab me NAHI hain — #150e me aayenge. Tab tak in
-# teeno point ka status NOT_MEASURED rehta hai, apni wajah ke saath. Isliye
-# yahan `lab.py` import nahi kiya jaata: is module ko usse aage jaana hai, aur
-# import karne se dono ek doosre ko bandhak bana lete.
+# Ye naam `lab.py` ke recipe naam hain. Chaaron ab lab me MAUJOOD hain (#150e:
+# `monte_carlo`, `parameter_robustness`, `baseline_tournament` walk-forward ke
+# baad chalte hain), isliye ye chaar point asli me MET tak pahunch sakte hain —
+# par sirf tab jab test SACH ME chala ho aur pass hua ho. Recipe na chale to
+# status apni wajah ke saath NOT_MET/NOT_MEASURED hi rehta hai. Yahan `lab.py`
+# JAAN-BOOJH KAR import nahi hota: is module ko usse aage jaana hai, aur import
+# karne se dono ek doosre ko bandhak bana lete.
 LAB_RECIPE_WALK_FORWARD = "walk_forward"
 LAB_RECIPE_MONTE_CARLO = "monte_carlo"
 LAB_RECIPE_ROBUSTNESS = "parameter_robustness"

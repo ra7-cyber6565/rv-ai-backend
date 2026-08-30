@@ -367,6 +367,16 @@ class WalkForward:
     first_period: str = ""
     last_period: str = ""
     holdout_first: str = ""
+    # #150e — held-out ke HAR step ka signed nateeja (price units me): model ne
+    # jis taraf kaha, us taraf chaal hui to +, ulti hui to −, aur koi signal na
+    # ho (drift 0) to 0.0. Ye `to_dict` me JAAN-BOOJH KAR nahi jaata (report
+    # bhaari ho jaati); ye Monte Carlo aur baseline muqable ka input hai. Isse
+    # MC us MODEL par chalta hai jo sach me test hua, buy-and-hold par nahi.
+    steps: Tuple[float, ...] = ()
+    # Kis drift lookback par ye nateeja aaya (None = poora itihaas, purana
+    # bartaav). Robustness sweep ise badal kar dekhta hai ki edge ek REGION me
+    # zinda hai ya ek magic number par.
+    drift_lookback: Optional[int] = None
 
     @property
     def direction(self) -> str:
@@ -412,12 +422,18 @@ class WalkForward:
 def walk_forward(series: Optional[MarketSeries],
                  min_points: int = MIN_SERIES_POINTS,
                  min_holdout: int = MIN_HOLDOUT_POINTS,
-                 train_fraction: float = TRAIN_FRACTION) -> WalkForward:
+                 train_fraction: float = TRAIN_FRACTION,
+                 drift_lookback: Optional[int] = None) -> WalkForward:
     """Expanding-window walk-forward. Deterministic: koi random seed nahi.
 
     Har held-out step par model ke paas SIRF us se pehle ka data hota hai
     (peeche se jhaank kar "sahi" jawab nahi utha sakta). Model = drift
     (train ka average change), baseline = naive random-walk (aakhri value).
+
+    `drift_lookback=None` (default) = poora itihaas, yaani #118 ka bilkul wahi
+    bartaav. Koi number dene par drift sirf aakhri utne point se banta hai —
+    ye #150e ke parameter-robustness sweep ke liye hai, aur ye bhi sirf PICHLA
+    data dekhta hai (koi leakage nahi).
     """
     if series is None or not series.points:
         return WalkForward(reason_code=NO_SERIES)
@@ -432,13 +448,28 @@ def walk_forward(series: Optional[MarketSeries],
                            n_train=max(0, n_train), n_test=max(0, n_test))
     model_error = naive_error = 0.0
     hits = scored = 0
+    steps: List[float] = []
     for index in range(n_train, total):
         history = values[:index]
-        drift = (history[-1] - history[0]) / (len(history) - 1)
+        window = history
+        if drift_lookback is not None and drift_lookback >= 2:
+            window = history[-int(drift_lookback):]
+        drift = ((window[-1] - window[0]) / (len(window) - 1)
+                 if len(window) > 1 else 0.0)
         forecast = history[-1] + drift
         actual = values[index]
         model_error += abs(actual - forecast)
         naive_error += abs(actual - history[-1])
+        # Ek step ka asli P&L: signal ki taraf chaal hui to fayda, ulti hui to
+        # nuksaan, aur bina signal (drift 0) par kuch nahi. Yahan bhi sirf
+        # `forecast` istemal hota hai, `actual` ki disha se signal nahi banta.
+        move = actual - history[-1]
+        if forecast > history[-1]:
+            steps.append(move)
+        elif forecast < history[-1]:
+            steps.append(-move)
+        else:
+            steps.append(0.0)
         # Direction sirf tab ginti hai jab cheez sach me hili ho — flat step par
         # "sahi disha bata di" kehna muft ka credit hota.
         if actual != history[-1]:
@@ -458,7 +489,447 @@ def walk_forward(series: Optional[MarketSeries],
         holdout_last=holdout[-1],
         first_period=series.points[0].period,
         last_period=series.points[-1].period,
-        holdout_first=series.points[n_train].period)
+        holdout_first=series.points[n_train].period,
+        steps=tuple(steps), drift_lookback=drift_lookback)
+
+
+# ── #150e: backtest ke AAGE ke teen naap (sab deterministic, ₹0) ─────────────
+# "Backtest chal gaya" se teen alag sawaalon ka jawab NAHI milta, isliye teen
+# alag naap:
+#   monte_carlo         — usi nateeje ka kram badal kar drawdown, losing streak,
+#                         risk of ruin, aur unse nikla risk-per-trade
+#   parameter_sweep     — edge ek REGION me zinda hai ya ek magic number par
+#   baseline_tournament — model ko HAR simple baseline se held-out par jeetna hai
+#
+# Randomness yahan bhi NAHI hai. Aam "Monte Carlo" random draw karta hai; yahan
+# uski jagah ek LIKHA HUA niyam hai — har path steps ka ek block-resample hai
+# (block stride se chune jaate hain, aur ulta kram bhi), yaani replacement ke
+# saath resampling, par bina kisi random number ke. Isliye wahi input par hamesha
+# wahi nateeja aata hai aur `randomness_used: False` jhooth nahi banta. Path ki
+# ginti bhi ASLI likhi jaati hai — "hazaaron simulation" ka jhootha daawa nahi.
+MC_MIN_STEPS = 12            # itne held-out step se kam par koi distribution nahi
+MC_MIN_PATHS = 60            # itne se kam path par percentile bemaani hai
+MC_MAX_PATHS = 600           # chhat (kram wahi, isliye truncate bhi deterministic)
+MC_BLOCK_LENGTHS: Tuple[int, ...] = (1, 2, 3, 4, 6, 8)
+MC_RISK_LADDER: Tuple[float, ...] = (0.0025, 0.005, 0.01, 0.02, 0.03, 0.05)
+MC_RUIN_LEVEL = 0.5          # equity aadhi reh gayi = ruin
+MC_MAX_P95_DRAWDOWN = 0.20   # p95 drawdown ki chhat
+MC_MAX_RUIN_PROB = 0.01      # ruin ki chhat (1%)
+FEW_STEPS = "too_few_steps_for_simulation"
+NO_STEP_MOVED = "no_step_moved_at_all"
+FEW_PATHS = "too_few_deterministic_paths"
+NO_SAFE_RISK = "no_risk_level_survived"
+
+SWEEP_LOOKBACKS: Tuple[int, ...] = (3, 4, 5, 6, 8, 12)
+SWEEP_MIN_SETTINGS = 3       # itne se kam setting par "region" ka daawa nahi
+SWEEP_MIN_BEAT_SHARE = 0.6   # region me kam se kam itne setting jeetein
+FEW_SETTINGS = "too_few_usable_parameter_settings"
+
+
+def _percentile(sorted_values: Sequence[float], q: float) -> float:
+    """Nearest-rank percentile. Koi interpolation nahi — kram hi kaafi hai."""
+    if not sorted_values:
+        return 0.0
+    index = int(round(q * (len(sorted_values) - 1)))
+    return float(sorted_values[max(0, min(len(sorted_values) - 1, index))])
+
+
+def mc_paths(steps: Sequence[float],
+             block_lengths: Sequence[int] = MC_BLOCK_LENGTHS,
+             max_paths: int = MC_MAX_PATHS) -> List[Tuple[float, ...]]:
+    """Deterministic block-resample: (block, start) ka har joda + ulta kram.
+
+    Block stride `block + 1` hai, isliye path me kuch step do baar aa sakta hai
+    aur kuch chhoot sakta hai — bootstrap wahi karta hai (replacement ke saath),
+    bas yahan chunav random nahi, likha hua hai.
+    """
+    base = [float(step) for step in steps or ()]
+    n = len(base)
+    if n < 2:
+        return [tuple(base)] if base else []
+    out: List[Tuple[float, ...]] = []
+    seen = set()
+    for raw in block_lengths:
+        block = max(1, min(int(raw), n))
+        for start in range(n):
+            order: List[float] = []
+            index = start
+            while len(order) < n:
+                order.extend(base[(index + k) % n] for k in range(block))
+                index = (index + block + 1) % n
+            path = tuple(order[:n])
+            for candidate in (path, tuple(reversed(path))):
+                if candidate in seen:
+                    continue
+                seen.add(candidate)
+                out.append(candidate)
+                if len(out) >= max_paths:
+                    return out
+    return out
+
+
+@dataclass
+class PathMetrics:
+    """Ek path ka nateeja. `ruined` = equity kabhi ruin level tak gir gayi."""
+    ending_equity: float = 1.0
+    max_drawdown: float = 0.0
+    worst_streak: int = 0
+    ruined: bool = False
+
+
+def path_metrics(path: Sequence[float], unit: float, risk: float,
+                 ruin_level: float = MC_RUIN_LEVEL) -> PathMetrics:
+    """Ek path par equity chala kar drawdown/streak/ruin naapo.
+
+    `unit` = ek "R" kitna bada hai (steps ki average absolute chaal). Risk ka
+    matlab: har step par equity ka `risk` hissa ek R par laga hai.
+    """
+    equity = peak = 1.0
+    max_dd = 0.0
+    streak = worst = 0
+    ruined = False
+    for step in path:
+        equity = max(0.0, equity * (1.0 + risk * (float(step) / unit)))
+        peak = max(peak, equity)
+        if peak > 0:
+            max_dd = max(max_dd, (peak - equity) / peak)
+        if float(step) < 0:
+            streak += 1
+            worst = max(worst, streak)
+        else:
+            streak = 0
+        if equity <= ruin_level:
+            ruined = True
+    return PathMetrics(ending_equity=equity, max_drawdown=max_dd,
+                       worst_streak=worst, ruined=ruined)
+
+
+@dataclass
+class MonteCarlo:
+    """Deterministic resampling ka nateeja. `ok=False` = chala hi nahi."""
+    ok: bool = False
+    reason_code: str = ""
+    n_steps: int = 0
+    n_paths: int = 0
+    unit: float = 0.0
+    rows: Tuple[Dict[str, Any], ...] = ()
+    risk_fraction: Optional[float] = None
+    # Top-level p95/ruin/median kis risk level ke hain. Ye field JAAN-BOOJH KAR
+    # alag hai: koi bhi level chhat ke andar na bache to `risk_fraction` None
+    # rehta hai par numbers phir bhi kisi ke hote hain (sabse chhote risk ke) —
+    # unhe "chune hue risk ke numbers" samajh lena hi jhooth ban jaata.
+    reported_risk: Optional[float] = None
+    p95_drawdown: Optional[float] = None
+    ruin_prob: Optional[float] = None
+    median_end: Optional[float] = None
+    worst_streak: int = 0
+
+    @property
+    def survived(self) -> bool:
+        """Koi risk level in chhaton ke andar bacha ya nahi."""
+        return self.ok and self.risk_fraction is not None
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "reason_code": self.reason_code,
+            "n_steps": self.n_steps,
+            "n_paths": self.n_paths,
+            "ladder": [dict(row) for row in self.rows],
+            "risk_per_trade": self.risk_fraction,
+            "numbers_belong_to_risk": self.reported_risk,
+            "p95_drawdown": self.p95_drawdown,
+            "ruin_probability": self.ruin_prob,
+            "median_ending_equity": self.median_end,
+            "worst_losing_streak": self.worst_streak,
+            "randomness_used": False,
+            "method": ("deterministic block-resample (rotation + ulta kram), "
+                       "koi random draw nahi"),
+            "past_data_only": BACKTEST_NOTE,
+            "not_financial_advice": NOT_ADVICE_NOTE,
+            "is_established_fact": False,
+        }
+
+
+def monte_carlo(steps: Sequence[float],
+                risk_ladder: Sequence[float] = MC_RISK_LADDER,
+                min_steps: int = MC_MIN_STEPS,
+                min_paths: int = MC_MIN_PATHS,
+                max_p95_drawdown: float = MC_MAX_P95_DRAWDOWN,
+                max_ruin_prob: float = MC_MAX_RUIN_PROB) -> MonteCarlo:
+    """Held-out ke steps par deterministic resampling — aur usse risk-per-trade.
+
+    Kya naapa jaata hai: p95 drawdown, ruin ki probability, median ending
+    equity, aur sabse lamba losing streak. Risk-per-trade WAHI chuna jaata hai
+    jo in chhaton ke andar sabse bada bacha ho. Koi risk level na bache to
+    `risk_fraction` None rehta hai — "chalo 1% le lo" jaisa andaaza nahi.
+    """
+    rows_in = [float(step) for step in steps or ()]
+    if len(rows_in) < max(4, int(min_steps)):
+        return MonteCarlo(reason_code=FEW_STEPS, n_steps=len(rows_in))
+    unit = sum(abs(step) for step in rows_in) / len(rows_in)
+    if unit <= 0:
+        return MonteCarlo(reason_code=NO_STEP_MOVED, n_steps=len(rows_in))
+    paths = mc_paths(rows_in)
+    if len(paths) < max(2, int(min_paths)):
+        return MonteCarlo(reason_code=FEW_PATHS, n_steps=len(rows_in),
+                          n_paths=len(paths), unit=unit)
+    rows: List[Dict[str, Any]] = []
+    for risk in risk_ladder:
+        metrics = [path_metrics(path, unit, float(risk)) for path in paths]
+        drawdowns = sorted(m.max_drawdown for m in metrics)
+        endings = sorted(m.ending_equity for m in metrics)
+        ruin_prob = sum(1 for m in metrics if m.ruined) / len(metrics)
+        row = {
+            "risk": float(risk),
+            "median_drawdown": _percentile(drawdowns, 0.5),
+            "p95_drawdown": _percentile(drawdowns, 0.95),
+            "ruin_prob": ruin_prob,
+            "median_end": _percentile(endings, 0.5),
+            "p05_end": _percentile(endings, 0.05),
+            "worst_streak": max((m.worst_streak for m in metrics), default=0),
+        }
+        row["acceptable"] = bool(row["p95_drawdown"] <= max_p95_drawdown
+                                 and ruin_prob <= max_ruin_prob
+                                 and row["median_end"] > 1.0)
+        rows.append(row)
+    safe = [row for row in rows if row["acceptable"]]
+    best = max(safe, key=lambda row: row["risk"]) if safe else None
+    return MonteCarlo(
+        ok=True, reason_code=("" if best else NO_SAFE_RISK),
+        n_steps=len(rows_in), n_paths=len(paths), unit=unit,
+        rows=tuple(rows),
+        risk_fraction=(best["risk"] if best else None),
+        reported_risk=(best or rows[0])["risk"],
+        p95_drawdown=(best or rows[0])["p95_drawdown"],
+        ruin_prob=(best or rows[0])["ruin_prob"],
+        median_end=(best or rows[0])["median_end"],
+        worst_streak=max(int(row["worst_streak"]) for row in rows))
+
+
+@dataclass
+class Sweep:
+    """Parameter sweep ka nateeja — edge region me hai ya ek magic number par."""
+    ok: bool = False
+    reason_code: str = ""
+    rows: Tuple[Dict[str, Any], ...] = ()
+    usable: int = 0
+    beat: int = 0
+    best_lookback: Optional[int] = None
+    min_settings: int = SWEEP_MIN_SETTINGS
+    min_share: float = SWEEP_MIN_BEAT_SHARE
+
+    @property
+    def share(self) -> Optional[float]:
+        return None if not self.usable else self.beat / self.usable
+
+    @property
+    def region_ok(self) -> Optional[bool]:
+        """None = faisla hi nahi ho sakta (itni settings chali hi nahi)."""
+        if not self.ok or self.usable < max(2, int(self.min_settings)):
+            return None
+        return bool((self.share or 0.0) >= self.min_share)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "reason_code": self.reason_code,
+            "settings": [dict(row) for row in self.rows],
+            "usable_settings": self.usable,
+            "settings_that_beat_naive": self.beat,
+            "share": self.share,
+            "region_ok": self.region_ok,
+            "best_lookback": self.best_lookback,
+            "past_data_only": BACKTEST_NOTE,
+            "not_financial_advice": NOT_ADVICE_NOTE,
+            "is_established_fact": False,
+        }
+
+
+def parameter_sweep(series: Optional[MarketSeries],
+                    lookbacks: Sequence[int] = SWEEP_LOOKBACKS,
+                    min_points: int = MIN_SERIES_POINTS,
+                    min_holdout: int = MIN_HOLDOUT_POINTS,
+                    train_fraction: float = TRAIN_FRACTION,
+                    min_settings: int = SWEEP_MIN_SETTINGS,
+                    min_share: float = SWEEP_MIN_BEAT_SHARE) -> Sweep:
+    """Drift lookback badal kar dekho: edge ek region me zinda hai ya nahi.
+
+    Split wahi rehta hai (warna do cheezein saath badal jaayengi aur pata nahi
+    chalega kis wajah se nateeja badla). Jo setting chal hi nahi sakti (lookback
+    train se bada) wo row me likhi jaati hai par ginti me nahi aati — chupke se
+    girna hi purani galti hai.
+    """
+    base = walk_forward(series, min_points=min_points, min_holdout=min_holdout,
+                        train_fraction=train_fraction)
+    if not base.ok:
+        return Sweep(reason_code=base.reason_code or NO_SERIES,
+                     min_settings=min_settings, min_share=min_share)
+    rows: List[Dict[str, Any]] = []
+    wanted: List[Optional[int]] = [None]
+    wanted.extend(int(k) for k in lookbacks)
+    for lookback in wanted:
+        if lookback is not None and not (2 <= lookback <= base.n_train):
+            rows.append({"lookback": lookback, "ran": False,
+                         "reason": "lookback_outside_train",
+                         "beats_naive": None})
+            continue
+        outcome = (base if lookback is None else
+                   walk_forward(series, min_points=min_points,
+                                min_holdout=min_holdout,
+                                train_fraction=train_fraction,
+                                drift_lookback=lookback))
+        rows.append({
+            "lookback": lookback,
+            "ran": bool(outcome.ok),
+            "reason": ("" if outcome.ok else outcome.reason_code),
+            "model_mae": round(outcome.model_mae, 6),
+            "naive_mae": round(outcome.naive_mae, 6),
+            "beats_naive": outcome.beats_naive,
+        })
+    usable = [row for row in rows if row.get("beats_naive") is not None]
+    winners = [row for row in usable if row["beats_naive"]]
+    best = min(winners, key=lambda row: row["model_mae"]) if winners else None
+    return Sweep(ok=True,
+                 reason_code=("" if len(usable) >= max(2, int(min_settings))
+                              else FEW_SETTINGS),
+                 rows=tuple(rows), usable=len(usable), beat=len(winners),
+                 best_lookback=(None if best is None else best["lookback"]),
+                 min_settings=min_settings, min_share=min_share)
+
+
+# Baseline tournament — model ko HAR simple model ko haraana padega, warna
+# "complex model" ka koi haq nahi. Naam wahi jo asli me chalte hain.
+BASELINE_NAMES: Tuple[str, ...] = (
+    "naive_last", "momentum_last_change", "mean_reversion_history",
+    "moving_average_3", "linear_trend",
+)
+BASELINE_SCOPE_NOTE = (
+    "Ye SERIES-level forecast baseline hain (naive, momentum, mean-reversion, "
+    "moving average, linear trend). Intraday ORB / VWAP / order-flow strategy "
+    "yahan test NAHI hui — uske liye bar-level (OHLC/tick) data chahiye, jo is "
+    "run me nahi tha."
+)
+NO_BASELINE = "no_baseline_could_forecast"
+
+
+def _baseline_forecasts(history: Sequence[float]) -> Dict[str, Optional[float]]:
+    """t tak ke data se hi har baseline ka agla forecast (koi future value nahi)."""
+    last = history[-1]
+    out: Dict[str, Optional[float]] = {"naive_last": last}
+    out["momentum_last_change"] = (last + (last - history[-2])
+                                   if len(history) > 1 else None)
+    out["mean_reversion_history"] = sum(history) / len(history)
+    out["moving_average_3"] = (sum(history[-3:]) / 3.0
+                               if len(history) >= 3 else None)
+    if len(history) > 1:
+        n = len(history)
+        mean_x = (n - 1) / 2.0
+        mean_y = sum(history) / n
+        var = sum((i - mean_x) ** 2 for i in range(n))
+        cov = sum((i - mean_x) * (history[i] - mean_y) for i in range(n))
+        slope = (cov / var) if var else 0.0
+        out["linear_trend"] = mean_y + slope * (n - mean_x)
+    else:
+        out["linear_trend"] = None
+    return out
+
+
+@dataclass
+class Tournament:
+    """Model vs simple baselines, sab par WAHI held-out split."""
+    ok: bool = False
+    reason_code: str = ""
+    n_train: int = 0
+    n_test: int = 0
+    model_mae: float = 0.0
+    rows: Tuple[Dict[str, Any], ...] = ()
+    beaten: int = 0
+    total: int = 0
+    winner: str = ""
+
+    @property
+    def beats_all(self) -> Optional[bool]:
+        if not self.ok or not self.total:
+            return None
+        return self.beaten == self.total
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "ok": self.ok,
+            "reason_code": self.reason_code,
+            "train_points": self.n_train,
+            "holdout_points": self.n_test,
+            "model_mae": round(self.model_mae, 6),
+            "baselines": [dict(row) for row in self.rows],
+            "baselines_beaten": self.beaten,
+            "baselines_compared": self.total,
+            "beats_all_baselines": self.beats_all,
+            "winner": self.winner,
+            "scope": BASELINE_SCOPE_NOTE,
+            "past_data_only": BACKTEST_NOTE,
+            "not_financial_advice": NOT_ADVICE_NOTE,
+            "is_established_fact": False,
+        }
+
+
+def baseline_tournament(series: Optional[MarketSeries],
+                        min_points: int = MIN_SERIES_POINTS,
+                        min_holdout: int = MIN_HOLDOUT_POINTS,
+                        train_fraction: float = TRAIN_FRACTION,
+                        drift_lookback: Optional[int] = None) -> Tournament:
+    """Held-out MAE par model aur paanch simple baseline ka seedha muqabla.
+
+    Model ka number `walk_forward()` se hi aata hai (do jagah do hisaab = jhooth
+    ki jagah). Baseline usi expanding window par chalte hain, sirf `history` se —
+    yaani sirf t ya usse pehle ka data.
+    """
+    outcome = walk_forward(series, min_points=min_points,
+                           min_holdout=min_holdout,
+                           train_fraction=train_fraction,
+                           drift_lookback=drift_lookback)
+    if not outcome.ok or series is None:
+        return Tournament(reason_code=(outcome.reason_code or NO_SERIES))
+    values = series.values()
+    n_train = outcome.n_train
+    errors: Dict[str, List[float]] = {name: [] for name in BASELINE_NAMES}
+    usable: Dict[str, bool] = {name: True for name in BASELINE_NAMES}
+    for index in range(n_train, len(values)):
+        history = values[:index]
+        actual = values[index]
+        forecasts = _baseline_forecasts(history)
+        for name in BASELINE_NAMES:
+            guess = forecasts.get(name)
+            if guess is None:
+                usable[name] = False
+                continue
+            errors[name].append(abs(actual - guess))
+    rows: List[Dict[str, Any]] = []
+    beaten = 0
+    total = 0
+    for name in BASELINE_NAMES:
+        points = errors[name]
+        if not usable[name] or not points:
+            rows.append({"baseline": name, "compared": False,
+                         "reason": "baseline_could_not_forecast",
+                         "mae": None, "model_better": None})
+            continue
+        mae = sum(points) / len(points)
+        better = outcome.model_mae < mae
+        total += 1
+        beaten += 1 if better else 0
+        rows.append({"baseline": name, "compared": True, "reason": "",
+                     "mae": round(mae, 6), "model_better": better})
+    if not total:
+        return Tournament(reason_code=NO_BASELINE, n_train=n_train,
+                          n_test=outcome.n_test, model_mae=outcome.model_mae,
+                          rows=tuple(rows))
+    scored = [(row["mae"], row["baseline"]) for row in rows if row["compared"]]
+    best_mae, best_name = min(scored)
+    winner = "model" if outcome.model_mae < best_mae else best_name
+    return Tournament(ok=True, n_train=n_train, n_test=outcome.n_test,
+                      model_mae=outcome.model_mae, rows=tuple(rows),
+                      beaten=beaten, total=total, winner=winner)
 
 
 # ── provider payload → series (pure functions, isliye offline test hote hain) ─

@@ -14,13 +14,24 @@ Kya ye module JAAN-BOOJH KAR nahi karta:
     app ke andar ka hisaab/consistency check pass hua — asli duniya ka
     experiment abhi bhi baaki hai.
 
-Paanch recipe (sab deterministic):
+Aath recipe (sab deterministic):
   numeric_formula     — hypothesis ka apna formula dobara chala kar naapo
   threshold           — "X se zyada/kam" wala daawa evidence ke numbers se naapo
   direction           — "badhega/ghatega" khud ke numbers se ulta hai ya nahi
   proportion_interval — "k of n" par Wilson interval; chhota sample = koi verdict nahi
   walk_forward        — asli train → held-out backtest (naive baseline se muqabla);
                         series na ho to DATA_MISSING, jhoothi "chal gaya" nahi
+  monte_carlo         — held-out ke asli per-step nateeje ko dobara-dobara jod kar
+                        drawdown / losing streak / risk-of-ruin, aur usse risk per
+                        trade. "Thousands of random simulations" ka jhooth NAHI:
+                        ye deterministic block-resample hai aur asli path ginti
+                        report hoti hai (#150e)
+  parameter_robustness— ek hi magic number par tikka edge FAIL hai. Drift lookback
+                        badal kar dekha jaata hai ki edge ek REGION me zinda hai
+  baseline_tournament — model ko paanch simple baseline (naive, momentum,
+                        mean-reversion, moving average, linear trend) me se HAR ek
+                        ko held-out par haraana padega, warna "complex model" ka
+                        koi haq nahi
 
 Status shabd (isse bahar kuch nahi):
   TESTED_PASS, TESTED_FAIL, DATA_MISSING, NOT_TESTABLE_HERE, NOT_RUN
@@ -75,7 +86,12 @@ RISK_REVIEW_NOTE = (
 class LabPolicy:
     """Lab ki chhat. Inhe badalna = jaan-boojh kar faisla, chupke se nahi."""
     max_hypotheses: int = 6
-    max_specs_per_hypothesis: int = 4
+    # #150e — 4 se 8. Pehle paanch branch the aur chhat 4 thi, yaani paanchvi spec
+    # (walk_forward) CHUP-CHAAP gir jaati thi jab baaki chaar ban jaayein. Ab teen
+    # naye backtest-baad ke test bhi hain (monte_carlo, parameter_robustness,
+    # baseline_tournament), aur aath ka matlab hai: koi bhi spec cap ki wajah se
+    # nahi girti. Chhat rakhi hui hai (0 nahi) taaki wall-clock budget bacha rahe.
+    max_specs_per_hypothesis: int = 8
     max_wall_seconds: float = 6.0
     seed: int = 20260826            # fixed — koi randomness use nahi hoti,
     #                                 ye sirf reproducibility ka record hai
@@ -89,6 +105,15 @@ class LabPolicy:
     min_series_points: int = market_data.MIN_SERIES_POINTS
     min_holdout_points: int = market_data.MIN_HOLDOUT_POINTS
     train_fraction: float = market_data.TRAIN_FRACTION
+    # #150e — teen naye test ki chhat. Ye bhi market_data se aati hain (wahi wajah:
+    # "kitna kaafi hai" ek hi jagah tay ho). In numbers ko yahan se badalna ek
+    # jaan-boojh kar liya faisla hai; chupke se kuch dheela nahi hota.
+    mc_min_steps: int = market_data.MC_MIN_STEPS
+    mc_min_paths: int = market_data.MC_MIN_PATHS
+    mc_max_p95_drawdown: float = market_data.MC_MAX_P95_DRAWDOWN
+    mc_max_ruin_prob: float = market_data.MC_MAX_RUIN_PROB
+    sweep_min_settings: int = market_data.SWEEP_MIN_SETTINGS
+    sweep_min_beat_share: float = market_data.SWEEP_MIN_BEAT_SHARE
     # #155e — ye run "kuch bana kar do" wali farmaish hai (gaana/kavita/script)?
     # Default False rakha gaya hai jaan-boojh kar: science aur trading ke run me
     # LAB ka bartaav ek bit bhi nahi badalta. True hone par sirf ITNA hota hai ki
@@ -107,6 +132,12 @@ class LabPolicy:
             "min_series_points": self.min_series_points,
             "min_holdout_points": self.min_holdout_points,
             "train_fraction": self.train_fraction,
+            "mc_min_steps": self.mc_min_steps,
+            "mc_min_paths": self.mc_min_paths,
+            "mc_max_p95_drawdown": self.mc_max_p95_drawdown,
+            "mc_max_ruin_prob": self.mc_max_ruin_prob,
+            "sweep_min_settings": self.sweep_min_settings,
+            "sweep_min_beat_share": self.sweep_min_beat_share,
             "craft_ask": self.craft_ask,
             "randomness_used": False,
             "network_used": False,
@@ -512,6 +543,28 @@ def plan_specs(hypothesis: Dict[str, Any], pack: Any = None,
             what="Forecast/backtest jaisa daawa — walk-forward test chahiye",
             text=claim, evidence_text=ev_text,
             series=series, series_reason=("" if series is not None else reason))
+        # 6-8. #150e — "backtest chal gaya" se teen ALAG sawaalon ka jawab nahi
+        #      milta, isliye teen alag spec: kitna risk zinda rehta hai (MC),
+        #      edge ek region me hai ya ek magic number par (sweep), aur model
+        #      simple baseline se behtar hai ya nahi (tournament). Ye spec sirf
+        #      tab banti hain jab SERIES asli me maujood ho — series na hone par
+        #      walk_forward ki ek DATA_MISSING line kaafi hai, aur teen aur
+        #      "data nahi mila" line report ko bhaari aur bekaar bana deti.
+        if series is not None:
+            add(recipe="monte_carlo", origin="prediction/statement",
+                what=("Held-out ke asli per-step nateeje dobara-dobara jod kar "
+                      "drawdown / losing streak / risk-of-ruin, aur usse risk "
+                      "per trade"),
+                text=claim, evidence_text=ev_text, series=series)
+            add(recipe="parameter_robustness", origin="prediction/statement",
+                what=("Edge ek REGION me zinda hai ya ek magic number par — "
+                      "drift lookback badal kar naapa"),
+                text=claim, evidence_text=ev_text, series=series)
+            add(recipe="baseline_tournament", origin="prediction/statement",
+                what=("Model vs paanch simple baseline (naive, momentum, "
+                      "mean-reversion, moving average, linear trend) — held-out "
+                      "MAE par seedha muqabla"),
+                text=claim, evidence_text=ev_text, series=series)
     return specs
 
 
@@ -960,12 +1013,255 @@ def _run_walk_forward(spec: TestSpec, policy: LabPolicy,
                 + market_data.NOT_ADVICE_NOTE))
 
 
+# ── #150e: backtest ke BAAD ke teen test ───────────────────────────────────────
+# Teeno ki ek hi shakal hai: series → walk_forward → uske ASLI nateeje par ek
+# aur naap. Isliye "series thi ya nahi" aur "walk-forward chala ya nahi" wali
+# do wajah ek hi jagah se aati hain (`_series_outcome`) — do jagah likhne se
+# dono chupke se alag ho jaati hain aur report kis wajah par ruki, ye pata hi
+# nahi chalta.
+_MC_NOT_RUN: Dict[str, str] = {
+    market_data.FEW_STEPS: (
+        f"Held-out me {market_data.MC_MIN_STEPS} step se kam the. Itne se "
+        "drawdown/ruin ka koi distribution nahi banta, isliye koi simulation "
+        "chalaya hi nahi gaya — 'risk per trade itna rakho' yahan se nahi aata."),
+    market_data.NO_STEP_MOVED: (
+        "Held-out ke saare step 0 the (model ne kabhi koi taraf hi nahi kaha). "
+        "Aise data par har risk 'safe' dikhta, isliye koi simulation nahi chala."),
+    market_data.FEW_PATHS: (
+        "Deterministic resample se itne alag path bane hi nahi ki percentile ka "
+        "matlab bane, isliye koi verdict nahi diya gaya."),
+}
+_SWEEP_NOT_RUN: Dict[str, str] = {
+    market_data.FEW_SETTINGS: (
+        f"{market_data.SWEEP_MIN_SETTINGS} se kam parameter setting chal payi "
+        "(series chhoti hai), isliye 'edge ek region me hai' ya 'ek magic number "
+        "par hai' — is sawaal ka jawab hi nahi nikla."),
+}
+_TOURNAMENT_NOT_RUN: Dict[str, str] = {
+    market_data.NO_BASELINE: (
+        "Koi bhi baseline held-out par forecast bana hi nahi paaya, isliye "
+        "muqabla hua hi nahi — 'model jeet gaya' kehna yahan jhooth hota."),
+}
+
+
+def _series_outcome(spec: TestSpec, policy: LabPolicy
+                    ) -> Tuple[Any, Any, str, List[str]]:
+    """(series, walk_forward outcome, label, source_ids). Fail par outcome None."""
+    series = spec.series
+    if series is None or not getattr(series, "points", None):
+        return None, None, "", []
+    source_ids = [str(sid) for sid in (getattr(series, "source_ids", None) or ())
+                  if str(sid)]
+    outcome = market_data.walk_forward(
+        series,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction)
+    return series, outcome, _series_label(series), source_ids
+
+
+def _no_series_result(spec: TestSpec) -> TestResult:
+    reason = spec.series_reason or market_data.NO_SERIES
+    return _result(spec, DATA_MISSING, reason_code=reason,
+                   detail=_wf_detail(reason))
+
+
+def _outcome_blocked(spec: TestSpec, outcome: Any, label: str,
+                     source_ids: List[str]) -> Optional[TestResult]:
+    """Walk-forward hi verdict-layak na ho to teeno naye test bhi chup rehte hain.
+
+    Do wajah: (a) walk-forward chala hi nahi, (b) held-out bilkul flat tha —
+    naive baseline ki galti 0 thi, yaani muqabla hua hi nahi. (b) wahi purana
+    #118 gate hai jo `walk_forward` recipe par lagta hai. Usko sirf ek recipe
+    par lagana aur baaki teen par chhod dena naapa hua jhooth banata hai: usi
+    series par walk_forward "koi verdict nahi ban sakta" kehta aur tournament
+    TESTED_FAIL likh deta — jabki flat held-out par model JEET bhi nahi sakta
+    (sab MAE 0 par barabar), isliye us "haar" ka koi matlab nahi hota.
+    """
+    if not outcome.ok:
+        return _result(spec, DATA_MISSING,
+                       reason_code=outcome.reason_code or market_data.NO_SERIES,
+                       observed=label, evidence_ids=source_ids,
+                       detail=_wf_detail(outcome.reason_code))
+    if outcome.beats_naive is None:
+        return _result(spec, DATA_MISSING, reason_code=market_data.FLAT_HOLDOUT,
+                       observed=label, evidence_ids=source_ids,
+                       detail=_wf_detail(market_data.FLAT_HOLDOUT))
+    return None
+
+
+def _run_monte_carlo(spec: TestSpec, policy: LabPolicy,
+                     executor: SafeNumericExecutor) -> TestResult:
+    """Drawdown / losing streak / risk-of-ruin — aur usse risk per trade.
+
+    Ye "thousands of random simulations" NAHI hai aur aisa daawa bhi nahi karta:
+    `market_data.mc_paths` ek deterministic block-resample hai (rotation + ulta
+    kram), aur report me asli path ginti jaati hai. Isi wajah se lab ka
+    `randomness_used: False` waada ek bit bhi nahi tootta.
+
+    PASS ka matlab: risk ladder me KOI aisa level mila jispar p95 drawdown aur
+    ruin ki probability chhat ke andar rahe aur median ending equity 1.0 se
+    upar. Na mile to TESTED_FAIL — "chalo 1% le lo" jaisa andaaza nahi.
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    mc = market_data.monte_carlo(outcome.steps,
+                                 min_steps=policy.mc_min_steps,
+                                 min_paths=policy.mc_min_paths,
+                                 max_p95_drawdown=policy.mc_max_p95_drawdown,
+                                 max_ruin_prob=policy.mc_max_ruin_prob)
+    if not mc.ok:
+        return _result(spec, DATA_MISSING, reason_code=mc.reason_code,
+                       observed=f"{label} | held-out step {mc.n_steps}",
+                       evidence_ids=source_ids,
+                       detail=_MC_NOT_RUN.get(
+                           mc.reason_code,
+                           f"Simulation chalaya hi nahi gaya (wajah: "
+                           f"{mc.reason_code or 'pata nahi'})."))
+    observed = (f"{label} | {mc.n_steps} held-out step se {mc.n_paths} "
+                f"deterministic path | p95 drawdown "
+                f"{mc.p95_drawdown:.1%} (risk {mc.reported_risk:.2%} par), "
+                f"ruin {mc.ruin_prob:.2%}, sabse lamba losing streak "
+                f"{mc.worst_streak}")
+    tail = (" " + market_data.BACKTEST_NOTE + " "
+            + market_data.NOT_ADVICE_NOTE)
+    if not mc.survived:
+        return _result(
+            spec, TESTED_FAIL, observed=observed,
+            expected=(f"kam se kam ek risk level jispar p95 drawdown ≤ "
+                      f"{policy.mc_max_p95_drawdown:.0%} aur ruin ≤ "
+                      f"{policy.mc_max_ruin_prob:.1%}"),
+            evidence_ids=source_ids, reason_code=market_data.NO_SAFE_RISK,
+            detail=("Risk ladder ka koi bhi level in chhaton ke andar nahi "
+                    "bacha — is model ko is series par tradeable risk NAHI "
+                    "mila. Upar ke numbers sabse chhote risk level ke hain, "
+                    "kisi 'chune hue' risk ke nahi." + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed,
+        expected=(f"p95 drawdown ≤ {policy.mc_max_p95_drawdown:.0%}, ruin ≤ "
+                  f"{policy.mc_max_ruin_prob:.1%}, median ending equity > 1.0"),
+        computed=mc.risk_fraction, evidence_ids=source_ids,
+        reason_code="risk_level_survived_resampling",
+        detail=(f"Sabse bada risk per trade jo in chhaton ke andar bacha: "
+                f"{mc.risk_fraction:.2%} (median ending equity "
+                f"{mc.median_end:.3g}). Ye {mc.n_paths} deterministic path par "
+                f"naapa gaya, koi random draw nahi." + tail))
+
+
+def _run_parameter_robustness(spec: TestSpec, policy: LabPolicy,
+                              executor: SafeNumericExecutor) -> TestResult:
+    """Edge ek REGION me zinda hai ya ek magic number par.
+
+    Split wahi rehta hai, sirf drift lookback badalta hai. PASS tab jab kaafi
+    settings chali hon AUR unme se kam se kam `sweep_min_beat_share` hissa naive
+    baseline ko haraye. Ek hi setting jeete = magic number = TESTED_FAIL.
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    sweep = market_data.parameter_sweep(
+        series,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction,
+        min_settings=policy.sweep_min_settings,
+        min_share=policy.sweep_min_beat_share)
+    region = sweep.region_ok
+    observed = (f"{label} | {sweep.usable} setting chali, {sweep.beat} ne naive "
+                f"baseline ko haraya"
+                + (f" (share {sweep.share:.0%})" if sweep.share is not None
+                   else ""))
+    if region is None:
+        reason = sweep.reason_code or market_data.FEW_SETTINGS
+        return _result(spec, DATA_MISSING, reason_code=reason,
+                       observed=observed, evidence_ids=source_ids,
+                       detail=_SWEEP_NOT_RUN.get(
+                           reason, _wf_detail(reason)))
+    tail = " " + market_data.BACKTEST_NOTE + " " + market_data.NOT_ADVICE_NOTE
+    expected = (f"{sweep.usable} me se kam se kam "
+                f"{policy.sweep_min_beat_share:.0%} settings naive baseline se "
+                "behtar")
+    if not region:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=sweep.share, evidence_ids=source_ids,
+            reason_code="edge_only_at_isolated_setting",
+            detail=("Edge sirf ginti ki settings par dikha — yaani ye ek magic "
+                    "number par tikka hai, region me zinda nahi. Aise edge ka "
+                    "live market me bachna sabse kam sambhav hai." + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=sweep.share, evidence_ids=source_ids,
+        reason_code="edge_survives_parameter_region",
+        detail=(f"Lookback {sweep.best_lookback if sweep.best_lookback else 'poora itihaas'} "
+                f"par sabse kam galti thi, par nateeja ek setting par nahi tikka: "
+                f"{sweep.beat}/{sweep.usable} settings ne naive ko haraya." + tail))
+
+
+def _run_baseline_tournament(spec: TestSpec, policy: LabPolicy,
+                             executor: SafeNumericExecutor) -> TestResult:
+    """Model vs paanch simple baseline, wahi held-out split.
+
+    PASS tab jab model HAR compare hui baseline se kam galti kare. Ek bhi simple
+    model behtar nikla to complex model ka koi haq nahi — TESTED_FAIL.
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    tour = market_data.baseline_tournament(
+        series,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction)
+    if not tour.ok:
+        reason = tour.reason_code or market_data.NO_BASELINE
+        return _result(spec, DATA_MISSING, reason_code=reason,
+                       observed=label, evidence_ids=source_ids,
+                       detail=_TOURNAMENT_NOT_RUN.get(reason,
+                                                      _wf_detail(reason)))
+    lost = [row["baseline"] for row in tour.rows
+            if row.get("compared") and not row.get("model_better")]
+    observed = (f"{label} | held-out {tour.n_test} | model MAE "
+                f"{tour.model_mae:.4g} | {tour.beaten}/{tour.total} baseline "
+                f"haraye | jeeta: {tour.winner}")
+    expected = f"{tour.total}/{tour.total} baseline se kam galti (MAE)"
+    tail = (" " + market_data.BASELINE_SCOPE_NOTE + " "
+            + market_data.BACKTEST_NOTE + " " + market_data.NOT_ADVICE_NOTE)
+    if not tour.beats_all:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=float(tour.beaten), evidence_ids=source_ids,
+            reason_code="simpler_baseline_did_better",
+            detail=("Ye simple baseline model se BEHTAR nikle: "
+                    + ", ".join(lost) + ". Jab ek seedha model hi behtar hai, "
+                    "complex model ka koi haq nahi." + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=float(tour.beaten), evidence_ids=source_ids,
+        reason_code="model_beats_every_baseline",
+        detail=(f"Model ne saari {tour.total} baseline ko held-out par haraya "
+                f"(model MAE {tour.model_mae:.4g})." + tail))
+
+
 RECIPES: Dict[str, Any] = {
     "numeric_formula": _run_numeric_formula,
     "threshold": _run_threshold,
     "direction": _run_direction,
     "proportion_interval": _run_proportion_interval,
     "walk_forward": _run_walk_forward,
+    "monte_carlo": _run_monte_carlo,
+    "parameter_robustness": _run_parameter_robustness,
+    "baseline_tournament": _run_baseline_tournament,
 }
 
 
@@ -1196,6 +1492,15 @@ def lab_report_section(report: Optional[Dict[str, Any]]) -> str:
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _ran_count(report: Dict[str, Any], recipe: str) -> int:
+    """Kitne test SACH ME chale (PASS ya FAIL). DATA_MISSING yahan nahi ginta."""
+    return sum(
+        1 for block in report.get("hypotheses") or []
+        for test in (block.get("tests") or [])
+        if test.get("recipe") == recipe
+        and test.get("status") in (TESTED_PASS, TESTED_FAIL))
+
+
 def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
     """Wo seemayein jo LAB ke baad BHI sach hain — jawab ke audit me jaati hain.
 
@@ -1251,9 +1556,35 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
             "future ka waada NAHI hai, aur ye financial advice nahi hai.")
     if report.get("budget_exhausted"):
         limits.append("Lab ka time budget khatam hua — kuch test adhoore rahe.")
-    # #155e — jo hypothesis INSAAN par naapi jaani thi, uska yahan test hi nahi
     # bana. Ye seema LAB ke baad bhi sach hai, isliye audit me jaati hai. "Test
     # nahi chala" ko "hypothesis kamzor thi" padhna sabse aasaan galti hai —
+    # line khud us farq ko bolti hai.
+    # #150e — teen naye test ki apni-apni seema. Ye teeno "chal gaya" ke saath
+    # hi likhi jaati hain, kyunki inka pass hona sabse aasaani se over-read hota
+    # hai. Ginti asli results se aati hai (declare nahi ki jaati).
+    ran_mc = _ran_count(report, "monte_carlo")
+    if ran_mc:
+        limits.append(
+            f"{ran_mc} Monte-Carlo risk test chala, par ye DETERMINISTIC "
+            "block-resample hai (held-out ke asli steps ka kram badal kar) — "
+            "'thousands of random simulations' NAHI. Risk per trade sirf isi "
+            "purane held-out se nikla hai; naya regime aane par ye number "
+            "bemaani ho sakta hai.")
+    ran_sweep = _ran_count(report, "parameter_robustness")
+    if ran_sweep:
+        limits.append(
+            f"{ran_sweep} parameter-robustness sweep chala, par usme sirf ek "
+            "parameter (drift lookback) badla gaya — poora strategy space nahi "
+            "chhana gaya. Region me zinda edge bhi live market me chalne ka "
+            "waada NAHI hai.")
+    ran_tour = _ran_count(report, "baseline_tournament")
+    if ran_tour:
+        limits.append(
+            f"{ran_tour} baseline tournament chala. "
+            + market_data.BASELINE_SCOPE_NOTE)
+    # Jis hypothesis ka naap INSAAN par hota hai, uska yahan test hi nahi bana
+    # (#155e). Ye seema LAB ke baad bhi sach hai, isliye audit me jaati hai.
+    # "Test nahi chala" ko "hypothesis kamzor thi" padhna sabse aasaan galti hai —
     # line khud us farq ko bolti hai.
     human_blocked = [
         str(block.get("human_subject_phrase") or "")
@@ -1278,7 +1609,7 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
 # hi jagah badalni pade. `tests/test_deliverable_guard.py` ise upar ki asli
 # append-sites ki ginti se pin karta hai, isliye ye chupchaap purani nahi ho
 # sakti.
-MAX_AUDIT_LIMIT_LINES = 7
+MAX_AUDIT_LIMIT_LINES = 10
 
 
 def verdict_for(report: Optional[Dict[str, Any]], hypothesis_id: str) -> str:
