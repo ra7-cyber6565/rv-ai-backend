@@ -10,6 +10,11 @@ The observer HMAC proves that a holder of the configured external observer key
 signed the measurement packet. Operational key custody and the physical truth
 of a sensor remain external trust assumptions; therefore this module never
 sets ``truth_proven``.
+
+RUNTIME/LIVE receipts are deliberately short-lived. Their expiry is bounded by
+the original signed receipt and observation freshness horizons, so replaying the
+same observation through this attestor cannot make stale reality evidence fresh
+again. EXECUTION/REPRODUCIBILITY receipts remain revision-bound but non-live.
 """
 from __future__ import annotations
 
@@ -54,6 +59,7 @@ _REQUIRED: Tuple[ProofKind, ...] = (
     ProofKind.RUNTIME,
     ProofKind.LIVE,
 )
+_LIVE_PROOFS = frozenset((ProofKind.RUNTIME, ProofKind.LIVE))
 _MAX_RECEIPT_BYTES = 2 * 1024 * 1024
 _MAX_RECEIPT_AGE_SECONDS = 2 * 60 * 60
 _MAX_OBSERVATION_AGE_SECONDS = 2 * 60 * 60
@@ -125,7 +131,11 @@ def observation_signature(
         "prediction_contract_hash": str(prediction_contract_hash),
         "observation": dict(observation),
     }
-    return hmac.new(bytes(observer_key), _SIGNATURE_DOMAIN + _canonical(payload), hashlib.sha256).hexdigest()
+    return hmac.new(
+        bytes(observer_key),
+        _SIGNATURE_DOMAIN + _canonical(payload),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -136,6 +146,7 @@ class LiveOracleReceipt:
     observation_id: str
     evaluation_hash: str
     sha256: str
+    live_valid_until_epoch: float
 
 
 @dataclass(frozen=True)
@@ -188,7 +199,7 @@ def validate_live_oracle_receipt(
         raise ValueError("created_at_epoch must be an integer")
     if created > current_time + _MAX_FUTURE_SKEW_SECONDS:
         raise ValueError("reality oracle receipt is from the future")
-    if current_time - created > _MAX_RECEIPT_AGE_SECONDS:
+    if current_time - created >= _MAX_RECEIPT_AGE_SECONDS:
         raise ValueError("reality oracle receipt is stale")
 
     pred = value.get("prediction")
@@ -220,8 +231,18 @@ def validate_live_oracle_receipt(
     observed_epoch = _unix(rebuilt_observation.observed_at)
     if observed_epoch > current_time + _MAX_FUTURE_SKEW_SECONDS:
         raise ValueError("observation timestamp is from the future")
-    if current_time - observed_epoch > _MAX_OBSERVATION_AGE_SECONDS:
+    if current_time - observed_epoch >= _MAX_OBSERVATION_AGE_SECONDS:
         raise ValueError("observation is too old to count as live")
+
+    # LIVE/RUNTIME evidence may never outlive the source packet that justified it.
+    # The minimum binds freshness to both the signed receipt and the measurement,
+    # preventing re-attestation from extending a stale observation's lifetime.
+    live_valid_until = min(
+        float(created) + _MAX_RECEIPT_AGE_SECONDS,
+        observed_epoch + _MAX_OBSERVATION_AGE_SECONDS,
+    )
+    if not math.isfinite(live_valid_until) or live_valid_until <= current_time:
+        raise ValueError("live observation validity window is exhausted")
 
     observer = value.get("observer")
     if not isinstance(observer, dict) or set(observer) != {"observer_id", "signature"}:
@@ -251,7 +272,11 @@ def validate_live_oracle_receipt(
         raise ValueError("inconclusive observation cannot mint live oracle proof")
     if first.to_dict() != evaluation:
         raise ValueError("reality oracle evaluation content/hash verification failed")
-    if first.truth_proven or first.live_observation_proven or first.observation_authenticity_proven:
+    if (
+        first.truth_proven
+        or first.live_observation_proven
+        or first.observation_authenticity_proven
+    ):
         raise ValueError("untrusted oracle evaluation must preserve authenticity/truth boundary")
 
     return LiveOracleReceipt(
@@ -261,6 +286,7 @@ def validate_live_oracle_receipt(
         observation_id=rebuilt_observation.observation_id,
         evaluation_hash=first.evaluation_hash,
         sha256=hashlib.sha256(raw_bytes).hexdigest(),
+        live_valid_until_epoch=live_valid_until,
     )
 
 
@@ -271,6 +297,7 @@ def _same_receipt(
     digest: str,
     reference: str,
     revision: str,
+    valid_until: float | None,
 ) -> bool:
     expected = {
         "capability_id": _CAPABILITY_ID,
@@ -280,6 +307,7 @@ def _same_receipt(
         "verifier": _VERIFIER,
         "reference": reference,
         "implementation_revision": revision,
+        "valid_until": valid_until,
     }
     return all(row.get(key) == value for key, value in expected.items())
 
@@ -308,7 +336,11 @@ def attest_reality_oracle_live(
 
     identity_before = repository_identity(root)
     revision = str(identity_before.get("revision") or "")
-    if not identity_before.get("available") or not identity_before.get("clean") or not revision:
+    if (
+        not identity_before.get("available")
+        or not identity_before.get("clean")
+        or not revision
+    ):
         raise ValueError("reality oracle attestation requires a clean Git checkout")
 
     live_receipt = validate_live_oracle_receipt(
@@ -322,7 +354,8 @@ def attest_reality_oracle_live(
     policy = _parse_policy(_read_policy_bytes(root, tracked, policy_path))
     for kind in _REQUIRED:
         matching = tuple(
-            rule for rule in policy.rules
+            rule
+            for rule in policy.rules
             if rule.capability_id == _CAPABILITY_ID
             and rule.proof_kind is kind
             and _SUBJECT in rule.subjects
@@ -351,18 +384,26 @@ def attest_reality_oracle_live(
     elif prior_anchor_token or prior_revision:
         raise ValueError("prior anchor/revision supplied for an empty maturity ledger")
 
-    digest = _sha({
-        "receipt_sha256": live_receipt.sha256,
-        "evaluation_hash": live_receipt.evaluation_hash,
-        "observer_id": live_receipt.observer_id,
-        "revision": revision,
-        "subject": _SUBJECT,
-    })
+    digest = _sha(
+        {
+            "receipt_sha256": live_receipt.sha256,
+            "evaluation_hash": live_receipt.evaluation_hash,
+            "observer_id": live_receipt.observer_id,
+            "revision": revision,
+            "subject": _SUBJECT,
+            "live_valid_until_epoch": live_receipt.live_valid_until_epoch,
+        }
+    )
     ledger = ProofLedger(str(ledger_target), integrity_key=integrity_key)
     existing = _existing_adds(ledger)
     added = reused = 0
     for kind in _REQUIRED:
-        receipt_id = f"reality:{revision[:12]}:{live_receipt.observation_id}:{kind.value}"
+        valid_until = (
+            live_receipt.live_valid_until_epoch if kind in _LIVE_PROOFS else None
+        )
+        receipt_id = (
+            f"reality:{revision[:12]}:{live_receipt.observation_id}:{kind.value}"
+        )
         previous = existing.get(receipt_id)
         if previous is not None:
             if not _same_receipt(
@@ -371,6 +412,7 @@ def attest_reality_oracle_live(
                 digest=digest,
                 reference=reference,
                 revision=revision,
+                valid_until=valid_until,
             ):
                 raise ValueError("deterministic reality oracle receipt_id collision")
             reused += 1
@@ -383,6 +425,7 @@ def attest_reality_oracle_live(
             subject_sha256=digest,
             verifier=_VERIFIER,
             observed_at=current_time,
+            valid_until=valid_until,
             reference=reference,
             implementation_revision=revision,
         )
