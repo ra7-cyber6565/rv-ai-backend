@@ -96,6 +96,23 @@ def test_capability_98_committed_policy_maps_every_required_route():
     assert report.mapped_routes == 5
 
 
+def test_committed_policy_maps_every_registry_required_proof_route():
+    """Every required proof class needs a committed acceptance route.
+
+    This is deliberately stricter than the wiring-only regression above.  A
+    mapped route is *not* evidence and never makes a capability verified; it
+    only guarantees that legitimate future CODE/TEST/execution/independence/
+    persistence/runtime/live/hardware/safety/reproducibility evidence has a
+    fail-closed policy path through the trusted maturity auditor.
+    """
+    root = Path(__file__).resolve().parents[1]
+    report = audit_repository_policy_coverage(root)
+    assert report.complete is True, report.to_dict()
+    assert report.required_routes == report.mapped_routes
+    assert report.gaps == ()
+    assert report.invalid_file_subjects == ()
+
+
 def test_report_is_machine_readable_and_never_equates_route_with_evidence():
     report = load_policy_coverage(
         _policy(_rule(1, ProofKind.CODE, "research_engine/question.py")),
