@@ -23,6 +23,8 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Mapping
 
+from utils.release_identity import repository_identity
+
 from .external_proof_attestor_core import (
     ExternalEvidenceReceipt,
     ExternalProofAttestation,
@@ -64,6 +66,14 @@ def _canonical_receipt(path: str | os.PathLike[str]) -> tuple[Mapping[str, Any],
     return value, encoded, hashlib.sha256(encoded).hexdigest()
 
 
+def _clean_revision(root: Path) -> str:
+    identity = repository_identity(root)
+    revision = str(identity.get("revision") or "").strip().lower()
+    if not identity.get("available") or not identity.get("clean") or len(revision) != 40:
+        raise ValueError("external proof attestation requires a clean Git checkout")
+    return revision
+
+
 def validate_external_evidence_receipt(
     path: str | os.PathLike[str],
     *,
@@ -100,6 +110,7 @@ def attest_external_proof(
 ) -> ExternalProofAttestation:
     """Attest one canonicalized signed receipt without changing its semantics."""
     root = Path(repo_root).resolve(strict=True)
+    revision = _clean_revision(root)
     source = Path(evidence_receipt_path).expanduser().resolve()
     if not _outside_repo(root, source):
         raise ValueError("external evidence receipt must live outside the audited repository")
@@ -107,12 +118,7 @@ def attest_external_proof(
     parsed = validate_external_evidence_receipt(
         source,
         repo_root=root,
-        expected_revision=str(
-            __import__("utils.release_identity", fromlist=["repository_identity"])
-            .repository_identity(root)
-            .get("revision")
-            or ""
-        ),
+        expected_revision=revision,
         verifier_key=verifier_key,
         now=now,
         policy_path=policy_path,
