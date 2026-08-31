@@ -1,7 +1,7 @@
 """Trusted external live-hardware attestation for capabilities #125 and #126.
 
 The in-process :mod:`physical_lab_boundary` is deliberately unable to prove that
-its callback touched real hardware.  This module closes only the *attestation
+its callback touched real hardware. This module closes only the *attestation
 route*: a protected external hardware-observer may submit a short-lived HMAC
 receipt that binds the exact clean Git revision, exact physical boundary source
 hash, repeated runtime sessions, per-session sensor/action commitments,
@@ -46,9 +46,6 @@ _MAX_SESSIONS = 64
 _GIT_RE = re.compile(r"^[0-9a-f]{40}$")
 _SHA_RE = re.compile(r"^[0-9a-f]{64}$")
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:@/+~-]{1,200}$")
-_SUBJECT = "physical-lab-live-validation"
-_VERIFIER = "trusted-hardware-observer"
-_PREFIX = "physical-lab:"
 _BOUNDARY_PATH = "research_engine/physical_lab_boundary.py"
 _REQUIRED: Tuple[ProofKind, ...] = (
     ProofKind.EXECUTION,
@@ -58,6 +55,18 @@ _REQUIRED: Tuple[ProofKind, ...] = (
     ProofKind.HARDWARE,
     ProofKind.SAFETY,
 )
+_ROUTE_ROLE = {
+    ProofKind.EXECUTION: ("execution-run", "trusted-execution-attestor", "execution"),
+    ProofKind.REPRODUCIBILITY: (
+        "reproducibility-run",
+        "trusted-reproducibility-attestor",
+        "reproducibility",
+    ),
+    ProofKind.RUNTIME: ("runtime-observation", "trusted-runtime-attestor", "runtime"),
+    ProofKind.LIVE: ("live-observation", "trusted-live-observer", "live"),
+    ProofKind.HARDWARE: ("hardware-observation", "trusted-hardware-lab", "hardware"),
+    ProofKind.SAFETY: ("safety-gate", "trusted-safety-officer", "safety"),
+}
 
 
 def _canonical(value: Any) -> bytes:
@@ -89,6 +98,17 @@ def _safe_sha(value: object, field: str) -> str:
     if not _SHA_RE.fullmatch(text):
         raise ValueError(f"{field} must be a SHA-256 digest")
     return text
+
+
+def _route_meta(capability_id: int, kind: ProofKind) -> Tuple[str, str, str]:
+    if capability_id not in _CAPABILITIES or kind not in _ROUTE_ROLE:
+        raise ValueError("unsupported physical-lab proof route")
+    suffix, verifier, namespace = _ROUTE_ROLE[kind]
+    return (
+        f"capability-{capability_id}-{suffix}",
+        verifier,
+        f"{namespace}:c{capability_id}:",
+    )
 
 
 def _outside_repo(root: Path, target: Path) -> bool:
@@ -302,12 +322,13 @@ def validate_physical_lab_attestation(
 def _required_policy_rules(policy) -> None:
     for capability_id in _CAPABILITIES:
         for kind in _REQUIRED:
+            subject, verifier, prefix = _route_meta(capability_id, kind)
             allowed = any(
                 rule.capability_id == capability_id
                 and rule.proof_kind == kind
-                and _SUBJECT in rule.subjects
-                and _VERIFIER in rule.verifiers
-                and _PREFIX in rule.reference_prefixes
+                and subject in rule.subjects
+                and verifier in rule.verifiers
+                and prefix in rule.reference_prefixes
                 for rule in policy.rules
             )
             if not allowed:
@@ -329,6 +350,8 @@ def _same(
     *,
     capability_id: int,
     kind: ProofKind,
+    subject: str,
+    verifier: str,
     digest: str,
     reference: str,
     revision: str,
@@ -336,9 +359,9 @@ def _same(
     expected = {
         "capability_id": capability_id,
         "proof_kind": kind.value,
-        "subject": _SUBJECT,
+        "subject": subject,
         "subject_sha256": digest,
-        "verifier": _VERIFIER,
+        "verifier": verifier,
         "reference": reference,
         "implementation_revision": revision,
     }
@@ -396,11 +419,12 @@ def attest_physical_lab_proofs(
 
     ledger = ProofLedger(str(ledger_target), integrity_key=integrity_key)
     existing = _existing_adds(ledger)
-    reference = _PREFIX + receipt.receipt_sha256
     added = 0
     reused = 0
     for capability_id in _CAPABILITIES:
         for kind in _REQUIRED:
+            subject, verifier, prefix = _route_meta(capability_id, kind)
+            reference = prefix + receipt.receipt_sha256
             receipt_id = f"physical-lab:c{capability_id}:{kind.value}:{receipt.receipt_sha256[:16]}"
             previous = existing.get(receipt_id)
             if previous is not None:
@@ -408,6 +432,8 @@ def attest_physical_lab_proofs(
                     previous,
                     capability_id=capability_id,
                     kind=kind,
+                    subject=subject,
+                    verifier=verifier,
                     digest=receipt.receipt_sha256,
                     reference=reference,
                     revision=revision,
@@ -419,9 +445,9 @@ def attest_physical_lab_proofs(
                 receipt_id=receipt_id,
                 capability_id=capability_id,
                 proof_kind=kind,
-                subject=_SUBJECT,
+                subject=subject,
                 subject_sha256=receipt.receipt_sha256,
-                verifier=_VERIFIER,
+                verifier=verifier,
                 observed_at=current_time,
                 reference=reference,
                 implementation_revision=revision,
