@@ -152,13 +152,21 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
     assert oracle.attestor_id == "reality-oracle-live"
     assert oracle.external_required is True
 
-    # The #127 specialized verifier exists in source, but the committed proof
-    # policy still routes these proof classes through generic trusted-* routes.
-    # Readiness must not pretend that source existence alone makes it usable.
-    hardware = _route(report, 127, ProofKind.HARDWARE)
-    assert hardware.status == "HARDWARE_REQUIRED"
-    assert hardware.attestor_id == ""
-    assert hardware.external_required is True
+    # #127 now has a repo-backed specialized verifier and exact committed policy
+    # route. It is still external: source/tests prove only verifier behavior, not
+    # a real physical validation run.
+    for kind in (
+        ProofKind.EXECUTION,
+        ProofKind.REPRODUCIBILITY,
+        ProofKind.HARDWARE,
+        ProofKind.SAFETY,
+    ):
+        route = _route(report, 127, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == "sim-to-reality-hardware"
+        assert route.external_required is True
+        assert route.verifiers == ("trusted-hardware-observer",)
+        assert route.subjects == ("sim-to-reality-hardware-validation",)
 
 
 def test_production_wiring_is_repo_backed_but_not_execution_evidence():
