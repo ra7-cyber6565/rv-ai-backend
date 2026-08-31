@@ -183,6 +183,27 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
         assert route.verifiers == ("trusted-hardware-observer",)
         assert route.subjects == ("sim-to-reality-hardware-validation",)
 
+    physical_roles = {
+        ProofKind.EXECUTION: ("physical-lab-execution", "trusted-execution-attestor", "execution-run"),
+        ProofKind.REPRODUCIBILITY: (
+            "physical-lab-reproducibility",
+            "trusted-reproducibility-attestor",
+            "reproducibility-run",
+        ),
+        ProofKind.RUNTIME: ("physical-lab-runtime", "trusted-runtime-attestor", "runtime-observation"),
+        ProofKind.LIVE: ("physical-lab-live", "trusted-live-observer", "live-observation"),
+        ProofKind.HARDWARE: ("physical-lab-hardware", "trusted-hardware-lab", "hardware-observation"),
+        ProofKind.SAFETY: ("physical-lab-safety", "trusted-safety-officer", "safety-gate"),
+    }
+    for capability_id in (125, 126):
+        for kind, (attestor_id, verifier, suffix) in physical_roles.items():
+            route = _route(report, capability_id, kind)
+            assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+            assert route.attestor_id == attestor_id
+            assert route.external_required is True
+            assert route.verifiers == (verifier,)
+            assert route.subjects == (f"capability-{capability_id}-{suffix}",)
+
     for kind in (ProofKind.EXECUTION, ProofKind.REPRODUCIBILITY):
         route = _route(report, 97, kind)
         assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
@@ -214,7 +235,7 @@ def test_production_wiring_is_repo_backed_but_not_execution_evidence():
 def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors():
     report = audit_attestation_readiness(ROOT)
 
-    hardware = _route(report, 125, ProofKind.HARDWARE)
+    hardware = _route(report, 71, ProofKind.HARDWARE)
     assert hardware.status == "HARDWARE_REQUIRED"
     assert hardware.attestor_id == ""
     assert hardware.external_required is True
