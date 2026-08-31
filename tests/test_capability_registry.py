@@ -31,13 +31,16 @@ def test_registry_fails_closed_without_proof():
 
 
 def test_max_level_requires_more_than_code_and_test_for_real_world_capabilities():
-    hardware = CAPABILITY_BY_ID[125]
-    assert ProofKind.CODE in hardware.required_proofs
-    assert ProofKind.TEST in hardware.required_proofs
-    assert ProofKind.EXECUTION in hardware.required_proofs
-    assert ProofKind.HARDWARE in hardware.required_proofs
-    assert ProofKind.SAFETY in hardware.required_proofs
-    assert ProofKind.REPRODUCIBILITY in hardware.required_proofs
+    for capability_id in (125, 126):
+        hardware = CAPABILITY_BY_ID[capability_id]
+        assert ProofKind.CODE in hardware.required_proofs
+        assert ProofKind.TEST in hardware.required_proofs
+        assert ProofKind.EXECUTION in hardware.required_proofs
+        assert ProofKind.REPRODUCIBILITY in hardware.required_proofs
+        assert ProofKind.RUNTIME in hardware.required_proofs
+        assert ProofKind.LIVE in hardware.required_proofs
+        assert ProofKind.HARDWARE in hardware.required_proofs
+        assert ProofKind.SAFETY in hardware.required_proofs
 
     continuous = CAPABILITY_BY_ID[135]
     assert ProofKind.PERSISTENCE in continuous.required_proofs
