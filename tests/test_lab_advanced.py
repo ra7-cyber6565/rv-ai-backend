@@ -787,6 +787,47 @@ def test_the_order_flow_point_can_never_be_met_from_a_lab_run():
     assert rows["order_flow_edge"]["status"] in ("NOT_MEASURED", "NOT_MET")
 
 
+# ══ GROUP 11 ── "test nahi chala" ki WAJAH bhi sach bole ═════════════════════
+# #150e se pehle in teen point ki wajah likhi thi "ye recipe LAB me abhi nahi
+# hai (#150e me aayegi)". Recipe ban jaane ke baad wahi line JHOOTH ho jaati:
+# feature maujood hai, kami DATA ki hai. Ye group us purani line ko wapas aane
+# se rokta hai.
+_RECIPE_BUILT_POINTS = ("monte_carlo_risk", "parameter_robustness",
+                        "baseline_tournament")
+
+
+def test_a_test_that_did_not_run_never_blames_a_missing_feature():
+    """Wajah "feature nahi bana" nahi bol sakti — teeno recipe ban chuke hain."""
+    rows = _contract(None)
+    for point in _RECIPE_BUILT_POINTS:
+        reason = rows[point]["reason"].lower()
+        assert "abhi nahi hai" not in reason, point
+        assert "#150e me aayegi" not in reason, point
+        assert "lab me" in reason and "hai par" in reason, point
+
+
+def test_each_unrun_recipe_gives_its_own_data_reason_not_one_shared_line():
+    """Teen point, teen alag wajah — ek copy-paste line teeno par nahi chipakti."""
+    rows = _contract(None)
+    reasons = {rows[point]["reason"] for point in _RECIPE_BUILT_POINTS}
+    assert len(reasons) == 3
+
+
+def test_the_monte_carlo_reason_names_the_step_count_it_needs():
+    """Sirf "data kam tha" kaafi nahi — KITNA kam, ye user ko pata chale."""
+    reason = _contract(None)["monte_carlo_risk"]["reason"]
+    assert "12" in reason
+    assert "held-out" in reason.lower()
+
+
+def test_a_flat_series_reason_still_points_at_the_data_not_at_the_code():
+    """Flat held-out par bhi wajah data ki rehti hai, "feature missing" ki nahi."""
+    rows = _contract(_run([100.0] * 46))
+    for point in _RECIPE_BUILT_POINTS:
+        assert rows[point]["status"] == "NOT_MEASURED", point
+        assert "abhi nahi hai" not in rows[point]["reason"].lower(), point
+
+
 
 
 

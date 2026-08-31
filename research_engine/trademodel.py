@@ -1834,8 +1834,19 @@ def _lab(point_id: str, recipe: str, label: str, absent_reason: str):
     return run
 
 
-_NOT_IN_LAB_YET = ("ye recipe LAB me abhi nahi hai (#150e me aayegi) — isliye "
-                   "naapa nahi gaya, aur ise 'ho gaya' nahi likha ja raha")
+# #150e ke baad ye teeno recipe LAB me MAUJOOD hain. Isliye "0 test chale" ka
+# matlab ab "feature nahi bana" NAHI hai — matlab hai "is run me data itna nahi
+# tha ki test chal pata". Purani line (#150e me aayegi) ab jhooth hoti, isliye
+# har recipe ki apni asli wajah likhi jaati hai.
+_MC_NOT_RUN = ("LAB me Monte Carlo hai par is run me ek bhi test nahi chala — "
+               "ise ~12 held-out step (yaani 40+ point ki series) chahiye, aur "
+               "bilkul flat held-out par ye jaan-boojh kar rok diya jaata hai")
+_SWEEP_NOT_RUN = ("LAB me parameter sweep hai par is run me ek bhi test nahi "
+                  "chala — series aayi hi nahi, ya held-out me koi harkat nahi "
+                  "thi, isliye 'edge ek region me hai' naapa nahi ja saka")
+_TOUR_NOT_RUN = ("LAB me baseline tournament hai par is run me ek bhi test nahi "
+                 "chala — bina series/held-out harkat ke kisi baseline se tulna "
+                 "hi mumkin nahi thi")
 
 _EVALUATORS: Dict[str, Any] = {
     "instrument_scope": _instrument_scope,
@@ -1875,11 +1886,11 @@ _EVALUATORS: Dict[str, Any] = {
         "LAB me ek bhi walk-forward test nahi chala (series aayi hi nahi ho "
         "sakti) — isliye held-out ka nateeja nahi hai"),
     "monte_carlo_risk": _lab("monte_carlo_risk", LAB_RECIPE_MONTE_CARLO,
-                             "Monte Carlo", _NOT_IN_LAB_YET),
+                             "Monte Carlo", _MC_NOT_RUN),
     "parameter_robustness": _lab("parameter_robustness", LAB_RECIPE_ROBUSTNESS,
-                                 "parameter robustness", _NOT_IN_LAB_YET),
+                                 "parameter robustness", _SWEEP_NOT_RUN),
     "baseline_tournament": _lab("baseline_tournament", LAB_RECIPE_BASELINE,
-                                "baseline tournament", _NOT_IN_LAB_YET),
+                                "baseline tournament", _TOUR_NOT_RUN),
     "failure_classification": _simple("failure_classification",
                                       "haar ki class-wise ginti"),
     "red_team": _cov("red_team", _RED_TEAM_GROUPS, 6, "red-team ke sawaal",
