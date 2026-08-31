@@ -36,6 +36,10 @@
     {"capability_id":35,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
     {"capability_id":35,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
     {"capability_id":99,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
-    {"capability_id":99,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"}
+    {"capability_id":99,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":20,"proof_kind":"execution","subject":"hypothesis-evolution-benchmark","verifier":"trusted-operator","reference_prefix":"hypothesis-evolution:"},
+    {"capability_id":20,"proof_kind":"reproducibility","subject":"hypothesis-evolution-benchmark","verifier":"trusted-operator","reference_prefix":"hypothesis-evolution:"},
+    {"capability_id":66,"proof_kind":"execution","subject":"hypothesis-evolution-benchmark","verifier":"trusted-operator","reference_prefix":"hypothesis-evolution:"},
+    {"capability_id":66,"proof_kind":"reproducibility","subject":"hypothesis-evolution-benchmark","verifier":"trusted-operator","reference_prefix":"hypothesis-evolution:"}
   ]
 }
