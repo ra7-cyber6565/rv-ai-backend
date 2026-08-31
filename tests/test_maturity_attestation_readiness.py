@@ -170,9 +170,6 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
             assert route.verifiers == ("trusted-deployment-observer",)
             assert route.subjects == ("post-deployment-live-validation",)
 
-    # #127 has a repo-backed specialized verifier and exact committed policy
-    # route. It is still external: source/tests prove verifier behavior, not a
-    # real physical validation run.
     for kind in (
         ProofKind.EXECUTION,
         ProofKind.REPRODUCIBILITY,
@@ -210,11 +207,11 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    # #22 and #29-35/#99 are now backed by specialized benchmark attestors.
+    # #22, #20/#66, and #29-35/#99 now have specialized benchmark attestors.
     # Keep this generic-route regression on a still-unspecialized execution
     # capability so generic acceptance routes cannot be mislabeled as concrete
     # repo-backed attestors.
-    execution = _route(report, 20, ProofKind.EXECUTION)
+    execution = _route(report, 23, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
