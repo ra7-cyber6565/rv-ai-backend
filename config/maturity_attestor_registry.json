@@ -119,6 +119,23 @@
       ]
     },
     {
+      "attestor_id": "post-deployment-live",
+      "verifier": "trusted-deployment-observer",
+      "module": "research_engine/post_deployment_attestor.py",
+      "test": "tests/test_post_deployment_attestor.py",
+      "external_required": true,
+      "routes": [
+        {"capability_id": 87, "proof_kind": "persistence", "subject": "post-deployment-live-validation"},
+        {"capability_id": 87, "proof_kind": "runtime_observation", "subject": "post-deployment-live-validation"},
+        {"capability_id": 87, "proof_kind": "live_observation", "subject": "post-deployment-live-validation"},
+        {"capability_id": 88, "proof_kind": "execution", "subject": "post-deployment-live-validation"},
+        {"capability_id": 88, "proof_kind": "reproducibility", "subject": "post-deployment-live-validation"},
+        {"capability_id": 88, "proof_kind": "persistence", "subject": "post-deployment-live-validation"},
+        {"capability_id": 88, "proof_kind": "runtime_observation", "subject": "post-deployment-live-validation"},
+        {"capability_id": 88, "proof_kind": "live_observation", "subject": "post-deployment-live-validation"}
+      ]
+    },
+    {
       "attestor_id": "sim-to-reality-hardware",
       "verifier": "trusted-hardware-observer",
       "module": "research_engine/sim_to_reality_attestor.py",
