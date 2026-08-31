@@ -152,9 +152,27 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
     assert oracle.attestor_id == "reality-oracle-live"
     assert oracle.external_required is True
 
-    # #127 now has a repo-backed specialized verifier and exact committed policy
-    # route. It is still external: source/tests prove only verifier behavior, not
-    # a real physical validation run.
+    for capability_id, kinds in {
+        87: (ProofKind.PERSISTENCE, ProofKind.RUNTIME, ProofKind.LIVE),
+        88: (
+            ProofKind.EXECUTION,
+            ProofKind.REPRODUCIBILITY,
+            ProofKind.PERSISTENCE,
+            ProofKind.RUNTIME,
+            ProofKind.LIVE,
+        ),
+    }.items():
+        for kind in kinds:
+            route = _route(report, capability_id, kind)
+            assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+            assert route.attestor_id == "post-deployment-live"
+            assert route.external_required is True
+            assert route.verifiers == ("trusted-deployment-observer",)
+            assert route.subjects == ("post-deployment-live-validation",)
+
+    # #127 has a repo-backed specialized verifier and exact committed policy
+    # route. It is still external: source/tests prove verifier behavior, not a
+    # real physical validation run.
     for kind in (
         ProofKind.EXECUTION,
         ProofKind.REPRODUCIBILITY,
@@ -187,7 +205,7 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert hardware.attestor_id == ""
     assert hardware.external_required is True
 
-    runtime = _route(report, 88, ProofKind.RUNTIME)
+    runtime = _route(report, 91, ProofKind.RUNTIME)
     assert runtime.status == "RUNTIME_EXTERNAL_REQUIRED"
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
