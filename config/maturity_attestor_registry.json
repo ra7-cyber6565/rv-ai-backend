@@ -83,6 +83,23 @@
       ]
     },
     {
+      "attestor_id": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "module": "research_engine/experiment_intelligence_attestor.py",
+      "test": "tests/test_experiment_intelligence_attestor.py",
+      "external_required": true,
+      "routes": [
+        {"capability_id": 22, "proof_kind": "execution", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 22, "proof_kind": "reproducibility", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 122, "proof_kind": "execution", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 122, "proof_kind": "reproducibility", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 123, "proof_kind": "execution", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 123, "proof_kind": "reproducibility", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 124, "proof_kind": "execution", "subject": "experiment-intelligence-benchmark"},
+        {"capability_id": 124, "proof_kind": "reproducibility", "subject": "experiment-intelligence-benchmark"}
+      ]
+    },
+    {
       "attestor_id": "economic-reality-benchmark",
       "verifier": "trusted-operator",
       "module": "research_engine/economic_reality_attestor.py",
