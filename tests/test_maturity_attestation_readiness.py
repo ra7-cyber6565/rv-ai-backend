@@ -210,7 +210,11 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    execution = _route(report, 22, ProofKind.EXECUTION)
+    # #22 is now backed by the experiment-intelligence specialized attestor.
+    # Keep this generic-route regression on a still-unspecialized execution
+    # capability so generic acceptance routes cannot be mislabeled as concrete
+    # repo-backed attestors.
+    execution = _route(report, 29, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
