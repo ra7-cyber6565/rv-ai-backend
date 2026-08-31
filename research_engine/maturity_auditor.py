@@ -270,7 +270,20 @@ def _read_policy_bytes(
     data = candidate.read_bytes()
     if len(data) != info.st_size or len(data) > _MAX_POLICY_BYTES:
         raise ValueError("proof policy changed during read")
-    return data
+
+    # Compile the optional tracked route-extension manifest into the same bounded
+    # rule schema consumed below.  This changes policy semantics only: it creates
+    # no receipts and therefore cannot inflate maturity by itself.
+    from .maturity_policy_extensions import merge_policy_route_extensions
+
+    merged = merge_policy_route_extensions(
+        root=root,
+        tracked=tracked,
+        base_policy_bytes=data,
+    )
+    if len(merged) > _MAX_POLICY_BYTES:
+        raise ValueError("merged proof policy exceeds size budget")
+    return merged
 
 
 def _parse_policy(data: bytes) -> RepositoryProofPolicy:
