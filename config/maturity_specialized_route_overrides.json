@@ -84,6 +84,62 @@
       "subject": "sim-to-reality-hardware-validation",
       "verifier": "trusted-hardware-observer",
       "reference_prefix": "sim-to-reality:"
+    },
+    {
+      "capability_id": 22,
+      "proof_kind": "execution",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 22,
+      "proof_kind": "reproducibility",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 122,
+      "proof_kind": "execution",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 122,
+      "proof_kind": "reproducibility",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 123,
+      "proof_kind": "execution",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 123,
+      "proof_kind": "reproducibility",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 124,
+      "proof_kind": "execution",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
+    },
+    {
+      "capability_id": 124,
+      "proof_kind": "reproducibility",
+      "subject": "experiment-intelligence-benchmark",
+      "verifier": "trusted-operator",
+      "reference_prefix": "experiment-intelligence:"
     }
   ]
 }
