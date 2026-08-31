@@ -2,11 +2,14 @@
 
 The functions here are intentionally model-agnostic and zero-cost. They turn
 several blueprint labels (multiple-testing correction, placebo testing, Monte
-Carlo stress, sensitivity analysis, leakage checks and walk-forward holdouts)
-into executable, testable numerical behavior.
+Carlo stress, sensitivity analysis, ablation, overfit diagnostics, leakage
+checks and walk-forward holdouts) into executable, testable numerical behavior.
 
 No function promotes an empirical result to a guarantee. Inputs, method and
-random seed remain explicit so results can be reproduced.
+random seed remain explicit so results can be reproduced. Ablation is a
+one-at-a-time diagnostic and does not by itself prove causal importance;
+train/validation gaps are overfit warnings and do not by themselves prove the
+cause of generalization failure.
 """
 from __future__ import annotations
 
@@ -84,6 +87,44 @@ class LeakageFinding:
     available_time: float
     target_time: float
     detail: str
+
+
+@dataclass(frozen=True)
+class AblationEffect:
+    component: str
+    baseline_score: float
+    ablated_score: float
+    degradation: float
+    relative_degradation: float
+    critical: bool
+    improved_when_removed: bool
+
+
+@dataclass(frozen=True)
+class AblationResult:
+    baseline_score: float
+    higher_is_better: bool
+    minimum_relative_degradation: float
+    effects: Tuple[AblationEffect, ...]
+    critical_components: Tuple[str, ...]
+    causal_importance_proven: bool = False
+    interaction_effects_tested: bool = False
+    truth_proven: bool = False
+
+
+@dataclass(frozen=True)
+class OverfitDiagnostic:
+    train_mean: float
+    validation_mean: float
+    generalization_gap: float
+    relative_gap: float
+    max_relative_gap: float
+    higher_is_better: bool
+    suspicious: bool
+    paired_samples: int
+    overfitting_proven: bool = False
+    distribution_shift_ruled_out: bool = False
+    truth_proven: bool = False
 
 
 def benjamini_hochberg(
@@ -346,6 +387,117 @@ def sensitivity_plateau(
         plateau_fraction=round(plateau_fraction, 12),
         cliff_detected=local_drop >= cliff,
         local_drop_fraction=round(local_drop, 12),
+    )
+
+
+def ablation_analysis(
+    baseline_score: float,
+    scores_without_component: Mapping[str, float],
+    *,
+    higher_is_better: bool = True,
+    min_relative_degradation: float = 0.10,
+) -> AblationResult:
+    """Run deterministic one-at-a-time component ablation diagnostics.
+
+    A drop after removing a component is evidence that the *configured system*
+    depended on that component under this evaluation. It is not, by itself,
+    proof of causal importance in other environments and it does not measure
+    higher-order interactions between removed components.
+    """
+    baseline = _finite(baseline_score, "baseline_score")
+    if type(higher_is_better) is not bool:
+        raise ValueError("higher_is_better must be boolean")
+    threshold = _finite(min_relative_degradation, "min_relative_degradation")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("min_relative_degradation must be in [0,1]")
+    if not isinstance(scores_without_component, Mapping) or not scores_without_component:
+        raise ValueError("scores_without_component must be a non-empty mapping")
+    if len(scores_without_component) > 256:
+        raise ValueError("scores_without_component exceeds component budget")
+
+    normalized: dict[str, float] = {}
+    for raw_name, raw_score in scores_without_component.items():
+        name = str(raw_name or "").strip()
+        if not name or len(name) > 240:
+            raise ValueError("component names must be non-empty and bounded")
+        if name in normalized:
+            raise ValueError("component names must be unique after normalization")
+        normalized[name] = _finite(raw_score, f"scores_without_component.{name}")
+
+    effects = []
+    for name in sorted(normalized):
+        ablated = normalized[name]
+        degradation = (baseline - ablated) if higher_is_better else (ablated - baseline)
+        scale = max(abs(baseline), abs(ablated), 1e-12)
+        relative = degradation / scale
+        critical = degradation > 0.0 and relative >= threshold
+        effects.append(AblationEffect(
+            component=name,
+            baseline_score=baseline,
+            ablated_score=ablated,
+            degradation=round(degradation, 12),
+            relative_degradation=round(relative, 12),
+            critical=critical,
+            improved_when_removed=degradation < 0.0,
+        ))
+    critical_components = tuple(effect.component for effect in effects if effect.critical)
+    return AblationResult(
+        baseline_score=baseline,
+        higher_is_better=higher_is_better,
+        minimum_relative_degradation=threshold,
+        effects=tuple(effects),
+        critical_components=critical_components,
+    )
+
+
+def overfit_diagnostic(
+    train_scores: Sequence[float],
+    validation_scores: Sequence[float],
+    *,
+    higher_is_better: bool = True,
+    max_relative_gap: float = 0.10,
+) -> OverfitDiagnostic:
+    """Flag a train/validation generalization gap without claiming its cause.
+
+    A suspicious gap is compatible with overfitting, leakage, distribution
+    shift, data-quality changes or other causes. This diagnostic intentionally
+    keeps ``overfitting_proven`` false until those alternatives are tested.
+    """
+    if type(higher_is_better) is not bool:
+        raise ValueError("higher_is_better must be boolean")
+    threshold = _finite(max_relative_gap, "max_relative_gap")
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("max_relative_gap must be in [0,1]")
+    if len(train_scores) != len(validation_scores):
+        raise ValueError("train_scores and validation_scores must have the same length")
+    if len(train_scores) < 2:
+        raise ValueError("at least two paired train/validation scores are required")
+    if len(train_scores) > 1_000_000:
+        raise ValueError("train/validation score sequences exceed budget")
+
+    train = tuple(_finite(value, f"train_scores[{index}]") for index, value in enumerate(train_scores))
+    validation = tuple(
+        _finite(value, f"validation_scores[{index}]")
+        for index, value in enumerate(validation_scores)
+    )
+    train_mean = mean(train)
+    validation_mean = mean(validation)
+    gap = (
+        train_mean - validation_mean
+        if higher_is_better
+        else validation_mean - train_mean
+    )
+    scale = max(abs(train_mean), abs(validation_mean), 1e-12)
+    relative_gap = max(0.0, gap) / scale
+    return OverfitDiagnostic(
+        train_mean=round(train_mean, 12),
+        validation_mean=round(validation_mean, 12),
+        generalization_gap=round(gap, 12),
+        relative_gap=round(relative_gap, 12),
+        max_relative_gap=threshold,
+        higher_is_better=higher_is_better,
+        suspicious=relative_gap > threshold,
+        paired_samples=len(train),
     )
 
 
