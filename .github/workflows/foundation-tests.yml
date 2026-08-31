@@ -132,6 +132,7 @@ jobs:
             tests/test_mechanistic_reasoning_registry.py \
             tests/test_mechanistic_reasoning_attestor.py \
             tests/test_visual_science.py \
+            tests/test_visual_science_execution_attestor.py \
             tests/test_post_deployment_validation.py \
             tests/test_post_deployment_input_guard.py \
             tests/test_post_deployment_integrity.py \
