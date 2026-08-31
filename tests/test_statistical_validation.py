@@ -1,10 +1,12 @@
 import pytest
 
 from research_engine.statistical_validation import (
+    ablation_analysis,
     benjamini_hochberg,
     detect_temporal_leakage,
     holm_bonferroni,
     monte_carlo_return_paths,
+    overfit_diagnostic,
     paired_placebo_permutation_test,
     population_stability_index,
     sensitivity_plateau,
@@ -62,6 +64,90 @@ def test_sensitivity_plateau_distinguishes_broad_region_from_brittle_spike():
     assert spike.plateau_max == 3.0
     assert spike.cliff_detected is True
     assert spike.local_drop_fraction >= 0.45
+
+
+def test_ablation_identifies_component_dependency_without_claiming_causality():
+    result = ablation_analysis(
+        100.0,
+        {"core": 70.0, "helper": 95.0, "noise": 105.0},
+        min_relative_degradation=0.10,
+    )
+    assert result.critical_components == ("core",)
+    effects = {item.component: item for item in result.effects}
+    assert effects["core"].degradation == 30.0
+    assert effects["core"].relative_degradation == pytest.approx(0.30)
+    assert effects["core"].critical is True
+    assert effects["helper"].critical is False
+    assert effects["noise"].improved_when_removed is True
+    assert result.causal_importance_proven is False
+    assert result.interaction_effects_tested is False
+    assert result.truth_proven is False
+
+
+def test_ablation_supports_lower_is_better_metrics():
+    result = ablation_analysis(
+        0.20,
+        {"calibration": 0.40, "regularizer": 0.21, "bad_component": 0.10},
+        higher_is_better=False,
+        min_relative_degradation=0.20,
+    )
+    assert result.critical_components == ("calibration",)
+    effects = {item.component: item for item in result.effects}
+    assert effects["calibration"].degradation == pytest.approx(0.20)
+    assert effects["bad_component"].improved_when_removed is True
+
+
+def test_ablation_rejects_normalized_duplicate_names_nonfinite_and_empty_inputs():
+    with pytest.raises(ValueError, match="unique after normalization"):
+        ablation_analysis(1.0, {"A": 0.8, " A ": 0.7})
+    with pytest.raises(ValueError, match="non-empty mapping"):
+        ablation_analysis(1.0, {})
+    with pytest.raises(ValueError, match="must be finite"):
+        ablation_analysis(1.0, {"A": float("nan")})
+    with pytest.raises(ValueError, match="boolean"):
+        ablation_analysis(1.0, {"A": 0.8}, higher_is_better=1)
+
+
+def test_overfit_diagnostic_flags_large_gap_without_proving_overfitting():
+    result = overfit_diagnostic(
+        [100.0, 98.0, 102.0],
+        [70.0, 72.0, 68.0],
+        max_relative_gap=0.10,
+    )
+    assert result.train_mean == pytest.approx(100.0)
+    assert result.validation_mean == pytest.approx(70.0)
+    assert result.generalization_gap == pytest.approx(30.0)
+    assert result.relative_gap == pytest.approx(0.30)
+    assert result.suspicious is True
+    assert result.overfitting_proven is False
+    assert result.distribution_shift_ruled_out is False
+    assert result.truth_proven is False
+
+
+def test_overfit_diagnostic_stable_and_lower_is_better_cases():
+    stable = overfit_diagnostic([0.90, 0.91, 0.89], [0.88, 0.90, 0.89])
+    assert stable.suspicious is False
+
+    lower = overfit_diagnostic(
+        [0.10, 0.12, 0.11],
+        [0.30, 0.28, 0.32],
+        higher_is_better=False,
+        max_relative_gap=0.20,
+    )
+    assert lower.suspicious is True
+    assert lower.generalization_gap > 0
+    assert lower.overfitting_proven is False
+
+
+def test_overfit_diagnostic_invalid_inputs_fail_closed():
+    with pytest.raises(ValueError, match="same length"):
+        overfit_diagnostic([1.0, 2.0], [1.0])
+    with pytest.raises(ValueError, match="at least two"):
+        overfit_diagnostic([1.0], [1.0])
+    with pytest.raises(ValueError, match="must be finite"):
+        overfit_diagnostic([1.0, float("inf")], [1.0, 1.0])
+    with pytest.raises(ValueError, match="boolean"):
+        overfit_diagnostic([1.0, 1.0], [1.0, 1.0], higher_is_better="yes")
 
 
 def test_temporal_leakage_flags_future_feature_bad_target_and_non_monotonic_time():
