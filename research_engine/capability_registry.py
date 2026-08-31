@@ -92,8 +92,11 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
         42, 45, 46, 47, 48, 49, 50, 51, 52, 53, 54, 55, 56, 76, 77, 78,
         79, 80, 87, 88, 89, 90, 96, 134, 135, 136, 137,
     }
-    runtime = {41, 42, 49, 75, 76, 87, 88, 89, 91, 92, 135, 136, 137}
-    live = {41, 42, 87, 88, 89, 135, 136, 137}
+    # A lab/sensor capability is not max-level merely because an external
+    # callback once returned. #125/#126 must prove sustained runtime operation
+    # and a fresh live observation path in addition to hardware/safety evidence.
+    runtime = {41, 42, 49, 75, 76, 87, 88, 89, 91, 92, 125, 126, 135, 136, 137}
+    live = {41, 42, 87, 88, 89, 125, 126, 135, 136, 137}
     physical = {25, 26, 71, 72, 73, 74, 125, 126, 127}
     safety_boundary = {23, 79, 111, 113, 114}
 
