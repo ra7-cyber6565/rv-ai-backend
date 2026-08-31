@@ -152,6 +152,10 @@ def _agent_manifest(agents: Sequence[Tuple[AgentSpec, Runner]]) -> Tuple[Dict[st
         raise ValueError("blind analysis requires at least two model families")
     if len({row["perspective"] for row in rows}) < 2:
         raise ValueError("blind analysis requires at least two perspectives")
+    # Canonicalize independently of external configuration order.  The validator
+    # already normalizes by agent_id; the builder must use the same ordering so
+    # a semantically identical manifest produces the same protocol commitment.
+    rows.sort(key=lambda row: row["agent_id"])
     return tuple(rows)
 
 
