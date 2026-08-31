@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, chatgpt-upload-safety]
+    branches: [main, chatgpt-upload-safety, chatgpt-external-proof-attestors-20260831]
   workflow_dispatch:
 
 permissions:
@@ -105,6 +105,7 @@ jobs:
             tests/test_maturity_policy_extensions.py \
             tests/test_maturity_specialized_route_overrides.py \
             tests/test_maturity_attestation_readiness.py \
+            tests/test_external_proof_attestor.py \
             tests/test_maturity_attestor.py \
             tests/test_experiment_intelligence.py \
             tests/test_experiment_intelligence_hardening.py \
