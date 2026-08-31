@@ -2,6 +2,62 @@
   "schema_version": 1,
   "routes": [
     {
+      "capability_id": 87,
+      "proof_kind": "persistence",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 87,
+      "proof_kind": "runtime_observation",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 87,
+      "proof_kind": "live_observation",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 88,
+      "proof_kind": "execution",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 88,
+      "proof_kind": "reproducibility",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 88,
+      "proof_kind": "persistence",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 88,
+      "proof_kind": "runtime_observation",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
+      "capability_id": 88,
+      "proof_kind": "live_observation",
+      "subject": "post-deployment-live-validation",
+      "verifier": "trusted-deployment-observer",
+      "reference_prefix": "post-deployment:"
+    },
+    {
       "capability_id": 127,
       "proof_kind": "execution",
       "subject": "sim-to-reality-hardware-validation",
