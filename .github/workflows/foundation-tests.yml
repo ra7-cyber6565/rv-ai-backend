@@ -102,6 +102,7 @@ jobs:
             tests/test_maturity_proof_crypto.py \
             tests/test_maturity_auditor.py \
             tests/test_maturity_policy_coverage.py \
+            tests/test_maturity_policy_extensions.py \
             tests/test_maturity_attestor.py \
             tests/test_experiment_intelligence.py \
             tests/test_experiment_intelligence_hardening.py \
