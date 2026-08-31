@@ -183,6 +183,14 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
         assert route.verifiers == ("trusted-hardware-observer",)
         assert route.subjects == ("sim-to-reality-hardware-validation",)
 
+    for kind in (ProofKind.EXECUTION, ProofKind.REPRODUCIBILITY):
+        route = _route(report, 97, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == "holdout-vault-benchmark"
+        assert route.external_required is True
+        assert route.verifiers == ("trusted-operator",)
+        assert route.subjects == ("holdout-vault-benchmark",)
+
 
 def test_production_wiring_is_repo_backed_but_not_execution_evidence():
     report = audit_attestation_readiness(ROOT)
@@ -207,9 +215,9 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    # Several execution families now have concrete specialized benchmark
-    # attestors. Keep this regression on a genuinely still-unspecialized route.
-    execution = _route(report, 97, ProofKind.EXECUTION)
+    # Keep this regression on a genuinely still-unspecialized execution route;
+    # Holdout Vault (#97) now has its own locked benchmark attestor.
+    execution = _route(report, 107, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
