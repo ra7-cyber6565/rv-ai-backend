@@ -497,7 +497,8 @@ def test_nauvi_spec_banti_hai_aur_cap_use_nahi_kaat_sakti():
                            lab.LabPolicy(), "cpi forecast")
     recipes = [spec.recipe for spec in specs]
     assert recipes == ["walk_forward", "monte_carlo", "parameter_robustness",
-                       "baseline_tournament", "trade_expectancy"]
+                       "baseline_tournament", "trade_expectancy",
+                       "slot_expectancy", "regime_split", "event_window"]
     assert lab.LabPolicy().max_specs_per_hypothesis >= len(recipes)
 
 
@@ -792,9 +793,28 @@ def test_faisla_kabhi_insaan_ke_padhne_wali_line_se_nahi_hota():
 
 
 def test_naapa_hua_number_sirf_chale_hue_test_ke_saath_bahar_jaata_hai():
-    """LAB me `numbers=` sirf PASS aur FAIL par — DATA_MISSING par kabhi nahi."""
+    """LAB me `numbers=` sirf PASS aur FAIL par — DATA_MISSING par kabhi nahi.
+
+    Ginti hardcode karne ke bajaye HAR naapne wali recipe se nikaali jaati hai,
+    warna kal koi paanchvi recipe DATA_MISSING ke saath adhoora dict bahar bhej
+    degi aur ye test chup rahega. Adhoora dict aage "naapa hua" jaisa dikhta hai
+    — yahi is jagah ka sabse aasan jhooth hai.
+    """
     source = _src("research_engine/lab.py")
-    assert source.count("numbers=measured") == 2
+    measured_recipes = (lab._run_trade_expectancy, lab._run_slot_expectancy,
+                        lab._run_regime_split, lab._run_event_window)
+    total = 0
+    for func in measured_recipes:
+        code = _code(func)
+        ran_returns = (code.count("spec, TESTED_PASS,")
+                       + code.count("spec, TESTED_FAIL,"))
+        assert ran_returns >= 2, func.__name__
+        # Har chale hue nateeje par theek ek `numbers=`, aur file me kahin aur
+        # nahi — yaani DATA_MISSING wali return me ek bhi nahi.
+        assert code.count("numbers=measured") == ran_returns, func.__name__
+        assert "spec, DATA_MISSING," in code, func.__name__
+        total += ran_returns
+    assert source.count("numbers=measured") == total
     assert "trade_expectancy" in lab.RECIPES
     # Dono taraf ka naam ek hi hona chahiye — `trademodel` ka recipe naam LAB ke
     # recipe se alag ho jaaye to naap chup-chaap padhi hi nahi jaayegi.

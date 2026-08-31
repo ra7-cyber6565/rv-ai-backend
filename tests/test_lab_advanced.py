@@ -687,9 +687,11 @@ def test_with_a_series_all_four_specs_are_planned():
     # #150g me paanchvi series-spec judi (`trade_expectancy`). Ye list poori
     # likhi jaati hai — sirf `in` se dekhne par ek spec chup-chaap gir sakti hai
     # aur test phir bhi green rehta.
+    # #150i me teen aur judi: slot / regime / event window.
     assert [s.recipe for s in specs] == [
         "walk_forward", "monte_carlo", "parameter_robustness",
-        "baseline_tournament", "trade_expectancy"]
+        "baseline_tournament", "trade_expectancy", "slot_expectancy",
+        "regime_split", "event_window"]
 
 
 def test_the_per_hypothesis_spec_cap_really_stops_the_planner():

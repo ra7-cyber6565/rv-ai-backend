@@ -94,7 +94,10 @@ class LabPolicy:
     # #150g — 8 se 9: `trade_expectancy` naam ki nauvi spec judi. Ye number spec
     # ki asli ginti ke saath badhna CHAHIYE, warna sabse aakhri spec chup-chaap
     # girti hai aur report me uski koi line hi nahi aati.
-    max_specs_per_hypothesis: int = 9
+    # #150i — 9 se 12: teen naye naap (slot_expectancy, regime_split,
+    # event_window) judi. Wahi chetavni dobara: ye number badhaye bina naya
+    # branch likhna = naya test likh kar use chup-chaap gira dena.
+    max_specs_per_hypothesis: int = 12
     max_wall_seconds: float = 6.0
     seed: int = 20260826            # fixed — koi randomness use nahi hoti,
     #                                 ye sirf reproducibility ka record hai
@@ -127,6 +130,20 @@ class LabPolicy:
     trade_max_bars: int = market_data.TRADE_MAX_BARS
     trade_cost_fraction: float = market_data.TRADE_COST_FRACTION
     trade_min_robust_share: float = market_data.TRADE_MIN_ROBUST_SHARE
+    # #150i — WAQT, HAALAT aur KHABAR ki chhat. Ye teen cheezein pehle sirf text
+    # ke ishaare par grade hoti thi ("session expectancy tested" likha hai =
+    # MET). Ab inki asli naap hoti hai, aur naap ki chhat bhi ek hi jagah se
+    # aati hai. Do jagah do value = report kis chhat par tiki hai, ye pata hi
+    # nahi chalta.
+    slot_min_trades: int = market_data.SLOT_MIN_TRADES
+    slot_min_slots: int = market_data.SLOT_MIN_SLOTS
+    regime_min_trades: int = market_data.REGIME_MIN_TRADES
+    regime_min_regimes: int = market_data.REGIME_MIN_REGIMES
+    regime_trend_lookback: int = market_data.REGIME_TREND_LOOKBACK
+    regime_vol_lookback: int = market_data.REGIME_VOL_LOOKBACK
+    event_min_trades: int = market_data.EVENT_MIN_TRADES
+    event_min_windows: int = market_data.EVENT_MIN_WINDOWS
+    event_shock_units: float = market_data.EVENT_SHOCK_UNITS
     # #155e — ye run "kuch bana kar do" wali farmaish hai (gaana/kavita/script)?
     # Default False rakha gaya hai jaan-boojh kar: science aur trading ke run me
     # LAB ka bartaav ek bit bhi nahi badalta. True hone par sirf ITNA hota hai ki
@@ -157,6 +174,15 @@ class LabPolicy:
             "trade_max_bars": self.trade_max_bars,
             "trade_cost_fraction": self.trade_cost_fraction,
             "trade_min_robust_share": self.trade_min_robust_share,
+            "slot_min_trades": self.slot_min_trades,
+            "slot_min_slots": self.slot_min_slots,
+            "regime_min_trades": self.regime_min_trades,
+            "regime_min_regimes": self.regime_min_regimes,
+            "regime_trend_lookback": self.regime_trend_lookback,
+            "regime_vol_lookback": self.regime_vol_lookback,
+            "event_min_trades": self.event_min_trades,
+            "event_min_windows": self.event_min_windows,
+            "event_shock_units": self.event_shock_units,
             "craft_ask": self.craft_ask,
             "randomness_used": False,
             "network_used": False,
@@ -599,6 +625,27 @@ def plan_specs(hypothesis: Dict[str, Any], pack: Any = None,
                 what=("Asli trade-level naap: entry/stop/target + cost ke baad "
                       "expectancy, profit factor, drawdown, MAE aur haar ki "
                       "wajah (1R…3R take-profit tulna ke saath)"),
+                text=claim, evidence_text=ev_text, series=series)
+            # 10-12. #150i — teen sawaal jo ab tak SIRF text ke ishaare par grade
+            #     hote the ("session expectancy tested" likh dena hi kaafi tha).
+            #     Ab teeno ki asli naap hoti hai, aur teeno ALAG spec hain kyunki
+            #     teeno alag sawaal hain: KAB trade karein (slot), KIS HAALAT me
+            #     (regime), aur KHABAR ke aas-paas kya karein (event window).
+            #     Ek hi spec me daalne se ek naap ka PASS doosre ko dhak leta.
+            add(recipe="slot_expectancy", origin="prediction/statement",
+                what=("Waqt ke hisaab se expectancy: har slot (ghanta / weekday / "
+                      "mahina / quarter) ki apni NET expectancy, aur best-worst "
+                      "ka faasla — 'session' ka naam nahi, naapa hua slot"),
+                text=claim, evidence_text=ev_text, series=series)
+            add(recipe="regime_split", origin="prediction/statement",
+                what=("Regime pehchan: har entry se PEHLE trend/volatility ka "
+                      "label, aur per-regime NET expectancy — kitne hisse trade "
+                      "labelled thi ye bhi naapa jaata hai"),
+                text=claim, evidence_text=ev_text, series=series)
+            add(recipe="event_window", origin="prediction/statement",
+                what=("Macro-event khidkiyan: pre-news / release / 1-5M / 5-15M "
+                      "/ 15-60M ki apni expectancy aur har khidki ka "
+                      "trade / wait / avoid faisla"),
                 text=claim, evidence_text=ev_text, series=series)
     return specs
 
@@ -1096,6 +1143,81 @@ _TRADE_NOT_RUN: Dict[str, str] = {
         "mil gaya' ka saboot NAHI hai — ye sirf itna kehta hai ki is chhote "
         "hisse me haar aayi hi nahi."),
 }
+# #150i — WAQT ki naap kis wajah se nahi chali. Yahan sabse zaroori baat: in
+# wajahon me se koi bhi "edge nahi hai" nahi kehti. Ye sab "naap HO HI NAHI
+# SAKI" kehti hain, aur isliye ye DATA_MISSING hain — TESTED_FAIL nahi.
+_SLOT_NOT_RUN: Dict[str, str] = {
+    market_data.SLOT_TOO_COARSE: (
+        "Series saal-saal ki hai. Saal ke andar 'kaunsa waqt behtar' ka koi "
+        "matlab nahi banta, isliye slot ki naap chalayi hi nahi gayi."),
+    market_data.NO_SLOT_LABELS: (
+        "Series ke period label me waqt ka koi hissa hi nahi hai (na ghanta, na "
+        "din, na mahina), isliye kis slot me trade hua — ye pata hi nahi chal "
+        "sakta."),
+    market_data.FEW_SLOTS: (
+        f"{market_data.SLOT_MIN_SLOTS} se kam slot me {market_data.SLOT_MIN_TRADES}"
+        "+ trade bane, isliye slot-to-slot muqabla hua hi nahi. Ek hi slot ke "
+        "number se 'ye waqt behtar hai' kehna sample ko waqt bata dena hai."),
+    market_data.SLOT_NO_DIFFERENCE: (
+        f"Sabse acche aur sabse bure slot ka faasla {market_data.SLOT_DIFF_R:g}R "
+        "se kam nikla, yaani is series par waqt se koi naapa hua farak NAHI "
+        "aaya. Ye 'session edge nahi mila' hai — 'session edge hai hi nahi' "
+        "nahi."),
+    market_data.NO_VOLATILITY: (
+        "Train hisse me koi harkat hi nahi thi, isliye stop ki naap ban hi nahi "
+        "saki aur kisi bhi slot ka R-multiple bemaani ho jaata."),
+    market_data.FEW_TRADES: (
+        f"Held-out me {market_data.TRADE_MIN_TRADES} se kam poore trade bane, "
+        "isliye unhe slot me baantne ka koi matlab nahi tha."),
+}
+_REGIME_NOT_RUN: Dict[str, str] = {
+    market_data.NO_REGIME_HISTORY: (
+        "Entry se PEHLE itne bar hi nahi the ki trend aur volatility ka label "
+        "ban sake. Regime sirf guzre hue data se banta hai (aage ka bar dekhna "
+        "leakage hai), isliye label bina — naap bhi bina."),
+    market_data.REGIME_UNLABELLED: (
+        "Kuch trade aise the jinke entry se pehle regime ka label hi nahi ban "
+        "paaya. 'Har scalp se pehle regime pehchana gaya' — ye daawa tab tak "
+        "nahi ho sakta jab tak 100% trade labelled na hon."),
+    market_data.FEW_REGIMES: (
+        f"{market_data.REGIME_MIN_REGIMES} se kam regime me "
+        f"{market_data.REGIME_MIN_TRADES}+ trade bane, isliye 'kis haalat me "
+        "kaam karta hai' ka muqabla hua hi nahi."),
+    market_data.REGIME_NO_DIFFERENCE: (
+        f"Sabse acche aur sabse bure regime ka faasla "
+        f"{market_data.REGIME_DIFF_R:g}R se kam nikla — is series par haalat "
+        "badalne se naapa hua farak nahi aaya."),
+    market_data.NO_VOLATILITY: (
+        "Train hisse me koi harkat hi nahi thi, isliye na stop bani, na "
+        "volatility-regime ka koi paimana."),
+    market_data.FEW_TRADES: (
+        f"Held-out me {market_data.TRADE_MIN_TRADES} se kam poore trade bane, "
+        "isliye regime ke hisaab se baantna bemaani tha."),
+}
+_EVENT_NOT_RUN: Dict[str, str] = {
+    market_data.EVENT_NEEDS_INTRADAY: (
+        "Khabar ki khidki minute me naapi jaati hai (release, 1-5M, 5-15M, "
+        "15-60M). Is series me intraday waqt hi nahi hai, isliye ye khidkiyan "
+        "ban hi nahi sakti — daily bar par 'release ke 5 minute baad' ka koi "
+        "matlab nahi."),
+    market_data.NO_EVENTS: (
+        "Evidence me na koi event ka naam+waqt mila, aur na series me koi aisa "
+        "shock bar jo event ka proxy ban sake. Bina event, khidki ki naap ka "
+        "sawaal hi nahi uthta."),
+    market_data.EVENT_STEP_UNKNOWN: (
+        "Bar ka waqfa (kitne minute ka ek bar) tay hi nahi ho paaya, isliye "
+        "minute-waali khidkiyan naapi nahi ja saki."),
+    market_data.FEW_EVENT_WINDOWS: (
+        f"{market_data.EVENT_MIN_WINDOWS} se kam khidki me "
+        f"{market_data.EVENT_MIN_TRADES}+ trade bane, isliye khidki-to-khidki "
+        "muqabla nahi hua aur koi trade/wait/avoid verdict nahi diya gaya."),
+    market_data.NO_VOLATILITY: (
+        "Train hisse me koi harkat hi nahi thi, isliye na stop bani aur na "
+        "shock ki chhat — event pehchana hi nahi ja sakta tha."),
+    market_data.FEW_TRADES: (
+        f"Held-out me {market_data.TRADE_MIN_TRADES} se kam poore trade bane, "
+        "isliye unhe event ki khidkiyon me baantna bemaani tha."),
+}
 
 
 def _series_outcome(spec: TestSpec, policy: LabPolicy
@@ -1433,6 +1555,259 @@ def _run_trade_expectancy(spec: TestSpec, policy: LabPolicy,
                 f"ka nahi." + tail))
 
 
+# ── #150i: WAQT, HAALAT aur KHABAR — teen naap jo pehle sirf text se grade hoti thi
+def _run_slot_expectancy(spec: TestSpec, policy: LabPolicy,
+                         executor: SafeNumericExecutor) -> TestResult:
+    """KAB trade karna behtar hai — slot-wise NET expectancy ka asli muqabla.
+
+    Do baat jaan-boojh kar saaf hai:
+      * Slot ka naam "London"/"New York" nahi hota. Period stamp me timezone
+        likha hi nahi hota, isliye ghanta `h00…h23` me naapa jaata hai aur uski
+        wajah `SESSION_NAME_NOTE` me bahar bhi jaati hai. Session ka naam de
+        dena ek aisa daawa hai jo data me maujood hi nahi.
+      * Tulna EK hi R par hoti hai (`slot_min_*` ke saath mirror hui setting).
+        Har slot ke liye uska "sabse accha R" dhoondhna cherry-picking hai —
+        phir farak waqt ka nahi, R ke chunav ka hota hai.
+
+    PASS ka matlab: best aur worst slot ka faasla naapi hui hadd se bada nikla,
+    yaani is series par waqt sach me maayne rakhta hai. Faasla chhota nikalna
+    TESTED_FAIL hai (asli negative nateeja), aur "naap hi nahi hui" DATA_MISSING.
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    split = market_data.slot_expectancy(
+        series,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction,
+        stop_units=policy.trade_stop_units,
+        max_bars=policy.trade_max_bars,
+        cost_fraction=policy.trade_cost_fraction,
+        min_slot_trades=policy.slot_min_trades,
+        min_slots=policy.slot_min_slots)
+    measured = split.to_dict()
+    tail = (" " + market_data.SESSION_NAME_NOTE + " " + market_data.CLOSE_ONLY_NOTE
+            + " " + market_data.BACKTEST_NOTE + " " + market_data.NOT_ADVICE_NOTE)
+    dependent = split.slot_dependent
+    if not split.ok or dependent is None:
+        reason = split.reason_code or market_data.FEW_SLOTS
+        return _result(spec, DATA_MISSING, reason_code=reason,
+                       observed=(f"{label} | held-out {split.n_test} | "
+                                 f"granularity {split.granularity or 'none'} | "
+                                 f"{split.measured} slot naapa ja saka"),
+                       # `numbers=` jaan-boojh kar NAHI — DATA_MISSING ka matlab
+                       # naap hui hi nahi. Aadha-adhoora dict bahar bhej dena
+                       # aage "naapa hua" jaisa dikhta hai, aur wahi jhooth hai.
+                       evidence_ids=source_ids,
+                       detail=(_SLOT_NOT_RUN.get(reason, _wf_detail(reason))
+                               + tail))
+    best = split.best or {}
+    worst = split.worst or {}
+    observed = (f"{label} | held-out {split.n_test} | {split.granularity} | "
+                f"{split.measured} slot naape | best {best.get('slot')} "
+                f"{best.get('expectancy_r'):+.3f}R ({best.get('n_trades')} trade) "
+                f"vs worst {worst.get('slot')} "
+                f"{worst.get('expectancy_r'):+.3f}R ({worst.get('n_trades')} "
+                f"trade) | faasla {split.spread_r:+.3f}R")
+    expected = (f"best aur worst slot ka faasla >= {market_data.SLOT_DIFF_R:g}R "
+                f"(kam se kam {policy.slot_min_slots} slot me "
+                f"{policy.slot_min_trades}+ trade)")
+    hour_note = ("" if split.intraday else
+                 " Ghanta-wise (yaani asli 'session') naap NAHI hui — is series "
+                 "me intraday waqt hi nahi hai, isliye ye "
+                 f"{split.granularity} ka farak hai, session ka nahi.")
+    if not dependent:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=split.spread_r, evidence_ids=source_ids, numbers=measured,
+            reason_code=split.reason_code or market_data.SLOT_NO_DIFFERENCE,
+            detail=("Slot badalne se koi naapa hua farak NAHI aaya — is series "
+                    "par 'is waqt trade karo' wala daawa saboot ke bina hai."
+                    + hour_note + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=split.spread_r, evidence_ids=source_ids, numbers=measured,
+        reason_code="slot_expectancy_spread_measured",
+        detail=(f"{split.granularity} ke hisaab se expectancy sach me badalti "
+                f"hai: {split.positive}/{split.measured} slot me NET expectancy "
+                f"positive rahi. Ye {split.n_trades} trade ka nateeja hai, aur "
+                f"{measured['labelled_share']} hissa trade ko slot mila."
+                + hour_note + tail))
+
+
+def _run_regime_split(spec: TestSpec, policy: LabPolicy,
+                      executor: SafeNumericExecutor) -> TestResult:
+    """KIS HAALAT me kaam karta hai — aur kya har entry se PEHLE haalat pata thi.
+
+    Yahan do sawaal ek saath naape jaate hain, aur pehla doosre se bada hai:
+
+      1. `labelled_before_entry` — har trade par entry se PEHLE regime ka label
+         bana ya nahi. Label sirf `values[:entry_index]` se banta hai, yaani us
+         waqt tak ka data aur bas itna hi; aage ka ek bhi bar dekhna leakage hai.
+         Ye number hi "har scalp se pehle regime pehchana gaya" ka saboot hai.
+      2. `regime_dependent` — regime badalne par expectancy asli me badalti hai.
+
+    Agar kuch trade bina label reh gayi to nateeja TESTED_FAIL hai, DATA_MISSING
+    nahi: naap chali thi, aur usne saaf bata diya ki "HAR" nahi hua. Per-regime
+    number us adhoore hisse par tike hote, isliye wo daawa nahi banaya jaata.
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    split = market_data.regime_expectancy(
+        series,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction,
+        stop_units=policy.trade_stop_units,
+        max_bars=policy.trade_max_bars,
+        cost_fraction=policy.trade_cost_fraction,
+        trend_lookback=policy.regime_trend_lookback,
+        vol_lookback=policy.regime_vol_lookback,
+        min_regime_trades=policy.regime_min_trades,
+        min_regimes=policy.regime_min_regimes)
+    measured = split.to_dict()
+    tail = (" " + market_data.REGIME_PAST_ONLY_NOTE + " "
+            + market_data.REGIME_RELATIVE_NOTE + " " + market_data.BACKTEST_NOTE
+            + " " + market_data.NOT_ADVICE_NOTE)
+    head = (f"{label} | held-out {split.n_test} | {split.measured} regime naape "
+            f"| {split.n_trades} trade, {split.unlabelled} bina label")
+    if split.ok and split.n_trades and split.unlabelled:
+        return _result(
+            spec, TESTED_FAIL, observed=head,
+            expected="100% trade par entry se PEHLE regime ka label",
+            computed=measured["labelled_share"], evidence_ids=source_ids,
+            numbers=measured, reason_code=market_data.REGIME_UNLABELLED,
+            detail=(_REGIME_NOT_RUN[market_data.REGIME_UNLABELLED]
+                    + f" Naapa hua hissa: {measured['labelled_share']}."
+                    + tail))
+    dependent = split.regime_dependent
+    if not split.ok or dependent is None:
+        reason = split.reason_code or market_data.FEW_REGIMES
+        return _result(spec, DATA_MISSING, reason_code=reason, observed=head,
+                       # DATA_MISSING par koi number bahar nahi — dekho
+                       # `_run_slot_expectancy` ki wahi wajah.
+                       evidence_ids=source_ids,
+                       detail=(_REGIME_NOT_RUN.get(reason, _wf_detail(reason))
+                               + tail))
+    best = split.best or {}
+    worst = split.worst or {}
+    observed = (f"{head} | best {best.get('regime')} "
+                f"{best.get('expectancy_r'):+.3f}R ({best.get('n_trades')} trade) "
+                f"vs worst {worst.get('regime')} "
+                f"{worst.get('expectancy_r'):+.3f}R ({worst.get('n_trades')} "
+                f"trade) | faasla {split.spread_r:+.3f}R")
+    expected = (f"har entry se pehle label, aur best-worst regime ka faasla >= "
+                f"{market_data.REGIME_DIFF_R:g}R (kam se kam "
+                f"{policy.regime_min_regimes} regime me "
+                f"{policy.regime_min_trades}+ trade)")
+    if not dependent:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=split.spread_r, evidence_ids=source_ids, numbers=measured,
+            reason_code=split.reason_code or market_data.REGIME_NO_DIFFERENCE,
+            detail=("Regime badalne se koi naapa hua farak nahi aaya. Label har "
+                    "entry se pehle bana (wo hissa sach hai), par 'is haalat me "
+                    "hi trade karo' — is baat ka saboot is series par nahi mila."
+                    + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=split.spread_r, evidence_ids=source_ids, numbers=measured,
+        reason_code="regime_labelled_before_entry_and_expectancy_differs",
+        detail=(f"Har trade ka regime entry se PEHLE bana (labelled share "
+                f"{measured['labelled_share']}), aur haalat badalne par "
+                f"expectancy sach me badli: {split.positive}/{split.measured} "
+                f"regime me NET expectancy positive rahi." + tail))
+
+
+def _run_event_window(spec: TestSpec, policy: LabPolicy,
+                      executor: SafeNumericExecutor) -> TestResult:
+    """KHABAR ke aas-paas kya karein — har khidki ka naapa hua trade/wait/avoid.
+
+    Do mode hain aur dono ka farak chhupaya nahi jaata:
+      * calendar — evidence me event ka NAAM aur intraday waqt ek hi line par
+        mila. Sirf isi mode me "pre-news" ka faisla ho sakta hai, kyunki event ka
+        waqt pehle se pata tha.
+      * shock proxy — koi calendar nahi mili, isliye bade move ko event ka
+        nishaan maana gaya. Ye event ka PROXY hai, saboot nahi, aur is mode me
+        `pre_event_verdict` hamesha None rehta hai (wajah bhi saath jaati hai).
+
+    "wait" ek FAISLA hai (naapa, edge nahi mila, ruko). Jahan naap hi nahi hui
+    wahan verdict None rehta hai — "wait" likh dena naap ke na hone ko chhupa
+    dena hota, aur yahi is point ka sabse aasan jhooth hai.
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    split = market_data.event_window_expectancy(
+        series,
+        text=spec.evidence_text,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction,
+        stop_units=policy.trade_stop_units,
+        max_bars=policy.trade_max_bars,
+        cost_fraction=policy.trade_cost_fraction,
+        shock_units=policy.event_shock_units,
+        min_window_trades=policy.event_min_trades,
+        min_windows=policy.event_min_windows)
+    measured = split.to_dict()
+    mode_note = (market_data.EVENT_CALENDAR_NOTE
+                 if split.mode == market_data.EVENT_MODE_CALENDAR
+                 else market_data.EVENT_SHOCK_NOTE)
+    tail = (" " + mode_note + " " + market_data.EVENT_VERDICT_NOTE + " "
+            + market_data.BACKTEST_NOTE + " " + market_data.NOT_ADVICE_NOTE)
+    head = (f"{label} | mode {split.mode or 'none'} | {split.n_events} event | "
+            f"held-out {split.n_test} | {split.measured} khidki naapi, "
+            f"{split.decided} ka faisla bana")
+    dependent = split.window_dependent
+    if not split.ok or dependent is None:
+        reason = split.reason_code or market_data.NO_EVENTS
+        return _result(spec, DATA_MISSING, reason_code=reason, observed=head,
+                       # DATA_MISSING par koi number bahar nahi — dekho
+                       # `_run_slot_expectancy` ki wahi wajah.
+                       evidence_ids=source_ids,
+                       detail=(_EVENT_NOT_RUN.get(reason, _wf_detail(reason))
+                               + tail))
+    verdicts = ", ".join(f"{window}={verdict}"
+                         for window, verdict in split.verdicts.items() if verdict)
+    observed = f"{head} | {verdicts}"
+    expected = (f"kam se kam {policy.event_min_windows} khidki me "
+                f"{policy.event_min_trades}+ trade, aur khidkiyon ka faisla ek "
+                "jaisa na ho")
+    pre_note = ("" if split.mode == market_data.EVENT_MODE_CALENDAR else
+                " Pre-news window ka faisla NAHI hua — uske liye asli event "
+                "calendar chahiye, shock proxy se event ka waqt pehle se pata "
+                "nahi hota.")
+    if not dependent:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=split.decided, evidence_ids=source_ids, numbers=measured,
+            reason_code=split.reason_code or market_data.EVENT_NO_DIFFERENCE,
+            detail=("Har naapi hui khidki ka faisla ek hi nikla, yaani khabar ke "
+                    "aas-paas bartaav badalne ka koi naapa hua kaaran is series "
+                    "par nahi mila." + pre_note + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=split.decided, evidence_ids=source_ids, numbers=measured,
+        reason_code="event_window_verdicts_differ_by_window",
+        detail=(f"{split.decided} khidki ka faisla naap se bana aur wo faisle ek "
+                f"jaise NAHI hain — yaani event ki khidki asli me maayne rakhti "
+                f"hai. Ye {split.n_trades} trade ka nateeja hai, aur "
+                f"{measured['labelled_share']} hissa trade ko khidki mili."
+                + pre_note + tail))
+
+
 RECIPES: Dict[str, Any] = {
     "numeric_formula": _run_numeric_formula,
     "threshold": _run_threshold,
@@ -1443,6 +1818,9 @@ RECIPES: Dict[str, Any] = {
     "parameter_robustness": _run_parameter_robustness,
     "baseline_tournament": _run_baseline_tournament,
     "trade_expectancy": _run_trade_expectancy,
+    "slot_expectancy": _run_slot_expectancy,
+    "regime_split": _run_regime_split,
+    "event_window": _run_event_window,
 }
 
 
@@ -1775,6 +2153,30 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
             + market_data.CLOSE_ONLY_NOTE
             + " Chhote sample ki positive expectancy ko 'edge mil gaya' nahi "
             "padha jaaye.")
+    # #150i — teen nayi naap ki apni-apni seema. Ye teeno IS liye likhi jaati
+    # hain ki inka naam hi over-read hota hai: "session expectancy" sun kar log
+    # London/New York samajh lete hain, "regime detection" sun kar live regime
+    # engine, aur "macro-event windows" sun kar asli news calendar.
+    ran_slot = _ran_count(report, "slot_expectancy")
+    if ran_slot:
+        limits.append(
+            f"{ran_slot} slot-wise expectancy test chala, par slot data ke apne "
+            "label se bana hai (ghanta / weekday / mahina / quarter). "
+            + market_data.SESSION_NAME_NOTE)
+    ran_regime = _ran_count(report, "regime_split")
+    if ran_regime:
+        limits.append(
+            f"{ran_regime} regime-split test chala. Label sirf guzre hue bars se "
+            "banta hai (yahi leakage se bachne ka tareeqa hai), par iska matlab "
+            "ye NAHI ki regime badalne ka pata live me itni jaldi chalega. "
+            + market_data.REGIME_RELATIVE_NOTE)
+    ran_event = _ran_count(report, "event_window")
+    if ran_event:
+        limits.append(
+            f"{ran_event} macro-event window test chala. "
+            + market_data.EVENT_SHOCK_NOTE
+            + " Jahan asli calendar mili wahan mode `calendar` likha hota hai — "
+            "audit me mode dekh kar hi is naap ko padha jaaye.")
     # Jis hypothesis ka naap INSAAN par hota hai, uska yahan test hi nahi bana
     # (#155e). Ye seema LAB ke baad bhi sach hai, isliye audit me jaati hai.
     # "Test nahi chala" ko "hypothesis kamzor thi" padhna sabse aasaan galti hai —
@@ -1802,7 +2204,8 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
 # hi jagah badalni pade. `tests/test_deliverable_guard.py` ise upar ki asli
 # append-sites ki ginti se pin karta hai, isliye ye chupchaap purani nahi ho
 # sakti.
-MAX_AUDIT_LIMIT_LINES = 11
+# #150i — 11 se 14: slot / regime / event window ki teen nayi seema-line judi.
+MAX_AUDIT_LIMIT_LINES = 14
 
 
 def verdict_for(report: Optional[Dict[str, Any]], hypothesis_id: str) -> str:

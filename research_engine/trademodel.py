@@ -49,7 +49,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 
-from .market_data import BACKTEST_NOTE, NOT_ADVICE_NOTE
+from .market_data import (BACKTEST_NOTE, EVENT_PRE, EVENT_QUIET,
+                          EVENT_WINDOW_ORDER, NOT_ADVICE_NOTE, SLOT_HOUR)
 
 SCHEMA_VERSION = "trademodel-1"
 
@@ -1013,8 +1014,22 @@ LAB_RECIPE_BASELINE = "baseline_tournament"
 # galti nahi, balki entry/stop/target + cost ke baad TRADE-level nateeja. Isi ke
 # structured numbers se neeche paanch point grade hote hain.
 LAB_RECIPE_TRADE = "trade_expectancy"
+# #150i — teen aur naapne wali recipe. Ye teen "kab" ka jawab dete hain (kaunse
+# ghante, kaunse regime, kaunsi macro-event window me trade ka nateeja kaisa
+# rehta hai), isliye niche ke teen point text-cue ke bajaye inke number se
+# grade hote hain — par sirf tab jab naap SACH ME hui ho.
+LAB_RECIPE_SLOT = "slot_expectancy"
+LAB_RECIPE_REGIME = "regime_split"
+LAB_RECIPE_EVENT = "event_window"
 LAB_PASS_STATUSES: Tuple[str, ...] = ("TESTED_PASS",)
 LAB_RAN_STATUSES: Tuple[str, ...] = ("TESTED_PASS", "TESTED_FAIL")
+
+# Contract ki paanch macro window. Naam yahan DOBARA nahi likhe jaate —
+# `market_data.EVENT_WINDOW_ORDER` me se sirf "koi event nahi" wali window hata
+# di jaati hai. Haath se list likhne par kal wahan ek window add hoti aur yahan
+# chup-chaap chhoot jaati; tab "sab window ka faisla ho gaya" jhooth ban jaata.
+CONTRACT_EVENT_WINDOWS: Tuple[str, ...] = tuple(
+    window for window in EVENT_WINDOW_ORDER if window != EVENT_QUIET)
 
 
 def lab_tests(lab_report: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
@@ -1076,6 +1091,41 @@ def lab_trade_numbers(lab_report: Optional[Dict[str, Any]]
         return None
     return max(rows, key=lambda row: (int(row.get("n_trades") or 0),
                                       float(row.get("expectancy_r") or 0.0)))
+
+
+def _biggest(rows: List[Dict[str, Any]], tie_key: str
+             ) -> Optional[Dict[str, Any]]:
+    """Sabse bade sample wali naap; barabari par jisme zyada hisse naape gaye.
+
+    Tie-breaker `expectancy_r` NAHI hai — behtar dikhne wali naap chun lena
+    theek utna hi dhokha hai jitna chhota sample chun lena. Yahan zyada
+    hisse (slot/regime/window) naapne wali naap jeetti hai, kyunki wo zyada
+    baat batati hai, chaahe nateeja bura ho.
+    """
+    if not rows:
+        return None
+    return max(rows, key=lambda row: (int(row.get("n_trades") or 0),
+                                      int(row.get(tie_key) or 0)))
+
+
+def lab_slot_numbers(lab_report: Optional[Dict[str, Any]]
+                     ) -> Optional[Dict[str, Any]]:
+    """Session/ghante ki naap — sabse bade sample wali."""
+    return _biggest(lab_numbers(lab_report, LAB_RECIPE_SLOT), "slots_measured")
+
+
+def lab_regime_numbers(lab_report: Optional[Dict[str, Any]]
+                       ) -> Optional[Dict[str, Any]]:
+    """Regime ki naap — sabse bade sample wali."""
+    return _biggest(lab_numbers(lab_report, LAB_RECIPE_REGIME),
+                    "regimes_measured")
+
+
+def lab_event_numbers(lab_report: Optional[Dict[str, Any]]
+                      ) -> Optional[Dict[str, Any]]:
+    """Macro-event window ki naap — sabse bade sample wali."""
+    return _biggest(lab_numbers(lab_report, LAB_RECIPE_EVENT),
+                    "windows_decided")
 
 
 # ── ek hi teen-tarfa niyam, har point par ───────────────────────────────────
@@ -2002,6 +2052,16 @@ _TARGET_TEXT = _simple("take_profit_research", "take-profit ki research",
                        also_label="expectancy ka hisaab (win-rate ka nahi)")
 _COST_TEXT = _cov("realistic_costs", _COST_GROUPS, 3, "asli cost")
 _FAILURE_TEXT = _simple("failure_classification", "haar ki class-wise ginti")
+# #150i ke teen point ka purana text-cue naap — BILKUL waise hi, shabd badle
+# bina. LAB ki naap na ho to yahi chalte hain, isliye #150i se in teen point ka
+# purana bartaav ratti bhar nahi badalta.
+_REGIME_TEXT = _simple("regime_detection", "regime ki pehchaan")
+_SESSION_TEXT = _simple("session_expectancy", "session/ghante ki expectancy",
+                        also=_SAMPLE_CUES, also_label="sample size")
+_EVENT_TEXT = _simple(
+    "macro_event_windows", "macro event window",
+    also=("trade", "wait", "avoid", "skip", "no-trade", "stand aside"),
+    also_label="trade/wait/avoid ka faisla")
 
 
 def _perf_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
@@ -2076,6 +2136,187 @@ def _cost_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
                       "naapi hi nahi gayi — isliye 'asli cost' poori tarah "
                       "naapi hui nahi maani ja sakti"}
 
+
+def _session_from_numbers(numbers: Dict[str, Any]) -> Dict[str, Any]:
+    """"Session ki expectancy" ka matlab GHANTE ka naap hai, kuch aur nahi.
+
+    Weekday-wise ya month-wise farak naapna bhi kaam hai, par usse "session
+    expectancy naap li" keh dena galat hoga — mangi hui cheez time-of-day hai.
+    Isliye `hour_of_day_measured` False par nateeja NOT_MET rehta hai, apni
+    naapi hui wajah ke saath.
+
+    Yahan MET ke liye ye ZAROORI NAHI hai ki slot se farak MILA ho. Contract
+    kehta hai "har session/ghante ka apna number aur sample size" — naap ke baad
+    "koi farak nahi" nikalna bhi poora jawab hai. Farak milna zaroori bana dena
+    is point ko us taraf dhakel dega jahan positive nateeja hi paas ho, aur wahi
+    backtest ka sabse purana dhokha hai.
+    """
+    need = CONTRACT_BY_ID["session_expectancy"].needs
+    slots = int(numbers.get("slots_measured") or 0)
+    share = numbers.get("labelled_share")
+    granularity = str(numbers.get("granularity") or "none")
+    head = (f"{granularity} ke hisaab se {slots} slot naape "
+            f"({numbers.get('n_trades')} trade)")
+    if not numbers.get("hour_of_day_measured") or granularity != SLOT_HOUR:
+        return {"status": NOT_MET,
+                "observed": head,
+                "expected": need,
+                "reason": ("LAB ne slot-wise expectancy naapi, par ghanta-wise "
+                           f"nahi — is series me intraday waqt hi nahi tha "
+                           f"(granularity {granularity}, chahiye {SLOT_HOUR}). "
+                           "Ghante ke bina ye 'session expectancy' nahi hai; "
+                           "wajah: "
+                           + str(numbers.get("hour_of_day_reason") or ""))}
+    if slots < 2 or numbers.get("spread_r") is None:
+        return {"status": NOT_MET,
+                "observed": head,
+                "expected": need,
+                "reason": ("session ki tulna ke liye kam se kam do ghante me "
+                           "poora sample chahiye — ek slot se 'is waqt trade "
+                           "karo' nahi kaha ja sakta")}
+    if share is None or float(share) < 1.0:
+        return {"status": NOT_MET,
+                "observed": f"{head} | labelled_share {share}",
+                "expected": need,
+                "reason": (f"{numbers.get('trades_without_slot')} trade ko koi "
+                           "ghanta mila hi nahi, isliye per-slot number adhoore "
+                           "sample par tike hain")}
+    best = numbers.get("best_slot") or {}
+    worst = numbers.get("worst_slot") or {}
+    dependent = numbers.get("slot_dependent")
+    return {"status": MET,
+            "observed": (f"{head} | best {best.get('slot')} "
+                         f"{best.get('expectancy_r')}R "
+                         f"({best.get('n_trades')} trade) vs worst "
+                         f"{worst.get('slot')} {worst.get('expectancy_r')}R "
+                         f"({worst.get('n_trades')} trade) | faasla "
+                         f"{numbers.get('spread_r')}R"
+                         + _lab_note(numbers) + _LAB_MEASURED),
+            "expected": need,
+            "reason": ("har ghante ka apna NET expectancy aur apna sample size "
+                       f"naapa gaya ({numbers.get('slots_positive')} ghante me "
+                       "expectancy positive), aur slot signal-bar se liya gaya "
+                       "yaani entry se pehle ka waqt; naapa hua faisla: "
+                       + ("waqt se farak padta hai" if dependent else
+                          "is series par waqt se farak NAHI padta")
+                       + ". Session ke NAAM (London/New York) jaan-boojh kar "
+                         "nahi diye gaye — stamp me timezone hi nahi hota")}
+
+
+def _regime_from_numbers(numbers: Dict[str, Any]) -> Dict[str, Any]:
+    """Contract ka sawaal "HAR scalp se pehle" hai — yahi naapa jaata hai.
+
+    Faisla `labelled_before_entry` par tikta hai: har trade ka regime sirf us
+    waqt tak ke data se bana ya nahi. Ek bhi trade bina label reh jaaye to ye
+    NOT_MET hai, chaahe per-regime number kitne bhi acche dikhein — kyunki tab
+    "har" ka daawa jhootha ho jaata.
+    """
+    need = CONTRACT_BY_ID["regime_detection"].needs
+    regimes = int(numbers.get("regimes_measured") or 0)
+    share = numbers.get("labelled_share")
+    head = (f"{regimes} regime naape, {numbers.get('n_trades')} trade, "
+            f"{numbers.get('trades_without_regime')} bina label")
+    if not numbers.get("labelled_before_entry"):
+        return {"status": NOT_MET,
+                "observed": f"{head} | labelled_share {share}",
+                "expected": need,
+                "reason": ("regime ka label har entry se PEHLE nahi bana — "
+                           "kuch trade bina haalat ki pehchaan ke chali, isliye "
+                           "'har scalp se pehle regime pehchana gaya' saabit "
+                           "nahi hota")}
+    if regimes < 2:
+        return {"status": NOT_MET,
+                "observed": head,
+                "expected": need,
+                "reason": ("label to entry se pehle bana, par tulna ke liye kam "
+                           "se kam do regime me poora sample chahiye — ek hi "
+                           "haalat se 'regime dekh kar trade karo' ka rule nahi "
+                           "banta")}
+    best = numbers.get("best_regime") or {}
+    worst = numbers.get("worst_regime") or {}
+    dependent = numbers.get("regime_dependent")
+    return {"status": MET,
+            "observed": (f"{head} | best {best.get('regime')} "
+                         f"{best.get('expectancy_r')}R vs worst "
+                         f"{worst.get('regime')} {worst.get('expectancy_r')}R | "
+                         f"faasla {numbers.get('spread_r')}R"
+                         + _lab_note(numbers) + _LAB_MEASURED),
+            "expected": need,
+            "reason": ("har trade ka regime entry se PEHLE ke data se bana "
+                       f"(labelled_share {share}) aur "
+                       f"{regimes} regime ka apna number naapa gaya; naapa hua "
+                       "faisla: "
+                       + ("haalat se expectancy badalti hai" if dependent else
+                          "is series par haalat se farak NAHI padta")
+                       + ". Regime ka paimana relative hai (isi series ke "
+                         "andar), koi absolute market state nahi")}
+
+
+def _event_from_numbers(numbers: Dict[str, Any]) -> Dict[str, Any]:
+    """Paanchon khidki ka faisla — aur pre-news ke liye asli calendar zaroori.
+
+    Contract ki khidkiyan `CONTRACT_EVENT_WINDOWS` se aati hain, haath se likhi
+    hui list se nahi. Pre-news ka faisla `pre_event_verdict` se padha jaata hai,
+    `verdicts` se nahi: shock-proxy mode me event ka waqt pehle se pata hi nahi
+    hota, isliye wahan pre-news ka faisla structurally None rehta hai. Wahan
+    "wait" likh dena naap ke na hone ko chhupa dena hota.
+    """
+    need = CONTRACT_BY_ID["macro_event_windows"].needs
+    verdicts = numbers.get("verdicts") or {}
+    decided: Dict[str, str] = {}
+    for window in CONTRACT_EVENT_WINDOWS:
+        verdict = (numbers.get("pre_event_verdict") if window == EVENT_PRE
+                   else verdicts.get(window))
+        if verdict:
+            decided[window] = str(verdict)
+    missing = [window for window in CONTRACT_EVENT_WINDOWS
+               if window not in decided]
+    mode = str(numbers.get("mode") or "none")
+    head = (f"mode {mode} | {numbers.get('n_events')} event | "
+            f"{len(decided)}/{len(CONTRACT_EVENT_WINDOWS)} contract khidki ka "
+            "faisla bana: "
+            + (", ".join(f"{window}={verdict}"
+                         for window, verdict in decided.items()) or "koi nahi"))
+    if missing:
+        pre_reason = str(numbers.get("pre_event_reason") or "")
+        why = (f"in khidkiyon ka faisla naap se bana hi nahi: "
+               + ", ".join(missing)
+               + ". Bina naap 'wait' likh dena hi is point ka sabse aasan "
+                 "jhooth hai, isliye ye NOT_MET hai")
+        if EVENT_PRE in missing and pre_reason:
+            why += f" (pre-news ki wajah: {pre_reason})"
+        return {"status": NOT_MET, "observed": head, "expected": need,
+                "reason": why}
+    dependent = numbers.get("window_dependent")
+    return {"status": MET,
+            "observed": head + _lab_note(numbers) + _LAB_MEASURED,
+            "expected": need,
+            "reason": ("contract ki har macro khidki ka trade/wait/avoid naapi "
+                       "hui expectancy se bana (pre-news ka faisla asli event "
+                       "calendar se), aur "
+                       + ("khidki badalne par faisla sach me badla"
+                          if dependent else
+                          "sab khidkiyon ka faisla ek jaisa nikla — ye bhi ek "
+                          "naapa hua nateeja hai")
+                       + f"; {numbers.get('labelled_share')} hissa trade ko "
+                         "khidki mili")}
+
+
+def _session_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    numbers = ctx.get("slot_numbers")
+    return _SESSION_TEXT(ctx) if not numbers else _session_from_numbers(numbers)
+
+
+def _regime_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    numbers = ctx.get("regime_numbers")
+    return _REGIME_TEXT(ctx) if not numbers else _regime_from_numbers(numbers)
+
+
+def _event_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    numbers = ctx.get("event_numbers")
+    return _EVENT_TEXT(ctx) if not numbers else _event_from_numbers(numbers)
+
+
 _EVALUATORS: Dict[str, Any] = {
     "instrument_scope": _instrument_scope,
     "execution_chain": _execution_chain,
@@ -2093,13 +2334,9 @@ _EVALUATORS: Dict[str, Any] = {
     "order_flow_edge": _order_flow_edge,
     "competing_hypotheses": _competing_hypotheses,
     "original_hypotheses": _original_hypotheses,
-    "regime_detection": _simple("regime_detection", "regime ki pehchaan"),
-    "session_expectancy": _simple("session_expectancy", "session/ghante ki expectancy",
-                                  also=_SAMPLE_CUES, also_label="sample size"),
-    "macro_event_windows": _simple(
-        "macro_event_windows", "macro event window",
-        also=("trade", "wait", "avoid", "skip", "no-trade", "stand aside"),
-        also_label="trade/wait/avoid ka faisla"),
+    "regime_detection": _regime_point,
+    "session_expectancy": _session_point,
+    "macro_event_windows": _event_point,
     "intermarket_tests": _simple(
         "intermarket_tests", "intermarket rishta",
         also=("regime", "break", "unstable", "tootta", "time dependent",
@@ -2163,6 +2400,13 @@ def measure(ask: Optional[TradeAsk] = None, spec: Any = "",
         # Paanch point isi se grade hote hain; None ho to purana text-cue
         # raasta hi chalta hai — yaani kuch bhi kamzor nahi hota.
         "trade_numbers": lab_trade_numbers(lab_report),
+        # #150i — waqt / haalat / khabar ki naap. Teenon alag key par hain
+        # (`slots` naam pehle se `entry_slots` ka hai, usse chhua nahi gaya).
+        # Inme se koi None ho to us point ka purana text-cue raasta hi chalta
+        # hai — teen naye point bhi kisi purani baat ko nahi hataate.
+        "slot_numbers": lab_slot_numbers(lab_report),
+        "regime_numbers": lab_regime_numbers(lab_report),
+        "event_numbers": lab_event_numbers(lab_report),
         "inst": institutional_sources(source_list),
         "acad": academic_sources(source_list),
         "deep": deeply_read(source_list),
