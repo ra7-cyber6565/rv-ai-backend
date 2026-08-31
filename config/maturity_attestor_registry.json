@@ -117,6 +117,19 @@
         {"capability_id": 55, "proof_kind": "persistence", "subject": "memory-governance-runtime"},
         {"capability_id": 56, "proof_kind": "persistence", "subject": "memory-governance-runtime"}
       ]
+    },
+    {
+      "attestor_id": "sim-to-reality-hardware",
+      "verifier": "trusted-hardware-observer",
+      "module": "research_engine/sim_to_reality_attestor.py",
+      "test": "tests/test_sim_to_reality_attestor.py",
+      "external_required": true,
+      "routes": [
+        {"capability_id": 127, "proof_kind": "execution", "subject": "sim-to-reality-hardware-validation"},
+        {"capability_id": 127, "proof_kind": "reproducibility", "subject": "sim-to-reality-hardware-validation"},
+        {"capability_id": 127, "proof_kind": "hardware_observation", "subject": "sim-to-reality-hardware-validation"},
+        {"capability_id": 127, "proof_kind": "safety_gate", "subject": "sim-to-reality-hardware-validation"}
+      ]
     }
   ]
 }
