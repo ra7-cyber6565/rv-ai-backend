@@ -1,145 +1,41 @@
 {
   "schema_version": 1,
   "routes": [
-    {
-      "capability_id": 87,
-      "proof_kind": "persistence",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 87,
-      "proof_kind": "runtime_observation",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 87,
-      "proof_kind": "live_observation",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 88,
-      "proof_kind": "execution",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 88,
-      "proof_kind": "reproducibility",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 88,
-      "proof_kind": "persistence",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 88,
-      "proof_kind": "runtime_observation",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 88,
-      "proof_kind": "live_observation",
-      "subject": "post-deployment-live-validation",
-      "verifier": "trusted-deployment-observer",
-      "reference_prefix": "post-deployment:"
-    },
-    {
-      "capability_id": 127,
-      "proof_kind": "execution",
-      "subject": "sim-to-reality-hardware-validation",
-      "verifier": "trusted-hardware-observer",
-      "reference_prefix": "sim-to-reality:"
-    },
-    {
-      "capability_id": 127,
-      "proof_kind": "reproducibility",
-      "subject": "sim-to-reality-hardware-validation",
-      "verifier": "trusted-hardware-observer",
-      "reference_prefix": "sim-to-reality:"
-    },
-    {
-      "capability_id": 127,
-      "proof_kind": "hardware_observation",
-      "subject": "sim-to-reality-hardware-validation",
-      "verifier": "trusted-hardware-observer",
-      "reference_prefix": "sim-to-reality:"
-    },
-    {
-      "capability_id": 127,
-      "proof_kind": "safety_gate",
-      "subject": "sim-to-reality-hardware-validation",
-      "verifier": "trusted-hardware-observer",
-      "reference_prefix": "sim-to-reality:"
-    },
-    {
-      "capability_id": 22,
-      "proof_kind": "execution",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 22,
-      "proof_kind": "reproducibility",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 122,
-      "proof_kind": "execution",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 122,
-      "proof_kind": "reproducibility",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 123,
-      "proof_kind": "execution",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 123,
-      "proof_kind": "reproducibility",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 124,
-      "proof_kind": "execution",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    },
-    {
-      "capability_id": 124,
-      "proof_kind": "reproducibility",
-      "subject": "experiment-intelligence-benchmark",
-      "verifier": "trusted-operator",
-      "reference_prefix": "experiment-intelligence:"
-    }
+    {"capability_id":87,"proof_kind":"persistence","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":87,"proof_kind":"runtime_observation","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":87,"proof_kind":"live_observation","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":88,"proof_kind":"execution","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":88,"proof_kind":"reproducibility","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":88,"proof_kind":"persistence","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":88,"proof_kind":"runtime_observation","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":88,"proof_kind":"live_observation","subject":"post-deployment-live-validation","verifier":"trusted-deployment-observer","reference_prefix":"post-deployment:"},
+    {"capability_id":127,"proof_kind":"execution","subject":"sim-to-reality-hardware-validation","verifier":"trusted-hardware-observer","reference_prefix":"sim-to-reality:"},
+    {"capability_id":127,"proof_kind":"reproducibility","subject":"sim-to-reality-hardware-validation","verifier":"trusted-hardware-observer","reference_prefix":"sim-to-reality:"},
+    {"capability_id":127,"proof_kind":"hardware_observation","subject":"sim-to-reality-hardware-validation","verifier":"trusted-hardware-observer","reference_prefix":"sim-to-reality:"},
+    {"capability_id":127,"proof_kind":"safety_gate","subject":"sim-to-reality-hardware-validation","verifier":"trusted-hardware-observer","reference_prefix":"sim-to-reality:"},
+    {"capability_id":22,"proof_kind":"execution","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":22,"proof_kind":"reproducibility","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":122,"proof_kind":"execution","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":122,"proof_kind":"reproducibility","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":123,"proof_kind":"execution","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":123,"proof_kind":"reproducibility","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":124,"proof_kind":"execution","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":124,"proof_kind":"reproducibility","subject":"experiment-intelligence-benchmark","verifier":"trusted-operator","reference_prefix":"experiment-intelligence:"},
+    {"capability_id":29,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":29,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":30,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":30,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":31,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":31,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":32,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":32,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":33,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":33,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":34,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":34,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":35,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":35,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":99,"proof_kind":"execution","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"},
+    {"capability_id":99,"proof_kind":"reproducibility","subject":"statistical-validation-benchmark","verifier":"trusted-operator","reference_prefix":"statistical-validation:"}
   ]
 }
