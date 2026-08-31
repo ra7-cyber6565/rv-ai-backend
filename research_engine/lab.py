@@ -91,7 +91,10 @@ class LabPolicy:
     # naye backtest-baad ke test bhi hain (monte_carlo, parameter_robustness,
     # baseline_tournament), aur aath ka matlab hai: koi bhi spec cap ki wajah se
     # nahi girti. Chhat rakhi hui hai (0 nahi) taaki wall-clock budget bacha rahe.
-    max_specs_per_hypothesis: int = 8
+    # #150g — 8 se 9: `trade_expectancy` naam ki nauvi spec judi. Ye number spec
+    # ki asli ginti ke saath badhna CHAHIYE, warna sabse aakhri spec chup-chaap
+    # girti hai aur report me uski koi line hi nahi aati.
+    max_specs_per_hypothesis: int = 9
     max_wall_seconds: float = 6.0
     seed: int = 20260826            # fixed — koi randomness use nahi hoti,
     #                                 ye sirf reproducibility ka record hai
@@ -114,6 +117,16 @@ class LabPolicy:
     mc_max_ruin_prob: float = market_data.MC_MAX_RUIN_PROB
     sweep_min_settings: int = market_data.SWEEP_MIN_SETTINGS
     sweep_min_beat_share: float = market_data.SWEEP_MIN_BEAT_SHARE
+    # #150g — TRADE-level naap ki chhat. Wahi niyam: har number market_data se
+    # mirror hota hai, do jagah do value kabhi nahi. `walk_forward` sirf "agla
+    # point kitna galat guess hua" naapta hai; trading ka sawaal entry/stop/
+    # target/cost ke BAAD ka hai, aur wo naap yahin se aati hai.
+    trade_min_trades: int = market_data.TRADE_MIN_TRADES
+    trade_r_multiples: Tuple[float, ...] = market_data.TRADE_R_MULTIPLES
+    trade_stop_units: float = market_data.TRADE_STOP_UNITS
+    trade_max_bars: int = market_data.TRADE_MAX_BARS
+    trade_cost_fraction: float = market_data.TRADE_COST_FRACTION
+    trade_min_robust_share: float = market_data.TRADE_MIN_ROBUST_SHARE
     # #155e — ye run "kuch bana kar do" wali farmaish hai (gaana/kavita/script)?
     # Default False rakha gaya hai jaan-boojh kar: science aur trading ke run me
     # LAB ka bartaav ek bit bhi nahi badalta. True hone par sirf ITNA hota hai ki
@@ -138,6 +151,12 @@ class LabPolicy:
             "mc_max_ruin_prob": self.mc_max_ruin_prob,
             "sweep_min_settings": self.sweep_min_settings,
             "sweep_min_beat_share": self.sweep_min_beat_share,
+            "trade_min_trades": self.trade_min_trades,
+            "trade_r_multiples": list(self.trade_r_multiples),
+            "trade_stop_units": self.trade_stop_units,
+            "trade_max_bars": self.trade_max_bars,
+            "trade_cost_fraction": self.trade_cost_fraction,
+            "trade_min_robust_share": self.trade_min_robust_share,
             "craft_ask": self.craft_ask,
             "randomness_used": False,
             "network_used": False,
@@ -335,6 +354,12 @@ class TestResult:
     evidence_ids: List[str] = field(default_factory=list)
     computed: Optional[float] = None
     requires_risk_review: bool = False
+    # #150g — NAAPE hue numbers, string me nahi. `observed` ek insaan ke padhne
+    # ki line hai; usko wapas parse karke faisla lena hi "declare vs derive" ka
+    # ulta rasta hai. Jise numbers par grade karna hai (jaise trademodel ke
+    # contract point) wo yahan se le, line se nahi. Khaali dict ka matlab: is
+    # recipe ne koi structured naap nahi di.
+    numbers: Dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -350,6 +375,7 @@ class TestResult:
             "evidence_ids": list(self.evidence_ids),
             "computed": self.computed,
             "requires_risk_review": self.requires_risk_review,
+            "numbers": dict(self.numbers),
             # Ye do line kabhi badalti nahi: lab ka pass hona sabooti nahi hai.
             "is_established_fact": False,
             "real_world_experiment_pending": True,
@@ -564,6 +590,15 @@ def plan_specs(hypothesis: Dict[str, Any], pack: Any = None,
                 what=("Model vs paanch simple baseline (naive, momentum, "
                       "mean-reversion, moving average, linear trend) — held-out "
                       "MAE par seedha muqabla"),
+                text=claim, evidence_text=ev_text, series=series)
+            # 9. #150g — upar ke chaar test forecast ki GALTI naapte hain. Ye
+            #    nauva test poochta hai: entry, stop, target aur COST ke baad
+            #    kya bachta hai. Ye alag sawaal hai, isliye alag spec — MAE se
+            #    "paisa banega" nikaal lena hi trading ka sabse aam jhooth hai.
+            add(recipe="trade_expectancy", origin="prediction/statement",
+                what=("Asli trade-level naap: entry/stop/target + cost ke baad "
+                      "expectancy, profit factor, drawdown, MAE aur haar ki "
+                      "wajah (1R…3R take-profit tulna ke saath)"),
                 text=claim, evidence_text=ev_text, series=series)
     return specs
 
@@ -1042,6 +1077,25 @@ _TOURNAMENT_NOT_RUN: Dict[str, str] = {
         "Koi bhi baseline held-out par forecast bana hi nahi paaya, isliye "
         "muqabla hua hi nahi — 'model jeet gaya' kehna yahan jhooth hota."),
 }
+# #150g — trade-level naap kis wajah se nahi chali. Har wajah ASLI kami batati
+# hai, "feature nahi hai" nahi (feature hai).
+_TRADE_NOT_RUN: Dict[str, str] = {
+    market_data.FEW_TRADES: (
+        f"Held-out hisse me {market_data.TRADE_MIN_TRADES} se kam poore trade "
+        f"bane (entry se exit tak), isliye expectancy / profit factor naapa hi "
+        f"nahi gaya. Is naap ke liye takreeban "
+        f"{market_data.TRADE_MIN_SERIES_POINTS}+ point ki series chahiye — "
+        "chhote sample par 'edge mil gaya' kehna sabse aam backtest jhooth hai."),
+    market_data.NO_VOLATILITY: (
+        "Train hisse me koi harkat hi nahi thi, isliye stop ki naap (SL kitni "
+        "door) ban hi nahi saki — aur bina stop ke R-multiple, expectancy aur "
+        "MAE ka koi matlab nahi hota."),
+    market_data.NO_LOSS_TO_MEASURE: (
+        "Sample me ek bhi haarne wala trade nahi tha, isliye loss-side (profit "
+        "factor, average loss, tail loss) naapa hi nahi gaya. Aisa sample 'edge "
+        "mil gaya' ka saboot NAHI hai — ye sirf itna kehta hai ki is chhote "
+        "hisse me haar aayi hi nahi."),
+}
 
 
 def _series_outcome(spec: TestSpec, policy: LabPolicy
@@ -1253,6 +1307,132 @@ def _run_baseline_tournament(spec: TestSpec, policy: LabPolicy,
                 f"(model MAE {tour.model_mae:.4g})." + tail))
 
 
+def _run_trade_expectancy(spec: TestSpec, policy: LabPolicy,
+                          executor: SafeNumericExecutor) -> TestResult:
+    """Entry + stop + target + COST ke baad kya bachta hai — asli trade naap.
+
+    Baaki chaar recipe forecast ki GALTI naapte hain (MAE). Trading ka sawaal
+    alag hai: har trade ka R-multiple, expectancy, profit factor, drawdown, MAE
+    aur haar ki wajah. Yahi wo naap hai jispar intel ka contract tika hai, aur
+    yahan do baat jaan-boojh kar saaf likhi jaati hai:
+
+      * Series me sirf CLOSE hai. Isliye "ek hi bar me pehle SL laga ya TP" ye
+        HISAAB NAHI HO SAKTA. `simulate_trades` pehle STOP maanta hai — yaani
+        bura-se-bura — kyunki apne haq me maan lena hi sabse meetha jhooth hai,
+        aur ye baat `CLOSE_ONLY_NOTE` me bahar bhi jaati hai.
+      * PASS ka matlab sirf itna: NET expectancy positive, profit factor 1 se
+        upar, aur edge ek hi R par nahi (kam se kam `trade_min_robust_share`
+        hissa R-settings me zinda). Win rate PASS ki shart me JAAN-BOOJH KAR
+        nahi hai — 90% win rate wala model bhi ek haar me sab de sakta hai.
+
+    Teen alag "naap hi nahi hui" haalat DATA_MISSING hain, TESTED_FAIL nahi:
+    kam trade, train me koi harkat nahi, aur sample me ek bhi haar na hona
+    (loss-side naapa hi nahi gaya).
+    """
+    series, outcome, label, source_ids = _series_outcome(spec, policy)
+    if outcome is None:
+        return _no_series_result(spec)
+    blocked = _outcome_blocked(spec, outcome, label, source_ids)
+    if blocked is not None:
+        return blocked
+    sim = market_data.trade_expectancy(
+        series,
+        r_multiples=policy.trade_r_multiples,
+        min_points=policy.min_series_points,
+        min_holdout=policy.min_holdout_points,
+        train_fraction=policy.train_fraction,
+        min_trades=policy.trade_min_trades,
+        stop_units=policy.trade_stop_units,
+        max_bars=policy.trade_max_bars,
+        cost_fraction=policy.trade_cost_fraction,
+        min_robust_share=policy.trade_min_robust_share)
+    edge = sim.edge_after_cost
+    best = sim.best or {}
+    tail = (" " + market_data.CLOSE_ONLY_NOTE + " " + market_data.TRADE_COST_NOTE
+            + " " + market_data.BACKTEST_NOTE + " " + market_data.NOT_ADVICE_NOTE)
+    if edge is None:
+        reason = sim.reason_code or market_data.FEW_TRADES
+        return _result(spec, DATA_MISSING, reason_code=reason,
+                       observed=(f"{label} | held-out {sim.n_test} | "
+                                 f"{sim.usable}/{len(sim.rows)} R-setting naapi "
+                                 f"ja saki"),
+                       evidence_ids=source_ids,
+                       detail=(_TRADE_NOT_RUN.get(reason, _wf_detail(reason))
+                               + tail))
+    observed = (f"{label} | held-out {sim.n_test} | best TP "
+                f"{best.get('r_multiple')}R par {best.get('n_trades')} trade | "
+                f"NET expectancy {best.get('expectancy_r'):+.3f}R, profit factor "
+                f"{best.get('profit_factor'):.3g}, win rate "
+                f"{(best.get('win_rate') or 0.0):.0%}, max drawdown "
+                f"{best.get('max_drawdown_r'):.3g}R, MAE p95 "
+                f"{best.get('mae_p95_r'):.3g}R")
+    expected = (f"NET expectancy > {market_data.TRADE_MIN_EXPECTANCY_R:g}R, "
+                f"profit factor > {market_data.TRADE_MIN_PROFIT_FACTOR:g}, aur "
+                f"{policy.trade_min_robust_share:.0%} R-settings me expectancy "
+                "positive")
+    losses = ", ".join(f"{name} × {count}"
+                       for name, count in sorted(
+                           (best.get("loss_classes") or {}).items()))
+    # #150g — NAAPE hue number, structured. Ye wahi jagah hai jahan se
+    # `trademodel` ke contract point grade honge — `observed` line se NAHI.
+    # Line insaan ke padhne ke liye hai; usko wapas parse karna "derive, never
+    # declare" ka ulta rasta hai. Jo yahan nahi hai, wo naapa hi nahi gaya.
+    measured: Dict[str, Any] = {
+        "r_multiple": best.get("r_multiple"),
+        "n_trades": best.get("n_trades"),
+        "win_rate": best.get("win_rate"),
+        "expectancy_r": best.get("expectancy_r"),
+        "profit_factor": best.get("profit_factor"),
+        "sharpe_r": best.get("sharpe_r"),
+        "sortino_r": best.get("sortino_r"),
+        "avg_win_r": best.get("avg_win_r"),
+        "avg_loss_r": best.get("avg_loss_r"),
+        "max_drawdown_r": best.get("max_drawdown_r"),
+        "tail_loss_r": best.get("tail_loss_r"),
+        "mae_median_r": best.get("mae_median_r"),
+        "mae_p95_r": best.get("mae_p95_r"),
+        # Cost sirf "lagayi gayi" kehna kaafi nahi — kitni lagi, ye naap bahar
+        # jaati hai. 0 aaye to cost lagi hi nahi thi.
+        "avg_cost_r": best.get("avg_cost_r"),
+        "cost_fraction": float(policy.trade_cost_fraction),
+        "stop_units": float(policy.trade_stop_units),
+        "max_bars": int(policy.trade_max_bars),
+        "loss_classes": dict(best.get("loss_classes") or {}),
+        "exit_kinds": dict(best.get("exit_kinds") or {}),
+        # R-ladder ka poora hisaab: kitni settings naapi ja saki, kitni me
+        # expectancy positive rahi, aur wo hissa (region hai ya magic number).
+        "r_settings_tried": len(sim.rows),
+        "r_settings_measured": sim.usable,
+        "r_settings_positive": sim.positive,
+        "robust_share": sim.robust_share,
+        "n_train": sim.n_train,
+        "n_test": sim.n_test,
+        "edge_after_cost": edge,
+        "close_only": True,
+    }
+    if not edge:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=best.get("expectancy_r"), evidence_ids=source_ids,
+            numbers=measured,
+            reason_code=sim.reason_code or market_data.NO_EDGE_AFTER_COST,
+            detail=("Cost lagne ke baad is series par is model ka koi edge NAHI "
+                    "bacha — yaani ye setup live me paisa banane ka koi saboot "
+                    "nahi de raha."
+                    + (f" Haar ki naapi hui wajah: {losses}." if losses else "")
+                    + tail))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=best.get("expectancy_r"), evidence_ids=source_ids,
+        numbers=measured,
+        reason_code="net_positive_expectancy_across_r_settings",
+        detail=(f"Sabse acchi take-profit {best.get('r_multiple')}R nikli, aur "
+                f"edge ek hi setting par nahi tikka: {sim.positive}/{sim.usable} "
+                f"R-settings me NET expectancy positive rahi. Ye "
+                f"{best.get('n_trades')} trade ka nateeja hai, kisi bade sample "
+                f"ka nahi." + tail))
+
+
 RECIPES: Dict[str, Any] = {
     "numeric_formula": _run_numeric_formula,
     "threshold": _run_threshold,
@@ -1262,6 +1442,7 @@ RECIPES: Dict[str, Any] = {
     "monte_carlo": _run_monte_carlo,
     "parameter_robustness": _run_parameter_robustness,
     "baseline_tournament": _run_baseline_tournament,
+    "trade_expectancy": _run_trade_expectancy,
 }
 
 
@@ -1582,6 +1763,18 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
         limits.append(
             f"{ran_tour} baseline tournament chala. "
             + market_data.BASELINE_SCOPE_NOTE)
+    # #150g — trade-level naap ki seema. Ye SABSE aasaani se over-read hoti hai:
+    # "expectancy positive nikli" ko log "paisa banega" padh lete hain. Isliye
+    # do baat isi line me hain — sample kitna chhota tha, aur close-only data ki
+    # wajah se intrabar SL-vs-TP ka faisla hua hi nahi.
+    ran_trade = _ran_count(report, "trade_expectancy")
+    if ran_trade:
+        limits.append(
+            f"{ran_trade} trade-level expectancy test chala (cost ke saath), par "
+            "ye sirf CLOSE price par naapa gaya hai. "
+            + market_data.CLOSE_ONLY_NOTE
+            + " Chhote sample ki positive expectancy ko 'edge mil gaya' nahi "
+            "padha jaaye.")
     # Jis hypothesis ka naap INSAAN par hota hai, uska yahan test hi nahi bana
     # (#155e). Ye seema LAB ke baad bhi sach hai, isliye audit me jaati hai.
     # "Test nahi chala" ko "hypothesis kamzor thi" padhna sabse aasaan galti hai —
@@ -1609,7 +1802,7 @@ def lab_limits(report: Optional[Dict[str, Any]]) -> List[str]:
 # hi jagah badalni pade. `tests/test_deliverable_guard.py` ise upar ki asli
 # append-sites ki ginti se pin karta hai, isliye ye chupchaap purani nahi ho
 # sakti.
-MAX_AUDIT_LIMIT_LINES = 10
+MAX_AUDIT_LIMIT_LINES = 11
 
 
 def verdict_for(report: Optional[Dict[str, Any]], hypothesis_id: str) -> str:

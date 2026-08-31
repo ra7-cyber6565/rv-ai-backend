@@ -525,6 +525,51 @@ SWEEP_MIN_SETTINGS = 3       # itne se kam setting par "region" ka daawa nahi
 SWEEP_MIN_BEAT_SHARE = 0.6   # region me kam se kam itne setting jeetein
 FEW_SETTINGS = "too_few_usable_parameter_settings"
 
+# ── #150f: asli TRADE-level naap (sirf forecast error nahi) ───────────────────
+# `walk_forward` sirf ye batata hai ki agla point kitna galat guess hua. Trading
+# ka sawaal alag hai: entry, stop, target, cost — inke baad kya bachta hai. Ye
+# hissa wahi naapta hai, aur do baat par bilkul saaf hai:
+#
+#   1. Series me sirf CLOSE hai (SeriesPoint me high/low nahi). Isliye "ek hi bar
+#      me pehle SL laga ya TP" ye HISAAB NAHI HO SAKTA. Har exit close par tay
+#      hota hai, aur ye baat `CLOSE_ONLY_NOTE` me likh kar bahar jaati hai.
+#      Intrabar sequencing ka andaaza lagana yahan jaan-boojh kar mana hai.
+#   2. Signal, stop ki naap, aur cost — teeno sirf PICHLE data se bante hain.
+#      Kisi bhi step par `values[index]` se signal nahi banta.
+TRADE_MIN_TRADES = 8         # itne se kam trade par expectancy naapna dhokha hai
+TRADE_R_MULTIPLES: Tuple[float, ...] = (1.0, 1.5, 2.0, 3.0)
+TRADE_STOP_UNITS = 1.5       # SL = itne guna pichhli aausat harkat
+TRADE_MAX_BARS = 5           # itne bar me exit na hua to time-exit
+TRADE_COST_FRACTION = 0.0004  # round-turn cost (spread+commission+slippage), price ka hissa
+TRADE_MIN_EXPECTANCY_R = 0.0  # isse neeche expectancy = koi edge nahi
+TRADE_MIN_PROFIT_FACTOR = 1.0
+TRADE_MIN_ROBUST_SHARE = 0.5  # itne R-setting me expectancy positive ho
+FEW_TRADES = "too_few_trades_to_measure_expectancy"
+NO_VOLATILITY = "no_past_movement_to_size_a_stop"
+NO_EDGE_AFTER_COST = "no_positive_expectancy_after_cost"
+# Ek bhi haar na ho to loss-side naapa hi nahi gaya. Aisa sample "edge mil gaya"
+# ka saboot NAHI hai — aur "expectancy positive nahi thi" bolna bhi JHOOTH hoga.
+# Isliye ye alag, teesri haalat hai: faisla mumkin nahi.
+NO_LOSS_TO_MEASURE = "no_losing_trade_in_sample_loss_side_unmeasured"
+# Edge sirf ek hi R par zinda ho to wo region nahi, ek magic number hai.
+FRAGILE_EDGE = "edge_only_at_one_r_setting"
+# Kitni series chahiye — naapa hua, andaaza nahi: 8 trade ke liye ~40 held-out bar
+# chahiye (har trade ~TRADE_MAX_BARS bar leti hai), aur held-out series ka
+# (1 - TRAIN_FRACTION) hissa hota hai.
+TRADE_MIN_SERIES_POINTS = int(round(TRADE_MIN_TRADES * TRADE_MAX_BARS
+                                    / (1.0 - TRAIN_FRACTION)))
+CLOSE_ONLY_NOTE = ("Series me sirf close hai (high/low nahi), isliye har exit "
+                   "close par naapa gaya hai — 'ek hi bar me pehle SL laga ya "
+                   "TP' ye hisaab nahi kiya ja sakta, aur andaaza nahi lagaya "
+                   "gaya.")
+TRADE_COST_NOTE = ("Har trade par round-turn cost lagayi gayi hai (spread + "
+                   "commission + slippage ka ek hissa), yaani ye gross nahi "
+                   "NET nateeja hai.")
+# Har haar ki wajah — teen alag class, aur teeno naapi hui hain (kahani nahi).
+LOSS_STOPPED = "stopped_out"          # SL tak gaya
+LOSS_TIME_EXIT = "time_exit_negative"  # bar khatam, ulta band hua
+LOSS_COST_ONLY = "cost_ate_the_win"    # gross >= 0 tha, cost ke baad negative
+
 
 def _percentile(sorted_values: Sequence[float], q: float) -> float:
     """Nearest-rank percentile. Koi interpolation nahi — kram hi kaafi hai."""
@@ -932,7 +977,355 @@ def baseline_tournament(series: Optional[MarketSeries],
                       beaten=beaten, total=total, winner=winner)
 
 
-# ── provider payload → series (pure functions, isliye offline test hote hain) ─
+# ── #150f: ek trade ka poora jeevan (entry → exit), sirf pichhle data se ──────
+@dataclass(frozen=True)
+class Trade:
+    """Ek trade. `mae_r` = close par naapi gayi sabse ulti chaal (R me, >= 0)."""
+    entry_index: int = 0
+    direction: int = 0          # +1 long, -1 short (0 kabhi trade nahi banta)
+    entry: float = 0.0
+    stop_distance: float = 0.0
+    exit_index: int = 0
+    exit_price: float = 0.0
+    exit_kind: str = ""         # "target" | "stop" | "time"
+    gross_r: float = 0.0
+    cost_r: float = 0.0
+    net_r: float = 0.0
+    mae_r: float = 0.0
+
+    @property
+    def loss_class(self) -> str:
+        """Haar ki naapi hui wajah. Jeet par khaali string — kahani nahi."""
+        if self.net_r >= 0:
+            return ""
+        if self.exit_kind == "stop":
+            return LOSS_STOPPED
+        if self.gross_r >= 0:
+            return LOSS_COST_ONLY
+        return LOSS_TIME_EXIT
+
+
+def _past_move_unit(history: Sequence[float]) -> float:
+    """Pichhli aausat harkat (absolute). Stop ki naap sirf ISSE banti hai."""
+    if len(history) < 2:
+        return 0.0
+    moves = [abs(history[i] - history[i - 1]) for i in range(1, len(history))]
+    return sum(moves) / float(len(moves))
+
+
+def _drift_direction(history: Sequence[float],
+                     lookback: Optional[int] = None) -> int:
+    """+1 / -1 / 0. `walk_forward` wala hi drift — aur sirf `history` se."""
+    window = list(history)
+    if lookback is not None and lookback >= 2:
+        window = window[-int(lookback):]
+    if len(window) < 2:
+        return 0
+    drift = (window[-1] - window[0]) / (len(window) - 1)
+    if drift > 0:
+        return 1
+    if drift < 0:
+        return -1
+    return 0
+
+def simulate_trades(values: Sequence[float], n_train: int,
+                    r_multiple: float = 2.0,
+                    stop_units: float = TRADE_STOP_UNITS,
+                    max_bars: int = TRADE_MAX_BARS,
+                    cost_fraction: float = TRADE_COST_FRACTION,
+                    lookback: Optional[int] = None) -> List[Trade]:
+    """Held-out hisse par ek-ke-baad-ek (overlap bina) trade chalao.
+
+    Har entry par model ke paas SIRF `values[:index]` hota hai — signal, stop ki
+    naap aur cost teeno wahin se bante hain. Exit ke liye aage ke close padhe
+    jaate hain (wo asli waqt me bhi aage hi aate hain), par entry ka faisla ho
+    chukne ke BAAD. Isliye koi leakage nahi.
+
+    Ek hi bar me SL aur TP dono paar ho jaayein — ye close-only data se tay nahi
+    ho sakta. Yahan pehle STOP dekha jaata hai (bura-se-bura), kyunki apne haq
+    me maan lena hi backtest ka sabse aam jhooth hai.
+    """
+    total = len(values)
+    trades: List[Trade] = []
+    index = max(1, int(n_train))
+    while index < total:
+        history = values[:index]
+        unit = _past_move_unit(history)
+        direction = _drift_direction(history, lookback)
+        if unit <= 0 or direction == 0:
+            index += 1
+            continue
+        entry = history[-1]
+        stop_distance = float(stop_units) * unit
+        target = float(r_multiple) * stop_distance
+        worst = 0.0
+        exit_index = min(index + max(1, int(max_bars)) - 1, total - 1)
+        exit_kind = "time"
+        exit_price = values[exit_index]
+        for step in range(index, exit_index + 1):
+            excursion = direction * (values[step] - entry)
+            worst = min(worst, excursion)
+            if excursion <= -stop_distance:
+                exit_index, exit_kind, exit_price = step, "stop", values[step]
+                break
+            if excursion >= target:
+                exit_index, exit_kind, exit_price = step, "target", values[step]
+                break
+        gross_r = direction * (exit_price - entry) / stop_distance
+        cost_r = abs(float(cost_fraction) * entry) / stop_distance
+        trades.append(Trade(entry_index=index, direction=direction, entry=entry,
+                            stop_distance=stop_distance, exit_index=exit_index,
+                            exit_price=exit_price, exit_kind=exit_kind,
+                            gross_r=gross_r, cost_r=cost_r,
+                            net_r=gross_r - cost_r,
+                            mae_r=max(0.0, -worst / stop_distance)))
+        index = exit_index + 1
+    return trades
+
+
+def _stdev(values: Sequence[float]) -> float:
+    """Population stdev. 2 se kam value par 0.0 — "0 risk" nahi, "naap nahi"."""
+    if len(values) < 2:
+        return 0.0
+    mean = sum(values) / float(len(values))
+    var = sum((v - mean) ** 2 for v in values) / float(len(values))
+    return var ** 0.5
+
+
+def trade_stats(trades: Sequence[Trade]) -> Dict[str, Any]:
+    """Trade list se naap. Jo naapa nahi ja sakta wo `None` rehta hai, 0 nahi.
+
+    Win rate JAAN-BOOJH KAR sabse pehla naap nahi hai — expectancy hai. 90% win
+    rate wala model bhi ek hi haar me sab de sakta hai, aur intel ka contract
+    saaf kehta hai: win rate ke peechhe nahi bhaagna.
+    """
+    n = len(trades)
+    if not n:
+        return {"n_trades": 0, "win_rate": None, "expectancy_r": None,
+                "profit_factor": None, "sharpe_r": None, "sortino_r": None,
+                "avg_win_r": None, "avg_loss_r": None, "max_drawdown_r": None,
+                "tail_loss_r": None, "mae_median_r": None, "mae_p95_r": None,
+                "avg_cost_r": None,
+                "loss_classes": {}, "exit_kinds": {}}
+    nets = [t.net_r for t in trades]
+    wins = [r for r in nets if r > 0]
+    losses = [r for r in nets if r <= 0]
+    mean = sum(nets) / float(n)
+    spread = _stdev(nets)
+    downside = _stdev([r for r in nets if r < mean]) if len(nets) > 1 else 0.0
+    equity = 0.0
+    peak = 0.0
+    worst_dd = 0.0
+    for r in nets:
+        equity += r
+        peak = max(peak, equity)
+        worst_dd = max(worst_dd, peak - equity)
+    maes = sorted(t.mae_r for t in trades)
+    classes: Dict[str, int] = {}
+    for trade in trades:
+        if trade.loss_class:
+            classes[trade.loss_class] = classes.get(trade.loss_class, 0) + 1
+    kinds: Dict[str, int] = {}
+    for trade in trades:
+        kinds[trade.exit_kind] = kinds.get(trade.exit_kind, 0) + 1
+    loss_sum = abs(sum(losses))
+    return {
+        "n_trades": n,
+        "win_rate": round(len(wins) / float(n), 4),
+        "expectancy_r": round(mean, 4),
+        # Koi haar hi na ho to profit factor ka bhaag hi nahi banta — tab None,
+        # kyunki "infinite profit factor" chhaapna hi ek jhooth hai.
+        "profit_factor": (None if loss_sum <= 0
+                          else round(sum(wins) / loss_sum, 4)),
+        "sharpe_r": None if spread <= 0 else round(mean / spread, 4),
+        "sortino_r": None if downside <= 0 else round(mean / downside, 4),
+        "avg_win_r": None if not wins else round(sum(wins) / len(wins), 4),
+        "avg_loss_r": None if not losses else round(sum(losses) / len(losses), 4),
+        "max_drawdown_r": round(worst_dd, 4),
+        "tail_loss_r": round(_percentile(sorted(nets), 0.05), 4),
+        "mae_median_r": round(_percentile(maes, 0.5), 4),
+        "mae_p95_r": round(_percentile(maes, 0.95), 4),
+        # Cost sach me lagi ya sirf "laga di gayi" kaha gaya — ye NAAP uska
+        # saboot hai. 0 aaye to matlab cost lagi hi nahi.
+        "avg_cost_r": round(sum(t.cost_r for t in trades) / float(n), 6),
+        "loss_classes": classes,
+        "exit_kinds": kinds,
+    }
+
+
+@dataclass(frozen=True)
+class TradeSim:
+    """R-ladder ka poora nateeja. `chosen` = wo R jiski expectancy sabse acchi."""
+    ok: bool = False
+    reason_code: str = ""
+    n_train: int = 0
+    n_test: int = 0
+    rows: Tuple[Dict[str, Any], ...] = ()
+    chosen: Optional[float] = None
+    min_trades: int = TRADE_MIN_TRADES
+    min_robust_share: float = TRADE_MIN_ROBUST_SHARE
+
+    @property
+    def usable(self) -> int:
+        """Wo R-setting jinme itne trade bane ki naap ka matlab ho."""
+        return len([row for row in self.rows if row["measured"]])
+
+    @property
+    def positive(self) -> int:
+        return len([row for row in self.rows
+                    if row["measured"] and (row["expectancy_r"] or 0.0) > 0])
+
+    @property
+    def robust_share(self) -> Optional[float]:
+        """Kitne hisse R-setting me edge zinda hai. 0 naap par None, 0.0 nahi."""
+        if not self.usable:
+            return None
+        return self.positive / self.usable
+
+    @property
+    def best(self) -> Optional[Dict[str, Any]]:
+        rows = [row for row in self.rows if row["measured"]]
+        if not rows:
+            return None
+        return max(rows, key=lambda row: row["expectancy_r"])
+
+    @property
+    def edge_after_cost(self) -> Optional[bool]:
+        """None = faisla hi nahi ho saka. Ye teesri haalat kabhi mit nahi sakti.
+
+        Do alag-alag "None" hain, aur dono ka matlab ek hi hai — naap nahi hui:
+        (a) koi R-setting itne trade nahi bana paayi, (b) sample me EK BHI haar
+        nahi thi, isliye loss-side naapa hi nahi gaya. (b) ko "edge mil gaya"
+        maan lena hi backtest ka sabse meetha jhooth hai, aur usko "expectancy
+        positive nahi thi" kehna bhi jhooth hoga.
+        """
+        if not self.ok or not self.usable:
+            return None
+        best = self.best or {}
+        if best.get("profit_factor") is None:
+            return None
+        share = self.robust_share or 0.0
+        return bool((best.get("expectancy_r") or 0.0) > TRADE_MIN_EXPECTANCY_R
+                    and (best.get("profit_factor") or 0.0)
+                    > TRADE_MIN_PROFIT_FACTOR
+                    and share >= self.min_robust_share)
+
+    @property
+    def verdict_reason(self) -> str:
+        """Faisla jo bana, uski ASLI wajah — ek hi copy-paste line nahi.
+
+        `edge_after_cost` False hone ki teen alag wajah ho sakti hain, aur user
+        ko wahi wajah dikhni chahiye jo asli me lagi.
+        """
+        if not self.ok or not self.usable:
+            return FEW_TRADES
+        best = self.best or {}
+        if best.get("profit_factor") is None:
+            return NO_LOSS_TO_MEASURE
+        if (best.get("expectancy_r") or 0.0) <= TRADE_MIN_EXPECTANCY_R:
+            return NO_EDGE_AFTER_COST
+        if (best.get("profit_factor") or 0.0) <= TRADE_MIN_PROFIT_FACTOR:
+            return NO_EDGE_AFTER_COST
+        if (self.robust_share or 0.0) < self.min_robust_share:
+            return FRAGILE_EDGE
+        return ""
+
+    def to_dict(self) -> Dict[str, Any]:
+        best = self.best or {}
+        return {
+            "ran": self.ok,
+            "reason_code": self.reason_code,
+            "n_train": self.n_train,
+            "n_test": self.n_test,
+            "r_settings_measured": self.usable,
+            "r_settings_positive": self.positive,
+            "robust_share": (None if self.robust_share is None
+                             else round(self.robust_share, 4)),
+            "chosen_r_multiple": self.chosen,
+            "edge_after_cost": self.edge_after_cost,
+            # Loss-side naapa gaya ya nahi — ye alag se bahar jaata hai, warna
+            # "0 haar" wala sample sabse strong dikhne lagta hai.
+            "loss_side_measured": (None if not self.usable
+                                   else best.get("profit_factor") is not None),
+            "min_series_points_for_this_test": TRADE_MIN_SERIES_POINTS,
+            "rows": list(self.rows),
+            "best": dict(best),
+            "close_only_limit": CLOSE_ONLY_NOTE,
+            "cost_applied": TRADE_COST_NOTE,
+            "past_data_only": BACKTEST_NOTE,
+            "not_financial_advice": NOT_ADVICE_NOTE,
+            "randomness_used": False,
+            "is_established_fact": False,
+        }
+
+
+def trade_expectancy(series: Optional[MarketSeries],
+                     r_multiples: Sequence[float] = TRADE_R_MULTIPLES,
+                     min_points: int = MIN_SERIES_POINTS,
+                     min_holdout: int = MIN_HOLDOUT_POINTS,
+                     train_fraction: float = TRAIN_FRACTION,
+                     min_trades: int = TRADE_MIN_TRADES,
+                     stop_units: float = TRADE_STOP_UNITS,
+                     max_bars: int = TRADE_MAX_BARS,
+                     cost_fraction: float = TRADE_COST_FRACTION,
+                     min_robust_share: float = TRADE_MIN_ROBUST_SHARE
+                     ) -> TradeSim:
+    """Har take-profit (1R…3R) par asli trade chala kar NET naap.
+
+    Split wahi hai jo `walk_forward` ka — do jagah do split rakhne se pata nahi
+    chalta kis wajah se number badla. Jo R-setting itne trade nahi bana paati ki
+    naap ka matlab ho, wo row me likhi jaati hai `measured False` ke saath aur
+    ginti me nahi aati (chupke se girna hi purani galti hai).
+
+    Edge ek hi "magic" R par zinda ho to wo edge nahi, ittefaq hai — isliye
+    `robust_share` bhi shart me hai.
+    """
+    base = walk_forward(series, min_points=min_points, min_holdout=min_holdout,
+                        train_fraction=train_fraction)
+    if not base.ok:
+        return TradeSim(reason_code=base.reason_code or NO_SERIES,
+                        min_trades=int(min_trades),
+                        min_robust_share=float(min_robust_share))
+    values = list(series.values()) if series is not None else []
+    if _past_move_unit(values[:base.n_train]) <= 0:
+        return TradeSim(reason_code=NO_VOLATILITY, n_train=base.n_train,
+                        n_test=base.n_test, min_trades=int(min_trades),
+                        min_robust_share=float(min_robust_share))
+    rows: List[Dict[str, Any]] = []
+    for r_multiple in r_multiples or ():
+        trades = simulate_trades(values, base.n_train, r_multiple=r_multiple,
+                                 stop_units=stop_units, max_bars=max_bars,
+                                 cost_fraction=cost_fraction)
+        stats = trade_stats(trades)
+        enough = stats["n_trades"] >= max(2, int(min_trades))
+        row: Dict[str, Any] = {"r_multiple": float(r_multiple),
+                               "measured": bool(enough),
+                               "reason": ("" if enough else FEW_TRADES)}
+        row.update(stats)
+        if not enough:
+            # Naapa nahi gaya to koi number bahar nahi jaata — warna 2 trade ki
+            # "expectancy" 200 trade waali jaisi hi dikhne lagti hai.
+            for key in ("expectancy_r", "profit_factor", "sharpe_r",
+                        "sortino_r", "win_rate"):
+                row[key] = None
+        rows.append(row)
+    sim = TradeSim(ok=True, n_train=base.n_train, n_test=base.n_test,
+                   rows=tuple(rows), min_trades=int(min_trades),
+                   min_robust_share=float(min_robust_share))
+    if not sim.usable:
+        return TradeSim(reason_code=FEW_TRADES, n_train=base.n_train,
+                        n_test=base.n_test, rows=tuple(rows),
+                        min_trades=int(min_trades),
+                        min_robust_share=float(min_robust_share))
+    best = sim.best or {}
+    chosen = best.get("r_multiple")
+    return TradeSim(ok=True, reason_code=sim.verdict_reason,
+                    n_train=base.n_train,
+                    n_test=base.n_test, rows=tuple(rows), chosen=chosen,
+                    min_trades=int(min_trades),
+                    min_robust_share=float(min_robust_share))
+
+
 def _condense(rows: List[Tuple[str, SeriesPoint]]
               ) -> List[Tuple[str, SeriesPoint]]:
     """ISO date jinme din hamesha 01 ho, wo daily nahi — monthly/yearly hai.

@@ -1009,6 +1009,10 @@ LAB_RECIPE_WALK_FORWARD = "walk_forward"
 LAB_RECIPE_MONTE_CARLO = "monte_carlo"
 LAB_RECIPE_ROBUSTNESS = "parameter_robustness"
 LAB_RECIPE_BASELINE = "baseline_tournament"
+# #150g — paanchvi recipe. Ye baaki chaar se ALAG cheez naapti hai: forecast ki
+# galti nahi, balki entry/stop/target + cost ke baad TRADE-level nateeja. Isi ke
+# structured numbers se neeche paanch point grade hote hain.
+LAB_RECIPE_TRADE = "trade_expectancy"
 LAB_PASS_STATUSES: Tuple[str, ...] = ("TESTED_PASS",)
 LAB_RAN_STATUSES: Tuple[str, ...] = ("TESTED_PASS", "TESTED_FAIL")
 
@@ -1037,6 +1041,41 @@ def lab_recipe_status(lab_report: Optional[Dict[str, Any]],
         if status in LAB_PASS_STATUSES:
             passed += 1
     return ran, passed
+
+
+def lab_numbers(lab_report: Optional[Dict[str, Any]],
+                recipe: str) -> List[Dict[str, Any]]:
+    """Us recipe ke NAAPE hue number — sirf un test se jo SACH ME chale.
+
+    `observed` line jaan-boojh kar chhui hi nahi jaati. Wo line insaan ke padhne
+    ke liye hai; usse number nikaal kar faisla lena "derive, never declare" ka
+    ulta rasta hai. Jo `numbers` me nahi hai, wo naapa hi nahi gaya — aur uska
+    matlab MET nahi ho sakta.
+    """
+    rows: List[Dict[str, Any]] = []
+    for test in lab_tests(lab_report):
+        if str(test.get("recipe") or "") != recipe:
+            continue
+        if str(test.get("status") or "") not in LAB_RAN_STATUSES:
+            continue
+        numbers = test.get("numbers")
+        if isinstance(numbers, dict) and numbers:
+            rows.append(numbers)
+    return rows
+
+
+def lab_trade_numbers(lab_report: Optional[Dict[str, Any]]
+                      ) -> Optional[Dict[str, Any]]:
+    """Sabse BADE sample wali trade-naap (tie par behtar expectancy).
+
+    Kai hypothesis par test chale to sabse zyada trade wali naap li jaati hai —
+    kyunki chhote sample ko chun lena hi backtest ka sabse aasan dhokha hai.
+    """
+    rows = lab_numbers(lab_report, LAB_RECIPE_TRADE)
+    if not rows:
+        return None
+    return max(rows, key=lambda row: (int(row.get("n_trades") or 0),
+                                      float(row.get("expectancy_r") or 0.0)))
 
 
 # ── ek hi teen-tarfa niyam, har point par ───────────────────────────────────
@@ -1848,6 +1887,195 @@ _TOUR_NOT_RUN = ("LAB me baseline tournament hai par is run me ek bhi test nahi 
                  "chala — bina series/held-out harkat ke kisi baseline se tulna "
                  "hi mumkin nahi thi")
 
+# ── #150g: paanch point ab LIKHE hue daawe se nahi, NAAPE hue number se ──────
+# Niyam ek hi hai: LAB ka `trade_expectancy` test chala ho to uske structured
+# numbers faisla karte hain; na chala ho to purana text-cue naap jaisa tha waisa
+# hi chalta hai (kuch bhi kamzor nahi hota, sirf ek behtar raasta jud jaata hai).
+# Naap ka faisla text par BHAARI hai — spec me "expectancy positive" likha ho
+# par LAB me negative nikli, to point NOT_MET hai. Likha hua naap nahi hota.
+_LAB_MEASURED = " [LAB ne asli me naapa]"
+
+
+def _lab_note(numbers: Dict[str, Any]) -> str:
+    """Har naapi hui line ke saath uska sample aur seema — bina iske number
+    apne aap se bada dikhta hai."""
+    return (f" (sample: {numbers.get('n_trades')} trade, held-out "
+            f"{numbers.get('n_test')} bar, sirf CLOSE price par)")
+
+
+def _perf_from_numbers(ctx: Dict[str, Any],
+                       numbers: Dict[str, Any]) -> Dict[str, Any]:
+    """9 me se 8 metric trade-sim se aate hain; risk-of-ruin Monte Carlo se."""
+    need = CONTRACT_BY_ID["performance_metrics"].needs
+    pairs = (("win_rate", ("win_rate",)),
+             ("avg_win_loss", ("avg_win_r", "avg_loss_r")),
+             ("expectancy", ("expectancy_r",)),
+             ("profit_factor", ("profit_factor",)),
+             ("sharpe", ("sharpe_r",)),
+             ("sortino", ("sortino_r",)),
+             ("max_drawdown", ("max_drawdown_r",)),
+             ("tail_loss", ("tail_loss_r",)))
+    have = [name for name, keys in pairs
+            if all(numbers.get(key) is not None for key in keys)]
+    gone = [name for name, keys in pairs
+            if any(numbers.get(key) is None for key in keys)]
+    mc_ran, _mc_pass = lab_recipe_status(ctx["lab_report"], LAB_RECIPE_MONTE_CARLO)
+    if mc_ran:
+        have.append("risk_of_ruin")
+    else:
+        gone.append("risk_of_ruin")
+    observed = (f"{len(have)}/{len(METRIC_KEYS)} metric NAAPA gaya: expectancy "
+                f"{numbers.get('expectancy_r')}R, profit factor "
+                f"{numbers.get('profit_factor')}, win rate "
+                f"{numbers.get('win_rate')}, max drawdown "
+                f"{numbers.get('max_drawdown_r')}R" + _lab_note(numbers))
+    if ctx["chased"]:
+        return {"status": NOT_MET, "expected": need,
+                "observed": observed + f", par win-rate daawa {ctx['chased']}",
+                "reason": f"{MAX_CREDIBLE_WIN_RATE:.0f}%+ win-rate ka daawa spec "
+                          "me hai — ye apne aap me FAIL hai, chahe LAB ne saare "
+                          "number naap liye hon"}
+    if gone:
+        return {"status": NOT_MET, "observed": observed, "expected": need,
+                "reason": "LAB ne trade naap liye par ye number nahi ban paaye: "
+                          + ", ".join(gone)
+                          + " — adhoora naap poora naap nahi hota"}
+    return {"status": MET, "observed": observed + _LAB_MEASURED, "expected": need,
+            "reason": "saare number LAB ke asli trade-level test se naape gaye "
+                      "(likhe hue daawe se nahi), aur koi 90%+ win-rate daawa nahi"}
+
+
+def _stop_from_numbers(numbers: Dict[str, Any]) -> Dict[str, Any]:
+    """Stop kitna, aur trade kitna ULTA gaya (MAE) — dono naape hue."""
+    need = CONTRACT_BY_ID["stop_loss_research"].needs
+    p95 = numbers.get("mae_p95_r")
+    median = numbers.get("mae_median_r")
+    if p95 is None or median is None:
+        return {"status": NOT_MET, "observed": "trade chale par MAE nahi bana",
+                "expected": need,
+                "reason": "stop ka faisla bina MAE ke sirf andaaza hai, aur is "
+                          "sample me MAE naapa nahi ja saka"}
+    return {"status": MET,
+            "observed": (f"stop = {numbers.get('stop_units')}x pichhli aausat "
+                         f"harkat | MAE median {median}R, p95 {p95}R"
+                         + _lab_note(numbers) + _LAB_MEASURED),
+            "expected": need,
+            "reason": "stop ki jagah naapi hui hai aur har trade ka MAE bhi "
+                      "naapa gaya — yaani 'stop kitna tight ho sakta tha' ka "
+                      "jawab number se aaya, cue se nahi"}
+
+
+def _target_from_numbers(numbers: Dict[str, Any]) -> Dict[str, Any]:
+    """1R…3R tulna EXPECTANCY par, win rate par nahi."""
+    need = CONTRACT_BY_ID["take_profit_research"].needs
+    measured = int(numbers.get("r_settings_measured") or 0)
+    if measured < 2 or numbers.get("expectancy_r") is None:
+        return {"status": NOT_MET,
+                "observed": f"{measured} R-setting naapi ja saki",
+                "expected": need,
+                "reason": "take-profit ki tulna ke liye kam se kam do R-setting "
+                          "chahiye — ek setting se 'ye target behtar hai' nahi "
+                          "kaha ja sakta"}
+    kinds = numbers.get("exit_kinds") or {}
+    return {"status": MET,
+            "observed": (f"{measured} R-setting tuli, best "
+                         f"{numbers.get('r_multiple')}R par expectancy "
+                         f"{numbers.get('expectancy_r')}R | exit: "
+                         + ", ".join(f"{k} × {v}" for k, v in sorted(kinds.items()))
+                         + _lab_note(numbers) + _LAB_MEASURED),
+            "expected": need,
+            "reason": (f"{measured} take-profit setting NET expectancy par tuli "
+                       f"(win rate par nahi), aur "
+                       f"{numbers.get('r_settings_positive')} me expectancy "
+                       "positive rahi — yahi 'region vs magic number' ka jawab hai")}
+
+
+# Purane text-cue naap — HATAYE nahi gaye. LAB ka test na chale to bilkul yahi
+# chalte hain, isliye #150g se koi bhi purani baat kamzor nahi hoti.
+_PERF_TEXT = _performance_metrics
+_STOP_TEXT = _simple("stop_loss_research", "stop-loss ki research",
+                     also=("mae", "maximum adverse excursion",
+                           "adverse excursion"),
+                     also_label="MAE ka distribution")
+_TARGET_TEXT = _simple("take_profit_research", "take-profit ki research",
+                       also=("expectancy", "expected value", "net r", "average r"),
+                       also_label="expectancy ka hisaab (win-rate ka nahi)")
+_COST_TEXT = _cov("realistic_costs", _COST_GROUPS, 3, "asli cost")
+_FAILURE_TEXT = _simple("failure_classification", "haar ki class-wise ginti")
+
+
+def _perf_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    numbers = ctx.get("trade_numbers")
+    return _PERF_TEXT(ctx) if not numbers else _perf_from_numbers(ctx, numbers)
+
+
+def _stop_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    numbers = ctx.get("trade_numbers")
+    return _STOP_TEXT(ctx) if not numbers else _stop_from_numbers(numbers)
+
+
+def _target_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    numbers = ctx.get("trade_numbers")
+    return _TARGET_TEXT(ctx) if not numbers else _target_from_numbers(numbers)
+
+
+def _failure_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Har haar ki apni class — naapi hui ginti se, likhe hue jumle se nahi."""
+    numbers = ctx.get("trade_numbers")
+    if not numbers:
+        return _FAILURE_TEXT(ctx)
+    need = CONTRACT_BY_ID["failure_classification"].needs
+    classes = numbers.get("loss_classes") or {}
+    if not classes:
+        return {"status": NOT_MET,
+                "observed": f"{numbers.get('n_trades')} trade, 0 haar classify hui",
+                "expected": need,
+                "reason": "trade chale par ek bhi haar class me nahi gayi — "
+                          "bina wajah ki ginti se 'model kahan fail hota hai' "
+                          "ka jawab nahi milta"}
+    total = sum(int(v) for v in classes.values())
+    return {"status": MET,
+            "observed": (", ".join(f"{name} × {count}"
+                                   for name, count in sorted(classes.items()))
+                         + f" (kul {total} haar)" + _lab_note(numbers)
+                         + _LAB_MEASURED),
+            "expected": need,
+            "reason": "har haar ki apni class naapi gayi (stop laga, time-exit "
+                      "negative, ya cost ne kha liya) — ye ginti LAB ke asli "
+                      "trade se aayi hai"}
+
+
+def _cost_point(ctx: Dict[str, Any]) -> Dict[str, Any]:
+    """Cost ka naam lena aur cost LAGANA do alag baat hai — dono dekhi jaati hain."""
+    text = _COST_TEXT(ctx)
+    numbers = ctx.get("trade_numbers")
+    if not numbers:
+        return text
+    need = CONTRACT_BY_ID["realistic_costs"].needs
+    applied = numbers.get("avg_cost_r")
+    fraction = numbers.get("cost_fraction")
+    if not applied:
+        return {"status": NOT_MET,
+                "observed": f"cost_fraction {fraction}, har trade par 0R cost",
+                "expected": need,
+                "reason": "LAB ka trade test chala par usme cost LAGI HI NAHI — "
+                          "bina cost wala nateeja live market ka nateeja nahi hai"}
+    line = (f" | LAB ne har trade par aausat {applied}R cost lagayi "
+            f"(price ka {fraction}, round-turn)" + _lab_note(numbers))
+    if text.get("status") == MET:
+        return {"status": MET, "expected": need,
+                "observed": str(text.get("observed") or "") + line + _LAB_MEASURED,
+                "reason": str(text.get("reason") or "")
+                          + "; aur cost sirf likhi nahi — LAB ke har trade par "
+                            "asli me lagayi gayi"}
+    return {"status": NOT_MET, "expected": need,
+            "observed": str(text.get("observed") or "") + line,
+            "reason": "cost LAGI hai (ye naapa hua hai), par ye ek hi lump "
+                      "round-turn number hai: spread, commission aur slippage "
+                      "usme mile-jule hain, aur latency ya news-slippage alag se "
+                      "naapi hi nahi gayi — isliye 'asli cost' poori tarah "
+                      "naapi hui nahi maani ja sakti"}
+
 _EVALUATORS: Dict[str, Any] = {
     "instrument_scope": _instrument_scope,
     "execution_chain": _execution_chain,
@@ -1880,7 +2108,7 @@ _EVALUATORS: Dict[str, Any] = {
     "information_theory": _simple("information_theory", "information theory"),
     "game_theory": _game_theory,
     "no_leakage": _no_leakage,
-    "realistic_costs": _cov("realistic_costs", _COST_GROUPS, 3, "asli cost"),
+    "realistic_costs": _cost_point,
     "walk_forward_validation": _lab(
         "walk_forward_validation", LAB_RECIPE_WALK_FORWARD, "walk-forward",
         "LAB me ek bhi walk-forward test nahi chala (series aayi hi nahi ho "
@@ -1891,22 +2119,15 @@ _EVALUATORS: Dict[str, Any] = {
                                  "parameter robustness", _SWEEP_NOT_RUN),
     "baseline_tournament": _lab("baseline_tournament", LAB_RECIPE_BASELINE,
                                 "baseline tournament", _TOUR_NOT_RUN),
-    "failure_classification": _simple("failure_classification",
-                                      "haar ki class-wise ginti"),
+    "failure_classification": _failure_point,
     "red_team": _cov("red_team", _RED_TEAM_GROUPS, 6, "red-team ke sawaal",
                      need_number=False),
     "entry_model_exact": _entry_model_exact,
-    "stop_loss_research": _simple(
-        "stop_loss_research", "stop-loss ki research",
-        also=("mae", "maximum adverse excursion", "adverse excursion"),
-        also_label="MAE ka distribution"),
-    "take_profit_research": _simple(
-        "take_profit_research", "take-profit ki research",
-        also=("expectancy", "expected value", "net r", "average r"),
-        also_label="expectancy ka hisaab (win-rate ka nahi)"),
+    "stop_loss_research": _stop_point,
+    "take_profit_research": _target_point,
     "final_spec_tradeable": _cov("final_spec_tradeable", _FINAL_SPEC_GROUPS, 4,
                                  "final spec ke hisse"),
-    "performance_metrics": _performance_metrics,
+    "performance_metrics": _perf_point,
     "evidence_labels_ae": _evidence_labels_ae,
     "honest_final_decision": _honest_final_decision,
 }
@@ -1938,6 +2159,10 @@ def measure(ask: Optional[TradeAsk] = None, spec: Any = "",
         "sources": source_list,
         "hypotheses": hyp_list,
         "lab_report": lab_report or {},
+        # #150g — LAB ki trade-level naap (ya None, jab test chala hi nahi).
+        # Paanch point isi se grade hote hain; None ho to purana text-cue
+        # raasta hi chalta hai — yaani kuch bhi kamzor nahi hota.
+        "trade_numbers": lab_trade_numbers(lab_report),
         "inst": institutional_sources(source_list),
         "acad": academic_sources(source_list),
         "deep": deeply_read(source_list),

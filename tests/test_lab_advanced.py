@@ -684,9 +684,12 @@ def test_without_a_series_only_the_backtest_spec_is_planned():
 
 def test_with_a_series_all_four_specs_are_planned():
     specs = lab.plan_specs(_hyp(), pack=_Pack(_Src("S1", _meta(_MODEL_WINS))))
+    # #150g me paanchvi series-spec judi (`trade_expectancy`). Ye list poori
+    # likhi jaati hai — sirf `in` se dekhne par ek spec chup-chaap gir sakti hai
+    # aur test phir bhi green rehta.
     assert [s.recipe for s in specs] == [
         "walk_forward", "monte_carlo", "parameter_robustness",
-        "baseline_tournament"]
+        "baseline_tournament", "trade_expectancy"]
 
 
 def test_the_per_hypothesis_spec_cap_really_stops_the_planner():
