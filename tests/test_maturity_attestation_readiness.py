@@ -207,10 +207,10 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    # Several execution families now have concrete specialized benchmark
-    # attestors. Keep this regression on a still-unspecialized capability so a
+    # Some execution families have concrete specialized benchmark attestors.
+    # Keep this regression on a genuinely still-unspecialized capability so a
     # generic acceptance route can never be mislabeled as a repo-backed attestor.
-    execution = _route(report, 24, ProofKind.EXECUTION)
+    execution = _route(report, 18, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
