@@ -16,9 +16,6 @@ from research_engine.physical_lab_attestor import (
 HARDWARE_KEY = b"H" * 32
 LEDGER_KEY = b"L" * 32
 NOW = 10_000.0
-SUBJECT = "physical-lab-live-validation"
-VERIFIER = "trusted-hardware-observer"
-PREFIX = "physical-lab:"
 REQUIRED = (
     ProofKind.EXECUTION,
     ProofKind.REPRODUCIBILITY,
@@ -27,6 +24,18 @@ REQUIRED = (
     ProofKind.HARDWARE,
     ProofKind.SAFETY,
 )
+ROLES = {
+    ProofKind.EXECUTION: ("execution-run", "trusted-execution-attestor", "execution"),
+    ProofKind.REPRODUCIBILITY: (
+        "reproducibility-run",
+        "trusted-reproducibility-attestor",
+        "reproducibility",
+    ),
+    ProofKind.RUNTIME: ("runtime-observation", "trusted-runtime-attestor", "runtime"),
+    ProofKind.LIVE: ("live-observation", "trusted-live-observer", "live"),
+    ProofKind.HARDWARE: ("hardware-observation", "trusted-hardware-lab", "hardware"),
+    ProofKind.SAFETY: ("safety-gate", "trusted-safety-officer", "safety"),
+}
 
 
 def _git(root, *args):
@@ -57,6 +66,15 @@ def _sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
+def _route(capability_id, kind):
+    suffix, verifier, namespace = ROLES[kind]
+    return (
+        f"capability-{capability_id}-{suffix}",
+        verifier,
+        f"{namespace}:c{capability_id}:",
+    )
+
+
 def _repo(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
@@ -67,12 +85,13 @@ def _repo(tmp_path):
     rules = []
     for capability_id in (125, 126):
         for kind in REQUIRED:
+            subject, verifier, prefix = _route(capability_id, kind)
             rules.append({
                 "capability_id": capability_id,
                 "proof_kind": kind.value,
-                "subjects": [SUBJECT],
-                "verifiers": [VERIFIER],
-                "reference_prefixes": [PREFIX],
+                "subjects": [subject],
+                "verifiers": [verifier],
+                "reference_prefixes": [prefix],
             })
     (root / "config" / "maturity_proof_policy.json").write_text(
         json.dumps({"schema_version": 1, "rules": rules}, sort_keys=True, separators=(",", ":")),
@@ -147,8 +166,12 @@ def test_valid_live_hardware_receipt_mints_exact_twelve_external_proofs(tmp_path
     assert len(rows) == 12
     assert {row["capability_id"] for row in rows} == {125, 126}
     assert {row["proof_kind"] for row in rows} == {kind.value for kind in REQUIRED}
-    assert all(row["subject"] == SUBJECT for row in rows)
-    assert all(row["verifier"] == VERIFIER for row in rows)
+    for row in rows:
+        kind = ProofKind(row["proof_kind"])
+        subject, verifier, prefix = _route(row["capability_id"], kind)
+        assert row["subject"] == subject
+        assert row["verifier"] == verifier
+        assert row["reference"].startswith(prefix)
     assert ProofKind.CODE.value not in {row["proof_kind"] for row in rows}
     assert ProofKind.TEST.value not in {row["proof_kind"] for row in rows}
     assert ProofKind.WIRING.value not in {row["proof_kind"] for row in rows}
