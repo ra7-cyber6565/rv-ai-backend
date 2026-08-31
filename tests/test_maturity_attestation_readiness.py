@@ -170,9 +170,6 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
             assert route.verifiers == ("trusted-deployment-observer",)
             assert route.subjects == ("post-deployment-live-validation",)
 
-    # #127 has a repo-backed specialized verifier and exact committed policy
-    # route. It is still external: source/tests prove verifier behavior, not a
-    # real physical validation run.
     for kind in (
         ProofKind.EXECUTION,
         ProofKind.REPRODUCIBILITY,
@@ -197,23 +194,39 @@ def test_production_wiring_is_repo_backed_but_not_execution_evidence():
         assert route.verifiers == ("github-actions",)
 
 
-def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors():
+def test_every_generic_external_policy_route_now_has_repo_backed_validator_but_stays_external():
     report = audit_attestation_readiness(ROOT)
 
-    hardware = _route(report, 125, ProofKind.HARDWARE)
-    assert hardware.status == "HARDWARE_REQUIRED"
-    assert hardware.attestor_id == ""
-    assert hardware.external_required is True
+    # The previous generic/unbacked statuses are software-infrastructure gaps.
+    # They should now be zero, while the replacement attestors remain explicitly
+    # external_required=True so no hardware/live/runtime fact is fabricated.
+    for status in (
+        "GENERIC_EXTERNAL_ROUTE",
+        "RUNTIME_EXTERNAL_REQUIRED",
+        "LIVE_EXTERNAL_REQUIRED",
+        "HARDWARE_REQUIRED",
+        "SAFETY_EXTERNAL_REQUIRED",
+    ):
+        assert report.status_counts.get(status, 0) == 0
 
-    runtime = _route(report, 91, ProofKind.RUNTIME)
-    assert runtime.status == "RUNTIME_EXTERNAL_REQUIRED"
-    assert runtime.attestor_id == ""
-    assert runtime.external_required is True
-
-    execution = _route(report, 22, ProofKind.EXECUTION)
-    assert execution.status == "GENERIC_EXTERNAL_ROUTE"
-    assert execution.attestor_id == ""
-    assert execution.external_required is True
+    expected = (
+        (125, ProofKind.HARDWARE, "generic-hardware", "trusted-hardware-lab"),
+        (91, ProofKind.RUNTIME, "generic-runtime", "trusted-runtime-attestor"),
+        (22, ProofKind.EXECUTION, "generic-execution", "trusted-execution-attestor"),
+        (22, ProofKind.REPRODUCIBILITY, "generic-reproducibility", "trusted-reproducibility-attestor"),
+        (16, ProofKind.INDEPENDENT, "generic-independence", "trusted-independent-validator"),
+        (42, ProofKind.PERSISTENCE, "generic-persistence", "trusted-persistence-attestor"),
+        (42, ProofKind.LIVE, "generic-live", "trusted-live-observer"),
+        (23, ProofKind.SAFETY, "generic-safety", "trusted-safety-officer"),
+    )
+    for capability_id, kind, attestor_id, verifier in expected:
+        route = _route(report, capability_id, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == attestor_id
+        assert route.external_required is True
+        assert route.verifiers == (verifier,)
+        assert route.blockers
+        assert "real external observation/operator context" in route.blockers[0]
 
 
 def test_code_and_test_routes_are_tracked_ci_not_maturity_evidence():
