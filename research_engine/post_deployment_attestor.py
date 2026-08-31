@@ -67,6 +67,7 @@ _ROUTE_MAP = {
     ),
 }
 _OUTCOME_OBSERVED = {"VALIDATED_FOR_OBSERVED_METRICS", "DEGRADED"}
+_EXPIRING_PROOFS = {ProofKind.RUNTIME, ProofKind.LIVE}
 
 
 def _canonical(value: Any) -> bytes:
@@ -180,6 +181,21 @@ class PostDeploymentProofAttestation:
     audit: TrustedMaturityAudit
 
 
+def _proof_valid_until(
+    kind: ProofKind,
+    receipt: ValidatedDeploymentReceipt,
+) -> float | None:
+    """Return the immutable freshness ceiling for runtime/live evidence.
+
+    The clock is anchored to the protected deployment observer's receipt time,
+    not to when an operator happens to run this attestor.  Re-attesting a nearly
+    stale receipt therefore cannot manufacture a fresh runtime/live window.
+    """
+    if kind not in _EXPIRING_PROOFS:
+        return None
+    return float(receipt.created_at_epoch + _MAX_AGE_SECONDS)
+
+
 def validate_deployment_attestation(
     *,
     state_path: str | os.PathLike[str],
@@ -235,7 +251,7 @@ def validate_deployment_attestation(
         raise ValueError("deployment receipt created_at_epoch is invalid")
     if created > current_time + _MAX_FUTURE_SKEW_SECONDS:
         raise ValueError("deployment attestation receipt is from the future")
-    if current_time - created > _MAX_AGE_SECONDS:
+    if current_time - created >= _MAX_AGE_SECONDS:
         raise ValueError("deployment attestation receipt is stale")
     receipt_revision = str(receipt.get("implementation_revision") or "").strip().lower()
     if receipt_revision != revision:
@@ -377,6 +393,7 @@ def _same(
     digest: str,
     reference: str,
     revision: str,
+    valid_until: float | None,
 ) -> bool:
     expected = {
         "capability_id": capability_id,
@@ -386,6 +403,7 @@ def _same(
         "verifier": _VERIFIER,
         "reference": reference,
         "implementation_revision": revision,
+        "valid_until": valid_until,
     }
     return all(row.get(key) == value for key, value in expected.items())
 
@@ -453,12 +471,18 @@ def attest_post_deployment_proofs(
     reference = _PREFIX + receipt.state_sha256
     added = 0
     reused = 0
+
+    # Preflight every deterministic route before mutating the append-only ledger.
+    # A collision or freshness mismatch on a later route must not leave a partial
+    # prefix of receipts behind.
+    pending = []
     for capability_id, kinds in _ROUTE_MAP.items():
         for kind in kinds:
             receipt_id = (
                 f"postdeploy:c{capability_id}:{kind.value}:"
                 f"{receipt.receipt_sha256[:16]}"
             )
+            valid_until = _proof_valid_until(kind, receipt)
             previous = existing.get(receipt_id)
             if previous is not None:
                 if not _same(
@@ -468,22 +492,29 @@ def attest_post_deployment_proofs(
                     digest=receipt.receipt_sha256,
                     reference=reference,
                     revision=revision,
+                    valid_until=valid_until,
                 ):
                     raise ValueError("deterministic post-deployment receipt_id collision")
                 reused += 1
                 continue
-            ledger.add(
-                receipt_id=receipt_id,
-                capability_id=capability_id,
-                proof_kind=kind,
-                subject=_SUBJECT,
-                subject_sha256=receipt.receipt_sha256,
-                verifier=_VERIFIER,
-                observed_at=current_time,
-                reference=reference,
-                implementation_revision=revision,
-            )
-            added += 1
+            if valid_until is not None and valid_until <= current_time:
+                raise ValueError("runtime/live proof freshness window is exhausted")
+            pending.append((receipt_id, capability_id, kind, valid_until))
+
+    for receipt_id, capability_id, kind, valid_until in pending:
+        ledger.add(
+            receipt_id=receipt_id,
+            capability_id=capability_id,
+            proof_kind=kind,
+            subject=_SUBJECT,
+            subject_sha256=receipt.receipt_sha256,
+            verifier=_VERIFIER,
+            observed_at=current_time,
+            reference=reference,
+            valid_until=valid_until,
+            implementation_revision=revision,
+        )
+        added += 1
 
     anchor = ledger.create_anchor(current_revision=revision, issued_at=current_time)
     audit = audit_repository_maturity(
