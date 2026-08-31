@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "routes": [
+    {
+      "capability_id": 127,
+      "proof_kind": "execution",
+      "subject": "sim-to-reality-hardware-validation",
+      "verifier": "trusted-hardware-observer",
+      "reference_prefix": "sim-to-reality:"
+    },
+    {
+      "capability_id": 127,
+      "proof_kind": "reproducibility",
+      "subject": "sim-to-reality-hardware-validation",
+      "verifier": "trusted-hardware-observer",
+      "reference_prefix": "sim-to-reality:"
+    },
+    {
+      "capability_id": 127,
+      "proof_kind": "hardware_observation",
+      "subject": "sim-to-reality-hardware-validation",
+      "verifier": "trusted-hardware-observer",
+      "reference_prefix": "sim-to-reality:"
+    },
+    {
+      "capability_id": 127,
+      "proof_kind": "safety_gate",
+      "subject": "sim-to-reality-hardware-validation",
+      "verifier": "trusted-hardware-observer",
+      "reference_prefix": "sim-to-reality:"
+    }
+  ]
+}
