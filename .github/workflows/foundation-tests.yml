@@ -92,6 +92,7 @@ jobs:
             tests/test_procedural_memory.py \
             tests/test_knowledge_watch.py \
             tests/test_code_sandbox.py \
+            tests/test_sandbox_execution_attestor.py \
             tests/test_simulation_lab.py \
             tests/test_multiphysics_simulation.py \
             tests/test_simulation_execution_attestor.py \
