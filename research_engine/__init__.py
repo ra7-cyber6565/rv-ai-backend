@@ -101,7 +101,7 @@ _install_hypothesis_evidence_lineage()
 from .causal_chain_quality import install as _install_causal_chain_quality
 _install_causal_chain_quality()
 
-# #11/#12 execute only explicit structured SCM/counterfactual contracts.  The
+# #11/#12 execute only explicit structured SCM/counterfactual contracts. The
 # wiring never infers a causal graph from prose and never treats a model result
 # as empirical proof of causation or a measured real-world intervention.
 from .causal_counterfactual_wiring import install as _install_causal_counterfactual_wiring
@@ -156,6 +156,13 @@ _install_world_model_wiring()
 # hardware observation or operational evidence.
 from .technology_readiness_wiring import install as _install_technology_readiness_wiring
 _install_technology_readiness_wiring()
+
+# #71 Manufacturing Reality evaluates only explicit process requirements and
+# evidence receipts. It may block a manufacturing-relevant COMPLETE result, but
+# cannot infer factory measurements, claim hardware authenticity/certification,
+# or turn a software audit into real-world manufacturability proof.
+from .manufacturing_reality_wiring import install as _install_manufacturing_reality_wiring
+_install_manufacturing_reality_wiring()
 
 # #104 Historical Context uses only explicit structured chronology transported
 # through the existing result/coverage path. It preserves uncertain ranges,
