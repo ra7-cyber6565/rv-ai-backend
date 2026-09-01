@@ -77,7 +77,7 @@ def _proofs_for(capability_id: int) -> Tuple[ProofKind, ...]:
     # Standalone libraries are not enough for these capabilities. They must
     # prove an actual production result/claim path invokes the implementation.
     production_wiring = {
-        11, 12, 14, 62, 63, 64, 65, 67, 68, 70, 85, 95, 100, 101, 102, 103,
+        11, 12, 14, 62, 63, 64, 65, 67, 68, 70, 71, 85, 95, 100, 101, 102, 103,
         104, 105, 106, 110, 112, 119, 120,
     }
 
