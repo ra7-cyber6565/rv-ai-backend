@@ -19,6 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     env:
+      PYTHONPATH: "."
       ZERO_COST_ONLY: "true"
       GEMINI_API_KEY: ""
       GEMINI_ZERO_COST_CONFIRMED: "false"
