@@ -104,6 +104,7 @@ jobs:
             tests/test_sim_to_reality.py \
             tests/test_sim_to_reality_attestor.py \
             tests/test_data_forensics.py \
+            tests/test_data_forensics_execution_attestor.py \
             tests/test_tool_broker.py \
             tests/test_maturity_proof.py \
             tests/test_maturity_proof_crypto.py \
@@ -140,6 +141,8 @@ jobs:
             tests/test_post_deployment_proof_expiry.py \
             tests/test_benchmark_lab.py \
             tests/test_physical_lab_boundary.py \
+            tests/test_physical_lab_attestor.py \
+            tests/test_physical_lab_attestor_expiry.py \
             tests/test_epistemic_governance.py \
             tests/test_unknown_unknown_hunter.py \
             tests/test_claim_insurance.py \
