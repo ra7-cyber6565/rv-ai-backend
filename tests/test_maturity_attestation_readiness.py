@@ -202,6 +202,41 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
         assert route.verifiers == (verifier,)
         assert route.subjects == (subject,)
 
+    champion_challenger = {
+        ProofKind.EXECUTION: (
+            "champion-challenger-execution",
+            "trusted-execution-attestor",
+            "capability-89-execution-run",
+        ),
+        ProofKind.REPRODUCIBILITY: (
+            "champion-challenger-reproducibility",
+            "trusted-reproducibility-attestor",
+            "capability-89-reproducibility-run",
+        ),
+        ProofKind.PERSISTENCE: (
+            "champion-challenger-persistence",
+            "trusted-persistence-attestor",
+            "capability-89-persistence-observation",
+        ),
+        ProofKind.RUNTIME: (
+            "champion-challenger-runtime",
+            "trusted-runtime-attestor",
+            "capability-89-runtime-observation",
+        ),
+        ProofKind.LIVE: (
+            "champion-challenger-live",
+            "trusted-live-observer",
+            "capability-89-live-observation",
+        ),
+    }
+    for kind, (attestor_id, verifier, subject) in champion_challenger.items():
+        route = _route(report, 89, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == attestor_id
+        assert route.external_required is True
+        assert route.verifiers == (verifier,)
+        assert route.subjects == (subject,)
+
     for capability_id, kinds in {
         87: (ProofKind.PERSISTENCE, ProofKind.RUNTIME, ProofKind.LIVE),
         88: (
@@ -306,10 +341,10 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.external_required is True
 
     # Keep this regression on a genuinely still-unspecialized software route.
-    execution = _route(report, 89, ProofKind.EXECUTION)
-    assert execution.status == "GENERIC_EXTERNAL_ROUTE"
-    assert execution.attestor_id == ""
-    assert execution.external_required is True
+    independent = _route(report, 17, ProofKind.INDEPENDENT)
+    assert independent.status == "GENERIC_EXTERNAL_ROUTE"
+    assert independent.attestor_id == ""
+    assert independent.external_required is True
 
 
 def test_code_and_test_routes_are_tracked_ci_not_maturity_evidence():
