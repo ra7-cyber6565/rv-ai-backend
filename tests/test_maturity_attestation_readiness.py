@@ -254,8 +254,8 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.external_required is True
 
     # Keep this regression on a genuinely still-unspecialized execution route;
-    # Data Forensics now has a locked specialized benchmark attestor.
-    execution = _route(report, 69, ProofKind.EXECUTION)
+    # Physical Reality now has a locked specialized benchmark attestor.
+    execution = _route(report, 71, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
