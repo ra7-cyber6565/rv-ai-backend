@@ -33,6 +33,19 @@ Aath recipe (sab deterministic):
                         ko held-out par haraana padega, warna "complex model" ka
                         koi haq nahi
 
+#171e — EXAM/PADHAI ke paanch naye recipe. Ye upar wale aath ke UPAR bane hain,
+unki jagah nahi lete: hypothesis ka rasta ek bit nahi badalta (in specs ka
+janam `plan_exam_specs()` se hota hai, `plan_specs()` se nahi). Naapa jaata hai
+BANA HUA paper/plan, kisi ka daawa nahi:
+  syllabus_coverage   — syllabus ke kitne topic par ASLI me question bana
+  difficulty_mix      — sab question ek hi band me gire ya mix hua (proxy naap,
+                        aur ye baat report me likhi jaati hai)
+  duplicate_questions — do question ek jaise nikle ya nahi (shabd ke overlap se)
+  question_solvability— ginti wale question ka hissa bounded calculator me
+                        CHALA kar dekha gaya; calculator na mile to NOT MEASURED
+  plan_time_budget    — plan ka jodha hua time vs asli me mila hua time, aur
+                        kisi ek din ka bojh insaani hadd me hai ya nahi
+
 Status shabd (isse bahar kuch nahi):
   TESTED_PASS, TESTED_FAIL, DATA_MISSING, NOT_TESTABLE_HERE, NOT_RUN
 """
@@ -46,6 +59,11 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from . import physics_checks
 from . import market_data
+# #171e — exam/padhai ka naapne wala saamaan wahin rehta hai jahan uska parse
+# hota hai (`exammodel.py` leaf module hai: ye planner/discovery ko import nahi
+# karta, isliye koi cycle nahi banta). Lab yahan sirf CHALATA hai — split ka
+# hisaab exammodel ka hai, aur "kitna kaafi hai" ki chhat bhi wahin se aati hai.
+from . import exammodel
 from .advanced_discovery import NumericExecutionPolicy, SafeNumericExecutor
 # #155e — reject ka code ek hi jagah rehta hai (`rejects.py` leaf module hai,
 # isliye yahan import karne se koi cycle nahi banta). Naam yahan chhota rakha
@@ -144,6 +162,17 @@ class LabPolicy:
     event_min_trades: int = market_data.EVENT_MIN_TRADES
     event_min_windows: int = market_data.EVENT_MIN_WINDOWS
     event_shock_units: float = market_data.EVENT_SHOCK_UNITS
+    # #171e — EXAM/PADHAI ki chhat. Wahi niyam jo upar trade ke saath hai: har
+    # number `exammodel` se MIRROR hota hai, do jagah do value kabhi nahi. Agar
+    # ye value yahan alag likh di jaaye to report kis chhat par tiki hai ye pata
+    # hi nahi chalega, aur dono chupke se alag ho jaayengi. In numbers ko badalna
+    # ek jaan-boojh kar liya faisla hai — koi test inhe khud dheela nahi karta.
+    exam_min_coverage_share: float = exammodel.LAB_MIN_COVERAGE_SHARE
+    exam_max_band_share: float = exammodel.LAB_MAX_BAND_SHARE
+    exam_max_duplicate_pairs: int = exammodel.LAB_MAX_DUPLICATE_PAIRS
+    exam_min_solved_share: float = exammodel.LAB_MIN_SOLVED_SHARE
+    exam_duplicate_similarity: float = exammodel.DUPLICATE_SIMILARITY
+    exam_daily_minutes: float = float(exammodel.DEFAULT_DAILY_MINUTES)
     # #155e — ye run "kuch bana kar do" wali farmaish hai (gaana/kavita/script)?
     # Default False rakha gaya hai jaan-boojh kar: science aur trading ke run me
     # LAB ka bartaav ek bit bhi nahi badalta. True hone par sirf ITNA hota hai ki
@@ -183,6 +212,12 @@ class LabPolicy:
             "event_min_trades": self.event_min_trades,
             "event_min_windows": self.event_min_windows,
             "event_shock_units": self.event_shock_units,
+            "exam_min_coverage_share": self.exam_min_coverage_share,
+            "exam_max_band_share": self.exam_max_band_share,
+            "exam_max_duplicate_pairs": self.exam_max_duplicate_pairs,
+            "exam_min_solved_share": self.exam_min_solved_share,
+            "exam_duplicate_similarity": self.exam_duplicate_similarity,
+            "exam_daily_minutes": self.exam_daily_minutes,
             "craft_ask": self.craft_ask,
             "randomness_used": False,
             "network_used": False,
@@ -335,9 +370,16 @@ class TestSpec:
     # wajah `series_reason` me hai (khaali reason = "wajah bhi pata nahi").
     series: Optional[Any] = None
     series_reason: str = ""
+    # #171e — bana hua PAPER/PLAN ka parse kiya hua saamaan. Ye bhi lab khud
+    # nahi banata: `exam_material()` bahar se banata hai aur `plan_exam_specs()`
+    # yahan rakh deta hai — theek `series` ki tarah. None = koi paper/plan nahi
+    # tha, aur tab in recipes ka nateeja DATA_MISSING hota hai (khaali PASS
+    # kabhi nahi). Report me sirf GINTI jaati hai, poora paper nahi.
+    exam: Optional[Dict[str, Any]] = None
 
     def to_dict(self) -> Dict[str, Any]:
         series = self.series
+        exam = self.exam if isinstance(self.exam, dict) else {}
         return {
             "spec_id": self.spec_id,
             "hypothesis_id": self.hypothesis_id,
@@ -361,6 +403,14 @@ class TestSpec:
                                 if series is not None else ""),
             "series_points": len(getattr(series, "points", None) or ()),
             "series_reason": self.series_reason,
+            # Exam saamaan ka chhota parichay — sirf ginti. Poora paper report
+            # me daalna do wajah se galat hai: report bhaari ho jaati hai, aur
+            # bane hue question ko "naapa hua saboot" ki tarah padha jaata hai.
+            "exam_questions": int(len(exam.get("questions") or ())),
+            "exam_topics": int(len(exam.get("topics") or ())),
+            "exam_plan_rows": int(len(exam.get("plan_rows") or ())),
+            "exam_minutes_available": float(exam.get("minutes_available") or 0.0),
+            "exam_answer_key_pairs": int(exam.get("answer_key_pairs") or 0),
             "model_written_code": False,
         }
 
@@ -1808,6 +1858,299 @@ def _run_event_window(spec: TestSpec, policy: LabPolicy,
                 + pre_note + tail))
 
 
+# ── #171e — EXAM/PADHAI ke paanch naap ───────────────────────────────────────
+# Ye paanch recipe hypothesis ko nahi, BANE HUE paper/plan ko naapti hain. Isi
+# wajah se inka janam `plan_exam_specs()` se hota hai, `plan_specs()` se nahi —
+# science aur trading ka rasta ek bit bhi nahi badalta.
+#
+# Teen niyam poore batch par lage hain:
+#   1. Chhat `policy` se aati hai, aur policy ki value `exammodel` se mirror
+#      hoti hai. Recipe ke andar koi naya number nahi likha jaata.
+#   2. `numbers=` sirf TESTED_PASS/TESTED_FAIL par jaata hai. DATA_MISSING ke
+#      saath number bhejna "naap hui" ka jhootha nishaan ban jaata hai.
+#   3. Har DATA_MISSING ke saath `reason_code` exammodel ka hi hota hai, aur
+#      uska Hinglish matlab niche ki table se aata hai.
+_EXAM_NOT_RUN: Dict[str, str] = {
+    exammodel.NO_PAPER:
+        "Naapne ke liye koi bana hua paper hi nahi mila — question nikal hi "
+        "nahi paaye, isliye ye naap chalayi nahi gayi.",
+    exammodel.NO_SYLLABUS:
+        "Syllabus ke topic nahi mile (na official list, na paper me [Topic: …] "
+        "tag), isliye coverage naapi hi nahi ja sakti. Ye 'coverage poori hai' "
+        "NAHI hai — ye 'naapa hi nahi gaya' hai.",
+    exammodel.FEW_QUESTIONS:
+        f"Question ki ginti {exammodel.MIN_QUESTIONS_FOR_SPLIT} se kam thi — "
+        "itne chhote paper par band/duplicate ka faisla dena bemaani hota.",
+    exammodel.NO_KEY:
+        "Answer key nahi mili, isliye jawab se judi koi naap nahi hui.",
+    exammodel.NO_NUMERIC:
+        "Paper me ginti wala (calculate karne layak) koi hissa nahi tha, "
+        "isliye chala kar dekhne ka sawaal hi nahi utha.",
+    exammodel.NO_EVALUATOR:
+        "Bounded calculator nahi mila, isliye question chala kar dekhe hi "
+        "nahi gaye. Apna alag calculator likh kar 'check ho gaya' kehna jhooth "
+        "hota.",
+    exammodel.NO_PLAN:
+        "Koi study-plan ki line nahi mili (na din/hafte ka label, na time), "
+        "isliye plan ka time-budget naapa hi nahi gaya.",
+    exammodel.NO_TIME_BUDGET:
+        "Farmaish me kitne din mile hain ye likha hi nahi tha, isliye 'plan "
+        "time me fit hota hai ya nahi' ka faisla nahi ho sakta. Default maan "
+        "kar PASS dena sabse aasaan jhooth hota.",
+    exammodel.NO_TOPIC_WEIGHT:
+        "Plan ki kisi line par time (minute/ghanta) likha hi nahi tha, isliye "
+        "kul bojh joda hi nahi ja saka.",
+}
+
+_EXAM_TAIL = " " + exammodel.NOT_OFFICIAL_NOTE
+
+
+def _exam_of(spec: TestSpec) -> Dict[str, Any]:
+    """Spec ke saath aaya exam saamaan. Na ho to khaali dict (guess nahi)."""
+    return spec.exam if isinstance(spec.exam, dict) else {}
+
+
+def _exam_missing(spec: TestSpec, reason_code: str, extra: str = "") -> TestResult:
+    """DATA_MISSING — wajah exammodel ki, aur uske saath koi number NAHI."""
+    code = reason_code or exammodel.NO_PAPER
+    detail = _EXAM_NOT_RUN.get(code, f"Ye naap chalayi nahi ja saki ({code}).")
+    return _result(spec, DATA_MISSING, reason_code=code,
+                   detail=detail + (" " + extra if extra else "") + _EXAM_TAIL)
+
+
+def _run_syllabus_coverage(spec: TestSpec, policy: LabPolicy,
+                           executor: SafeNumericExecutor) -> TestResult:
+    """Syllabus ke kitne topic par ASLI me question bana — ginti se, daawe se nahi.
+
+    Sabse aam jhooth yahi hai: paper ke saath "poora syllabus cover hai" likh
+    dena. Yahan har topic par question dhoonde jaate hain, aur jo topic khaali
+    reh gaye unke NAAM bhi report me jaate hain.
+    """
+    material = _exam_of(spec)
+    split = exammodel.coverage_split(material.get("topics") or (),
+                                     material.get("questions") or ())
+    share = split.covered_share
+    if not split.ok or share is None:
+        return _exam_missing(spec, split.reason_code)
+    measured = split.to_dict()
+    observed = (f"{split.covered}/{split.topics} topic par question bana "
+                f"(hissa {share}), paper me {split.questions} question")
+    expected = (f"kam se kam {policy.exam_min_coverage_share} hissa topic par "
+                "ek-ek question")
+    small = (" Paper hi topic se chhota tha, isliye poora cover MUMKIN hi nahi "
+             "tha — ye paper ki kami hai, syllabus ki nahi."
+             if split.paper_too_small else "")
+    if share < policy.exam_min_coverage_share - 1e-9:
+        left = list(split.uncovered)[:6]
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=share, numbers=measured,
+            reason_code="syllabus_coverage_below_floor",
+            detail=(f"{split.reason}." + small + " Bina question wale topic: "
+                    + (", ".join(left) if left else "—")
+                    + (f" (+{len(split.uncovered) - len(left)} aur)"
+                       if len(split.uncovered) > len(left) else "")
+                    + _EXAM_TAIL))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=share, numbers=measured,
+        reason_code="syllabus_coverage_met",
+        detail=(f"Syllabus ke {split.covered} topic par question mila, yaani "
+                f"{share} hissa — chhat {policy.exam_min_coverage_share} thi."
+                + small + " Ye 'question sahi hain' NAHI kehta; sirf itna ki "
+                "topic chhoote nahi." + _EXAM_TAIL))
+
+
+def _run_difficulty_mix(spec: TestSpec, policy: LabPolicy,
+                        executor: SafeNumericExecutor) -> TestResult:
+    """Sab question ek hi band me gire ya mix hua — aur ye naap PROXY hai.
+
+    Proxy hone ki baat detail me HAR baar jaati hai. Difficulty ka asli naap
+    insaan ke attempt se hoti hai (kitne logon ne galat kiya) — wo data app ke
+    paas nahi hai, aur uska dikhawa karna hi is point ka sabse aasaan jhooth
+    hota.
+    """
+    material = _exam_of(spec)
+    split = exammodel.difficulty_split(material.get("questions") or ())
+    mixed = split.mixed
+    if not split.ok or mixed is None:
+        return _exam_missing(spec, split.reason_code)
+    measured = split.to_dict()
+    shares = {band: value for band, value in (split.shares or {}).items()
+              if value is not None}
+    top_band, top_share = "", 0.0
+    for band in exammodel.DIFFICULTY_BANDS:
+        value = float(shares.get(band) or 0.0)
+        if value > top_share:
+            top_band, top_share = band, value
+    proxy = (" Ye naap PROXY hai (question ki lambai, option, marks aur ginti "
+             "se banti hai) — asli difficulty insaan ke attempt se naapi jaati "
+             "hai, aur wo data app ke paas nahi hai.")
+    observed = (f"{split.questions} question | band "
+                + ", ".join(f"{band}={split.counts.get(band, 0)}"
+                            for band in exammodel.DIFFICULTY_BANDS)
+                + f" | sabse bhaari {top_band or '—'}={top_share}")
+    expected = (f"kam se kam 2 band me question, aur ek band me "
+                f"{policy.exam_max_band_share} se zyada hissa nahi")
+    if not mixed:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=top_share, numbers=measured,
+            reason_code="difficulty_single_band",
+            detail=(f"{split.reason} — yaani mix hi nahi hua." + proxy
+                    + _EXAM_TAIL))
+    if top_share > policy.exam_max_band_share + 1e-9:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=top_share, numbers=measured,
+            reason_code="difficulty_band_share_above_cap",
+            detail=(f"Do band to hain, par '{top_band}' band akela {top_share} "
+                    f"hissa le gaya (chhat {policy.exam_max_band_share}) — "
+                    "naam ka mix hai, asli mix nahi." + proxy + _EXAM_TAIL))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=top_share, numbers=measured,
+        reason_code="difficulty_mix_met",
+        detail=(f"Question {split.bands_used} band me baante hue mile aur koi "
+                f"ek band {policy.exam_max_band_share} se zyada nahi le gaya."
+                + proxy + _EXAM_TAIL))
+
+
+def _run_duplicate_questions(spec: TestSpec, policy: LabPolicy,
+                             executor: SafeNumericExecutor) -> TestResult:
+    """Do question ek jaise nikle ya nahi — shabd ke overlap se, aankh se nahi.
+
+    120 question maange gaye hon to sabse aam dhokha yahi hai: wahi sawaal
+    thoda ghuma kar dobara likh dena. Har jodi ka overlap naapa jaata hai aur
+    jodi ke NUMBER report me jaate hain.
+    """
+    material = _exam_of(spec)
+    split = exammodel.duplicate_split(material.get("questions") or (),
+                                      threshold=policy.exam_duplicate_similarity)
+    pairs = split.duplicate_pairs
+    if not split.ok or pairs is None:
+        return _exam_missing(spec, split.reason_code)
+    measured = split.to_dict()
+    observed = (f"{split.questions} question me {pairs} jodi ka overlap "
+                f"{split.threshold} ya usse zyada")
+    expected = (f"{policy.exam_max_duplicate_pairs} se zyada ek-jaisi jodi "
+                "nahi")
+    if pairs > policy.exam_max_duplicate_pairs:
+        named = ", ".join(f"Q{row['left']}~Q{row['right']} ({row['similarity']})"
+                          for row in list(split.pairs)[:5])
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=float(pairs), numbers=measured,
+            reason_code="duplicate_questions_found",
+            detail=(f"{split.reason}. Jodi: {named}"
+                    + (f" (+{pairs - 5} aur)" if pairs > 5 else "")
+                    + ". Overlap shabd ke milan se naapa gaya hai, isliye "
+                    "bilkul alag shabdon me likha wahi sawaal is naap se bach "
+                    "sakta hai." + _EXAM_TAIL))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=float(pairs), numbers=measured,
+        reason_code="duplicate_questions_clean",
+        detail=(f"{split.questions} question ki saari jodiyon me se ek bhi "
+                f"{split.threshold} overlap tak nahi pahunchi. Ye 'sab sawaal "
+                "alag mazmoon ke hain' NAHI kehta — sirf itna ki shabd dohraye "
+                "nahi gaye." + _EXAM_TAIL))
+
+
+def _run_question_solvability(spec: TestSpec, policy: LabPolicy,
+                              executor: SafeNumericExecutor) -> TestResult:
+    """Ginti wale question ko ASLI me bounded calculator me CHALA kar dekha gaya.
+
+    Calculator lab ka apna nahi hai — `SafeNumericExecutor` (bounded, sandboxed)
+    ka `evaluate` bahar se exammodel ko diya jaata hai. Model ka likha koi code
+    yahan chalta hi nahi (`model_written_code_executed: False` isi liye sach
+    rehta hai).
+    """
+    material = _exam_of(spec)
+    split = exammodel.solvability_split(material.get("questions") or (),
+                                        evaluate=executor.evaluate)
+    share = split.solved_share
+    if not split.ok or share is None:
+        return _exam_missing(spec, split.reason_code)
+    measured = split.to_dict()
+    observed = (f"{split.checked} ginti wale question chalaye gaye, "
+                f"{split.solved} bane (hissa {share})")
+    expected = (f"chale hue question ka {policy.exam_min_solved_share} hissa "
+                "banna chahiye")
+    scope = (" Ye naap sirf ITNA kehti hai ki question ka ginti wala hissa "
+             "chal jaata hai — jawab sahi hai ya nahi, wo alag baat hai aur "
+             "yahan naapi nahi gayi.")
+    if share < policy.exam_min_solved_share - 1e-9:
+        bad = ", ".join(f"Q{row['number']} ({row['error']})"
+                        for row in list(split.failed)[:5])
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=share, numbers=measured,
+            reason_code="question_not_solvable",
+            detail=(f"{split.reason}: {bad or '—'}. Aise question paper me "
+                    "rehne se student wahan atak jaayega, isliye ye FAIL hai."
+                    + scope + _EXAM_TAIL))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=share, numbers=measured,
+        reason_code="question_solvability_met",
+        detail=(f"{split.solved} me se {split.checked} ginti wale hisse "
+                "bounded calculator me chal gaye." + scope + _EXAM_TAIL))
+
+
+def _run_plan_time_budget(spec: TestSpec, policy: LabPolicy,
+                          executor: SafeNumericExecutor) -> TestResult:
+    """Plan ka jodha hua time vs asli me mila hua time — aur ek din ka bojh.
+
+    "30 din me strong kar do" par sabse aam dhokha ye hai: roz 9 ghante ka
+    plan likh dena. Do naap saath chalti hain — kul time fit hota hai ya nahi,
+    aur kisi EK din ka bojh insaani hadd me hai ya nahi.
+    """
+    material = _exam_of(spec)
+    split = exammodel.plan_time_split(
+        material.get("plan_rows") or (),
+        minutes_available=float(material.get("minutes_available") or 0.0))
+    fits = split.fits
+    if not split.ok or fits is None:
+        return _exam_missing(spec, split.reason_code)
+    measured = split.to_dict()
+    realistic = split.day_realistic
+    observed = (f"{split.timed_rows}/{split.rows} line par time likha | kul "
+                f"{split.total_minutes:.0f} min vs mila hua "
+                f"{split.minutes_available:.0f} min (hissa {split.load_share})"
+                + (f" | sabse bhaari {split.worst_day}="
+                   f"{split.worst_day_minutes:.0f} min"
+                   if split.worst_day else " | din ka label kisi line par nahi"))
+    expected = (f"kul time mile hue time ke andar, aur ek din "
+                f"{split.daily_ceiling:.0f} min se zyada nahi")
+    day_note = ("" if split.worst_day else
+                " Kisi line par din/hafte ka label nahi tha, isliye per-day "
+                "bojh naapa hi NAHI gaya — sirf kul time naapa gaya.")
+    if not fits:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=split.load_share, numbers=measured,
+            reason_code="plan_does_not_fit_time",
+            detail=(f"{split.reason}. Aisa plan kaagaz par poora dikhta hai "
+                    "par asli me chalta nahi." + day_note + _EXAM_TAIL))
+    if realistic is False:
+        return _result(
+            spec, TESTED_FAIL, observed=observed, expected=expected,
+            computed=split.load_share, numbers=measured,
+            reason_code="plan_day_load_above_ceiling",
+            detail=(f"Kul time to fit hai, par {split.reason} — ek din ka bojh "
+                    "insaani hadd se bahar hai." + _EXAM_TAIL))
+    return _result(
+        spec, TESTED_PASS, observed=observed, expected=expected,
+        computed=split.load_share, numbers=measured,
+        reason_code="plan_time_budget_met",
+        detail=(f"Plan ka joda hua time {split.total_minutes:.0f} min hai aur "
+                f"mila hua time {split.minutes_available:.0f} min — fit hai."
+                + day_note + " Time fit hona 'plan kaam karega' NAHI hai; "
+                "seekhne ki raftaar insaan par depend karti hai aur wo yahan "
+                "naapi nahi gayi." + _EXAM_TAIL))
+
+
 RECIPES: Dict[str, Any] = {
     "numeric_formula": _run_numeric_formula,
     "threshold": _run_threshold,
@@ -1821,6 +2164,14 @@ RECIPES: Dict[str, Any] = {
     "slot_expectancy": _run_slot_expectancy,
     "regime_split": _run_regime_split,
     "event_window": _run_event_window,
+    # #171e — exam/padhai ke paanch. Ye hypothesis ke rasta se nahi aate
+    # (`plan_exam_specs()` inhe banata hai), isliye science/trading run me
+    # inka naam bhi nahi aata.
+    "syllabus_coverage": _run_syllabus_coverage,
+    "difficulty_mix": _run_difficulty_mix,
+    "duplicate_questions": _run_duplicate_questions,
+    "question_solvability": _run_question_solvability,
+    "plan_time_budget": _run_plan_time_budget,
 }
 
 
@@ -2247,3 +2598,367 @@ def merge_into_hypotheses(hypotheses: Sequence[Dict[str, Any]],
         copy["lab_verdict"] = copy["lab"].get("verdict") or NOT_RUN
         out.append(copy)
     return out
+
+
+# ── #171e — EXAM LAB: bana hua PAPER/PLAN khud naapa jaata hai ────────────────
+# Ye upar wale hypothesis-lab ka bhai hai, uska badal nahi. Farq ek line me:
+#   run_lab()      → HYPOTHESIS ko naapta hai (daawa sach lagta hai ya nahi)
+#   run_exam_lab() → BANI HUI CHEEZ ko naapta hai (paper/plan theek bana ya nahi)
+# Yahi kram SONG LAB (#141) me bhi hai, aur wajah wahi hai: deliverable ka apna
+# naap hypothesis ke naap se alag sawaal hai, aur dono ko ek report me ghol dena
+# hi purani galti hai.
+EXAM_SUBJECT_ID = "EXAM-DELIVERABLE"
+EXAM_RECIPES: Tuple[str, ...] = ("syllabus_coverage", "difficulty_mix",
+                                 "duplicate_questions", "question_solvability",
+                                 "plan_time_budget")
+_EXAM_PAPER_RECIPES: Tuple[str, ...] = EXAM_RECIPES[:4]
+_EXAM_PLAN_RECIPES: Tuple[str, ...] = EXAM_RECIPES[4:]
+
+_EXAM_WHAT: Dict[str, str] = {
+    "syllabus_coverage": "syllabus ke kitne topic par asli me question bana",
+    "difficulty_mix": "question ek hi band me gire ya mix hue (proxy naap)",
+    "duplicate_questions": "do question ek jaise nikle ya nahi",
+    "question_solvability": "ginti wala hissa bounded calculator me chala ya nahi",
+    "plan_time_budget": "plan ka time mile hue time me fit hai ya nahi",
+}
+
+
+def exam_material(text: Any = "", syllabus_text: Optional[Any] = None,
+                  plan_text: Optional[Any] = None, ask: Optional[Any] = None,
+                  policy: Optional[LabPolicy] = None) -> Dict[str, Any]:
+    """Bane hue paper/plan ko EK baar parse karo — har recipe wahi saamaan padhe.
+
+    Ek hi jagah parse hone ki wajah: paanch recipe agar apna-apna parse karein
+    to dono ki ginti chupke se alag ho jaati hai, aur phir report kis paper par
+    tiki hai ye pata hi nahi chalta (yahi galti #133b me media ke saath ho chuki
+    hai — "mila" aur "padha" ki do ginti).
+
+    `syllabus_text`/`plan_text` na do to wahi deliverable text dono ke liye
+    padha jaata hai; alag do to sirf wahi padha jaata hai.
+    """
+    policy = policy or LabPolicy()
+    body = str(text or "")
+    syllabus_body = body if syllabus_text is None else str(syllabus_text or "")
+    plan_body = body if plan_text is None else str(plan_text or "")
+    questions = exammodel.questions_from_text(body)
+    key = exammodel.answer_key_from_text(body)
+    if key:
+        questions = exammodel.apply_answer_key(questions, key)
+    topics = exammodel.syllabus_topics(syllabus_body)
+    plan_rows = exammodel.plan_rows_from_text(plan_body)
+    # Kul time ka hisaab exammodel me hi rehta hai (ek hi jagah). Yahan sirf
+    # itna dekha jaata hai ki farmaish us shakl ki hai ya nahi — na hone par
+    # 0, jiska matlab "time budget naapa hi nahi gaya" (jhoothi 0 nahi).
+    minutes = (exammodel.minutes_available_of(ask, policy.exam_daily_minutes)
+               if hasattr(ask, "days_available") else 0.0)
+    return {
+        "questions": questions,
+        "topics": topics,
+        "plan_rows": plan_rows,
+        "answer_key_pairs": len(key),
+        "minutes_available": float(minutes),
+        "daily_minutes": float(policy.exam_daily_minutes),
+        # Ginti wala parichay — yahi report me jaata hai, poora paper nahi.
+        "summary": {
+            "questions": len(questions),
+            "with_answer": sum(1 for q in questions if q.answer),
+            "with_solution": sum(1 for q in questions if q.solution),
+            "topics": len(topics),
+            "plan_rows": len(plan_rows),
+            "timed_plan_rows": sum(1 for row in plan_rows
+                                   if float(row.get("minutes") or 0) > 0),
+            "answer_key_pairs": len(key),
+            "minutes_available": float(minutes),
+            "daily_minutes": float(policy.exam_daily_minutes),
+        },
+    }
+
+
+def plan_exam_specs(material: Optional[Dict[str, Any]] = None,
+                    question: str = "", ask: Optional[Any] = None
+                    ) -> List[TestSpec]:
+    """Kaun-kaun naap banegi — MAANG aur SAAMAAN dono dekh kar.
+
+    Ek zaroori baat: paper maanga gaya ho par ek bhi question na nikla ho, tab
+    bhi chaaron paper-naap ki spec BANTI hai. Wo DATA_MISSING dikhengi (wajah
+    `no_paper`), aur yahi imaandaar hai — spec hi na banane se report chup ho
+    jaati aur "sab theek tha" jaisa lagta.
+    """
+    rows = material if isinstance(material, dict) else {}
+    kind = str(getattr(ask, "kind", "") or "")
+    want_paper = bool(rows.get("questions")) or kind in (exammodel.KIND_PAPER,
+                                                        exammodel.KIND_BOTH)
+    want_plan = bool(rows.get("plan_rows")) or kind in (exammodel.KIND_PLAN,
+                                                        exammodel.KIND_BOTH)
+    names: List[str] = []
+    if want_paper:
+        names.extend(_EXAM_PAPER_RECIPES)
+    if want_plan:
+        names.extend(_EXAM_PLAN_RECIPES)
+    specs: List[TestSpec] = []
+    for index, recipe in enumerate(names):
+        specs.append(TestSpec(
+            spec_id=_spec_id(EXAM_SUBJECT_ID, index),
+            hypothesis_id=EXAM_SUBJECT_ID, recipe=recipe,
+            what=_EXAM_WHAT.get(recipe, recipe),
+            origin="exam_deliverable", question=str(question or ""),
+            exam=rows))
+    return specs
+
+
+# EXAM LAB ki apni wajah-lines. `_ROLLUP_REASON` idhar jaan-boojh kar use nahi
+# hoti: wo "ye hypothesis fail hui" kehti hai, aur yahan hypothesis naapi hi
+# nahi ja rahi — BANA HUA paper/plan naapa ja raha hai. Ek hi wording dono
+# jagah lagane se report jhooth bolne lagti (deliverable ki kami hypothesis ke
+# khaate me chali jaati).
+_EXAM_ROLLUP_REASON: Dict[str, str] = {
+    TESTED_FAIL: "app ne apne bane paper/plan me khud kami pakdi",
+    TESTED_PASS: "bane hue paper/plan ne app ki apni naap paar kar li (ye "
+                 "'asli exam jaisa hai' NAHI hai)",
+    DATA_MISSING: "naap ki spec bani, par usko chalane ka saamaan nahi mila",
+    NOT_TESTABLE_HERE: "is farmaish me naapne layak koi paper/plan nahi tha",
+    NOT_RUN: "naap chalayi hi nahi gayi",
+}
+
+
+def run_exam_lab(question: str = "", text: Any = "",
+                 ask: Optional[Any] = None, syllabus_text: Optional[Any] = None,
+                 plan_text: Optional[Any] = None,
+                 policy: Optional[LabPolicy] = None,
+                 kill_switch: bool = False,
+                 material: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """EXAM LAB stage: bana hua paper/plan → naap → imaandaar nateeja.
+
+    Zero network, zero Gemini call, zero randomness. Sab hisaab yahin hota hai
+    aur calculator bounded hai (`SafeNumericExecutor`) — model ka likha koi code
+    nahi chalta.
+    """
+    policy = policy or LabPolicy()
+    executor = SafeNumericExecutor(NumericExecutionPolicy())
+    if material is None:
+        material = exam_material(text, syllabus_text=syllabus_text,
+                                 plan_text=plan_text, ask=ask, policy=policy)
+    report: Dict[str, Any] = {
+        "ran": False,
+        "kill_switch": bool(kill_switch),
+        "policy": policy.to_dict(),
+        "executor": executor.policy_report(),
+        "seed": policy.seed,
+        "gemini_calls": exammodel.GEMINI_CALLS,
+        "provider_cost": 0,
+        "material": dict(material.get("summary") or {}),
+        "tests": [],
+        "counts": {status: 0 for status in LAB_STATUSES},
+        "verdict": NOT_RUN,
+        "verdict_reason": "",
+        "warnings": [],
+        "disclaimer": LAB_DISCLAIMER,
+        "note": "",
+        # Ye flag kabhi badalte nahi — inhe exammodel se MIRROR kiya jaata hai
+        # taaki do jagah do sach na ban jaayein.
+        "paper_is_practice_only": exammodel.PAPER_IS_PRACTICE_ONLY,
+        "is_exam_authority": exammodel.IS_EXAM_AUTHORITY,
+        "answer_key_is_app_made": exammodel.ANSWER_KEY_IS_APP_MADE,
+        "question_prediction_promised": exammodel.QUESTION_PREDICTION_PROMISED,
+        "score_promised": exammodel.SCORE_PROMISED,
+        "leaked_paper_used": exammodel.LEAKED_PAPER_USED,
+        "difficulty_is_proxy": exammodel.DIFFICULTY_IS_PROXY,
+        "network_used": exammodel.NETWORK_USED,
+        "not_official_note": exammodel.NOT_OFFICIAL_NOTE,
+        "is_established_fact": False,
+        "real_world_experiment_pending": True,
+    }
+    if kill_switch:
+        report["verdict_reason"] = "kill_switch"
+        report["note"] = ("Exam lab band tha (kill switch), isliye koi naap "
+                          "nahi chali — ye 'paper theek tha' NAHI hai.")
+        return report
+    specs = plan_exam_specs(material, question=question, ask=ask)
+    if not specs:
+        report["verdict"] = NOT_TESTABLE_HERE
+        report["verdict_reason"] = "no_exam_deliverable"
+        report["note"] = ("Na koi bana hua paper mila, na koi plan ki line — "
+                          "isliye exam lab ke liye koi naap hi nahi bani.")
+        return report
+    deadline = time.monotonic() + policy.max_wall_seconds
+    results = run_specs(specs, policy, executor, deadline)
+    report["tests"] = [r.to_dict() for r in results]
+    for result in results:
+        report["counts"][result.status] += 1
+    report["verdict"] = rollup(results)
+    report["verdict_reason"] = _EXAM_ROLLUP_REASON[report["verdict"]]
+    report["ran"] = any(r.status in (TESTED_PASS, TESTED_FAIL) for r in results)
+    if any(r.status == NOT_RUN and r.reason_code == "budget_exhausted"
+           for r in results):
+        report["warnings"].append(
+            "Exam lab ka time budget khatam hua — kuch naap chali hi nahi. "
+            "Unhe 'fail' nahi, 'nahi hui' padha jaaye.")
+    if not report["ran"]:
+        report["note"] = ("Naap ki spec bani, par unme se ek bhi chal nahi "
+                          "payi — wajah har row ke saath likhi hai.")
+    return report
+
+
+EXAM_LAB_SUBHEADING = "### App ne apne bane paper/plan ko khud kaise naapa (EXAM LAB)"
+
+# EXAM report ki pehchaan. Hypothesis wali `run_lab()` report me bhi `tests`
+# aur `note` hote hain, isliye sirf un key par bharosa karna galat tha: ek
+# hypothesis-lab report `exam_lab_section()` me daal dene par jawab me "apne
+# bane paper/plan ko naapa" ka block chhap jaata — jo naapa hi nahi gaya tha.
+# Ye marker EXAM ki report me hi banta hai (`run_exam_lab` ka base dict), aur
+# hypothesis wali report me kabhi nahi.
+_EXAM_REPORT_MARKERS: Tuple[str, ...] = ("not_official_note", "material",
+                                         "answer_key_is_app_made")
+
+
+def is_exam_report(report: Optional[Dict[str, Any]] = None) -> bool:
+    """Ye EXAM LAB ki report hai ya kisi doosre lab ki — shape se naapa gaya."""
+    if not isinstance(report, dict):
+        return False
+    return any(marker in report for marker in _EXAM_REPORT_MARKERS)
+
+
+def exam_lab_section(report: Optional[Dict[str, Any]] = None) -> str:
+    """EXAM LAB ka nateeja padhne layak Hinglish block. Khaali report par ""."""
+    if not is_exam_report(report):
+        return ""
+    tests = report.get("tests") or []
+    if not tests and not report.get("note"):
+        return ""
+    lines: List[str] = [EXAM_LAB_SUBHEADING, "",
+                        report.get("disclaimer") or LAB_DISCLAIMER, "",
+                        str(report.get("not_official_note")
+                            or exammodel.NOT_OFFICIAL_NOTE), ""]
+    material = report.get("material") or {}
+    if material:
+        lines.append(
+            f"- Naapa gaya saamaan: {material.get('questions', 0)} question, "
+            f"{material.get('topics', 0)} syllabus topic, "
+            f"{material.get('plan_rows', 0)} plan line "
+            f"({material.get('timed_plan_rows', 0)} par time likha tha)")
+    verdict = str(report.get("verdict") or NOT_RUN)
+    lines.append(f"- Kul nateeja: {_VERDICT_LABEL.get(verdict, verdict)}")
+    if report.get("verdict_reason"):
+        lines.append(f"- Kyun: {report['verdict_reason']}")
+    lines.append("")
+    for test in tests:
+        bits = [f"`{test.get('recipe')}`", str(test.get("status"))]
+        if test.get("observed"):
+            bits.append(f"naapa: {test['observed']}")
+        if test.get("expected"):
+            bits.append(f"chahiye tha: {test['expected']}")
+        lines.append("- " + " | ".join(bits))
+        if test.get("detail"):
+            lines.append(f"  {test['detail']}")
+    for warning in report.get("warnings") or []:
+        lines.append(f"- ⚠️ {warning}")
+    if report.get("note"):
+        lines.append(f"- {report['note']}")
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _exam_ran(report: Dict[str, Any], recipe: str) -> int:
+    """Ye naap SACH ME kitni baar chali (PASS ya FAIL). DATA_MISSING nahi ginta."""
+    return sum(1 for test in report.get("tests") or []
+               if test.get("recipe") == recipe
+               and test.get("status") in (TESTED_PASS, TESTED_FAIL))
+
+
+def exam_lab_limits(report: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Wo seemayein jo EXAM LAB ke baad BHI sach hain — audit me jaati hain.
+
+    Har line NAAPI hui ginti par bani hai (`_exam_ran`), likhe daawe par nahi.
+    Jo naap chali hi nahi, uski koi line nahi banti — aur jo chali, uski seema
+    zaroor banti hai. Yahan sabse aasaan over-read ye hai: "paper LAB me pass
+    ho gaya" ko "ye asli exam jaisa paper hai" padh lena.
+    """
+    if not is_exam_report(report) or not (report.get("tests") or []):
+        return []
+    limits: List[str] = [str(report.get("not_official_note")
+                             or exammodel.NOT_OFFICIAL_NOTE)]
+    counts = report.get("counts") or {}
+    if _exam_ran(report, "syllabus_coverage"):
+        limits.append(
+            "Syllabus coverage naapi gayi hai, par topic ke SHABD milne par "
+            "'cover ho gaya' maana jaata hai — question us topic ko theek "
+            "gehrai tak poochta hai ya nahi, wo yahan naapa NAHI gaya.")
+    if _exam_ran(report, "difficulty_mix"):
+        limits.append(
+            "Difficulty ka naap PROXY hai (lambai, option, marks, ginti se) — "
+            "asli difficulty insaan ke attempt se naapi jaati hai (kitne logon "
+            "ne galat kiya), aur wo data app ke paas nahi hai.")
+    if _exam_ran(report, "duplicate_questions"):
+        limits.append(
+            "Duplicate ka naap shabd ke overlap se hua hai. Bilkul alag "
+            "shabdon me likha wahi sawaal is naap se bach sakta hai, isliye "
+            "'ek bhi duplicate nahi' ko 'sab sawaal alag mazmoon ke hain' nahi "
+            "padha jaaye.")
+    if _exam_ran(report, "question_solvability"):
+        limits.append(
+            "Solvability me sirf question ka GINTI wala hissa bounded "
+            "calculator me chalaya gaya hai — jawab sahi hai ya nahi, aur "
+            "answer key theek hai ya nahi, wo yahan naapa NAHI gaya.")
+    if _exam_ran(report, "plan_time_budget"):
+        limits.append(
+            "Plan ka time-budget naapa gaya hai, par time me fit hona 'plan "
+            "kaam karega' NAHI hai — seekhne ki raftaar insaan par depend "
+            "karti hai aur wo yahan naapi nahi ja sakti.")
+    missing = sorted({str(test.get("reason_code") or "")
+                      for test in report.get("tests") or []
+                      if test.get("status") == DATA_MISSING
+                      and str(test.get("reason_code") or "")})
+    if missing:
+        limits.append(
+            "Kuch naap chal hi nahi payi (" + ", ".join(missing) + ") — inhe "
+            "'theek tha' nahi, 'naapa hi nahi gaya' padha jaaye.")
+    if counts.get(TESTED_FAIL):
+        limits.append(
+            f"{counts[TESTED_FAIL]} naap FAIL hui — uski wajah upar row me "
+            "likhi hai, aur us kami ko chhupaya nahi gaya hai.")
+    if report.get("warnings"):
+        limits.append("Exam lab ka time budget khatam hua — kuch naap adhoori "
+                      "rah gayi.")
+    return limits
+
+
+# Append-site ki ginti isi file me rehti hai (wahi wajah jo `MAX_AUDIT_LIMIT_LINES`
+# ke saath likhi hai): chhat kam rakhne se sabse AAKHIR wali line — FAIL ki
+# ginti — chup-chaap kat jaati, aur audit theek us baare me chup ho jaata jo
+# sabse zyada batane layak hai.
+EXAM_MAX_AUDIT_LIMIT_LINES = 9
+
+
+def exam_lab_public_record(report: Optional[Dict[str, Any]] = None
+                           ) -> Dict[str, Any]:
+    """Audit ke liye chhota record — ginti aur imaandaari ke flag, poora paper nahi."""
+    if not isinstance(report, dict):
+        return {"ran": False, "reason": "no_exam_lab"}
+    counts = report.get("counts") or {}
+    return {
+        "ran": bool(report.get("ran")),
+        "verdict": str(report.get("verdict") or NOT_RUN),
+        "verdict_reason": str(report.get("verdict_reason") or ""),
+        "tests": len(report.get("tests") or []),
+        "counts": {status: int(counts.get(status, 0)) for status in LAB_STATUSES},
+        "recipes_ran": {recipe: _exam_ran(report, recipe)
+                        for recipe in EXAM_RECIPES},
+        "material": dict(report.get("material") or {}),
+        "gemini_calls": int(report.get("gemini_calls") or 0),
+        "provider_cost": report.get("provider_cost", 0),
+        "paper_is_practice_only": exammodel.PAPER_IS_PRACTICE_ONLY,
+        "is_exam_authority": exammodel.IS_EXAM_AUTHORITY,
+        "answer_key_is_app_made": exammodel.ANSWER_KEY_IS_APP_MADE,
+        "question_prediction_promised": exammodel.QUESTION_PREDICTION_PROMISED,
+        "score_promised": exammodel.SCORE_PROMISED,
+        "leaked_paper_used": exammodel.LEAKED_PAPER_USED,
+        "difficulty_is_proxy": exammodel.DIFFICULTY_IS_PROXY,
+        "network_used": exammodel.NETWORK_USED,
+        "randomness_used": False,
+        "model_written_code_executed": False,
+        "is_established_fact": False,
+        "real_world_experiment_pending": True,
+    }
+
+
+
+

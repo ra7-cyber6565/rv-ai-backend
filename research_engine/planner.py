@@ -18,6 +18,7 @@ from typing import Callable, Dict, List, Optional
 from . import classics as classics_mod
 from . import concept_ledger as ledger_mod
 from . import craft as craft_mod
+from . import exammodel
 from .connectors.classic_connector import langs_for_question as classic_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
@@ -91,6 +92,11 @@ FIELD_MAP: Dict[str, List[str]] = {
     "prediction": ["Statistics", "Data Science", "Forecasting"],
     "philosophical": ["Philosophy", "Ethics", "Psychology", "Neuroscience"],
     "creative": ["Design", "Engineering", "Materials Science"],
+    # #171c: exam/padhai ki farmaish ka apna field-set. Ye QUESTION_TYPES me
+    # NAHI hai, isliye ye khud se kabhi detect nahi hota — sirf exam lane khulne
+    # par jodha jaata hai (purane sawaalon ka bartaav bilkul waisa hi rehta).
+    "educational": ["Education", "Cognitive Psychology",
+                    "Assessment and Measurement", "Curriculum Studies"],
     "unresolved_research": ["Research Methodology", "Domain-specific literature"],
     "factual": ["General Knowledge"],
 }
@@ -273,6 +279,31 @@ class ResearchPlanner:
             if not detected:
                 detected = ["factual"]
                 fields = fields or list(FIELD_MAP["factual"])
+        # ── #171c LANE ISOLATION: exam/padhai bhi creative rachna nahi hai ──
+        # Wahi #150c ki bimari doosri jagah: "RPF SI ka paper banao" aur "class
+        # 10 maths ka syllabus cover karne ka plan banao" me bhi "banao" hai,
+        # aur usi ek shabd se Design/Materials Science field aur ek creative
+        # sub-question exam ke jawab me ghus jaate the. Faisla yahan bhi khud se
+        # nahi liya jaata — `exammodel.is_request()` se aata hai, jo do signal
+        # (exam/padhai ki cheez + banane/seekhne ki maang) par khulta hai.
+        # `craft_ask` ki chhoot barqaraar: agar user ne asal me koi rachna maangi
+        # (jaise "exam par kavita likho") to creative type nahi hataayi jaati.
+        exam_ask = bool(exammodel.is_request(question))
+        if build_cue and exam_ask and not craft_ask:
+            detected = [qtype for qtype in detected if qtype != "creative"]
+            fields = [f for f in fields
+                      if f not in FIELD_MAP["creative"]
+                      or any(f in FIELD_MAP.get(other, [])
+                             for other in detected)]
+            if not detected:
+                detected = ["factual"]
+                fields = fields or list(FIELD_MAP["factual"])
+        # Exam/padhai maangi gayi hai to uske apne field aane chahiye.
+        if exam_ask and "educational" not in detected:
+            detected.append("educational")
+            for f in FIELD_MAP["educational"]:
+                if f not in fields:
+                    fields.append(f)
         # Trading model maanga gaya hai to uske apne field (Finance/Economics)
         # aane chahiye — Design/Materials Science nahi.
         if trade_ask and "financial" not in detected:
@@ -301,6 +332,10 @@ class ResearchPlanner:
             # ka signal yahan alag se milta hai. `is_creative` ka matlab ab
             # "creative rachna maangi gayi", aur ye do baatein ek nahi hain.
             "wants_construction": build_cue or craft_ask,
+            # #171c: exam lane ka faisla ek hi jagah se milta hai, taaki aage ke
+            # stage (source_discovery, LAB) apni doosri copy na banayein.
+            "is_exam_ask": exam_ask,
+            "exam_reason": exammodel.request_reason(question),
             "is_unresolved": "unresolved_research" in detected,
             "specialist_active": bool(specialist.get("active")),
             "specialist_profile_keys": list(specialist.get("profile_keys", [])),
@@ -511,6 +546,21 @@ class ResearchPlanner:
             trade_lead = list(trademodel.lead_queries(
                 trademodel.ask_of(question), limit=3))
 
+        # #171d — exam/padhai ki farmaish par bhi wahi baat. "RPF SI ka paper
+        # banao" par `domain.detect` ka curated intent set kaam ka nahi hai, aur
+        # "math basic se strong karun" par to bilkul nahi: uska jawab board ka
+        # apna syllabus aur padhai ki research deti hai. Un slots par ab
+        # official-first exam queries jaati hain.
+        #
+        # Do baatein jaan-boojh kar: (a) base query apni jagah PEHLE number par
+        # hi rehti hai, aur (b) trading ask par ye list khaali rehti hai
+        # (`not trade_lead`), taaki trading ka naapa hua kram 1 bit na badle.
+        # Non-exam sawaal par bhi khaali — yaani wahan ye badlaav no-op hai.
+        exam_lead: List[str] = []
+        if not trade_lead and exammodel.is_request(question):
+            exam_lead = list(exammodel.lead_queries(
+                exammodel.ask_of(question), limit=3))
+
         # §11 — round 2 se opposition side bhi dhoondhna ZAROORI hai. Pehle
         # (known domain wale path par) sirf support-side branch queries jaati
         # thi, aur phir bhi report "apparent agreement" likh deti thi. Ab
@@ -526,7 +576,8 @@ class ResearchPlanner:
                 # na plan hoti thi na report hoti thi. Ab intent-wise chalti
                 # hai: focus intents pehle, aur base query kabhi nahi girti.
                 intents = plan.search_intents(base, limit=3)
-                qs = [base] + (trade_lead or [i["query"] for i in intents])
+                qs = [base] + (trade_lead or exam_lead
+                              or [i["query"] for i in intents])
             else:
                 qs = ([base]
                       + plan.fallback_queries(base, round_no=round_no, limit=2)
@@ -556,8 +607,8 @@ class ResearchPlanner:
             # Trade queries lens se PEHLE — patla trading ask ("ek scalping setup
             # banao 5M chart par") ka domain profile generic nikalta hai, aur us
             # haalat me bhi institutional document sabse pehle jaana chahiye.
-            if trade_lead or lens_qs:
-                return [base, *trade_lead, *lens_qs][:4]
+            if trade_lead or exam_lead or lens_qs:
+                return [base, *trade_lead, *exam_lead, *lens_qs][:4]
             return [base]
 
         queries = []
@@ -927,6 +978,72 @@ class ResearchPlanner:
                     "maangi gayi; isliye lane khaali hai (0 query) aur trading "
                     "ka koi alag source padha nahi gaya")
 
+        # ── exam/padhai ka EXAM-STUDY lane (#171d) ───────────────────────────
+        # Trade-study wala hi dhaancha, aur wahi zaroori farak: ye lane baaki
+        # sabse AAZAD hai. Gaane ka lane band ho ya trading ka chal raha ho —
+        # is lane ka faisla sirf `exammodel.is_request()` se aata hai, jo DO
+        # signal par khulta hai (exam/subject ki cheez + banane ya seekhne ki
+        # maang). Isliye "hindi me gaana banao" par ye lane khulti hi nahi, aur
+        # yahi intel ki shart thi: "sab mix mt kr dena".
+        #
+        # Yahan KOI GYAAN NAHI khulta: ye sirf query hai. Isliye
+        # `exam_evidence_read` kabhi True nahi hota, aur chhah jhande naam se hi
+        # seema batate hain — app kisi board/commission ka hissa nahi, banaya
+        # hua paper sirf practice ka hai, answer key app ki apni banayi hui hai,
+        # "yahi question aayega" ka koi waada nahi, kitne number aayenge ka bhi
+        # nahi, aur koi leak/paid question bank chhua nahi gaya.
+        exam_text = question or cls.get("question") or ""
+        exam_ask = bool(exammodel.is_request(exam_text))
+        exam_queries: List[Dict] = []
+        exam_ask_dict: Dict = {}
+        exam_reason = exammodel.request_reason(exam_text)
+        if exam_ask:
+            # Depth lane band nahi karti, chhoti karti hai — wahi niyam.
+            e_budget = (exammodel.QUICK_STUDY_QUERIES
+                        if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else exammodel.MAX_STUDY_QUERIES)
+            e_ask = exammodel.ask_of(exam_text)
+            exam_ask_dict = e_ask.to_dict()
+            exam_queries = list(exammodel.lane_queries(e_ask, limit=e_budget))
+            if exam_queries:
+                # Reason lane ki ASLI ginti se banta hai, likhe hue daawe se
+                # nahi — trade lane par yahi galti pakdi gayi thi. Exam ka naam
+                # aur subject dono na aayein to official lane ki ek bhi query
+                # banti hi nahi, aur us haalat me "official document pehle"
+                # likhna naam-vs-kaam ka wahi farak hota.
+                counted = [(lane, sum(1 for row in exam_queries
+                                      if row.get("lane") == lane))
+                           for lane in exammodel.STUDY_LANES]
+                got = dict(counted)
+                detail = ", ".join(f"{lane}:{n}" for lane, n in counted if n)
+                if got.get(exammodel.LANE_OFFICIAL):
+                    parts = ["board/commission ka apna syllabus/notification "
+                             "sabse pehle"]
+                else:
+                    parts = ["na exam ka naam aaya na koi subject/level, isliye "
+                             "is baar kisi board/commission ka document nahi "
+                             "maanga gaya"]
+                if got.get(exammodel.LANE_TEXTBOOK):
+                    parts.append("topic ka asli daayra padhne wali kitaab se")
+                if got.get(exammodel.LANE_PEDAGOGY):
+                    parts.append("aur 'kaise padhein' ka jawab research se — "
+                                 "kisi ki raay se nahi")
+                if got.get(exammodel.LANE_PRACTICE):
+                    parts.append("purane paper se sirf DHAANCHA padha jaata hai, "
+                                 "uske question nahi")
+                exam_reason = (
+                    f"exam/padhai ki farmaish mili — exam-study lane chali "
+                    f"({len(exam_queries)} query; {detail}); "
+                    + "; ".join(parts))
+            else:
+                # Farmaish mili par ek bhi query nahi bani — ye baat CHHUPTI
+                # nahi (trade lane ka wahi niyam).
+                exam_reason = (
+                    "exam/padhai ki farmaish mili par exam-study lane ki ek bhi "
+                    "query nahi bani — na exam ka naam aaya, na koi subject, na "
+                    "koi class/level; isliye lane khaali hai (0 query) aur "
+                    "padhai ka koi alag source padha nahi gaya")
+
         return {
             "web": True,
             "papers": papers,
@@ -1081,6 +1198,37 @@ class ResearchPlanner:
                 "gemini_calls": trademodel.GEMINI_CALLS,
                 "network_used": trademodel.NETWORK_USED,
                 "reason": trade_reason},
+            # Exam/padhai ka EXAM-STUDY lane (#171d) — gaane ke teen lane aur
+            # trading ke lane se ALAG ginti, alag label (`exam_study_<lane>`).
+            # Ye bhi search PLAN hai, evidence nahi: `exam_evidence_read` yahan
+            # kabhi True nahi hota. Chhah jhande naam se hi seema batate hain,
+            # aur `not_official_note` wahi line hai jo jawab me bhi jaati hai.
+            "exam_study": exam_queries,
+            "exam_study_lane": {
+                "wanted": bool(exam_queries),
+                "is_exam_request": bool(exam_ask),
+                "query_count": len(exam_queries),
+                "lanes": [str(row.get("lane") or "") for row in exam_queries],
+                "reasons": [str(row.get("why") or "") for row in exam_queries],
+                # Ye jhanda BEHAVIOUR se banta hai: sach me pehli query board/
+                # commission ke apne document ki hai ya nahi. Hardcoded True
+                # likhna us ask par jhoot hota jahan exam ka naam hi nahi aaya.
+                "official_first": bool(
+                    exam_queries and exam_queries[0].get("lane")
+                    == exammodel.LANE_OFFICIAL),
+                "ask": exam_ask_dict,
+                "exam_evidence_read": False,
+                "paper_is_practice_only": exammodel.PAPER_IS_PRACTICE_ONLY,
+                "is_exam_authority": exammodel.IS_EXAM_AUTHORITY,
+                "answer_key_is_app_made": exammodel.ANSWER_KEY_IS_APP_MADE,
+                "question_prediction_promised":
+                    exammodel.QUESTION_PREDICTION_PROMISED,
+                "score_promised": exammodel.SCORE_PROMISED,
+                "leaked_paper_used": exammodel.LEAKED_PAPER_USED,
+                "not_official_note": exammodel.NOT_OFFICIAL_NOTE,
+                "gemini_calls": exammodel.GEMINI_CALLS,
+                "network_used": exammodel.NETWORK_USED,
+                "reason": exam_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────

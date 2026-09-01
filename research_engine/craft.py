@@ -282,6 +282,34 @@ def _cue_hit(tokens: Sequence[str], romans: Sequence[str],
     return ""
 
 
+# ── ek-matlab-se-zyada wale cue: sandarbh ke bina cue nahi ───────────────────
+# Kuch shabd form ka naam bhi hain aur aam kaam ka shabd bhi. "cover" ka matlab
+# "cover letter" bhi hota hai aur "syllabus cover karna" bhi. #171c me naapa
+# gaya: "class 10 maths ka syllabus cover karne ka plan banao" is ek shabd se
+# LETTER ki farmaish ban jaata tha — padhai ka plan creative patra ban jaata.
+# Ilaaj cue ko HATAANA nahi hai (asli cover-letter ki farmaish zinda rehni
+# chahiye), cue ko saath me apna sandarbh maangna hai. Ye list poori nahi hai
+# aur ye baat likhi ja rahi hai.
+CONTEXT_ROMAN_LIST_IS_NOT_EXHAUSTIVE = True
+_CONTEXT_ROMANS: Dict[str, Tuple[str, ...]] = {
+    "cover": ("letter", "ltr", "patra", "ptr", "chitthi", "chithi", "mail",
+              "email", "application", "aplkn", "arji", "arzi", "resume", "cv",
+              "job", "naukri", "internship", "intern", "vacancy"),
+}
+
+
+def _context_ok(tokens: Sequence[str], cue: str) -> bool:
+    """Cue ko sandarbh chahiye ya nahi — aur mila ya nahi."""
+    wanted = _CONTEXT_ROMANS.get(str(cue or "").lower())
+    if not wanted:
+        return True
+    for want in wanted:
+        for tok in tokens:
+            if tok == want or (len(want) >= 4 and tok.startswith(want)):
+                return True
+    return False
+
+
 def detect(question: str) -> Dict[str, Any]:
     """
     Sawaal "kuch bana kar do" hai ya nahi — aur kya banana hai.
@@ -299,6 +327,9 @@ def detect(question: str) -> Dict[str, Any]:
         # Dohri deewar: agar kabhi galti se koi aam-deliverable shabd kisi Form
         # me chala jaaye, to bhi ye stage us par nahi chalega.
         if cue and cue.lower() in PROSE_DELIVERABLE_WORDS:
+            cue = ""
+        # Teesri deewar: do-matlab wala cue apna sandarbh laaye, warna cue nahi.
+        if cue and not _context_ok(tokens, cue):
             cue = ""
         if cue:
             hit_form, form_cue = form, cue

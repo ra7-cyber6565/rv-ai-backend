@@ -47,6 +47,7 @@ from . import songcraft
 from . import listener_study
 from . import music_study
 from . import trademodel
+from . import exammodel
 
 
 class SourceDiscovery:
@@ -413,6 +414,50 @@ class SourceDiscovery:
                 # document webpage hai, paper nahi), aur lane band hone par bhi
                 # naam se saaf rahe ki ye trade-study thi.
                 tasks.append(("trade_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # EXAM/PADHAI ka EXAM-STUDY (#171d) — SIRF tab jab planner ne
+        # `exam_study` bhara ho. Ye tier baaki chaaron se ALAG hai: alag label
+        # (`exam_study_<lane>_<channel>`), alag budget, aur `is_lyrics_hunt` ka
+        # guard yahan JAAN-BOOJH KAR nahi hai — wo gaane ki lane ka pehra hai,
+        # exam ki query par use lagana lane mixing hi hota. Isi wajah se
+        # `seen_craft`/`seen_listener`/`seen_music`/`seen_trade` bhi nahi dekhe
+        # jaate: un chaaron se koi query milti hi nahi.
+        #
+        # Ek baat khaas hai: exammodel ke lane ka naam CONNECTOR ka naam NAHI
+        # hai (`official`/`textbook`/`pedagogy`/`practice`). Isliye yahan saaf
+        # mapping likhi hai — padhne wali kitaab wala lane book connector par,
+        # "kaise padhein" wala research paper connector par, aur official/
+        # practice web par (board ka syllabus PDF webpage hai, paper nahi).
+        # Label me DONO rehte hain: kaun lane thi AUR asal me kis channel par
+        # gayi. Sirf lane likhna us haalat me jhoot hota jab paper connector na
+        # mile aur query chup-chaap web par chali jaaye.
+        exam_limit = max(1, min(2, max_per_connector))
+        seen_exam = set()
+        for entry in list(plan.get("exam_study", []))[
+                :exammodel.MAX_STUDY_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), ""
+            key = clean.casefold()
+            if not clean or key in seen_exam:
+                continue
+            seen_exam.add(key)
+            connector = None
+            channel = "web"
+            if lane == exammodel.LANE_TEXTBOOK and book_name:
+                connector = self.books.by_name(book_name)
+                channel = "books"
+            elif lane == exammodel.LANE_PEDAGOGY and paper_name:
+                connector = self.papers.by_name(paper_name)
+                channel = "papers"
+            if connector is not None:
+                tasks.append((f"exam_study_{lane}_{channel}",
+                              self._single(connector, clean, exam_limit)))
+            elif plan.get("web", True):
+                tasks.append((f"exam_study_{lane or 'web'}_web",
                               self._web_chain(clean, max(1, min(2, max_web)))))
 
         return tasks

@@ -697,7 +697,12 @@ def test_the_planner_wiring_is_pinned_where_it_matters():
     src = _src("planner.py")
     assert "from . import trademodel" in src
     assert "trade_lead = list(trademodel.lead_queries(" in src
-    assert 'qs = [base] + (trade_lead or [i["query"] for i in intents])' in src
+    # #171d me is line ke saath exam lane bhi juda (`trade_lead or exam_lead
+    # or intents`). Needle CHHOTI ki gayi hai, kamzor nahi: `trade_lead` abhi
+    # bhi PEHLA hona chahiye. Agar koi ise hataaye ya exam ko aage kar de to
+    # ye assert usi tarah toot jaayega jaise pehle tootta tha — trading ka
+    # kram exam lane ke aane se badalna hi nahi chahiye tha.
+    assert "qs = [base] + (trade_lead or exam_lead" in src
     assert '"trade_study": trade_queries,' in src
     assert "if trade_queries:" in src
 

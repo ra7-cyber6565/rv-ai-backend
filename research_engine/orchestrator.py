@@ -54,6 +54,7 @@ from . import music_study
 from . import mood_lexicon
 from . import songlab
 from . import deliverable_guard
+from . import exammodel
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -1344,6 +1345,25 @@ class DeepResearchEngine:
                     out["analysis"] = fixed
             out["craft"]["answer_updated"] = bool(replaced)
 
+        # ── #171e EXAM LAB — bana hua paper/plan app KHUD naapta hai ────────
+        # Ye stage sirf exam/padhai ki farmaish par chalti hai; science aur
+        # trading ka rasta ek bit nahi badalta (`is_request` false hone par
+        # yahan se koi kaam hi nahi hota). Naapa jaata hai wahi jawab jo user
+        # ko jaayega: syllabus ke kitne topic par asli me question bana,
+        # difficulty mix hui ya sab ek band me, koi do sawaal ek jaise nikle,
+        # ginti wala sawaal bounded calculator me CHALA ya nahi, aur plan ka
+        # time budget insaani hadd me hai ya nahi. Zero Gemini call, zero
+        # network, zero randomness — kharcha 0 rehta hai.
+        #
+        # Ye `lab.run_lab` ki jagah NAHI leta: wo hypothesis test karta hai,
+        # ye BANA HUA deliverable. Dono ko ek report me milaana hi jhooth hota
+        # (paper ki kami hypothesis ke khaate me chali jaati).
+        exam_text = out["final"] or out["analysis"]
+        if exam_text and exammodel.is_request(question):
+            out["exam_lab"] = lab.run_exam_lab(
+                question=question, text=exam_text,
+                ask=exammodel.ask_of(question))
+
         out["calls"] = brain.calls_used
         out["errors"].extend(brain.errors)
         out["attempts"] = brain.attempts
@@ -2303,6 +2323,11 @@ class DeepResearchEngine:
             # dono naap saath dikhte hain. Gaane ki farmaish na ho to `wanted`
             # False hota hai aur na section chhapta hai na seema.
             music_report=passes.get("music_study") or {},
+            # #171e — EXAM LAB ka record: app ne apne BANAYE hue paper/plan ko
+            # khud kaise naapa. Ye `lab_report` ki jagah nahi leta (wo
+            # hypothesis ka test hai) aur uski ginti me nahi ghulta. Exam ki
+            # farmaish na ho to na section chhapta hai, na audit line.
+            exam_lab_report=passes.get("exam_lab") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.

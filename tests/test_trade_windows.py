@@ -703,7 +703,16 @@ def test_teen_nayi_recipe_lab_me_hain_aur_naam_dono_taraf_ek_hi():
     for recipe in (tm.LAB_RECIPE_SLOT, tm.LAB_RECIPE_REGIME,
                    tm.LAB_RECIPE_EVENT):
         assert recipe in lab.RECIPES, recipe
-    assert len(lab.RECIPES) == 12
+    # Pin abhi bhi EXACT hai, sirf do hisso me: 12 science/trading recipe +
+    # #171e ki exam recipes. Ye "12" ko dhakka de kar 17 karna nahi hai —
+    # science/trading ka hissa apni jagah pinned rehta hai, warna kal koi
+    # trading recipe chup-chaap gayab ho jaaye aur exam ki ek nayi recipe
+    # us kami ko dhak de.
+    assert len(lab.EXAM_RECIPES) == 5
+    assert len(lab.RECIPES) == 12 + len(lab.EXAM_RECIPES)
+    for recipe in lab.EXAM_RECIPES:
+        assert recipe not in (tm.LAB_RECIPE_SLOT, tm.LAB_RECIPE_REGIME,
+                              tm.LAB_RECIPE_EVENT), recipe
 
 
 def test_intraday_series_par_slot_aur_regime_ki_spec_banti_aur_chalti_hai():

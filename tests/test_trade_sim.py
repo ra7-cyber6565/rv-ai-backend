@@ -814,6 +814,25 @@ def test_naapa_hua_number_sirf_chale_hue_test_ke_saath_bahar_jaata_hai():
         assert code.count("numbers=measured") == ran_returns, func.__name__
         assert "spec, DATA_MISSING," in code, func.__name__
         total += ran_returns
+    # #171e — exam LAB ki paanch recipe bhi NAAPNE wali hain, isliye file ki
+    # ginti me wo JUDTI hain (ghatti nahi). Unka DATA_MISSING ek helper
+    # `_exam_missing` se jaata hai, isliye unme inline `spec, DATA_MISSING,`
+    # nahi milega — us raste par `numbers=` hai ya nahi, wo helper par seedha
+    # neeche pinned hai.
+    for name in lab.EXAM_RECIPES:
+        func = lab.RECIPES[name]
+        code = _code(func)
+        ran_returns = (code.count("spec, TESTED_PASS,")
+                       + code.count("spec, TESTED_FAIL,"))
+        assert ran_returns >= 2, name
+        assert code.count("numbers=measured") == ran_returns, name
+        assert "_exam_missing(spec" in code, name
+        total += ran_returns
+    # Saamaan na mile to exam recipe adhoora dict nahi bhejti — helper me
+    # `numbers=` ek bhi nahi hai, aur wahan reason_code hi jaata hai.
+    missing_code = _code(lab._exam_missing)
+    assert "numbers=" not in missing_code
+    assert "reason_code" in missing_code
     assert source.count("numbers=measured") == total
     assert "trade_expectancy" in lab.RECIPES
     # Dono taraf ka naam ek hi hona chahiye — `trademodel` ka recipe naam LAB ke

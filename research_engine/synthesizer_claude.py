@@ -46,6 +46,8 @@ from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
 from .lab import MAX_AUDIT_LIMIT_LINES as LAB_MAX_AUDIT_LIMIT_LINES
+from .lab import (EXAM_MAX_AUDIT_LIMIT_LINES, exam_lab_limits,
+                  exam_lab_section)
 from .lab import lab_limits, lab_report_section
 from .craft import craft_limits, craft_section
 from .media_study import media_limits, media_section
@@ -1506,7 +1508,8 @@ Ab jawab likho:"""
                        craft_report: Optional[Dict] = None,
                        media_report: Optional[Dict] = None,
                        listener_report: Optional[Dict] = None,
-                       music_report: Optional[Dict] = None) -> str:
+                       music_report: Optional[Dict] = None,
+                       exam_lab_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1693,6 +1696,17 @@ Ab jawab likho:"""
         # se likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
         for mood_line in mood_limits(craft_report)[:MOOD_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {mood_line}")
+        # #171e — EXAM LAB ki seema. Ye LAB ki seema (`lab_limits`) me jaan-boojh
+        # kar nahi ghulti: wahan HYPOTHESIS naapi jaati hai, yahan BANA HUA
+        # paper/plan. Ek hi ginti me daalne se "app ne apna paper khud naapa" aur
+        # "app ki hypothesis test hui" ek dikhne lagte, aur padhne wala samajhta
+        # ki paper kisi science-test se paas hua hai. Sabse bada jhooth jo yahan
+        # se rukta hai wo hai "LAB pass ho gaya = ye asli exam jaisa paper hai".
+        # Ceiling module se aati hai (`EXAM_MAX_AUDIT_LIMIT_LINES`) — haath se
+        # likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
+        for exam_line in exam_lab_limits(
+                exam_lab_report)[:EXAM_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {exam_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1947,7 +1961,8 @@ Ab jawab likho:"""
                  craft_report: Optional[Dict] = None,
                  media_report: Optional[Dict] = None,
                  listener_report: Optional[Dict] = None,
-                 music_report: Optional[Dict] = None) -> str:
+                 music_report: Optional[Dict] = None,
+                 exam_lab_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -2074,6 +2089,17 @@ Ab jawab likho:"""
                 mood_text = mood_section(craft_report)
                 if mood_text:
                     parts.append(mood_text)
+                # #171e — EXAM LAB: agar is run me paper/plan banaya gaya tha to
+                # app ne usko KHUD naapa (syllabus coverage, difficulty ka mix,
+                # ek jaise sawaal, ginti wale sawaal ka chalna, plan ka time
+                # budget). Ye LAB block ki jagah nahi leta — wo hypothesis ka
+                # test hai, ye BANE HUE paper/plan ka. Aur ye "asli exam jaisa
+                # hai" kabhi nahi kehta: har verdict ke saath likha hota hai ki
+                # paper practice ke liye hai aur difficulty ka naap proxy hai.
+                # Exam/padhai ki farmaish na ho to yahan kuch chhapta hi nahi.
+                exam_lab_text = exam_lab_section(exam_lab_report)
+                if exam_lab_text:
+                    parts.append(exam_lab_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -2093,7 +2119,8 @@ Ab jawab likho:"""
                     craft_report=craft_report,
                     media_report=media_report,
                     listener_report=listener_report,
-                    music_report=music_report)
+                    music_report=music_report,
+                    exam_lab_report=exam_lab_report)
                 parts.append(engine_text)
             else:
                 if index == 1:
