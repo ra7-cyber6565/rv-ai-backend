@@ -172,6 +172,36 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
         assert route.verifiers == (verifier,)
         assert route.subjects == (subject,)
 
+    human_factors = {
+        ProofKind.EXECUTION: (
+            "human-factors-execution",
+            "trusted-execution-attestor",
+            "capability-72-execution-run",
+        ),
+        ProofKind.REPRODUCIBILITY: (
+            "human-factors-reproducibility",
+            "trusted-reproducibility-attestor",
+            "capability-72-reproducibility-run",
+        ),
+        ProofKind.HARDWARE: (
+            "human-factors-hardware",
+            "trusted-hardware-lab",
+            "capability-72-hardware-observation",
+        ),
+        ProofKind.SAFETY: (
+            "human-factors-safety",
+            "trusted-safety-officer",
+            "capability-72-safety-gate",
+        ),
+    }
+    for kind, (attestor_id, verifier, subject) in human_factors.items():
+        route = _route(report, 72, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == attestor_id
+        assert route.external_required is True
+        assert route.verifiers == (verifier,)
+        assert route.subjects == (subject,)
+
     for capability_id, kinds in {
         87: (ProofKind.PERSISTENCE, ProofKind.RUNTIME, ProofKind.LIVE),
         88: (
@@ -276,7 +306,7 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.external_required is True
 
     # Keep this regression on a genuinely still-unspecialized software route.
-    execution = _route(report, 72, ProofKind.EXECUTION)
+    execution = _route(report, 89, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
