@@ -221,6 +221,14 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
             assert route.verifiers == ("trusted-operator",)
             assert route.subjects == ("visual-science-benchmark",)
 
+    for kind in (ProofKind.EXECUTION, ProofKind.REPRODUCIBILITY):
+        route = _route(report, 109, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == "data-forensics-benchmark"
+        assert route.external_required is True
+        assert route.verifiers == ("trusted-operator",)
+        assert route.subjects == ("data-forensics-benchmark",)
+
 
 def test_production_wiring_is_repo_backed_but_not_execution_evidence():
     report = audit_attestation_readiness(ROOT)
@@ -246,8 +254,8 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.external_required is True
 
     # Keep this regression on a genuinely still-unspecialized execution route;
-    # Holdout Vault and Visual Science now have locked benchmark attestors.
-    execution = _route(report, 109, ProofKind.EXECUTION)
+    # Data Forensics now has a locked specialized benchmark attestor.
+    execution = _route(report, 69, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
