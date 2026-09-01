@@ -31,6 +31,7 @@ def _primary(*, include_code=False):
     return {
         "schema_version": 1,
         "code_test_bindings": bindings,
+        "wiring_bindings": [],
         "external_routes": [{
             "proof_kind": "execution",
             "capability_ids": [127],
@@ -100,6 +101,7 @@ def test_override_cannot_create_route_that_primary_manifest_did_not_generate(tmp
     _write_json(tmp_path, _PRIMARY, {
         "schema_version": 1,
         "code_test_bindings": [],
+        "wiring_bindings": [],
         "external_routes": [],
     })
     _write_json(tmp_path, _SPECIAL, _override())
