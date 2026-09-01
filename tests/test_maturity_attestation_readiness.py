@@ -152,6 +152,26 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
     assert oracle.attestor_id == "reality-oracle-live"
     assert oracle.external_required is True
 
+    manufacturing = {
+        ProofKind.EXECUTION: (
+            "manufacturing-reality-execution",
+            "trusted-execution-attestor",
+            "capability-71-execution-run",
+        ),
+        ProofKind.REPRODUCIBILITY: (
+            "manufacturing-reality-reproducibility",
+            "trusted-reproducibility-attestor",
+            "capability-71-reproducibility-run",
+        ),
+    }
+    for kind, (attestor_id, verifier, subject) in manufacturing.items():
+        route = _route(report, 71, kind)
+        assert route.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert route.attestor_id == attestor_id
+        assert route.external_required is True
+        assert route.verifiers == (verifier,)
+        assert route.subjects == (subject,)
+
     for capability_id, kinds in {
         87: (ProofKind.PERSISTENCE, ProofKind.RUNTIME, ProofKind.LIVE),
         88: (
@@ -243,6 +263,8 @@ def test_production_wiring_is_repo_backed_but_not_execution_evidence():
 def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors():
     report = audit_attestation_readiness(ROOT)
 
+    # Real hardware evidence remains external even after the software execution
+    # benchmark for Manufacturing Reality is specialized.
     hardware = _route(report, 71, ProofKind.HARDWARE)
     assert hardware.status == "HARDWARE_REQUIRED"
     assert hardware.attestor_id == ""
@@ -253,9 +275,8 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    # Keep this regression on a genuinely still-unspecialized execution route;
-    # Physical Reality now has a locked specialized benchmark attestor.
-    execution = _route(report, 71, ProofKind.EXECUTION)
+    # Keep this regression on a genuinely still-unspecialized software route.
+    execution = _route(report, 72, ProofKind.EXECUTION)
     assert execution.status == "GENERIC_EXTERNAL_ROUTE"
     assert execution.attestor_id == ""
     assert execution.external_required is True
