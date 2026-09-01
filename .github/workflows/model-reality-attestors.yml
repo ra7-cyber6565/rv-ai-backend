@@ -51,4 +51,6 @@ jobs:
             tests/test_physical_reality_execution_attestor.py \
             tests/test_manufacturing_reality.py \
             tests/test_manufacturing_reality_attestor.py \
+            tests/test_human_factors.py \
+            tests/test_human_factors_attestor.py \
             tests/test_maturity_attestation_readiness.py
