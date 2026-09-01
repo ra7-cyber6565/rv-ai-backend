@@ -55,6 +55,7 @@ _REQUIRED: Tuple[ProofKind, ...] = (
     ProofKind.HARDWARE,
     ProofKind.SAFETY,
 )
+_EXPIRING_PROOFS = {ProofKind.RUNTIME, ProofKind.LIVE}
 _ROUTE_ROLE = {
     ProofKind.EXECUTION: ("execution-run", "trusted-execution-attestor", "execution"),
     ProofKind.REPRODUCIBILITY: (
@@ -193,6 +194,21 @@ class PhysicalLabProofAttestation:
     receipts_reused: int
     anchor_token: str
     audit: TrustedMaturityAudit
+
+
+def _proof_valid_until(
+    kind: ProofKind,
+    receipt: ValidatedPhysicalLabReceipt,
+) -> float | None:
+    """Return the signed-receipt freshness ceiling for runtime/live proofs.
+
+    The expiry is anchored to the protected external observer's receipt time,
+    never to when an operator happens to run this attestor. Re-attesting an old
+    receipt therefore cannot manufacture a fresh runtime/live proof window.
+    """
+    if kind not in _EXPIRING_PROOFS:
+        return None
+    return float(receipt.created_at_epoch + _MAX_AGE_SECONDS)
 
 
 def validate_physical_lab_attestation(
@@ -355,6 +371,7 @@ def _same(
     digest: str,
     reference: str,
     revision: str,
+    valid_until: float | None,
 ) -> bool:
     expected = {
         "capability_id": capability_id,
@@ -364,6 +381,7 @@ def _same(
         "verifier": verifier,
         "reference": reference,
         "implementation_revision": revision,
+        "valid_until": valid_until,
     }
     return all(row.get(key) == value for key, value in expected.items())
 
@@ -421,11 +439,16 @@ def attest_physical_lab_proofs(
     existing = _existing_adds(ledger)
     added = 0
     reused = 0
+
+    # Preflight every deterministic route before mutating the append-only ledger.
+    # A collision or expired live route must never leave a partial proof prefix.
+    pending = []
     for capability_id in _CAPABILITIES:
         for kind in _REQUIRED:
             subject, verifier, prefix = _route_meta(capability_id, kind)
             reference = prefix + receipt.receipt_sha256
             receipt_id = f"physical-lab:c{capability_id}:{kind.value}:{receipt.receipt_sha256[:16]}"
+            valid_until = _proof_valid_until(kind, receipt)
             previous = existing.get(receipt_id)
             if previous is not None:
                 if not _same(
@@ -437,22 +460,47 @@ def attest_physical_lab_proofs(
                     digest=receipt.receipt_sha256,
                     reference=reference,
                     revision=revision,
+                    valid_until=valid_until,
                 ):
                     raise ValueError("deterministic physical-lab receipt_id collision")
                 reused += 1
                 continue
-            ledger.add(
-                receipt_id=receipt_id,
-                capability_id=capability_id,
-                proof_kind=kind,
-                subject=subject,
-                subject_sha256=receipt.receipt_sha256,
-                verifier=verifier,
-                observed_at=current_time,
-                reference=reference,
-                implementation_revision=revision,
+            if valid_until is not None and valid_until <= current_time:
+                raise ValueError("runtime/live proof freshness window is exhausted")
+            pending.append(
+                (
+                    receipt_id,
+                    capability_id,
+                    kind,
+                    subject,
+                    verifier,
+                    reference,
+                    valid_until,
+                )
             )
-            added += 1
+
+    for (
+        receipt_id,
+        capability_id,
+        kind,
+        subject,
+        verifier,
+        reference,
+        valid_until,
+    ) in pending:
+        ledger.add(
+            receipt_id=receipt_id,
+            capability_id=capability_id,
+            proof_kind=kind,
+            subject=subject,
+            subject_sha256=receipt.receipt_sha256,
+            verifier=verifier,
+            observed_at=current_time,
+            reference=reference,
+            valid_until=valid_until,
+            implementation_revision=revision,
+        )
+        added += 1
 
     anchor = ledger.create_anchor(current_revision=revision, issued_at=current_time)
     audit = audit_repository_maturity(
