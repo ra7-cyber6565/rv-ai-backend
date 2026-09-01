@@ -13,6 +13,8 @@ from research_engine.maturity_proof import ProofLedger
 
 KEY = b"M" * 32
 NOW = 60_000.0
+_EXECUTION_REF = "execution:c71:manufacturing-ci"
+_REPRODUCIBILITY_REF = "reproducibility:c71:manufacturing-ci"
 
 
 def _root() -> Path:
@@ -24,8 +26,8 @@ def _attest(tmp_path, *, ledger_name="manufacturing-proof.jsonl", now=NOW, **kwa
         repo_root=_root(),
         ledger_path=tmp_path / ledger_name,
         integrity_key=KEY,
-        execution_reference="execution:manufacturing-ci",
-        reproducibility_reference="reproducibility:manufacturing-ci",
+        execution_reference=_EXECUTION_REF,
+        reproducibility_reference=_REPRODUCIBILITY_REF,
         now=now,
         **kwargs,
     )
@@ -75,6 +77,10 @@ def test_attestor_mints_execution_and_reproducibility_but_not_hardware_or_safety
         "trusted-execution-attestor",
         "trusted-reproducibility-attestor",
     }
+    assert {row["reference"] for row in rows} == {
+        _EXECUTION_REF,
+        _REPRODUCIBILITY_REF,
+    }
     assert ProofKind.HARDWARE.value not in {row["proof_kind"] for row in rows}
     assert ProofKind.SAFETY.value not in {row["proof_kind"] for row in rows}
 
@@ -93,15 +99,29 @@ def test_existing_ledger_requires_anchor_and_repeat_is_idempotent(tmp_path):
     assert second.receipts_reused == 2
 
 
-def test_wrong_execution_reference_fails_before_ledger_creation(tmp_path):
+def test_broad_execution_reference_fails_before_ledger_creation(tmp_path):
     ledger_path = tmp_path / "manufacturing-proof.jsonl"
     with pytest.raises(ValueError, match="execution reference is not allowed"):
         attest_manufacturing_reality_execution(
             repo_root=_root(),
             ledger_path=ledger_path,
             integrity_key=KEY,
-            execution_reference="self-asserted:execution",
-            reproducibility_reference="reproducibility:manufacturing-ci",
+            execution_reference="execution:manufacturing-ci",
+            reproducibility_reference=_REPRODUCIBILITY_REF,
+            now=NOW,
+        )
+    assert not ledger_path.exists()
+
+
+def test_cross_capability_execution_reference_fails_before_ledger_creation(tmp_path):
+    ledger_path = tmp_path / "manufacturing-proof.jsonl"
+    with pytest.raises(ValueError, match="execution reference is not allowed"):
+        attest_manufacturing_reality_execution(
+            repo_root=_root(),
+            ledger_path=ledger_path,
+            integrity_key=KEY,
+            execution_reference="execution:c72:manufacturing-ci",
+            reproducibility_reference=_REPRODUCIBILITY_REF,
             now=NOW,
         )
     assert not ledger_path.exists()
@@ -114,8 +134,8 @@ def test_wrong_reproducibility_reference_fails_before_ledger_creation(tmp_path):
             repo_root=_root(),
             ledger_path=ledger_path,
             integrity_key=KEY,
-            execution_reference="execution:manufacturing-ci",
-            reproducibility_reference="self-asserted:repro",
+            execution_reference=_EXECUTION_REF,
+            reproducibility_reference="reproducibility:c72:manufacturing-ci",
             now=NOW,
         )
     assert not ledger_path.exists()
@@ -129,8 +149,8 @@ def test_ledger_inside_repo_is_rejected():
                 repo_root=_root(),
                 ledger_path=target,
                 integrity_key=KEY,
-                execution_reference="execution:manufacturing-ci",
-                reproducibility_reference="reproducibility:manufacturing-ci",
+                execution_reference=_EXECUTION_REF,
+                reproducibility_reference=_REPRODUCIBILITY_REF,
                 now=NOW,
             )
     finally:
