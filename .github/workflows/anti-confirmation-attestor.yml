@@ -1,0 +1,51 @@
+name: Anti-confirmation attestor
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main, chatgpt-max-maturity-wave1-20260827]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anti-confirmation-attestor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  anti-confirmation-attestor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      ZERO_COST_ONLY: "true"
+      INFINITY_OFFLINE_TEST: "true"
+    steps:
+      - name: Checkout exact code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest
+
+      - name: Run anti-confirmation independent-validation adversarial gate
+        run: |
+          pytest -q \
+            tests/test_anti_confirmation_attestor.py \
+            tests/test_maturity_policy_extensions.py \
+            tests/test_maturity_specialized_route_overrides.py
+
+      - name: Compile protected operator CLI
+        run: |
+          python -m py_compile \
+            research_engine/anti_confirmation_attestor.py \
+            scripts/attest_anti_confirmation.py
