@@ -30,7 +30,7 @@ def test_assert_capacity_blocks_when_app_limit_would_be_exceeded():
                 assert_capacity(10, policy=policy)
 
 
-def test_cleanup_deletes_only_verified_file_inside_root():
+def test_cleanup_deletes_only_checksum_verified_file_inside_root():
     with tempfile.TemporaryDirectory() as root:
         verified = os.path.join(root, "verified.bin")
         pending = os.path.join(root, "pending.bin")
@@ -43,7 +43,9 @@ def test_cleanup_deletes_only_verified_file_inside_root():
         v = manifest.register(verified, remote_path="/v.bin", provider="fake")
         p = manifest.register(pending, remote_path="/p.bin", provider="fake")
         manifest.mark_upload_attempt(v["sha256"])
-        manifest.mark_verified(v["sha256"], remote_size=40)
+        manifest.mark_verified(
+            v["sha256"], remote_size=40, remote_sha256=v["sha256"]
+        )
 
         with patch.dict(os.environ, {"INFINITY_DATA_ROOT": root}, clear=False):
             result = cleanup_verified_archives(manifest, target_reclaim_bytes=1)
@@ -55,6 +57,24 @@ def test_cleanup_deletes_only_verified_file_inside_root():
         assert manifest.safe_to_delete_local(p["sha256"]) is False
 
 
+def test_cleanup_refuses_size_only_verified_file():
+    with tempfile.TemporaryDirectory() as root:
+        path = os.path.join(root, "size-only.bin")
+        with open(path, "wb") as handle:
+            handle.write(b"123456")
+        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        item = manifest.register(path, remote_path="/size-only.bin", provider="fake")
+        manifest.mark_upload_attempt(item["archive_id"])
+        manifest.mark_verified(item["archive_id"], remote_size=6)
+
+        with patch.dict(os.environ, {"INFINITY_DATA_ROOT": root}, clear=False):
+            result = cleanup_verified_archives(manifest, target_reclaim_bytes=1)
+
+        assert result["deleted_count"] == 0
+        assert os.path.exists(path)
+        assert any(entry["reason"] == "checksum_not_verified" for entry in result["skipped"])
+
+
 def test_cleanup_refuses_verified_path_outside_configured_root():
     with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
         path = os.path.join(outside, "outside.bin")
@@ -63,7 +83,9 @@ def test_cleanup_refuses_verified_path_outside_configured_root():
         manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
         item = manifest.register(path, remote_path="/outside.bin", provider="fake")
         manifest.mark_upload_attempt(item["sha256"])
-        manifest.mark_verified(item["sha256"], remote_size=4)
+        manifest.mark_verified(
+            item["sha256"], remote_size=4, remote_sha256=item["sha256"]
+        )
 
         with patch.dict(os.environ, {"INFINITY_DATA_ROOT": root}, clear=False):
             result = cleanup_verified_archives(manifest, target_reclaim_bytes=1)
