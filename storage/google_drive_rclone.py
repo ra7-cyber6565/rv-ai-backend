@@ -9,6 +9,9 @@ Why this adapter exists:
   and controls deletion. This provider never deletes local files.
 - optional at-rest encryption is delegated to rclone's mature ``crypt`` backend;
   the app never implements or stores its own encryption key material.
+- if the remote cannot expose a native SHA-256 (notably rclone crypt), the adapter
+  deliberately downloads the logical remote object through rclone and hashes the
+  returned plaintext. Size-only verification is not accepted for this provider.
 
 Runtime prerequisites are intentionally external: the user installs rclone and
 creates/authenticates a Google Drive remote. No OAuth token or crypt password is
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 from functools import lru_cache
@@ -187,6 +191,24 @@ class RcloneGoogleDriveProvider:
             )
         return result
 
+    def _download_sha256(self, target: str) -> str:
+        """End-to-end hash the logical remote bytes through rclone.
+
+        Google Drive normally exposes MD5 rather than SHA-256, and rclone crypt
+        intentionally stores no plaintext hashes. ``hashsum --download`` reads
+        the remote object through the configured backend (decrypting crypt data)
+        and calculates SHA-256 locally. If this cannot complete, verification is
+        refused and the local source remains retained/retryable.
+        """
+        result = self._run(["hashsum", "SHA256", target, "--download"])
+        for raw in (result.stdout or "").splitlines():
+            match = re.match(r"^\s*([0-9a-fA-F]{64})\s+", raw)
+            if match:
+                return match.group(1).lower()
+        raise RuntimeError(
+            "Remote SHA-256 content verification unavailable; local file retained hai"
+        )
+
     def upload_file(self, local_path: str, remote_path: str) -> RemoteObject:
         local = os.path.abspath(local_path)
         if not os.path.isfile(local):
@@ -217,8 +239,16 @@ class RcloneGoogleDriveProvider:
         for key, value in hashes.items():
             normalized = str(key).replace("-", "").lower()
             if normalized == "sha256" and value:
-                sha256 = str(value).lower()
-                break
+                candidate = str(value).lower()
+                if re.fullmatch(r"[0-9a-f]{64}", candidate):
+                    sha256 = candidate
+                    break
+
+        # Never downgrade to size-only verification. This extra read is slower
+        # for providers without native SHA-256, but it is the safe boundary that
+        # makes later local cleanup defensible.
+        if not sha256:
+            sha256 = self._download_sha256(target)
 
         return RemoteObject(
             path=remote_path,
@@ -239,6 +269,7 @@ class RcloneGoogleDriveProvider:
             "encryption_required": self.require_crypt,
             "encryption_verified": self.remote_type == "crypt" if self.require_crypt else None,
             "encryption_backend": "rclone-crypt" if self.remote_type == "crypt" else "",
+            "content_verification": "sha256-required",
         }
 
 
