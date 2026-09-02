@@ -81,6 +81,7 @@ def _extension_wiring() -> Check:
         "research_engine/advanced_discovery_integrated.py",
         (
             "class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine)",
+            "from .literature_debate_guard import AutonomousLiteratureDebate",
             "derive_triple_tasks(verification",
             "run_adapted_triple(self.triple_implementation, adaptation)",
             "self.literature_debate.reconstruct(",
@@ -88,6 +89,7 @@ def _extension_wiring() -> Check:
             'report["autonomous_literature_debate"] = debate',
             '"base_discovery_preserved": True',
             '"expected_value_gate_wired": True',
+            '"literature_debate_reliability_guard_wired": True',
             '"status": "ASSESSMENT_ERROR"',
         ),
     )
@@ -165,6 +167,25 @@ def _literature_grounding() -> Check:
     )
 
 
+def _literature_readiness_guard() -> Check:
+    return _contains(
+        "advanced:literature-debate-readiness-guard",
+        "research_engine/literature_debate_guard.py",
+        (
+            '_RELIABLE_DEPTHS = {"abstract", "full_text"}',
+            "relevance < _MIN_RELEVANCE",
+            "quality < _MIN_QUALITY and not peer_reviewed and not primary",
+            'return False, "retracted_historical_context_only"',
+            'row["reliable_current_evidence"] = bool(allowed)',
+            'row["reliability_reason"] = reason',
+            'report["role_presence_reliable"] = role_presence',
+            'report["status"] = "DEBATE_MAP_READY"',
+            '"shallow_or_low_quality_arguments_count_as_reliable"',
+            'proof["quality_and_depth_reliability_gate"] = True',
+        ),
+    )
+
+
 def _maturity_honesty() -> Check:
     text = _read("research_engine/capability_maturity.py")
     required = (
@@ -199,11 +220,13 @@ def run_audit() -> Report:
         "research_engine/triple_implementation.py",
         "research_engine/triple_task_adapter.py",
         "research_engine/literature_debate.py",
+        "research_engine/literature_debate_guard.py",
         "research_engine/capability_maturity.py",
         "research_engine/verification.py",
         "tests/test_advanced_discovery_extensions.py",
         "tests/test_capability_maturity.py",
         "tests/test_literature_debate.py",
+        "tests/test_literature_debate_guard.py",
         "tests/test_triple_implementation.py",
         "tests/test_triple_task_adapter.py",
         "tests/test_triple_verification_bridge.py",
@@ -216,11 +239,12 @@ def run_audit() -> Report:
         _triple_safety(),
         _expected_value_gate(),
         _literature_grounding(),
+        _literature_readiness_guard(),
         _maturity_honesty(),
     ]
     failed = [check.name for check in checks if not check.passed]
     return Report(
-        schema_version=1,
+        schema_version=2,
         passed=not failed,
         checks=[asdict(check) for check in checks],
         failed=failed,
