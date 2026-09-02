@@ -6,8 +6,9 @@ names fail closed; ``none`` is the safe default.
 
 TeraBox is intentionally absent until official API access and zero-cost terms are
 confirmed. Google Drive may be enabled through the open-source rclone adapter.
-Optional archive encryption uses a user-configured rclone ``crypt`` remote; the
-application never implements or stores encryption keys itself.
+When Drive archiving is enabled, rclone ``crypt`` is required by default unless
+the operator explicitly opts out. The application never implements or stores
+encryption keys itself.
 """
 from __future__ import annotations
 
@@ -62,9 +63,10 @@ def provider_status() -> dict[str, Any]:
     is useful in local logs/errors but must not be reflected by public /health or
     /api responses because environment values are not inherently non-secret.
 
-    When encryption is required, readiness additionally verifies the selected
-    rclone remote's backend type using the local-only ``listremotes --long``
-    command. OAuth/crypt secrets are never read or returned.
+    Drive encryption is fail-closed by default: unless the operator explicitly
+    sets ``GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false``, readiness verifies the
+    selected rclone remote's backend type using local-only ``listremotes --long``.
+    OAuth/crypt secrets are never read or returned.
     """
     try:
         name = configured_provider_name()
@@ -91,7 +93,7 @@ def provider_status() -> dict[str, Any]:
         if not resolved and os.path.isfile(requested_executable):
             resolved = os.path.abspath(requested_executable)
         available = bool(resolved)
-        require_crypt = _bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", False)
+        require_crypt = _bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)
         crypt_verified = None
         if require_crypt:
             crypt_verified = bool(
