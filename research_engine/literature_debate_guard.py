@@ -13,6 +13,12 @@ source, retracted historical material, or a source whose quality is not
 established can therefore remain visible as context without silently promoting
 the debate to "ready".
 
+A second hard distinction is enforced here: debate readiness counts independent
+underlying WORKS, while publisher/domain/provider ORIGIN diversity is reported
+separately. A DOI is a work identity, not an origin identity. Three distinct
+studies from one journal may form a three-work debate, but the audit must still
+say that all three came from one origin instead of calling them three origins.
+
 No model/network call is added and no source text is rewritten.
 """
 from __future__ import annotations
@@ -21,6 +27,7 @@ from typing import Any, Dict, Mapping, Tuple
 
 from .literature_debate import AutonomousLiteratureDebate as _BaseDebate
 from .models import EvidencePack, SourceRecord
+from .source_independence_guard import origin_key, work_independence_key
 
 
 _MIN_RELEVANCE = 0.25
@@ -83,7 +90,7 @@ def source_reliability(source: SourceRecord | None) -> Tuple[bool, str]:
 class GuardedAutonomousLiteratureDebate(_BaseDebate):
     """Base grounded debate + independent depth/quality readiness gate."""
 
-    reliability_schema_version = "1.3"
+    reliability_schema_version = "1.4"
 
     def reconstruct(self, question: str, pack: EvidencePack, contradictions=()) -> Dict[str, Any]:
         report = super().reconstruct(question, pack, contradictions=contradictions)
@@ -109,7 +116,9 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
             for source in (pack.sources or [])
             if str(getattr(source, "source_id", "") or "").strip()
         }
+        reliable_works: set[str] = set()
         reliable_origins: set[str] = set()
+        full_text_works: set[str] = set()
         full_text_origins: set[str] = set()
         role_presence: Dict[str, bool] = {}
         reliable_count = 0
@@ -130,21 +139,31 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
                     row["relevance_score"] = round(float(getattr(source, "relevance_score", 0.0) or 0.0), 4)
                     row["quality_score"] = round(float(getattr(source, "quality_score", 0.0) or 0.0), 4)
                     row["peer_reviewed"] = getattr(source, "peer_reviewed", None)
+                    # Do not overload the old row field. Keep explicit names so
+                    # downstream UI/audit code cannot confuse a work DOI/title
+                    # with a publisher/domain/provider origin.
+                    row["work_independence_key"] = work_independence_key(source)
+                    row["source_origin_key"] = origin_key(source)
                 if previous and not allowed:
                     downgraded_count += 1
-                if not allowed:
+                if not allowed or source is None:
                     continue
                 reliable_count += 1
                 role_has_reliable = True
-                origin = str(row.get("independence_key") or "")
-                if origin:
-                    reliable_origins.add(origin)
-                    if source is not None and _read_level(source) == "full_text":
-                        full_text_origins.add(origin)
+                work = work_independence_key(source)
+                origin = origin_key(source)
+                reliable_works.add(work)
+                reliable_origins.add(origin)
+                if _read_level(source) == "full_text":
+                    full_text_works.add(work)
+                    full_text_origins.add(origin)
             role_presence[role] = role_has_reliable
 
         report["role_presence_grounded_available_text"] = grounded_presence
         report["role_presence_reliable"] = role_presence
+        # Compatibility alias used by older callers; both are explicitly
+        # reliable-presence, not mere lexical presence.
+        report["role_presence"] = dict(role_presence)
         report["missing_roles_in_available_text"] = [
             _ROLE_LABELS[role]
             for role in _ROLE_ORDER
@@ -159,22 +178,36 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
         all_arguments = sum(len(role_slots.get(role) or []) for role in _ROLE_ORDER)
         if not all_arguments:
             report["status"] = "INSUFFICIENT_GROUNDED_ARGUMENTS"
-        elif all(role_presence.values()) and len(reliable_origins) >= 3:
+        elif all(role_presence.values()) and len(reliable_works) >= 3:
+            # Three independent works are the epistemic requirement. Requiring
+            # three domains would incorrectly collapse three different studies
+            # published by one journal; origin concentration remains a separate
+            # warning/coverage dimension below.
             report["status"] = "DEBATE_MAP_READY"
         else:
             report["status"] = "PARTIAL_DEBATE"
 
         coverage = dict(report.get("coverage") or {})
+        coverage["independent_current_works"] = len(reliable_works)
+        coverage["independent_current_origins"] = len(reliable_origins)
+        coverage["reliable_argument_works"] = len(reliable_works)
         coverage["reliable_argument_origins"] = len(reliable_origins)
+        coverage["full_text_argument_works"] = len(full_text_works)
         coverage["full_text_argument_origins"] = len(full_text_origins)
         coverage["arguments_reliable_current"] = reliable_count
         coverage["arguments_downgraded_by_readiness_gate"] = downgraded_count
+        coverage["origin_concentration_warning"] = bool(
+            len(reliable_works) >= 3 and len(reliable_origins) < 2
+        )
         report["coverage"] = coverage
 
         honesty = dict(report.get("honesty") or {})
         honesty["shallow_or_low_quality_arguments_count_as_reliable"] = False
         honesty["reliability_requires_depth_relevance_and_quality"] = True
         honesty["grounded_presence_separate_from_readiness"] = True
+        honesty["debate_readiness_uses_independent_works"] = True
+        honesty["origin_diversity_reported_separately"] = True
+        honesty["doi_or_work_identity_counted_as_origin"] = False
         report["honesty"] = honesty
 
         proof = dict(report.get("maturity_proof") or {})
@@ -185,10 +218,13 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
             "minimum_relevance": _MIN_RELEVANCE,
             "minimum_quality_or_strong_metadata": _MIN_QUALITY,
             "reliable_read_levels": sorted(_RELIABLE_DEPTHS),
+            "readiness_identity": "independent_work",
+            "origin_diversity_identity": "publisher_domain_provider",
             "note": (
                 "Argument map available text ko preserve karta hai; DEBATE_MAP_READY sirf "
-                "un independent origins se banta hai jinka access depth, relevance aur "
-                "source-quality gate pass hua."
+                "un independent WORKS se banta hai jinka access depth, relevance aur "
+                "source-quality gate pass hua. Journal/publisher/host origin diversity "
+                "alag report hoti hai; DOI ko origin nahi maana jaata."
             ),
         }
         return report
