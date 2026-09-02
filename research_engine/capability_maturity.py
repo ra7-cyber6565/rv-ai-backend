@@ -49,13 +49,16 @@ _CAPABILITIES: Dict[int, Dict[str, Any]] = {
         "name": "Autonomous Literature Debate",
         "implementation": {
             "module": "research_engine/literature_debate.py",
+            "readiness_guard": "research_engine/literature_debate_guard.py",
             "production_wiring": "research_engine/advanced_discovery_integrated.py",
             "tests": [
                 "tests/test_literature_debate.py",
+                "tests/test_literature_debate_guard.py",
                 "tests/test_advanced_discovery_extensions.py",
             ],
             "fail_closed": True,
             "adversarial_tests_defined": True,
+            "grounded_presence_separate_from_readiness": True,
         },
         "proof": {
             "repository_implementation_present": True,
@@ -63,6 +66,7 @@ _CAPABILITIES: Dict[int, Dict[str, Any]] = {
             "test_definitions_present": True,
             "current_full_gate_execution_proven": False,
             "grounded_available_text_reconstruction_proven_by_execution": False,
+            "depth_relevance_quality_readiness_gate_proven_by_execution": False,
             "systematic_review_completeness_proven": False,
             "live_independent_validation_proven": False,
             "hardware_or_physical_validation_proven": False,
@@ -72,6 +76,7 @@ _CAPABILITIES: Dict[int, Dict[str, Any]] = {
             "global literature completeness",
             "missing critique means no critique exists",
             "missing replication failure means replication succeeded",
+            "snippet or low-quality argument means reliable debate readiness",
             "invented researcher identities",
             "100/100 or max maturity without executed evidence",
         ],
