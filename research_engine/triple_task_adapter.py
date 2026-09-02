@@ -131,10 +131,12 @@ def derive_triple_tasks(
 ) -> Dict[str, Any]:
     """Derive bounded #40 tasks from trusted verification-output shapes only.
 
-    Explicit ``triple_implementation_tasks`` win and are returned unchanged by
-    this adapter; the triple engine still performs its own grammar validation.
-    Automatic derivation is used only when no explicit structured task list is
-    present.
+    ``triple_implementation_tasks`` win because the integrated verification
+    facade may already have safely derived them *before* simplifying public check
+    labels.  When accompanying ``triple_task_adapter`` provenance says they were
+    system-derived from verification checks, that provenance is preserved rather
+    than falsely re-labelling them as caller-explicit.  The triple engine still
+    performs its own independent grammar validation either way.
     """
     if not isinstance(verification, Mapping):
         return {
@@ -159,6 +161,22 @@ def derive_triple_tasks(
                 "source": "explicit",
                 "skipped_checks": 0,
             }
+        upstream = verification.get("triple_task_adapter")
+        if isinstance(upstream, Mapping) and bool(upstream.get("derived")):
+            source = str(upstream.get("source") or "verification_checks")
+            # Only preserve a machine-derived provenance state for the known
+            # verifier bridge. Unknown claimed sources do not gain trust merely
+            # by setting a metadata flag.
+            if source == "verification_checks":
+                return {
+                    "status": str(upstream.get("status") or "DERIVED_TASKS"),
+                    "tasks": list(explicit),
+                    "derived": True,
+                    "source": "verification_checks",
+                    "skipped_checks": int(upstream.get("skipped_checks") or 0),
+                    "checks_examined": int(upstream.get("checks_examined") or 0),
+                    "note": str(upstream.get("note") or ""),
+                }
         return {
             "status": "EXPLICIT_TASKS_PRESENT",
             "tasks": list(explicit),
