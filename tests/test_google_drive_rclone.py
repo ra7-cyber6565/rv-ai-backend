@@ -6,7 +6,10 @@ import subprocess
 
 import pytest
 
-from storage.google_drive_rclone import RcloneGoogleDriveProvider
+from storage.google_drive_rclone import (
+    RcloneGoogleDriveProvider,
+    detect_rclone_remote_type,
+)
 
 
 def _provider(monkeypatch, *, runner=None):
@@ -18,6 +21,7 @@ def _provider(monkeypatch, *, runner=None):
         archive_root="InfinityResearchAI",
         executable="rclone",
         timeout_seconds=30,
+        require_crypt=False,
     )
 
 
@@ -105,5 +109,82 @@ def test_status_contains_no_oauth_material(monkeypatch):
     status = provider.status()
     assert status["configured"] is True
     assert status["remote_name"] == "drive"
+    assert status["encryption_required"] is False
+    assert status["encryption_verified"] is None
     assert "token" not in repr(status).lower()
     assert "secret" not in repr(status).lower()
+
+
+def test_remote_type_detection_uses_local_safe_listremotes_only(monkeypatch):
+    detect_rclone_remote_type.cache_clear()
+
+    def fake_run(cmd, **kwargs):
+        assert cmd == ["/fake/rclone", "listremotes", "--long"]
+        assert kwargs["shell"] is False
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="drive: drive\ninfinitycrypt: crypt\n",
+            stderr="SHOULD-NOT-BE-PARSED oauth_token=SECRET",
+        )
+
+    monkeypatch.setattr("storage.google_drive_rclone.subprocess.run", fake_run)
+    assert detect_rclone_remote_type("/fake/rclone", "infinitycrypt") == "crypt"
+    assert detect_rclone_remote_type("/fake/rclone", "drive") == "drive"
+
+
+def test_required_encryption_accepts_only_verified_crypt_remote(monkeypatch):
+    detect_rclone_remote_type.cache_clear()
+    monkeypatch.setattr("storage.google_drive_rclone.shutil.which", lambda _: "/fake/rclone")
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[1:] == ["listremotes", "--long"]
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout="infinitycrypt: crypt\nplain: drive\n", stderr=""
+        )
+
+    monkeypatch.setattr("storage.google_drive_rclone.subprocess.run", fake_run)
+    provider = RcloneGoogleDriveProvider(
+        remote_name="infinitycrypt",
+        executable="rclone",
+        timeout_seconds=30,
+        require_crypt=True,
+    )
+    status = provider.status()
+    assert status["encryption_required"] is True
+    assert status["encryption_verified"] is True
+    assert status["encryption_backend"] == "rclone-crypt"
+
+
+def test_required_encryption_fails_closed_for_plain_or_unverifiable_remote(monkeypatch):
+    detect_rclone_remote_type.cache_clear()
+    monkeypatch.setattr("storage.google_drive_rclone.shutil.which", lambda _: "/fake/rclone")
+
+    def plain_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="plain: drive\n", stderr="")
+
+    monkeypatch.setattr("storage.google_drive_rclone.subprocess.run", plain_run)
+    with pytest.raises(RuntimeError, match="Encrypted archive required"):
+        RcloneGoogleDriveProvider(
+            remote_name="plain",
+            executable="rclone",
+            timeout_seconds=30,
+            require_crypt=True,
+        )
+
+    detect_rclone_remote_type.cache_clear()
+
+    def failed_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd, 1, stdout="", stderr="crypt_password=DO-NOT-LEAK"
+        )
+
+    monkeypatch.setattr("storage.google_drive_rclone.subprocess.run", failed_run)
+    with pytest.raises(RuntimeError) as captured:
+        RcloneGoogleDriveProvider(
+            remote_name="infinitycrypt",
+            executable="rclone",
+            timeout_seconds=30,
+            require_crypt=True,
+        )
+    assert "DO-NOT-LEAK" not in str(captured.value)
