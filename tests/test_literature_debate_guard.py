@@ -81,9 +81,13 @@ def test_three_good_independent_sources_can_still_make_ready_debate():
     )
 
     assert report["status"] == "DEBATE_MAP_READY"
+    assert all(report["role_presence_grounded_available_text"].values())
     assert all(report["role_presence_reliable"].values())
+    assert report["missing_roles_in_available_text"] == []
+    assert report["missing_roles_for_ready_debate"] == []
     assert report["coverage"]["reliable_argument_origins"] == 3
     assert report["honesty"]["reliability_requires_depth_relevance_and_quality"] is True
+    assert report["honesty"]["grounded_presence_separate_from_readiness"] is True
     assert report["maturity_proof"]["quality_and_depth_reliability_gate"] is True
 
 
@@ -97,7 +101,16 @@ def test_search_snippets_remain_visible_but_cannot_fake_ready_debate():
     assert report["coverage"]["arguments_total"] >= 3
     assert report["coverage"]["arguments_reliable_current"] == 0
     assert report["coverage"]["reliable_argument_origins"] == 0
+    # The arguments really are present in available text. Only readiness is
+    # blocked. This distinction prevents an honesty field from changing meaning.
+    assert all(report["role_presence_grounded_available_text"].values())
+    assert report["missing_roles_in_available_text"] == []
     assert not any(report["role_presence_reliable"].values())
+    assert set(report["missing_roles_for_ready_debate"]) == {
+        "Researcher A reasoning",
+        "Researcher B critique",
+        "Researcher C replication failure",
+    }
     reasons = {
         row["reliability_reason"]
         for role in report["role_slots"].values()
@@ -112,6 +125,8 @@ def test_full_text_with_unestablished_quality_does_not_count_as_reliable():
     report = GuardedAutonomousLiteratureDebate().reconstruct(QUESTION, _pack(rows))
 
     assert report["status"] == "PARTIAL_DEBATE"
+    assert all(report["role_presence_grounded_available_text"].values())
+    assert report["missing_roles_in_available_text"] == []
     assert report["coverage"]["arguments_reliable_current"] == 0
     assert all(
         row["reliability_reason"] == "source_quality_not_established"
@@ -144,9 +159,11 @@ def test_low_relevance_full_text_cannot_promote_role_readiness():
     report = GuardedAutonomousLiteratureDebate().reconstruct(QUESTION, _pack(rows))
 
     assert report["status"] == "PARTIAL_DEBATE"
+    assert report["role_presence_grounded_available_text"]["researcher_c_replication_failure"] is True
     assert report["role_presence_reliable"]["researcher_a_reasoning"] is True
     assert report["role_presence_reliable"]["researcher_b_critique"] is True
     assert report["role_presence_reliable"]["researcher_c_replication_failure"] is False
+    assert "Researcher C replication failure" in report["missing_roles_for_ready_debate"]
     failure = report["role_slots"]["researcher_c_replication_failure"][0]
     assert failure["reliability_reason"] == "relevance_below_readiness_gate"
 
@@ -163,4 +180,8 @@ def test_retracted_argument_stays_historical_and_never_becomes_reliable():
     assert row["retracted"] is True
     assert row["reliable_current_evidence"] is False
     assert row["reliability_reason"] == "retracted_historical_context_only"
+    assert report["role_presence_grounded_available_text"]["researcher_a_reasoning"] is True
+    assert report["role_presence_reliable"]["researcher_a_reasoning"] is False
+    assert "Researcher A reasoning" not in report["missing_roles_in_available_text"]
+    assert "Researcher A reasoning" in report["missing_roles_for_ready_debate"]
     assert report["status"] == "PARTIAL_DEBATE"
