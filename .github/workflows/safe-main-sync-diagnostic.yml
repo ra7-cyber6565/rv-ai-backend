@@ -1,0 +1,77 @@
+name: Safe main sync diagnostic
+
+on:
+  push:
+    branches: [chatgpt-max-maturity-wave1-20260827]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: safe-main-sync-diagnostic-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact branch head with history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Attempt real three-way merge without writing branch
+        shell: bash
+        run: |
+          set -uo pipefail
+          git config user.name "safe-main-sync-diagnostic"
+          git config user.email "safe-main-sync-diagnostic@users.noreply.github.com"
+          git fetch --no-tags origin main
+          branch_head="$(git rev-parse HEAD)"
+          main_head="$(git rev-parse origin/main)"
+          echo "BRANCH_HEAD=${branch_head}"
+          echo "MAIN_HEAD=${main_head}"
+          echo "MERGE_BASE=$(git merge-base HEAD origin/main)"
+          set +e
+          git merge --no-commit --no-ff origin/main
+          rc=$?
+          set -e
+          echo "MERGE_RC=${rc}"
+          echo "--- status ---"
+          git status --short
+          echo "--- unmerged paths ---"
+          git diff --name-only --diff-filter=U || true
+          echo "--- conflict contexts ---"
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          proc = subprocess.run(
+              ["git", "diff", "--name-only", "--diff-filter=U"],
+              text=True, capture_output=True, check=False,
+          )
+          paths = [p.strip() for p in proc.stdout.splitlines() if p.strip()]
+          for name in paths:
+              print(f"===== CONFLICT {name} =====")
+              lines = Path(name).read_text(encoding="utf-8").splitlines()
+              marker_rows = [i for i, line in enumerate(lines) if line.startswith("<<<<<<< ")]
+              if not marker_rows:
+                  print("NO_TEXT_MARKER_FOUND")
+                  continue
+              for n, start in enumerate(marker_rows, 1):
+                  lo = max(0, start - 35)
+                  end = start
+                  while end < len(lines) and not lines[end].startswith(">>>>>>> "):
+                      end += 1
+                  hi = min(len(lines), end + 36)
+                  print(f"--- hunk {n}: lines {lo+1}-{hi} ---")
+                  for idx in range(lo, hi):
+                      print(f"{idx+1:06d}: {lines[idx]}")
+          PY
+          echo "--- combined diff summary ---"
+          git diff --cc --stat || true
+          git merge --abort || true
+          # Diagnostic succeeds even when merge conflicts exist; logs are the artifact.
+          exit 0
