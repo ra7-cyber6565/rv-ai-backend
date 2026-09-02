@@ -5,10 +5,10 @@ verification must never make research fail or delete the local file. This queue
 persists retry intent under the configured Infinity archive directory and uses
 bounded exponential backoff.
 
-No provider secrets are stored here. Same-process read/modify/write operations
-are protected by a path-scoped re-entrant lock so parallel research threads do
-not silently overwrite each other's retry entries. Multi-process deployments
-still need a shared transactional store or an OS-level lock.
+No provider secrets are stored here. Same-process operations use a path-scoped
+re-entrant lock, and every read/modify/write transaction additionally holds a
+bounded OS file lock. Separate backend processes therefore cannot silently lose
+one another's retry entries by racing on the same JSON ledger.
 """
 from __future__ import annotations
 
@@ -17,10 +17,12 @@ import os
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 from utils.archive_manifest import sha256_file
+from utils.process_lock import bounded_process_file_lock
 from utils.storage_paths import ensure_layout
 
 
@@ -50,6 +52,14 @@ BASE_BACKOFF_SECONDS = _int_env("ARCHIVE_RETRY_BASE_SECONDS", 60, 5, 3600)
 MAX_BACKOFF_SECONDS = _int_env("ARCHIVE_RETRY_MAX_SECONDS", 3600, 60, 86400)
 
 
+def _lock_timeout_seconds() -> float:
+    try:
+        value = float(os.getenv("ARCHIVE_LEDGER_LOCK_TIMEOUT_SECONDS", "5"))
+    except (TypeError, ValueError):
+        value = 5.0
+    return max(0.25, min(60.0, value))
+
+
 def default_retry_path() -> str:
     folder = Path(ensure_layout()["archive"])
     folder.mkdir(parents=True, exist_ok=True)
@@ -63,6 +73,16 @@ class ArchiveRetryQueue:
         self.path = os.path.abspath(path or default_retry_path())
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = _lock_for(self.path)
+        self._process_lock_path = self.path + ".lock"
+
+    @contextmanager
+    def _transaction(self) -> Iterator[None]:
+        with self._lock:
+            with bounded_process_file_lock(
+                self._process_lock_path,
+                timeout_seconds=_lock_timeout_seconds(),
+            ):
+                yield
 
     def _load(self) -> dict[str, Any]:
         with self._lock:
@@ -115,7 +135,7 @@ class ArchiveRetryQueue:
         current = int(time.time() if now is None else now)
         digest = sha256_file(local)
         key = self._key(provider, remote_path, digest)
-        with self._lock:
+        with self._transaction():
             data = self._load()
             old = data["items"].get(key) or {}
             attempts = int(old.get("attempts", 0))
@@ -155,7 +175,7 @@ class ArchiveRetryQueue:
         return rows[: max(1, min(100, int(limit)))]
 
     def mark_failure(self, key: str, error: str, *, now: float | None = None) -> dict[str, Any]:
-        with self._lock:
+        with self._transaction():
             data = self._load()
             item = data["items"].get(key)
             if not item:
@@ -172,7 +192,7 @@ class ArchiveRetryQueue:
             return dict(item)
 
     def mark_success(self, key: str) -> None:
-        with self._lock:
+        with self._transaction():
             data = self._load()
             if key in data["items"]:
                 del data["items"][key]
