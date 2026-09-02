@@ -128,7 +128,10 @@ def cleanup_verified_archives(
     - matching remote SHA-256 proof is mandatory; size-only verification is not
       sufficient for destructive cleanup;
     - local path must be inside configured Infinity storage root;
-    - symlinks are never deleted through this cleanup path.
+    - symlinks are never deleted through this cleanup path;
+    - verification check + local remove + manifest deletion mark share the same
+      manifest RLock. A concurrent re-upload cannot invalidate verification in
+      the tiny gap after the check but before the local delete (TOCTOU guard).
     """
     root, _ = configured_root()
     reclaimed = 0
@@ -146,28 +149,41 @@ def cleanup_verified_archives(
             continue
         if item.get("local_deleted") is True:
             continue
-        if not manifest.safe_to_delete_local(archive_ref):
-            if item.get("verified") is True and item.get("checksum_verified") is not True:
-                reason = "checksum_not_verified"
-            else:
-                reason = "not_verified"
-            skipped.append({"path": path, "reason": reason})
-            continue
         if not _inside_root(path, root):
             skipped.append({"path": path, "reason": "outside_storage_root"})
             continue
-        if os.path.islink(path):
-            skipped.append({"path": path, "reason": "symlink"})
-            continue
-        if not os.path.isfile(path):
-            skipped.append({"path": path, "reason": "missing"})
-            continue
 
-        size = os.path.getsize(path)
-        os.remove(path)
-        manifest.mark_local_deleted(archive_ref)
-        reclaimed += size
-        deleted.append(path)
+        # ArchiveManifest instances that point at the same ledger share this
+        # path-scoped RLock. Holding it across the final verification re-check,
+        # filesystem removal and deletion mark prevents mark_upload_attempt()
+        # from racing between those operations in another archive thread.
+        with manifest._lock:  # noqa: SLF001 - intentional cross-layer safety lock
+            current = manifest.get(archive_ref) or {}
+            if current.get("local_deleted") is True:
+                continue
+            if not manifest.safe_to_delete_local(archive_ref):
+                if current.get("verified") is True and current.get("checksum_verified") is not True:
+                    reason = "checksum_not_verified"
+                else:
+                    reason = "not_verified"
+                skipped.append({"path": path, "reason": reason})
+                continue
+            current_path = str(current.get("local_path") or "")
+            if os.path.normcase(os.path.abspath(current_path)) != os.path.normcase(os.path.abspath(path)):
+                skipped.append({"path": path, "reason": "manifest_path_changed"})
+                continue
+            if os.path.islink(path):
+                skipped.append({"path": path, "reason": "symlink"})
+                continue
+            if not os.path.isfile(path):
+                skipped.append({"path": path, "reason": "missing"})
+                continue
+
+            size = os.path.getsize(path)
+            os.remove(path)
+            manifest.mark_local_deleted(archive_ref)
+            reclaimed += size
+            deleted.append(path)
 
     return {
         "target_reclaim_bytes": target,
