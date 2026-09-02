@@ -7,8 +7,9 @@ Why this adapter exists:
 - no shell is used; every argument is passed as a list to avoid command injection.
 - ArchiveCoordinator still performs independent remote stat/size/hash validation
   and controls deletion. This provider never deletes local files.
-- optional at-rest encryption is delegated to rclone's mature ``crypt`` backend;
-  the app never implements or stores its own encryption key material.
+- at-rest encryption is delegated to rclone's mature ``crypt`` backend and is
+  fail-closed by default when Drive archiving is enabled; the app never implements
+  or stores its own encryption key material.
 - if the remote cannot expose a native SHA-256 (notably rclone crypt), the adapter
   deliberately downloads the logical remote object through rclone and hashes the
   returned plaintext. Size-only verification is not accepted for this provider.
@@ -148,7 +149,7 @@ class RcloneGoogleDriveProvider:
         self.timeout_seconds = int(timeout_seconds or _int_env("RCLONE_TIMEOUT_SECONDS", 1800, 30, 7200))
 
         self.require_crypt = (
-            _bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", False)
+            _bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)
             if require_crypt is None else bool(require_crypt)
         )
         self.remote_type = ""
