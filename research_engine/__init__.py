@@ -19,6 +19,9 @@ Package layout:
     reasoning_router_integrated.py
                               provider fallback + latest pass accounting facade
     source_prompt_guard.py    untrusted source-data / prompt-injection boundary
+    triple_implementation.py  #40 Python/R/math independent consistency check
+    advanced_discovery_integrated.py
+                              additive advanced-discovery production facade
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -43,6 +46,10 @@ Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
 EvidencePack rendering in a strict evidence-only boundary, quotes every source
 line, neutralizes instruction-like source text without deleting research
 content, strips hidden bidi/control characters, and bounds hostile metadata.
+
+Advanced-discovery extensions use the same package-boundary pattern: the strong
+base engine remains unchanged, while a subclass adds separately-tested
+capabilities such as #40. The patch performs no model/network call at import.
 """
 from __future__ import annotations
 
@@ -72,6 +79,17 @@ from .models import (
 # Installation is deterministic and performs no network/model call.
 from .source_prompt_guard import install as _install_source_prompt_guard
 _install_source_prompt_guard()
+
+# Preserve the base advanced-discovery implementation and add non-overlapping
+# capabilities through an additive subclass. Orchestrator imports the class
+# directly from ``advanced_discovery``; patching that exported class here makes
+# the production path use the integrated facade without editing the orchestrator
+# or any concurrently-owned OCR/translation/capture/fetch/evidence modules.
+from . import advanced_discovery as _advanced_discovery
+from .advanced_discovery_integrated import (
+    IntegratedScientificDiscoveryEngine as _IntegratedScientificDiscoveryEngine,
+)
+_advanced_discovery.ScientificDiscoveryEngine = _IntegratedScientificDiscoveryEngine
 
 from .depth import DepthConfig, get_depth_config, quota_note
 
