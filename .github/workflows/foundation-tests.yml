@@ -31,8 +31,14 @@ jobs:
       CLOUD_ARCHIVE_PROVIDER: "none"
       INFINITY_OFFLINE_TEST: "true"
     steps:
-      - name: Checkout integrated branch/PR code
+      - name: Checkout exact integration head
         uses: actions/checkout@v7
+        with:
+          # Pull-request jobs normally checkout GitHub's synthetic merge commit.
+          # Release receipts must identify the exact code commit we are signing
+          # off, so test the PR head itself; push jobs fall back to github.sha.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 1
 
       - name: Set up Python
         uses: actions/setup-python@v7
