@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import math
 import re
+from copy import deepcopy
 from typing import Any, Dict, List, Mapping, Sequence
 
 
@@ -37,6 +38,15 @@ def _number(raw: str) -> float:
     value = float(str(raw).replace(",", ""))
     if not math.isfinite(value) or abs(value) > 1e12:
         raise ValueError("numeric_out_of_bounds")
+    return value
+
+
+def _expected_number(raw: Any) -> float:
+    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+        raise ValueError("invalid_expected_value")
+    value = float(raw)
+    if not math.isfinite(value) or abs(value) > 1e18:
+        raise ValueError("invalid_expected_value")
     return value
 
 
@@ -197,4 +207,141 @@ def derive_triple_tasks(
     }
 
 
-__all__ = ["derive_triple_tasks"]
+def run_adapted_triple(engine: Any, adaptation: Mapping[str, Any]) -> Dict[str, Any]:
+    """Run #40 and independently compare any claimed expected values.
+
+    The base triple engine remains the authority for grammar/backend/pairwise
+    implementation agreement.  This wrapper adds a second fail-closed condition:
+    where a task carries ``expected_value``, every successful backend result must
+    also match that claimed value inside the same bounded tolerance.
+    """
+    if not isinstance(adaptation, Mapping):
+        return {
+            "schema_version": "1.0",
+            "capability_id": 40,
+            "capability": "Triple Independent Implementation",
+            "status": "INVALID_TASK_SET",
+            "all_requested_tasks_agree": False,
+            "all_expected_values_match": False,
+            "results": [],
+            "task_adapter": {"status": "INVALID_ADAPTER_INPUT"},
+        }
+    adapter_status = str(adaptation.get("status") or "")
+    tasks_raw = adaptation.get("tasks")
+    if adapter_status == "INVALID_EXPLICIT_TASK_CONTAINER" or not isinstance(tasks_raw, Sequence) or isinstance(tasks_raw, (str, bytes, bytearray)):
+        return {
+            "schema_version": "1.0",
+            "capability_id": 40,
+            "capability": "Triple Independent Implementation",
+            "status": "INVALID_TASK_SET",
+            "all_requested_tasks_agree": False,
+            "all_expected_values_match": False,
+            "results": [],
+            "task_adapter": {
+                "status": adapter_status or "INVALID_TASK_CONTAINER",
+                "derived": bool(adaptation.get("derived")),
+                "source": str(adaptation.get("source") or "unknown"),
+            },
+        }
+
+    tasks = list(tasks_raw)
+    try:
+        base = engine.run(tasks)
+    except Exception:
+        return {
+            "schema_version": "1.0",
+            "capability_id": 40,
+            "capability": "Triple Independent Implementation",
+            "status": "ASSESSMENT_ERROR",
+            "all_requested_tasks_agree": False,
+            "all_expected_values_match": False,
+            "results": [],
+            "task_adapter": {
+                "status": adapter_status or "UNKNOWN",
+                "derived": bool(adaptation.get("derived")),
+                "source": str(adaptation.get("source") or "unknown"),
+            },
+        }
+    report = deepcopy(dict(base))
+    rows = list(report.get("results") or [])
+    expected_checked = 0
+    expected_matched = 0
+    invalid_expected = 0
+    claim_mismatch = False
+
+    for raw, row in zip(tasks, rows):
+        if not isinstance(raw, Mapping) or not isinstance(row, dict) or "expected_value" not in raw:
+            continue
+        expected_checked += 1
+        try:
+            expected = _expected_number(raw.get("expected_value"))
+            abs_tol = float(raw.get("abs_tolerance", row.get("abs_tolerance", 1e-9)))
+            rel_tol = float(raw.get("rel_tolerance", row.get("rel_tolerance", 1e-9)))
+            if not math.isfinite(abs_tol) or not math.isfinite(rel_tol) or abs_tol < 0 or rel_tol < 0 or rel_tol > 1.0:
+                raise ValueError("invalid_tolerance")
+        except (TypeError, ValueError):
+            invalid_expected += 1
+            row["expected_value_checked"] = False
+            row["claim_value_matches_expected"] = False
+            row["verified"] = False
+            if row.get("status") == "TRIPLE_AGREEMENT":
+                row["status"] = "INVALID_EXPECTED_VALUE"
+            continue
+
+        backend_checks: Dict[str, bool] = {}
+        for implementation in row.get("implementations", []):
+            if not isinstance(implementation, Mapping) or not implementation.get("ok"):
+                continue
+            try:
+                value = float(implementation.get("value"))
+            except (TypeError, ValueError):
+                continue
+            backend_checks[str(implementation.get("backend") or "unknown")] = math.isclose(
+                value,
+                expected,
+                rel_tol=rel_tol,
+                abs_tol=abs_tol,
+            )
+        expected_ok = len(backend_checks) == 3 and all(backend_checks.values())
+        row["expected_value_checked"] = True
+        row["expected_value"] = expected
+        row["expected_value_agreement"] = backend_checks
+        row["claim_value_matches_expected"] = expected_ok
+        if expected_ok:
+            expected_matched += 1
+        elif row.get("status") == "TRIPLE_AGREEMENT":
+            # All implementations can agree with each other and still prove the
+            # model/user's written RHS is wrong. Do not let that become a pass.
+            claim_mismatch = True
+            row["status"] = "CLAIM_MISMATCH"
+            row["verified"] = False
+            row["note"] = (
+                "Teen implementations aapas mein agree karte hain, lekin claimed expected value se match nahi karte; claim validate nahi hua."
+            )
+
+    report["results"] = rows
+    report["task_adapter"] = {
+        "status": adapter_status or "UNKNOWN",
+        "derived": bool(adaptation.get("derived")),
+        "source": str(adaptation.get("source") or "unknown"),
+        "skipped_checks": int(adaptation.get("skipped_checks") or 0),
+    }
+    report["expected_values_checked"] = expected_checked
+    report["expected_values_matched"] = expected_matched
+    report["all_expected_values_match"] = bool(expected_checked) and expected_matched == expected_checked and invalid_expected == 0
+    report["invalid_expected_values"] = invalid_expected
+    report["implementations_all_agree"] = bool(report.get("all_requested_tasks_agree"))
+
+    if invalid_expected:
+        report["status"] = "INVALID_EXPECTED_VALUE"
+        report["all_requested_tasks_agree"] = False
+    elif claim_mismatch:
+        report["status"] = "CLAIM_MISMATCH"
+        report["all_requested_tasks_agree"] = False
+    if expected_checked and not report["all_expected_values_match"]:
+        report["maturity_proof"] = dict(report.get("maturity_proof") or {})
+        report["maturity_proof"]["max_or_verified_real_world_claim"] = False
+    return report
+
+
+__all__ = ["derive_triple_tasks", "run_adapted_triple"]
