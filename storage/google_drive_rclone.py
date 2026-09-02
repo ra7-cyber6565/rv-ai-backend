@@ -7,9 +7,12 @@ Why this adapter exists:
 - no shell is used; every argument is passed as a list to avoid command injection.
 - ArchiveCoordinator still performs independent remote stat/size/hash validation
   and controls deletion. This provider never deletes local files.
+- optional at-rest encryption is delegated to rclone's mature ``crypt`` backend;
+  the app never implements or stores its own encryption key material.
 
 Runtime prerequisites are intentionally external: the user installs rclone and
-creates/authenticates a Google Drive remote. No OAuth token is committed here.
+creates/authenticates a Google Drive remote. No OAuth token or crypt password is
+committed here.
 """
 from __future__ import annotations
 
@@ -17,6 +20,7 @@ import json
 import os
 import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import PurePosixPath
 from typing import Any
 
@@ -29,6 +33,16 @@ def _int_env(name: str, default: int, minimum: int, maximum: int) -> int:
     except (TypeError, ValueError):
         value = default
     return max(minimum, min(maximum, value))
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "true" if default else "false") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off", ""}:
+        return False
+    # Security-sensitive switches fail closed rather than treating a typo as on.
+    return False
 
 
 def _safe_component_path(value: str, *, allow_empty: bool = False) -> str:
@@ -48,6 +62,51 @@ def _safe_component_path(value: str, *, allow_empty: bool = False) -> str:
     return "/".join(parts)
 
 
+@lru_cache(maxsize=16)
+def detect_rclone_remote_type(executable: str, remote_name: str, timeout_seconds: int = 8) -> str:
+    """Return rclone backend type (e.g. ``drive``/``crypt``) without secrets.
+
+    ``rclone listremotes --long`` is local/config-only and prints remote names +
+    backend type; unlike ``rclone config show`` it does not dump OAuth tokens or
+    crypt passwords. Empty string means the type could not be verified.
+    """
+    try:
+        result = subprocess.run(
+            [str(executable), "listremotes", "--long"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=max(2, min(30, int(timeout_seconds))),
+            check=False,
+            shell=False,
+        )
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return ""
+    if result.returncode != 0:
+        return ""
+
+    wanted = str(remote_name or "").strip().rstrip(":")
+    for raw in (result.stdout or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        # Current rclone prints e.g. ``infinitycrypt: crypt``. Accept generic
+        # whitespace/tab separation while never parsing stderr/config secrets.
+        parts = line.split()
+        if not parts:
+            continue
+        name = parts[0].rstrip(":")
+        if name != wanted:
+            continue
+        if len(parts) < 2:
+            return ""
+        return parts[1].strip().lower().rstrip(":")
+    return ""
+
+
 class RcloneGoogleDriveProvider:
     """Provider-neutral archive adapter backed by a configured rclone remote."""
 
@@ -60,6 +119,7 @@ class RcloneGoogleDriveProvider:
         archive_root: str | None = None,
         executable: str | None = None,
         timeout_seconds: int | None = None,
+        require_crypt: bool | None = None,
     ):
         self.remote_name = str(remote_name or os.getenv("GOOGLE_DRIVE_RCLONE_REMOTE", "")).strip()
         if not self.remote_name:
@@ -82,6 +142,19 @@ class RcloneGoogleDriveProvider:
             raise RuntimeError("rclone executable nahi mila; Google Drive archive provider disabled hai")
         self.executable = resolved
         self.timeout_seconds = int(timeout_seconds or _int_env("RCLONE_TIMEOUT_SECONDS", 1800, 30, 7200))
+
+        self.require_crypt = (
+            _bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", False)
+            if require_crypt is None else bool(require_crypt)
+        )
+        self.remote_type = ""
+        if self.require_crypt:
+            self.remote_type = detect_rclone_remote_type(self.executable, self.remote_name)
+            if self.remote_type != "crypt":
+                raise RuntimeError(
+                    "Encrypted archive required hai, lekin selected rclone remote ko "
+                    "'crypt' backend ke roop me verify nahi kiya ja saka. Local file retained hai."
+                )
 
     def _target(self, remote_path: str) -> str:
         safe = _safe_component_path(remote_path)
@@ -120,6 +193,8 @@ class RcloneGoogleDriveProvider:
             raise FileNotFoundError(local)
         target = self._target(remote_path)
         # copyto targets exactly one file; no shell expansion or wildcard is used.
+        # If remote_name is a verified crypt remote, rclone encrypts filename and
+        # content before the underlying Drive remote sees them.
         self._run(["copyto", local, target, "--retries", "1", "--low-level-retries", "2"])
         return self.stat(remote_path)
 
@@ -153,7 +228,7 @@ class RcloneGoogleDriveProvider:
         )
 
     def status(self) -> dict[str, object]:
-        """Return non-secret configuration readiness; never expose OAuth tokens."""
+        """Return non-secret configuration readiness; never expose OAuth/crypt secrets."""
         return {
             "provider": self.name,
             "configured": True,
@@ -161,4 +236,10 @@ class RcloneGoogleDriveProvider:
             "archive_root": self.archive_root,
             "rclone_available": bool(self.executable),
             "timeout_seconds": self.timeout_seconds,
+            "encryption_required": self.require_crypt,
+            "encryption_verified": self.remote_type == "crypt" if self.require_crypt else None,
+            "encryption_backend": "rclone-crypt" if self.remote_type == "crypt" else "",
         }
+
+
+__all__ = ["RcloneGoogleDriveProvider", "detect_rclone_remote_type"]
