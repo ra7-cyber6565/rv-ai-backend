@@ -23,6 +23,23 @@ def test_40_mapping_names_real_modules_and_tests_without_claiming_execution():
     assert row["claim_ceiling"] == "IMPLEMENTED_PENDING_EXECUTION_PROOF"
 
 
+def test_103_mapping_stays_below_verified_without_execution_or_global_review():
+    row = capability_maturity(103)
+    assert row["name"] == "Autonomous Literature Debate"
+    assert row["implementation"]["module"] == "research_engine/literature_debate.py"
+    assert row["implementation"]["production_wiring"] == "research_engine/advanced_discovery_integrated.py"
+    assert "tests/test_literature_debate.py" in row["implementation"]["tests"]
+    assert row["implementation"]["fail_closed"] is True
+    assert row["proof"]["repository_implementation_present"] is True
+    assert row["proof"]["current_full_gate_execution_proven"] is False
+    assert row["proof"]["grounded_available_text_reconstruction_proven_by_execution"] is False
+    assert row["proof"]["systematic_review_completeness_proven"] is False
+    assert row["proof"]["live_independent_validation_proven"] is False
+    assert row["claim_ceiling"] == "IMPLEMENTED_PENDING_EXECUTION_PROOF"
+    assert "global literature completeness" in row["cannot_claim"]
+    assert "invented researcher identities" in row["cannot_claim"]
+
+
 def test_unknown_capability_fails_closed_instead_of_inventing_maturity():
     row = capability_maturity(999999)
     assert row["claim_ceiling"] == "NOT_REGISTERED"
@@ -37,5 +54,8 @@ def test_registry_returns_copies_not_mutable_global_state():
     assert second["proof"]["hardware_or_physical_validation_proven"] is False
 
     all_rows = all_capability_maturity()
+    assert sorted(all_rows) == [40, 103]
     all_rows[40]["claim_ceiling"] = "MAX"
+    all_rows[103]["proof"]["systematic_review_completeness_proven"] = True
     assert capability_maturity(40)["claim_ceiling"] == "IMPLEMENTED_PENDING_EXECUTION_PROOF"
+    assert capability_maturity(103)["proof"]["systematic_review_completeness_proven"] is False
