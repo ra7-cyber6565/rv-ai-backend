@@ -54,16 +54,56 @@ def test_drive_status_does_not_expose_remote_secret_material(monkeypatch):
     monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
     monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "drive")
     monkeypatch.setenv("RCLONE_EXE", "rclone")
+    monkeypatch.delenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", raising=False)
     monkeypatch.setattr("storage.provider_factory.shutil.which", lambda _: "/fake/rclone")
     status = provider_status()
     assert status["provider"] == "google-drive-rclone"
     assert status["ready"] is True
+    assert status["encryption_required"] is False
+    assert status["encryption_verified"] is None
     text = repr(status).lower()
     assert "oauth" not in text
     assert "token" not in text
     assert "secret" not in text
     # Status reports only presence/readiness, never the configured rclone remote.
     assert "'drive'" not in text
+
+
+def test_drive_status_fails_closed_when_encryption_required_but_not_crypt(monkeypatch):
+    monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
+    monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "plain")
+    monkeypatch.setenv("RCLONE_EXE", "rclone")
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", "true")
+    monkeypatch.setattr("storage.provider_factory.shutil.which", lambda _: "/fake/rclone")
+    monkeypatch.setattr(
+        "storage.provider_factory.detect_rclone_remote_type",
+        lambda executable, remote: "drive",
+    )
+    status = provider_status()
+    assert status["enabled"] is True
+    assert status["ready"] is False
+    assert status["encryption_required"] is True
+    assert status["encryption_verified"] is False
+    assert status["reason"] == "encrypted_archive_required_but_rclone_crypt_not_verified"
+    assert "plain" not in repr(status)
+
+
+def test_drive_status_ready_when_required_crypt_is_verified(monkeypatch):
+    monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
+    monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "vault")
+    monkeypatch.setenv("RCLONE_EXE", "rclone")
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", "yes")
+    monkeypatch.setattr("storage.provider_factory.shutil.which", lambda _: "/fake/rclone")
+    monkeypatch.setattr(
+        "storage.provider_factory.detect_rclone_remote_type",
+        lambda executable, remote: "crypt",
+    )
+    status = provider_status()
+    assert status["ready"] is True
+    assert status["encryption_required"] is True
+    assert status["encryption_verified"] is True
+    assert status["reason"] == ""
+    assert "vault" not in repr(status)
 
 
 def test_build_drive_provider_requires_actual_remote_and_executable(monkeypatch):
