@@ -129,9 +129,11 @@ def cleanup_verified_archives(
       sufficient for destructive cleanup;
     - local path must be inside configured Infinity storage root;
     - symlinks are never deleted through this cleanup path;
-    - verification check + local remove + manifest deletion mark share the same
-      manifest RLock. A concurrent re-upload cannot invalidate verification in
-      the tiny gap after the check but before the local delete (TOCTOU guard).
+    - verification check + local remove + manifest deletion mark share one
+      re-entrant manifest transaction. The transaction includes a path-scoped
+      thread lock and a bounded OS file lock, so neither another thread nor a
+      separate backend process can invalidate verification in the check/delete
+      gap (TOCTOU guard).
     """
     root, _ = configured_root()
     reclaimed = 0
@@ -153,11 +155,11 @@ def cleanup_verified_archives(
             skipped.append({"path": path, "reason": "outside_storage_root"})
             continue
 
-        # ArchiveManifest instances that point at the same ledger share this
-        # path-scoped RLock. Holding it across the final verification re-check,
-        # filesystem removal and deletion mark prevents mark_upload_attempt()
-        # from racing between those operations in another archive thread.
-        with manifest._lock:  # noqa: SLF001 - intentional cross-layer safety lock
+        # The public manifest transaction is intentionally held across the final
+        # verification re-check, filesystem removal and deletion tombstone. Its
+        # process lock is re-entrant, so mark_local_deleted() below can safely
+        # reuse the exact same transaction boundary.
+        with manifest.transaction():
             current = manifest.get(archive_ref) or {}
             if current.get("local_deleted") is True:
                 continue
