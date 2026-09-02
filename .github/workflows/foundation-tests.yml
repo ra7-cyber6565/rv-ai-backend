@@ -91,13 +91,14 @@ jobs:
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
 
-      # Keep the machine-readable stage/tail report even when the strict gate
-      # fails. This is diagnostics only: it never changes pass/fail semantics.
+      # Keep the machine-readable stage/tail report when the strict gate reaches
+      # receipt generation. If an earlier release-critical stage fails first,
+      # absence of the receipt is expected and must not mask the original error.
       - name: Upload foundation receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: foundation-gate-receipt-${{ github.run_id }}
           path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 1
