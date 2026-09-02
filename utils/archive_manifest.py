@@ -16,7 +16,9 @@ Safety:
   they are re-verified;
 - legacy SHA-only references still work only when they identify exactly one
   record, so ambiguous multi-provider state fails closed;
-- same-process read/modify/write is protected by a path-scoped RLock.
+- same-process operations are protected by a path-scoped RLock;
+- every read/modify/write transaction also holds a bounded OS file lock, so two
+  backend processes cannot silently overwrite each other's manifest updates.
 """
 from __future__ import annotations
 
@@ -26,9 +28,11 @@ import os
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
+from utils.process_lock import bounded_process_file_lock
 from utils.storage_paths import ensure_layout
 
 
@@ -44,6 +48,14 @@ def _lock_for(path: str) -> threading.RLock:
             lock = threading.RLock()
             _PATH_LOCKS[key] = lock
         return lock
+
+
+def _lock_timeout_seconds() -> float:
+    try:
+        value = float(os.getenv("ARCHIVE_LEDGER_LOCK_TIMEOUT_SECONDS", "5"))
+    except (TypeError, ValueError):
+        value = 5.0
+    return max(0.25, min(60.0, value))
 
 
 def sha256_file(path: str, chunk_bytes: int = 1024 * 1024) -> str:
@@ -75,6 +87,25 @@ class ArchiveManifest:
         self.path = os.path.abspath(path or default_manifest_path())
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = _lock_for(self.path)
+        # Separate lock file: replacing manifest.json atomically must never
+        # replace the inode that carries the OS advisory lock.
+        self._process_lock_path = self.path + ".lock"
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Hold one re-entrant thread + process transaction for this ledger.
+
+        Public because destructive cleanup must keep the final verification
+        re-check, local unlink and deletion tombstone inside the same transaction.
+        The bounded process helper is re-entrant for this thread/path, therefore
+        nested manifest mutators remain safe.
+        """
+        with self._lock:
+            with bounded_process_file_lock(
+                self._process_lock_path,
+                timeout_seconds=_lock_timeout_seconds(),
+            ):
+                yield
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
         """Migrate legacy SHA-keyed manifests to provider/path-aware v2 in memory.
@@ -181,7 +212,7 @@ class ArchiveManifest:
             "last_error": "",
             "updated_at": now,
         }
-        with self._lock:
+        with self.transaction():
             data = self._load()
             existing = data["items"].get(archive_id)
             if existing:
@@ -207,7 +238,7 @@ class ArchiveManifest:
         replaced. If that same network call then fails, the second call with
         ``error=...`` changes state to failed without counting a second attempt.
         """
-        with self._lock:
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
@@ -231,7 +262,7 @@ class ArchiveManifest:
 
     def mark_verification_failed(self, reference: str, error: str) -> None:
         """Persist verification failure without counting a second upload attempt."""
-        with self._lock:
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
@@ -251,7 +282,7 @@ class ArchiveManifest:
         providers that lack content hashes usable while making data deletion
         fail closed.
         """
-        with self._lock:
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
@@ -275,7 +306,7 @@ class ArchiveManifest:
 
     def mark_local_deleted(self, reference: str) -> None:
         """Record that a strongly verified local working copy was safely removed."""
-        with self._lock:
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
