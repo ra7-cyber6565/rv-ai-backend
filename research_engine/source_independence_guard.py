@@ -15,14 +15,16 @@ This deterministic package-boundary guard gives the two concepts separate keys:
 
 - ``work_independence_key``: DOI/patent family/title/content identity used for
   evidence independence, consensus/debate and corroboration counts.
-- ``origin_key``: publisher/domain/provider identity used only for source-list
+- ``origin_key``: publisher/domain/provider identity used for ordinary source-list
   concentration and diversity reporting.
 
 The public ``independence_key`` property is redirected to *work* identity because
 all evidence-strength consumers use that name. ``DeduplicationEngine``'s
-``cap_per_origin`` is patched to use ``origin_key`` explicitly. Literature-debate
-coverage is also normalized so "works" and "origins" are never reported as the
-same denominator.
+``cap_per_origin`` uses true origin identity for normal sources, with one explicit
+patent exception: official patent registries necessarily host many unrelated
+inventions on the same domain, so distinct patent families are capped by FAMILY/
+work identity rather than registry host. That preserves prior-art recall without
+lying about origin diversity in reports.
 
 No network/model call is involved.
 """
@@ -30,7 +32,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from typing import Any, Dict, List, Mapping
+from typing import Dict, List, Mapping
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from .models import EvidencePack, SourceRecord, SourceType, normalize_doi
@@ -93,15 +95,16 @@ def origin_key(source: SourceRecord) -> str:
     """Publisher/domain/provider identity for concentration and diversity.
 
     This key must *not* use DOI or patent-family identity before origin metadata.
-    A DOI identifies a work, not its hosting/publishing origin. The previous
-    implementation returned ``doi:<full-doi>`` first, which meant four papers
-    from the same journal escaped ``cap_per_origin`` merely because each had a
-    different DOI. That silently defeated the concentration guard exactly on
-    the best-metadata scholarly records.
+    A DOI/patent family identifies a work, not its hosting/publishing origin.
 
-    Priority therefore is:
+    Priority:
       user document -> host/domain -> publisher/venue -> connector/provider ->
       DOI registrant prefix (last metadata fallback) -> unknown origin.
+
+    Patent prior-art selection is the deliberate exception at ``cap_per_origin``
+    time, not here: reports must still truthfully say that five EPO-hosted patent
+    families came from one registry origin even though selection must not throw
+    four families away merely because EPO is the common host.
     """
     if getattr(source, "source_type", None) == SourceType.DOCUMENT:
         title = _normalized_title(source)
@@ -122,8 +125,8 @@ def origin_key(source: SourceRecord) -> str:
         return f"connector:{connector}"
 
     # DOI registrant prefix is weaker than an actual publisher/domain, but when
-    # it is the only origin-like metadata it is still safer than treating every
-    # DOI as its own origin. Example 10.1234/a and 10.1234/b share one registrant.
+    # it is the only origin-like metadata it is safer than treating every DOI as
+    # its own origin. Example 10.1234/a and 10.1234/b share one registrant.
     doi = normalize_doi(getattr(source, "doi", ""))
     if doi and "/" in doi:
         return f"doi-prefix:{doi.split('/', 1)[0]}"
@@ -200,6 +203,14 @@ def _install_dedup_semantics() -> None:
             origin_groups.setdefault(origin_key(source), []).append(source)
         repeated_works = {key: len(rows) for key, rows in work_groups.items() if len(rows) > 1}
         repeated_origins = {key: len(rows) for key, rows in origin_groups.items() if len(rows) > 1}
+        patent_works = {
+            work_independence_key(source)
+            for source in sources if getattr(source, "is_patent", False)
+        }
+        patent_origins = {
+            origin_key(source)
+            for source in sources if getattr(source, "is_patent", False)
+        }
         return {
             "total_sources": len(sources),
             # Legacy key remains for API compatibility, but its meaning is now
@@ -209,20 +220,33 @@ def _install_dedup_semantics() -> None:
             "independent_origins": len(origin_groups),
             "repeated_works": repeated_works,
             "repeated_origins": repeated_origins,
+            "patent_independent_families": len(patent_works),
+            "patent_registry_origins": len(patent_origins),
             "note": (
                 "Independent works aur source origins alag ginte hain: same DOI/patent-family/"
                 "same work copy ek evidence hai, lekin ek hi journal/domain par chhapi do "
                 "alag studies ko sirf host same hone ki wajah se ek nahi maana jaata. "
-                "Origin diversity alag metric hai aur DOI ko origin nahi maana jaata."
+                "Patent prior-art selection mein distinct families ko common official registry "
+                "host ki wajah se drop nahi kiya jaata; registry-origin count alag report hota hai."
             ),
         }
 
     def cap_per_origin(self, sources: List[SourceRecord], max_per_origin: int = 3) -> List[SourceRecord]:
-        """Bound one publisher/domain/provider without collapsing distinct works."""
+        """Bound one normal publisher/provider without destroying patent recall.
+
+        Ordinary papers/web/books/datasets are concentrated by actual origin.
+        Patents are different: EPO/USPTO-like official registries necessarily host
+        many unrelated inventions. Patent family collapse already handles duplicate
+        jurisdiction members, so distinct families use their work/family identity
+        for this cap and may coexist even when one registry hosts them all.
+        """
         counts: Dict[str, int] = {}
         out: List[SourceRecord] = []
         for source in sources:
-            key = origin_key(source)
+            if getattr(source, "is_patent", False):
+                key = f"patent-work:{work_independence_key(source)}"
+            else:
+                key = origin_key(source)
             if counts.get(key, 0) >= max_per_origin:
                 continue
             counts[key] = counts.get(key, 0) + 1
@@ -246,7 +270,7 @@ def _install_literature_debate_semantics() -> None:
     """
     from .literature_debate import AutonomousLiteratureDebate
 
-    if getattr(AutonomousLiteratureDebate, "_independence_semantics_version", "") == "2.1":
+    if getattr(AutonomousLiteratureDebate, "_independence_semantics_version", "") == "2.2":
         return
 
     original = AutonomousLiteratureDebate.reconstruct
@@ -324,18 +348,18 @@ def _install_literature_debate_semantics() -> None:
         return result
 
     AutonomousLiteratureDebate.reconstruct = reconstruct  # type: ignore[assignment]
-    AutonomousLiteratureDebate._independence_semantics_version = "2.1"  # type: ignore[attr-defined]
+    AutonomousLiteratureDebate._independence_semantics_version = "2.2"  # type: ignore[attr-defined]
 
 
 def install() -> None:
     """Install the split identity semantics idempotently at package import."""
-    if getattr(SourceRecord, "_independence_semantics_version", "") == "2.1":
+    if getattr(SourceRecord, "_independence_semantics_version", "") == "2.2":
         return
     _install_source_properties()
     _install_pack_property()
     _install_dedup_semantics()
     _install_literature_debate_semantics()
-    SourceRecord._independence_semantics_version = "2.1"  # type: ignore[attr-defined]
+    SourceRecord._independence_semantics_version = "2.2"  # type: ignore[attr-defined]
 
 
 __all__ = ["install", "origin_key", "work_independence_key"]
