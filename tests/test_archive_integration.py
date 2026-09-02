@@ -73,10 +73,12 @@ def test_google_drive_archive_can_fail_closed_on_encryption_and_sha256():
     docs = _read("docs/GOOGLE_DRIVE_ARCHIVE_SETUP.md")
 
     assert "GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT" in provider
+    assert '_bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)' in provider
     assert "detect_rclone_remote_type" in provider
     assert '["listremotes", "--long"]' in provider
     assert '["hashsum", "SHA256", target, "--download"]' in provider
     assert "Remote SHA-256 content verification unavailable" in provider
+    assert '_bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)' in factory
     assert "encrypted_archive_required_but_rclone_crypt_not_verified" in factory
-    assert "GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false" in env
+    assert "GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=true" in env
     assert "matching SHA-256" in docs
