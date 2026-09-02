@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Any, Dict, Mapping, Sequence
 
 from .advanced_discovery import ScientificDiscoveryEngine as _BaseScientificDiscoveryEngine
-from .literature_debate import AutonomousLiteratureDebate
+from .literature_debate_guard import AutonomousLiteratureDebate
 from .triple_implementation import TripleIndependentImplementation
 from .triple_task_adapter import derive_triple_tasks, run_adapted_triple
 
@@ -79,7 +79,7 @@ def _normalize_triple_record(value: Mapping[str, Any] | None) -> Dict[str, Any]:
 class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine):
     """Base discovery engine plus fail-closed independent capability records."""
 
-    integration_schema_version = "1.3"
+    integration_schema_version = "1.4"
 
     def __init__(
         self,
@@ -95,6 +95,8 @@ class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine):
         self.triple_implementation = triple_engine or TripleIndependentImplementation(
             self.executor
         )
+        # Production #103 uses the guarded facade: grounded arguments remain
+        # visible, but shallow/low-quality sources cannot promote debate readiness.
         self.literature_debate = literature_debate or AutonomousLiteratureDebate()
 
     def analyze(
@@ -187,6 +189,7 @@ class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine):
             "triple_task_adapter_wired": True,
             "expected_value_gate_wired": True,
             "stable_fail_closed_maturity_shape": True,
+            "literature_debate_reliability_guard_wired": True,
         }
         return report
 
