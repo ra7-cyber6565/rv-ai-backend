@@ -155,6 +155,13 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
     assert debate.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
     assert debate.attestor_id == "literature-debate-independent"
 
+    anti_confirmation = _route(report, 140, ProofKind.INDEPENDENT)
+    assert anti_confirmation.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+    assert anti_confirmation.attestor_id == "anti-confirmation-independent"
+    assert anti_confirmation.external_required is True
+    assert anti_confirmation.verifiers == ("anti-confirmation-independent-validator",)
+    assert anti_confirmation.subjects == ("anti-confirmation-campaign",)
+
     oracle = _route(report, 41, ProofKind.LIVE)
     assert oracle.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
     assert oracle.attestor_id == "reality-oracle-live"
@@ -348,8 +355,8 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    # Keep this regression on a genuinely still-unspecialized route.
-    independent = _route(report, 140, ProofKind.INDEPENDENT)
+    # Keep this regression on a genuinely still-unspecialized independent route.
+    independent = _route(report, 19, ProofKind.INDEPENDENT)
     assert independent.status == "GENERIC_EXTERNAL_ROUTE"
     assert independent.attestor_id == ""
     assert independent.external_required is True
