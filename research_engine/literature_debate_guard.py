@@ -30,6 +30,11 @@ _ROLE_ORDER = (
     "researcher_b_critique",
     "researcher_c_replication_failure",
 )
+_ROLE_LABELS = {
+    "researcher_a_reasoning": "Researcher A reasoning",
+    "researcher_b_critique": "Researcher B critique",
+    "researcher_c_replication_failure": "Researcher C replication failure",
+}
 
 
 def _read_level(source: SourceRecord) -> str:
@@ -77,7 +82,7 @@ def source_reliability(source: SourceRecord | None) -> Tuple[bool, str]:
 class GuardedAutonomousLiteratureDebate(_BaseDebate):
     """Base grounded debate + independent depth/quality readiness gate."""
 
-    reliability_schema_version = "1.1"
+    reliability_schema_version = "1.2"
 
     def reconstruct(self, question: str, pack: EvidencePack, contradictions=()) -> Dict[str, Any]:
         report = super().reconstruct(question, pack, contradictions=contradictions)
@@ -87,6 +92,16 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
         role_slots = report.get("role_slots")
         if not isinstance(role_slots, Mapping):
             return report
+
+        # Preserve the base engine's lexical-grounding fact separately from the
+        # stricter readiness decision.  A role can exist in available snippet
+        # text while still being too shallow/weak to count as reliable current
+        # debate evidence.  Conflating those two states would make the audit lie.
+        grounded_presence = {
+            role: bool(role_slots.get(role) or [])
+            for role in _ROLE_ORDER
+        }
+        base_missing_available = list(report.get("missing_roles_in_available_text") or [])
 
         by_id = {
             str(getattr(source, "source_id", "") or ""): source
@@ -123,11 +138,22 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
                 origin = str(row.get("independence_key") or "")
                 if origin:
                     reliable_origins.add(origin)
-                    if _read_level(source) == "full_text":
+                    if source is not None and _read_level(source) == "full_text":
                         full_text_origins.add(origin)
             role_presence[role] = role_has_reliable
 
+        report["role_presence_grounded_available_text"] = grounded_presence
         report["role_presence_reliable"] = role_presence
+        # Keep the base field semantically exact: it answers only whether a role
+        # was found in available grounded text, not whether that role passed the
+        # stronger readiness gate.
+        report["missing_roles_in_available_text"] = base_missing_available
+        report["missing_roles_for_ready_debate"] = [
+            _ROLE_LABELS[role]
+            for role in _ROLE_ORDER
+            if not role_presence.get(role)
+        ]
+
         all_arguments = sum(
             len(role_slots.get(role) or [])
             for role in _ROLE_ORDER
@@ -139,16 +165,6 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
         else:
             report["status"] = "PARTIAL_DEBATE"
 
-        report["missing_roles_in_available_text"] = [
-            {
-                "researcher_a_reasoning": "Researcher A reasoning",
-                "researcher_b_critique": "Researcher B critique",
-                "researcher_c_replication_failure": "Researcher C replication failure",
-            }[role]
-            for role in _ROLE_ORDER
-            if not role_presence.get(role)
-        ]
-
         coverage = dict(report.get("coverage") or {})
         coverage["reliable_argument_origins"] = len(reliable_origins)
         coverage["full_text_argument_origins"] = len(full_text_origins)
@@ -159,6 +175,7 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
         honesty = dict(report.get("honesty") or {})
         honesty["shallow_or_low_quality_arguments_count_as_reliable"] = False
         honesty["reliability_requires_depth_relevance_and_quality"] = True
+        honesty["grounded_presence_separate_from_readiness"] = True
         report["honesty"] = honesty
 
         proof = dict(report.get("maturity_proof") or {})
