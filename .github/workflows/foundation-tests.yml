@@ -87,6 +87,7 @@ jobs:
             tests/test_double_blind_attestor.py \
             tests/test_scientist_society.py \
             tests/test_scientist_society_execution_attestor.py \
+            tests/test_intellectual_diversity_attestor.py \
             tests/test_adversarial_science.py \
             tests/test_adversarial_science_attestor.py \
             tests/test_blind_analysis_attestor.py \
