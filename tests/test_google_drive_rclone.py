@@ -203,6 +203,24 @@ def test_remote_type_detection_uses_local_safe_listremotes_only(monkeypatch):
     assert detect_rclone_remote_type("/fake/rclone", "drive") == "drive"
 
 
+def test_encryption_requirement_is_default_not_only_explicit(monkeypatch):
+    detect_rclone_remote_type.cache_clear()
+    monkeypatch.delenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", raising=False)
+    monkeypatch.setattr("storage.google_drive_rclone.shutil.which", lambda _: "/fake/rclone")
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[1:] == ["listremotes", "--long"]
+        return subprocess.CompletedProcess(cmd, 0, stdout="plain: drive\n", stderr="")
+
+    monkeypatch.setattr("storage.google_drive_rclone.subprocess.run", fake_run)
+    with pytest.raises(RuntimeError, match="Encrypted archive required"):
+        RcloneGoogleDriveProvider(
+            remote_name="plain",
+            executable="rclone",
+            timeout_seconds=30,
+        )
+
+
 def test_required_encryption_accepts_only_verified_crypt_remote(monkeypatch):
     detect_rclone_remote_type.cache_clear()
     monkeypatch.setattr("storage.google_drive_rclone.shutil.which", lambda _: "/fake/rclone")
