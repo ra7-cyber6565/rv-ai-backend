@@ -39,8 +39,44 @@ def test_archive_retry_endpoint_requires_admin_guard():
     assert "Depends(require_admin)" in routes
 
 
-def test_new_archive_upload_attempt_invalidates_old_verification():
+def test_new_archive_upload_attempt_invalidates_old_verification_and_checksum():
     manifest = _read("utils/archive_manifest.py")
     marker = 'item["status"] = "failed" if error else "uploaded_unverified"'
     pos = manifest.index(marker)
-    assert 'item["verified"] = False' in manifest[pos:pos + 700]
+    window = manifest[pos:pos + 1000]
+    assert 'item["verified"] = False' in window
+    assert 'item["checksum_verified"] = False' in window
+    assert 'item["verification_method"] = ""' in window
+
+
+def test_destructive_cleanup_requires_checksum_and_holds_manifest_lock():
+    cleanup = _read("utils/storage_quota.py")
+    assert 'item.get("checksum_verified")' in cleanup
+    assert 'reason = "checksum_not_verified"' in cleanup
+    assert "with manifest._lock" in cleanup
+    assert "manifest.safe_to_delete_local(archive_ref)" in cleanup
+    assert "os.remove(path)" in cleanup
+    assert "manifest.mark_local_deleted(archive_ref)" in cleanup
+    # The three destructive-boundary operations must occur inside the lock in
+    # this order so re-upload cannot invalidate verification between them.
+    lock = cleanup.index("with manifest._lock")
+    check = cleanup.index("manifest.safe_to_delete_local(archive_ref)", lock)
+    remove = cleanup.index("os.remove(path)", check)
+    mark = cleanup.index("manifest.mark_local_deleted(archive_ref)", remove)
+    assert lock < check < remove < mark
+
+
+def test_google_drive_archive_can_fail_closed_on_encryption_and_sha256():
+    provider = _read("storage/google_drive_rclone.py")
+    factory = _read("storage/provider_factory.py")
+    env = _read(".env.example")
+    docs = _read("docs/GOOGLE_DRIVE_ARCHIVE_SETUP.md")
+
+    assert "GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT" in provider
+    assert "detect_rclone_remote_type" in provider
+    assert '["listremotes", "--long"]' in provider
+    assert '["hashsum", "SHA256", target, "--download"]' in provider
+    assert "Remote SHA-256 content verification unavailable" in provider
+    assert "encrypted_archive_required_but_rclone_crypt_not_verified" in factory
+    assert "GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false" in env
+    assert "matching SHA-256" in docs
