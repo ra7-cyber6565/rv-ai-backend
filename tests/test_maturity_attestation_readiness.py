@@ -138,6 +138,14 @@ def test_actual_repo_readiness_covers_every_required_route_without_minting_claim
 def test_current_specialized_attestors_are_explicit_and_external_boundaries_remain_visible():
     report = audit_attestation_readiness(ROOT)
 
+    for capability_id in (16, 17):
+        diversity = _route(report, capability_id, ProofKind.INDEPENDENT)
+        assert diversity.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert diversity.attestor_id == "scientist-society-independent"
+        assert diversity.external_required is True
+        assert diversity.verifiers == ("trusted-independent-validator",)
+        assert diversity.subjects == ("scientist-society-independent-validation",)
+
     triple = _route(report, 40, ProofKind.EXECUTION)
     assert triple.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
     assert triple.attestor_id == "triple-implementation"
@@ -340,8 +348,8 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.attestor_id == ""
     assert runtime.external_required is True
 
-    # Keep this regression on a genuinely still-unspecialized software route.
-    independent = _route(report, 17, ProofKind.INDEPENDENT)
+    # Keep this regression on a genuinely still-unspecialized route.
+    independent = _route(report, 140, ProofKind.INDEPENDENT)
     assert independent.status == "GENERIC_EXTERNAL_ROUTE"
     assert independent.attestor_id == ""
     assert independent.external_required is True
