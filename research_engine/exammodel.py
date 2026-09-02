@@ -222,34 +222,67 @@ def _exam_signal(text: str) -> bool:
     return bool(_EXAM_RE.search(text)) or bool(exam_word_cues(text))
 
 
+def _gate_parts(question: Any) -> Dict[str, bool]:
+    """Taale ke SAARE signal ek hi jagah se — EK sach, teen padhne waale.
+
+    `is_request`, `request_reason` aur `_subject_learn_signal` — teeno yahi
+    dictionary padhte hain, apna faisla dobara nahi nikaalte. Kyun: #178a ke
+    audit me naapa gaya tha ki `request_reason` `subject`/`learn` khud se
+    nikaal raha tha, isliye "ek helper, ek sach" ka pin sirf `_exam_signal`
+    par tha — aur do jagah do faisla hi agli baar ka bug hai.
+
+    Keys: `exam` (exam ki cheez ka naam), `want` (banane ki maang), `subject`
+    (subject ka naam), `learn` (seekhne/strong karne ki maang), aur inse bane
+    do raste `exam_route` / `subject_route` plus final `asked`.
+    """
+    text = str(question or "")
+    exam = _exam_signal(text)
+    want = bool(_WANT_RE.search(text))
+    subject = bool(subject_cues(text))
+    learn = bool(_LEARN_RE.search(text))
+    exam_route = exam and want
+    subject_route = subject and learn
+    return {
+        "exam": exam,
+        "want": want,
+        "subject": subject,
+        "learn": learn,
+        "exam_route": exam_route,
+        "subject_route": subject_route,
+        "asked": exam_route or subject_route,
+    }
+
+
 def _subject_learn_signal(text: str) -> bool:
     """Subject ka naam + SEEKHNE ki saaf maang = padhai ki farmaish.
 
     Dono shart zaroori hain. Subject list wahi purani `SUBJECTS` table hai,
-    koi nayi haath se likhi list nahi.
+    koi nayi haath se likhi list nahi. Faisla `_gate_parts` se aata hai.
     """
-    return bool(subject_cues(text)) and bool(_LEARN_RE.search(text))
+    return _gate_parts(text)["subject_route"]
 
 
 def is_request(question: str) -> bool:
     """Exam/padhai ki farmaish hai ya nahi — DO signal par, ek par nahi.
 
     Do raste, dono me do-do shart: (exam cheez + banane/seekhne ki maang)
-    YA (subject ka naam + seekhne ki maang).
+    YA (subject ka naam + seekhne ki maang). Dono shart `_gate_parts` me
+    hain, yahan dobara nahi naapi jaatin.
     """
-    text = str(question or "")
-    if _exam_signal(text) and bool(_WANT_RE.search(text)):
-        return True
-    return _subject_learn_signal(text)
+    return _gate_parts(question)["asked"]
 
 
 def request_reason(question: str) -> str:
-    """Taala khula ya band — aur KYUN. Dono hamesha likhe jaate hain."""
-    text = str(question or "")
-    exam = _exam_signal(text)
-    want = bool(_WANT_RE.search(text))
-    subject = bool(subject_cues(text))
-    learn = bool(_LEARN_RE.search(text))
+    """Taala khula ya band — aur KYUN. Dono hamesha likhe jaate hain.
+
+    `is_request` ke saath EK hi `_gate_parts` se banta hai, isliye "khula"
+    aur "kyun khula" kabhi alag nahi ja sakte.
+    """
+    parts = _gate_parts(question)
+    exam = parts["exam"]
+    want = parts["want"]
+    subject = parts["subject"]
+    learn = parts["learn"]
     if exam and want:
         return ("exam-study lane chali — sawaal me exam/padhai ki cheez ka naam "
                 "bhi hai aur kuch BANANE ya seekhne ki maang bhi")
@@ -2448,6 +2481,217 @@ def not_asked(question: str = "") -> Dict[str, Any]:
     }
 
 
+# ── jawab me jaane wala hissa: EXAM CONTRACT (na LAB, na trading) ───────────
+# Teen alag report kism hain aur teeno ki bhasha alag rakhi gayi hai, jaan-boojh
+# kar: (1) TRADING MODEL ka contract, (2) ye EXAM/PADHAI ka contract, aur (3)
+# EXAM LAB (`lab.run_exam_lab`) jo BANA HUA paper/plan khud chala kar dekhti
+# hai. Ek jaisi wording rakhne par paper ki kami hypothesis ke khaate me chali
+# jaati hai — isliye heading, status ke shabd, chhat aur seema-line teeno jagah
+# alag hain.
+SECTION_HEADING = "### EXAM/PADHAI ka contract — kya maanga tha, kya naapa gaya"
+NOT_EVIDENCE_LINE = (
+    "Neeche ka har MET sirf itna kehta hai: **jo maanga gaya wo material me "
+    "likha mila aur naapa gaya**. Iska matlab 'itne number aayenge' ya 'yahi "
+    "question aayega' NAHI hai.")
+MAX_SECTION_ROWS = 30
+_STATUS_MARK: Dict[str, str] = {
+    MET: "MAANG POORI HUI (MET)",
+    NOT_MET: "REH GAYA (NOT MET)",
+    NOT_MEASURED: "NAAP HI NAHI CHAL SAKI",
+}
+
+
+def section_lines(report: Optional[Dict[str, Any]] = None) -> List[str]:
+    """User jo padhta hai. Buri khabar pehle — neeche dabti nahi."""
+    data = report or {}
+    if not data.get("checks"):
+        return []
+    lines: List[str] = [SECTION_HEADING, "", NOT_EVIDENCE_LINE, ""]
+    lines.append(f"Ginti: {data.get('met_count', 0)} MET / "
+                 f"{data.get('not_met_count', 0)} NOT MET / "
+                 f"{data.get('not_measured_count', 0)} naap nahi chali "
+                 f"(kul {data.get('contract_points', CONTRACT_POINTS)} point)")
+    lines.append("")
+    shown = 0
+    for status in (NOT_MET, NOT_MEASURED, MET):
+        rows = [row for row in data["checks"] if row.get("status") == status]
+        if not rows:
+            continue
+        lines.append(f"**{_STATUS_MARK[status]} ({len(rows)})**")
+        for row in rows:
+            if shown >= MAX_SECTION_ROWS:
+                break
+            shown += 1
+            lines.append(f"- `{row.get('point_id')}` — {row.get('label')}")
+            if row.get("observed"):
+                lines.append(f"  - mila: {row['observed']}")
+            if row.get("reason"):
+                lines.append(f"  - wajah: {row['reason']}")
+            if row.get("blocked_by"):
+                lines.append(f"  - rukaawat: {row['blocked_by']}")
+        lines.append("")
+    if len(data["checks"]) > MAX_SECTION_ROWS:
+        lines.append(f"(is section me {MAX_SECTION_ROWS} point dikhaye gaye, "
+                     f"naape gaye {len(data['checks'])})")
+        lines.append("")
+    if data.get("prediction_claims"):
+        lines.append("**Chetavni:** \"yahi question aayega\" jaisi baat mili — "
+                     + "; ".join(list(data["prediction_claims"])[:3])
+                     + ". Ye apne aap me ek FAIL hai, khoobi nahi.")
+        lines.append("")
+    if data.get("score_promises"):
+        lines.append("**Chetavni:** number/rank ka waada jaisi baat mili — "
+                     + "; ".join(list(data["score_promises"])[:3])
+                     + ". App ke paas student ke asli number ka koi saboot nahi.")
+        lines.append("")
+    lines.append(data.get("not_official_note") or NOT_OFFICIAL_NOTE)
+    return lines
+
+
+# ── seema: is app me kya ho hi nahi sakta (audit me jaati hai) ───────────────
+def limits(report: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Audit ki seema-line. Ginti report se banti hai, hard-code nahi."""
+    data = report or {}
+    out: List[str] = [
+        "Ye app kisi board, commission ya university ka hissa nahi hai "
+        f"(IS_EXAM_AUTHORITY={IS_EXAM_AUTHORITY}) — yahan bana paper sirf "
+        f"PRACTICE ke liye hai (PAPER_IS_PRACTICE_ONLY={PAPER_IS_PRACTICE_ONLY}).",
+        "Answer key app ne khud banayi hai "
+        f"(ANSWER_KEY_IS_APP_MADE={ANSWER_KEY_IS_APP_MADE}) — kisi official key "
+        "se milaan nahi hua, kyunki wo key khuli hi nahi hoti.",
+        "Aane wale exam me kaunsa question aayega — iska koi waada nahi "
+        f"(QUESTION_PREDICTION_PROMISED={QUESTION_PREDICTION_PROMISED}), aur "
+        f"kitne number aayenge iska bhi nahi (SCORE_PROMISED={SCORE_PROMISED}).",
+        "Koi leak hua paper ya paid question bank nahi chhua gaya "
+        f"(LEAKED_PAPER_USED={LEAKED_PAPER_USED}) — is lane me sirf khule, "
+        "official ya public source aate hain.",
+        "Difficulty ka number ek PROXY hai "
+        f"(DIFFICULTY_IS_PROXY={DIFFICULTY_IS_PROXY}) — ye asli students ke "
+        "attempt data se nahi, sawaal ki shakal se naapa gaya hai.",
+        "Exam aur subject ke naam ki list poori nahi hai "
+        f"(EXAM_LIST_IS_NOT_EXHAUSTIVE={EXAM_LIST_IS_NOT_EXHAUSTIVE}, "
+        f"SUBJECT_LIST_IS_NOT_EXHAUSTIVE={SUBJECT_LIST_IS_NOT_EXHAUSTIVE}) — "
+        "list me na hone se ye nahi ki wo exam mauzood nahi.",
+        "Official host ke hint bhi poore nahi hain "
+        f"(OFFICIAL_HOST_LIST_IS_NOT_EXHAUSTIVE="
+        f"{OFFICIAL_HOST_LIST_IS_NOT_EXHAUSTIVE}) — kisi asli official site ko "
+        "ye lane 'official' na bhi maane, to wo galti is app ki hai.",
+        "Ye cheezein ₹0 par naapi hi nahi ja saktin: " + "; ".join(CANNOT_MEASURE)
+        + " — inka koi MET yahan se nahi nikalta.",
+    ]
+    blocked = list(data.get("structurally_blocked") or STRUCTURALLY_BLOCKED)
+    for point_id in blocked:
+        point = CONTRACT_BY_ID.get(point_id)
+        if point is not None:
+            out.append(f"`{point_id}` MET ho hi nahi sakta: {point.blocked_by}")
+    not_measured = list(data.get("not_measured") or [])
+    if not_measured:
+        out.append("Is run me ye point naape hi nahi ja sake (inhe 'theek hai' "
+                   "na padha jaaye): " + ", ".join(not_measured[:10]))
+    return out
+
+
+# Chhat SABSE BURE haal se naapi jaati hai, khaali call se nahi: khaali call me
+# "naape hi nahi ja sake" wali aakhri line hoti hi nahi, aur agar chhat usi se
+# banti to truncate karne wala theek wahi line kaat deta jo buri khabar hai.
+MAX_AUDIT_LIMIT_LINES: int = len(limits({"not_measured": list(CONTRACT_IDS)}))
+
+
+def policy() -> Dict[str, Any]:
+    """Ek jagah se saara sach — test, audit aur UI teeno isi ko padhte hain."""
+    return {
+        "schema": SCHEMA_VERSION,
+        "contract_points": CONTRACT_POINTS,
+        "contract_ids": list(CONTRACT_IDS),
+        "groups": list(GROUPS),
+        "check_statuses": list(CHECK_STATUSES),
+        "default_status": NOT_MEASURED,
+        "structurally_blocked": list(STRUCTURALLY_BLOCKED),
+        "kinds": list(KINDS),
+        "study_lanes": list(STUDY_LANES),
+        "paper_is_practice_only": PAPER_IS_PRACTICE_ONLY,
+        "is_exam_authority": IS_EXAM_AUTHORITY,
+        "answer_key_is_app_made": ANSWER_KEY_IS_APP_MADE,
+        "question_prediction_promised": QUESTION_PREDICTION_PROMISED,
+        "score_promised": SCORE_PROMISED,
+        "leaked_paper_used": LEAKED_PAPER_USED,
+        "difficulty_is_proxy": DIFFICULTY_IS_PROXY,
+        "exam_list_is_not_exhaustive": EXAM_LIST_IS_NOT_EXHAUSTIVE,
+        "subject_list_is_not_exhaustive": SUBJECT_LIST_IS_NOT_EXHAUSTIVE,
+        "official_host_list_is_not_exhaustive":
+            OFFICIAL_HOST_LIST_IS_NOT_EXHAUSTIVE,
+        "min_questions_for_split": MIN_QUESTIONS_FOR_SPLIT,
+        "duplicate_similarity": DUPLICATE_SIMILARITY,
+        "daily_minutes_ceiling": DAILY_MINUTES_CEILING,
+        "max_section_rows": MAX_SECTION_ROWS,
+        "max_audit_limit_lines": MAX_AUDIT_LIMIT_LINES,
+        "max_queries": MAX_STUDY_QUERIES,
+        "gemini_calls": GEMINI_CALLS,
+        "network_used": NETWORK_USED,
+        "deterministic": DETERMINISTIC,
+        "provider_cost": PROVIDER_COST,
+        "cannot_measure": list(CANNOT_MEASURE),
+        "not_official_note": NOT_OFFICIAL_NOTE,
+        "not_asked_reason": NOT_ASKED_REASON,
+    }
+
+
+def public_record(report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """API/UI ke liye chhota record — par ek bhi buri khabar kaat kar nahi."""
+    # #178f — dict ke alawa kuch aaye, ya khaali dict aaye, to khaali record.
+    # Khaali `{}` ka matlab hai contract stage CHALI HI NAHI (jawab ka text hi
+    # nahi bana) — us par 0 MET / 0 NOT MET wala bhara-bhara record bana dena
+    # jhooth hota, kyunki wo "sab naapa gaya aur kuch nahi mila" jaisa padha
+    # jaata. Farmaish is lane ki na ho to `not_asked()` ka record aata hai, jo
+    # `wanted: False` ke saath alag se pehchana jaata hai. Crash kar ke poora
+    # jawab girana bhi galat, isliye chup-chaap khaali. Baaki lane
+    # (media/listener/music/songlab) bhi thik yahi karte hain.
+    if not isinstance(report, dict) or not report:
+        return {}
+    data = report or {}
+    out: Dict[str, Any] = {
+        "schema": SCHEMA_VERSION,
+        "asked": bool(data.get("asked")),
+        "ran": bool(data.get("ran")),
+        "contract_points": data.get("contract_points", CONTRACT_POINTS),
+        "met_count": data.get("met_count", 0),
+        "not_met_count": data.get("not_met_count", 0),
+        "not_measured_count": data.get("not_measured_count", 0),
+        "not_met": list(data.get("not_met") or []),
+        "not_measured": list(data.get("not_measured") or []),
+        "structurally_blocked": list(data.get("structurally_blocked")
+                                     or STRUCTURALLY_BLOCKED),
+        "status_vocabulary": list(CHECK_STATUSES),
+        "questions_parsed": data.get("questions_parsed", 0),
+        "syllabus_topics": data.get("syllabus_topics", 0),
+        "plan_rows": data.get("plan_rows", 0),
+        "official_source_count": data.get("official_source_count", 0),
+        "textbook_source_count": data.get("textbook_source_count", 0),
+        "pedagogy_source_count": data.get("pedagogy_source_count", 0),
+        "deeply_read_count": data.get("deeply_read_count", 0),
+        "prediction_claims": list(data.get("prediction_claims") or []),
+        "score_promises": list(data.get("score_promises") or []),
+        "paper_is_practice_only": PAPER_IS_PRACTICE_ONLY,
+        "is_exam_authority": IS_EXAM_AUTHORITY,
+        "answer_key_is_app_made": ANSWER_KEY_IS_APP_MADE,
+        "question_prediction_promised": QUESTION_PREDICTION_PROMISED,
+        "score_promised": SCORE_PROMISED,
+        "difficulty_is_proxy": DIFFICULTY_IS_PROXY,
+        "gemini_calls": GEMINI_CALLS,
+        "network_used": NETWORK_USED,
+        "provider_cost": PROVIDER_COST,
+        "not_official_note": data.get("not_official_note") or NOT_OFFICIAL_NOTE,
+        "limit_lines": list(data.get("limits") or limits(data)),
+    }
+    # `wanted` sirf band-darwaze ke record me hoti hai — us farak ko yahan bhi
+    # zinda rakha jaata hai, warna "maanga hi nahi tha" aur "maanga tha par
+    # kuch nahi bana" ek jaise dikhne lagte hain.
+    if "wanted" in data:
+        out["wanted"] = bool(data["wanted"])
+        out["reason"] = str(data.get("reason") or "")
+    return out
+
+
 def gate(question: str = "", paper: Any = "", plan: Any = "",
          syllabus: Any = "", sources: Iterable[Any] = (),
          evaluate: Optional[Any] = None,
@@ -2469,6 +2713,9 @@ def gate(question: str = "", paper: Any = "", plan: Any = "",
     record["queries"] = [row["query"] for row in rows]
     record["lane_queries"] = rows
     record["lead_queries"] = lead_queries(ask)
+    record["section_lines"] = section_lines(record)
+    record["limits"] = limits(record)
+    record["max_audit_limit_lines"] = MAX_AUDIT_LIMIT_LINES
     return record
 
 

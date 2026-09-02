@@ -1189,6 +1189,29 @@ class ResearchResult:
     # `guard_wrote_deliverable: False`, `quality_proven: False`,
     # `gemini_calls: 0`. Banane wala module: research_engine/deliverable_guard.py
     deliverable: Dict = field(default_factory=dict)
+    # #178f — FARMAISH ke DO contract ledger. Ye teeno LAB/craft record se ALAG
+    # cheez hain aur unki jagah nahi le sakte: `lab` app ki HYPOTHESIS ka test
+    # hai, `exam_lab` BANE HUE paper/plan ka test hai, aur ye do batate hain ki
+    # JO MAANGA GAYA THA usme se kya-kya asli me likha aur naapa gaya
+    # (`met_count` / `not_met_count` / `not_measured_count`, aur naam se
+    # `not_met` + `not_measured` list — buri khabar chhupti nahi).
+    #
+    # `exam_contract` exam/padhai ke 28 point ka hisaab rakhta hai, uske saath
+    # jhande: app kisi exam ki authority nahi (`is_exam_authority: False`), bana
+    # hua paper sirf practice ka hai (`paper_is_practice_only: True`), answer key
+    # app ki khud ki hai, aur "itne number aayenge"/"yahi sawaal aayega" ka koi
+    # vaada nahi (`prediction_claims` / `score_promises` naam se ginte hain).
+    # `trade_contract` trading ke 34 naap ka hisaab rakhta hai, uske saath:
+    # `live_tested: False`, `broker_connected: False`, order-book/tick data padha
+    # hi nahi, backtest bhavishya ka vaada nahi, aur ye nivesh ki salah nahi.
+    #
+    # Khaali dict ({}) ka matlab hai stage chali hi nahi (jawab ka text hi nahi
+    # bana) — "sab theek tha" NAHI. Farmaish us lane ki na ho to record me
+    # `wanted: False` aata hai, jo "chala par kuch naapa nahi gaya" se
+    # jaan-boojh kar alag rakha gaya hai. Banane wale module:
+    # research_engine/exammodel.py aur research_engine/trademodel.py
+    exam_contract: Dict = field(default_factory=dict)
+    trade_contract: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return asdict(self)

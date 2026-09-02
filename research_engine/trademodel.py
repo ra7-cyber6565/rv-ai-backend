@@ -2960,6 +2960,16 @@ def study(question: str = "", spec: Any = "", sources: Iterable[Any] = (),
 
 def public_record(report: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """API/UI ke liye chhota record — par ek bhi buri khabar kaat kar nahi."""
+    # #178f — dict ke alawa kuch aaye, ya khaali dict aaye, to khaali record.
+    # Khaali `{}` ka matlab hai contract stage CHALI HI NAHI (jawab ka text hi
+    # nahi bana) — us par 0 MET / 0 NOT MET wala bhara-bhara record bana dena
+    # jhooth hota, kyunki wo "sab naapa gaya aur kuch nahi mila" jaisa padha
+    # jaata. Farmaish is lane ki na ho to `not_asked()` ka record aata hai, jo
+    # `wanted: False` ke saath alag se pehchana jaata hai. Crash kar ke poora
+    # jawab girana bhi galat, isliye chup-chaap khaali. Baaki lane
+    # (media/listener/music/songlab) bhi thik yahi karte hain.
+    if not isinstance(report, dict) or not report:
+        return {}
     data = report or {}
     out = {
         "schema": SCHEMA_VERSION,

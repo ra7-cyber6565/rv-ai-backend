@@ -175,6 +175,44 @@ def test_a_reason_aur_faisla_ek_hi_signal_se_bante_hain():
     assert em.request_reason(STRESS_Q) != em.request_reason("maths")
 
 
+def test_a_teeno_padhne_wale_ek_hi_helper_se_signal_lete_hain():
+    """"Ek helper, ek sach" — sirf naam se nahi, ASLI body se naapa gaya.
+
+    #178a ke audit me yahi adhoora nikla tha: `request_reason` apna `subject`
+    aur `learn` khud dobara nikaal raha tha, isliye ye pin sirf `_exam_signal`
+    par sacch tha. Ab teeno padhne wale (`is_request`, `request_reason`,
+    `_subject_learn_signal`) ek hi `_gate_parts` se poochhte hain, aur kachche
+    signal (regex/cue) sirf usi ek jagah chhoo'e jaate hain.
+    """
+    source = _src("exammodel.py")
+    assert source.count("def _gate_parts(") == 1
+    raw_signals = ("_EXAM_RE", "_WANT_RE", "_LEARN_RE", "subject_cues(",
+                   "exam_word_cues(", "_exam_signal(")
+    for func in (em.is_request, em.request_reason, em._subject_learn_signal):
+        body = inspect.getsource(func)
+        assert "_gate_parts(" in body, func.__name__
+        for token in raw_signals:
+            assert token not in body, (func.__name__, token)
+    # ...aur wo EK jagah asli me kachche signal chhoo'ti hai.
+    parts_body = inspect.getsource(em._gate_parts)
+    for token in ("_WANT_RE", "_LEARN_RE", "subject_cues(", "_exam_signal("):
+        assert token in parts_body, token
+    assert set(em._gate_parts(PAPER_Q)) == {
+        "exam", "want", "subject", "learn", "exam_route", "subject_route",
+        "asked"}
+    for question in (PAPER_Q, PLAN_Q, SONG_Q, SCIENCE_Q, TRADE_Q, STRESS_Q, "",
+                     "maths", "history padhni hai kaise shuru karun"):
+        parts = em._gate_parts(question)
+        assert parts["exam_route"] is (parts["exam"] and parts["want"]), question
+        assert parts["subject_route"] is (parts["subject"]
+                                         and parts["learn"]), question
+        assert parts["asked"] is (parts["exam_route"]
+                                  or parts["subject_route"]), question
+        assert parts["asked"] is em.is_request(question), question
+        assert parts["subject_route"] is em._subject_learn_signal(question), (
+            question)
+
+
 def test_a_bade_akshar_wale_shabd_exam_ka_naam_nahi_ban_jaate():
     """"PDF me MATH ka paper banao" — na PDF exam hai, na MATH exam ka naam."""
     assert em.exam_names("PDF me MATH ka paper banao") == []

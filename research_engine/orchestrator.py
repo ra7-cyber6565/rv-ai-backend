@@ -55,6 +55,7 @@ from . import mood_lexicon
 from . import songlab
 from . import deliverable_guard
 from . import exammodel
+from . import trademodel
 from .models import EvidencePack, ResearchResult, SourceRecord
 from .patents import novelty_note, novelty_overclaim
 from . import physics_checks
@@ -970,6 +971,14 @@ class DeepResearchEngine:
                # sirf hint hain. `learned_cue_can_drop_a_line: False` hamesha
                # saath jaata hai — seekhe shabd se koi line hataayi nahi jaati.
                "mood_lexicon": mood_ledger,
+               # #178d — FARMAISH ka contract ledger. `exam_contract` exam/padhai
+               # ke 28 point, `trade_contract` trading ke 34 naap. Khaali dict
+               # matlab stage chali hi nahi (jawab ka text hi nahi bana) — "sab
+               # theek tha" nahi. Farmaish us lane ki na ho to inme `wanted:
+               # False` wala record aata hai, jo "chala par kuch nahi mila" se
+               # jaan-boojh kar alag rakha gaya hai.
+               "exam_contract": {},
+               "trade_contract": {},
                "technical_details": [], "api_accounting": {}}
 
         # P0-B — evidence exists BEFORE any model-generated factual prose.
@@ -1363,6 +1372,45 @@ class DeepResearchEngine:
             out["exam_lab"] = lab.run_exam_lab(
                 question=question, text=exam_text,
                 ask=exammodel.ask_of(question))
+
+        # ── #178d CONTRACT ASLI ME CHALE — exam aur trading, dono ka ledger ──
+        # #178a ke audit me ye adhoora nikla tha: `exammodel.gate()` aur
+        # `trademodel.study()` production me kabhi chalte hi nahi the. Dono
+        # contract (28-point exam ledger, 34-naap trading ledger) sirf LAB
+        # recipe ke raaste TEDHE naape jaate the — matlab user ko wo ledger
+        # dikhta hi nahi tha jo asli me ye maapta hai ki "jo maanga gaya wo
+        # material me hai ya nahi".
+        #
+        # Teen alag report kism hain, aur teeno alag rehti hain:
+        #   - `lab`         -> HYPOTHESIS ka test (science/trading ka daawa)
+        #   - `exam_lab`    -> BANA HUA paper/plan khud chala kar dekha gaya
+        #   - `*_contract`  -> FARMAISH ka ledger: kya maanga tha, kya mila
+        #
+        # Dono gate apne aap band rehte hain: farmaish exam ki na ho to
+        # `exammodel.gate()` `not_asked()` deta hai (`wanted=False`), aur trading
+        # ki na ho to `trademodel.study()` bhi wahi karta hai. Isliye gaane ya
+        # science ke run par yahan se ek bhi naap nahi chalti, aur kharcha 0
+        # rehta hai (GEMINI_CALLS=0, NETWORK_USED=False, dono module me pinned).
+        contract_text = out["final"] or out["analysis"]
+        if contract_text:
+            contract_sources = list(pack.sources or ())
+            # Syllabus aur plan alag se nahi aate — jo jawab user ko jaayega,
+            # wahi teeno jagah padha jaata hai. Yahi niyam `lab.exam_material`
+            # me pehle se likha hai ("alag na do to wahi text dono ke liye
+            # padha jaata hai"), aur dono jagah ek hi rakha gaya hai taaki
+            # contract aur EXAM LAB ek hi cheez naapein.
+            out["exam_contract"] = exammodel.gate(
+                question, paper=contract_text, plan=contract_text,
+                syllabus=contract_text, sources=contract_sources,
+                evaluate=lab.SafeNumericExecutor(
+                    lab.NumericExecutionPolicy()).evaluate)
+            # Trading ka contract LAB ka nateeja bhi padhta hai (walk-forward,
+            # Monte Carlo, baseline) — isliye ye `out["lab"]` ke BAAD chalta
+            # hai, warna 5 point (out-of-sample, MC, robustness, baseline,
+            # tournament) "naapa hi nahi" par atak jaate.
+            out["trade_contract"] = trademodel.study(
+                question, spec=contract_text, sources=contract_sources,
+                hypotheses=out["hypotheses"], lab_report=out.get("lab") or {})
 
         out["calls"] = brain.calls_used
         out["errors"].extend(brain.errors)
@@ -2328,6 +2376,15 @@ class DeepResearchEngine:
             # hypothesis ka test hai) aur uski ginti me nahi ghulta. Exam ki
             # farmaish na ho to na section chhapta hai, na audit line.
             exam_lab_report=passes.get("exam_lab") or {},
+            # #178e — FARMAISH ke do contract ledger. Ye dono LAB report se ALAG
+            # hain: `lab_report` hypothesis ka test hai, `exam_lab_report` bane
+            # hue paper/plan ka test hai, aur ye batate hain ki jo maanga gaya
+            # tha usme se kya-kya asli me likha aur naapa gaya. Farmaish us lane
+            # ki na ho to `not_asked` record aata hai (`checks` hi nahi hota) —
+            # tab na section chhapta hai, na audit seema. Isliye gaane/science
+            # ke jawab me inka koi asar nahi padta.
+            exam_contract_report=passes.get("exam_contract") or {},
+            trade_contract_report=passes.get("trade_contract") or {},
         )
         # Synthesizer hi jaanta hai kaunse section khaali reh gaye (§10) —
         # wahi list status mein bhi jaati hai, taaki UI aur report ek hi baat kahein.
@@ -2675,6 +2732,19 @@ class DeepResearchEngine:
             # gemini_calls = 0. `DELIVERABLE_NOT_ASKED` = kuch banane ki farmaish
             # hi nahi thi (answer chhua bhi nahi gaya) — "nahi mila" nahi.
             deliverable=deliverable_public,
+            # #178f — FARMAISH ke DO contract ledger ka public record. Ye dono
+            # LAB record se ALAG hain: `lab` hypothesis ka test, `exam_lab` bane
+            # hue paper/plan ka test, aur ye do batate hain ki jo maanga gaya tha
+            # usme se kya-kya asli me likha aur naapa gaya (met/not-met/naap hi
+            # nahi chali, naam se). `public_record` isliye ki `gate()`/`study()`
+            # ke andar ka `ask` object API par na jaaye aur JSON safe rahe.
+            # Farmaish us lane ki na ho to record me `wanted: False` aata hai;
+            # khaali dict matlab stage hi nahi chali. Dono ka matlab alag hai
+            # aur inhe ek jaisa padhna hi jhooth hoga.
+            exam_contract=exammodel.public_record(
+                passes.get("exam_contract") or {}),
+            trade_contract=trademodel.public_record(
+                passes.get("trade_contract") or {}),
         ).to_dict()
 
     # ── confidence note ──────────────────────────────────────────────────────
