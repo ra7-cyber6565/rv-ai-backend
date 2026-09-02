@@ -227,7 +227,9 @@ def test_runtime_and_live_receipts_are_separate_and_expire_from_observer_time(tm
 
 def test_stale_or_wrong_signature_live_receipt_is_rejected(tmp_path):
     _memory, state_path = _live_state(tmp_path)
-    stale_path, _ = _signed_live_receipt(tmp_path, state_path, created=NOW - 7200)
+    stale_path, _ = _signed_live_receipt(
+        tmp_path, state_path, created=int(NOW - 7200)
+    )
     with pytest.raises(ValueError, match="stale"):
         validate_champion_challenger_live_receipt(
             memory_state_path=state_path,
