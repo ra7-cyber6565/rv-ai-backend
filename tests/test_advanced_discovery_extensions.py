@@ -31,7 +31,7 @@ def test_package_boundary_installs_integrated_engine_for_direct_module_imports()
     assert research_engine.ScientificDiscoveryEngine is IntegratedScientificDiscoveryEngine
 
 
-def test_base_advanced_discovery_contract_is_preserved_when_40_is_added():
+def test_base_advanced_discovery_contract_is_preserved_when_extensions_are_added():
     planner, plan, pack, verification = _inputs()
     report = IntegratedScientificDiscoveryEngine(planner).analyze(
         question=QUESTION,
@@ -51,11 +51,12 @@ def test_base_advanced_discovery_contract_is_preserved_when_40_is_added():
     assert report["status"] == "NO_TESTABLE_HYPOTHESES"
     assert report["triple_independent_implementation"]["status"] == "NO_TASKS"
     assert report["triple_independent_implementation"]["all_requested_tasks_agree"] is False
-    assert report["extension_integration"]["capabilities"] == [40]
+    assert report["autonomous_literature_debate"]["status"] == "INSUFFICIENT_GROUNDED_ARGUMENTS"
+    assert report["extension_integration"]["capabilities"] == [40, 103]
     assert report["extension_integration"]["base_discovery_preserved"] is True
 
 
-def test_injected_40_engine_is_called_with_existing_verification_payload():
+def test_injected_40_and_103_engines_receive_existing_pipeline_inputs():
     class SpyTriple:
         def __init__(self):
             self.seen = None
@@ -69,20 +70,43 @@ def test_injected_40_engine_is_called_with_existing_verification_payload():
                 "all_requested_tasks_agree": True,
             }
 
+    class SpyDebate:
+        def __init__(self):
+            self.seen = None
+
+        def reconstruct(self, question, pack, contradictions=()):
+            self.seen = (question, pack, contradictions)
+            return {
+                "schema_version": "1.0",
+                "capability_id": 103,
+                "status": "PARTIAL_DEBATE",
+                "role_slots": {},
+                "debate_map": {"nodes": [], "edges": []},
+            }
+
     planner, plan, pack, verification = _inputs()
     triple = SpyTriple()
-    report = IntegratedScientificDiscoveryEngine(planner, triple_engine=triple).analyze(
+    debate = SpyDebate()
+    contradictions = [{"summary": "fixture contradiction"}]
+    report = IntegratedScientificDiscoveryEngine(
+        planner,
+        triple_engine=triple,
+        literature_debate=debate,
+    ).analyze(
         question=QUESTION,
         plan=plan,
         pack=pack,
         hypotheses=[],
-        contradictions=[],
+        contradictions=contradictions,
         verification=verification,
     )
 
     assert triple.seen is verification
+    assert debate.seen == (QUESTION, pack, contradictions)
     assert report["triple_independent_implementation"]["capability_id"] == 40
     assert report["triple_independent_implementation"]["status"] == "TRIPLE_AGREEMENT"
+    assert report["autonomous_literature_debate"]["capability_id"] == 103
+    assert report["autonomous_literature_debate"]["status"] == "PARTIAL_DEBATE"
 
 
 def test_40_auxiliary_failure_is_fail_closed_without_destroying_base_report():
@@ -109,3 +133,36 @@ def test_40_auxiliary_failure_is_fail_closed_without_destroying_base_report():
     assert triple["maturity_proof"]["hardware_validation"] is False
     assert triple["maturity_proof"]["live_independent_validation"] is False
     assert "/tmp/do-not-leak" not in repr(report)
+    # One auxiliary failure must not prevent the other capability from running.
+    assert report["autonomous_literature_debate"]["status"] == "INSUFFICIENT_GROUNDED_ARGUMENTS"
+
+
+def test_103_auxiliary_failure_is_fail_closed_without_destroying_base_or_40():
+    class ExplodingDebate:
+        def reconstruct(self, question, pack, contradictions=()):
+            raise RuntimeError("secret debate failure /home/private")
+
+    planner, plan, pack, verification = _inputs()
+    report = IntegratedScientificDiscoveryEngine(
+        planner, literature_debate=ExplodingDebate()
+    ).analyze(
+        question=QUESTION,
+        plan=plan,
+        pack=pack,
+        hypotheses=[],
+        contradictions=[],
+        verification=verification,
+    )
+
+    assert report["status"] == "NO_TESTABLE_HYPOTHESES"
+    assert report["triple_independent_implementation"]["status"] == "NO_TASKS"
+    debate = report["autonomous_literature_debate"]
+    assert debate["status"] == "ASSESSMENT_ERROR"
+    assert debate["role_slots"] == {
+        "researcher_a_reasoning": [],
+        "researcher_b_critique": [],
+        "researcher_c_replication_failure": [],
+    }
+    assert debate["maturity_proof"]["systematic_review_completeness_proven"] is False
+    assert debate["maturity_proof"]["live_independent_validation_proven"] is False
+    assert "/home/private" not in repr(report)
