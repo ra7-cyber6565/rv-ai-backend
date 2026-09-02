@@ -5,14 +5,23 @@ The research engine talks to two kinds of URLs:
 * discovery API endpoints selected by our own connector code; and
 * full-text links learned from external search results.
 
-The second category is untrusted.  A URL ending in ``.pdf`` is not proof that it
+The second category is untrusted. A URL ending in ``.pdf`` is not proof that it
 is safe to request: it can still point at localhost, a cloud metadata service,
-or a private address after a redirect.  This module keeps the policy in one
+or a private address after a redirect. This module keeps the policy in one
 small, deterministic place so connector/fetch code does not grow slightly
 different SSRF checks.
 
 No exception returned by these helpers contains a response body, secret URL
 credentials, or a raw SDK/requests error string.
+
+Canonical-authority rule
+------------------------
+Downstream source-policy code compares hostnames against legal/ToS blocklists.
+Obfuscated but equivalent authorities such as ``publisher.example.:443`` can
+otherwise pass a network check yet fail a string-based publisher check. For
+untrusted research URLs we therefore reject explicit ports, trailing-dot hosts,
+percent-encoded authority components and backslashes rather than trying to make
+every downstream policy understand every URL spelling.
 """
 from __future__ import annotations
 
@@ -25,7 +34,6 @@ from urllib.parse import urljoin, urlsplit
 MAX_URL_CHARS = 2048
 MAX_REDIRECTS = 4
 _REDIRECT_STATUSES = {301, 302, 303, 307, 308}
-_SAFE_PORTS = {None, 80, 443}
 _LOCAL_SUFFIXES = (
     ".localhost",
     ".local",
@@ -86,10 +94,11 @@ def validate_public_http_url(
 ) -> str:
     """Validate and return a public HTTP(S) URL, otherwise raise ``UnsafeURL``.
 
-    ``allowed_hosts`` is used for connector endpoints chosen by source code.
+    ``allowed_hosts`` is used for connector endpoints chosen by our source code.
     Exact-host matching prevents a future connector from turning ``http_get``
-    into a generic URL fetcher.  Those trusted constants do not need a DNS
-    lookup to establish SSRF safety; untrusted full-text hosts always do.
+    into a generic URL fetcher. Trusted connector constants still use the same
+    canonical authority grammar so source-policy checks cannot be bypassed with
+    alternate URL spellings.
     """
     clean = str(url or "").strip()
     if not clean or len(clean) > MAX_URL_CHARS:
@@ -104,10 +113,22 @@ def validate_public_http_url(
         raise UnsafeURL("non-HTTP URL blocked")
     if parsed.username is not None or parsed.password is not None:
         raise UnsafeURL("URL credentials blocked")
-    if port not in _SAFE_PORTS:
-        raise UnsafeURL("non-standard network port blocked")
 
-    host = (parsed.hostname or "").rstrip(".").lower()
+    # Explicit :80/:443 are semantically unnecessary for the research engine
+    # and create a different netloc spelling than downstream host blocklists.
+    # Reject all explicit ports rather than trying to normalize policy at every
+    # consumer. Connector/full-text endpoints in this project use default ports.
+    if port is not None:
+        raise UnsafeURL("explicit network port blocked")
+
+    authority = str(parsed.netloc or "")
+    if "%" in authority or "\\" in authority:
+        raise UnsafeURL("obfuscated URL authority blocked")
+
+    raw_host = str(parsed.hostname or "")
+    if raw_host.endswith("."):
+        raise UnsafeURL("non-canonical hostname blocked")
+    host = raw_host.lower()
     if not host:
         raise UnsafeURL("URL hostname missing")
     if host == "localhost" or host.endswith(_LOCAL_SUFFIXES):
@@ -121,9 +142,9 @@ def validate_public_http_url(
     if allowed and host not in allowed:
         raise UnsafeURL("connector host is not allowlisted")
 
-    # Connector endpoints are hard-coded and exact-host allowlisted.  Untrusted
+    # Connector endpoints are hard-coded and exact-host allowlisted. Untrusted
     # full-text hostnames must resolve now, and every answer must be globally
-    # routable.  One private answer is enough to fail closed.
+    # routable. One private answer is enough to fail closed.
     if resolve_dns and literal_state is None and not allowed:
         try:
             addresses = _resolved_addresses(host)
@@ -162,8 +183,8 @@ def safe_get_with_redirects(
     """GET with manual redirect validation.
 
     ``requests`` normally follows redirects before callers can inspect the next
-    host.  Manual following guarantees that every hop passes the same public-IP
-    and allowlist policy as the original URL.
+    host. Manual following guarantees that every hop passes the same public-IP,
+    canonical-authority and allowlist policy as the original URL.
     """
     current = str(url or "")
     first_params = params
