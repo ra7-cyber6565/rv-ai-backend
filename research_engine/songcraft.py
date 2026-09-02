@@ -400,9 +400,157 @@ _LYRICS_HUNT_RE = re.compile(
     r"|\bsong\s+download\b|\bfree\s+download\b", re.I)
 
 
+# ── #186e bare "<gaane ka naam> song lyrics" ka chhed ───────────────────────
+# Upar ka regex saaf shakal pakadta hai (lyrics of / full lyrics / mp3 /
+# karaoke / bol download). Par naapa gaya ki "tum hi ho song lyrics", "channa
+# mereya lyrics" aur "arijit singh tum hi ho song lyrics likh do" us par nahi
+# girte — yaani kisi maujooda gaane ka NAAM le kar bol maangna guard se nikal
+# jaata tha (isi kami par listener/music me teesri deewar rakhi gayi thi, aur
+# do test me wo "jaani hui seema" likh kar chhod di gayi thi).
+#
+# Ilaaj me gaano ki koi NAAM-LIST nahi hai (wo hamesha adhoori hoti, aur nayi
+# release par jhooth bolti). Sirf SANDARBH naapa jaata hai: jo shabd app ke
+# apne table me hai — style/register/bhasha/tempo/craft cue, aur wo saare
+# shabd jo app KHUD apni craft-query me likhta hai — wo craft ka shabd hai,
+# naam nahi. Us vocabulary se BAHAR ke lagataar shabd "lyrics" se thik pehle
+# aayein, to wo kisi maujooda gaane ka naam hai.
+_LYRIC_ANCHORS: Tuple[str, ...] = ("lyric", "lyrics")
+
+# "song"/"ka"/"wala" jaise jodne wale shabd naam aur "lyrics" ke BEECH aa
+# sakte hain — inhe chhod kar peeche dekha jaata hai.
+_TITLE_CONNECTORS: Tuple[str, ...] = (
+    "song", "songs", "gana", "gaana", "gaanaa", "gaane", "gane", "geet",
+    "geeton", "track", "ka", "ki", "ke", "wala", "wale", "wali", "waala",
+    "waale", "waali", "movie", "film", "album",
+)
+
+# Ye shabd naam ke jhund ko TODTE hain: "barish PAR gaana ki lyrics likho" me
+# "par" ke baad ka hissa farmaish ka topic hai, kisi gaane ka naam nahi.
+_TITLE_STOPPERS: Tuple[str, ...] = (
+    "par", "pe", "pr", "upar", "about", "on", "for", "of", "regarding",
+    "theme", "jaisa", "jaisi", "jaise", "type", "style", "me", "mein", "main",
+    "se", "aur", "or", "ya", "and", "the", "a", "an", "in", "with", "bina",
+    "nahi", "nhi", "mat", "bhi", "to", "hai", "hain", "kya",
+)
+# Craft ki baat karne wale angrezi/hindi shabd jo upar ke table me nahi hain
+# (table style/bhasha ke naam rakhte hain, craft-frame ke nahi). Ye list sirf
+# ADDRESSING hai: "ye shabd farmaish ka dhaancha hai, gaane ka naam nahi".
+_CRAFT_FRAME_WORDS: Tuple[str, ...] = (
+    "lyric", "lyrics", "lyrical", "lyricist", "songwriting", "songwriter",
+    "writing", "write", "written", "likho", "likh", "likhna", "likhne",
+    "likhte", "banao", "bana", "banane", "banana", "chahiye", "chaiye",
+    "compose", "composing", "craft", "hunar", "guide", "book", "books",
+    "kitaab", "kitab", "notes", "study", "research", "analysis", "review",
+    "theory", "technique", "techniques", "tradition", "traditions",
+    "convention", "conventions", "structure", "form", "rules", "basics",
+    "example", "examples", "masterclass", "interview", "lecture", "recording",
+    "listener", "audience", "music", "musical", "singing", "singer", "poetry",
+    "poem", "kavita", "shayari", "nazm", "geetkar", "based",
+)
+CRAFT_FRAME_LIST_IS_NOT_EXHAUSTIVE = True
+
+# Kitne lagataar anjaan shabd = naam. 2 jaan-boojh kar hai: EK anjaan shabd
+# ("monsoon song lyrics likho") gaane ka naam bhi ho sakta hai aur farmaish ka
+# TOPIC bhi — aur us haalat me lane band karna asli farmaish maar deta.
+TITLE_HUNT_MIN_RUN = 2
+LYRICS_HUNT_KNOWN_LIMIT = (
+    "ek hi anjaan shabd wale naam ("
+    "jaise '<naam> song lyrics chahiye') par ye guard tab nahi girta jab "
+    "query me koi teesra shabd bhi ho — wahi shakal ek TOPIC ki bhi hoti hai "
+    "('monsoon song lyrics likho'), aur us par lane band karna banti hui "
+    "farmaish maar deta. Do ya zyada shabd wala naam pakda jaata hai.")
+
+_CRAFT_VOCAB_CACHE: Optional[frozenset] = None
+def craft_vocabulary() -> frozenset:
+    """App ke APNE table se bana craft-shabdkosh (ek baar bana kar rakha jaata).
+
+    Ye jaan-boojh kar module ke tables se banta hai, alag list se nahi: naya
+    style/bhasha/seed jodte waqt shabdkosh apne aap bada ho jaata hai, warna
+    app ki apni nayi query hi is guard par gir sakti thi.
+    """
+    global _CRAFT_VOCAB_CACHE
+    if _CRAFT_VOCAB_CACHE is not None:
+        return _CRAFT_VOCAB_CACHE
+    words: set = set()
+
+    def add(text: Any) -> None:
+        words.update(_WORD_RE.findall(str(text or "").lower()))
+
+    for style in STYLES:
+        add(style.style_id.replace("_", " "))
+        add(style.label)
+        add(style.tempo_family)
+        for cue in style.cues:
+            add(cue)
+        for term in style.study_terms:
+            add(term)
+    for register in REGISTERS:
+        add(register.register_id.replace("_", " "))
+        add(register.label)
+        for cue in register.cues:
+            add(cue)
+    for lang_id, label, cues in LANGUAGE_ASKS:
+        add(lang_id)
+        add(label)
+        for cue in cues:
+            add(cue)
+    for family in TEMPO_FAMILIES:
+        add(family)
+    for cue in CRAFT_CUES:
+        add(cue)
+    for query, _lane, _why in CRAFT_STUDY_SEEDS:
+        add(query)
+    for word in _CRAFT_FRAME_WORDS:
+        add(word)
+    _CRAFT_VOCAB_CACHE = frozenset(words)
+    return _CRAFT_VOCAB_CACHE
+def _title_run(tokens: Sequence[str], anchor_at: int) -> List[str]:
+    """"lyrics" se ULTA chal kar naam-jaisa lagataar shabd-jhund lauta do."""
+    idx = int(anchor_at) - 1
+    while idx >= 0 and tokens[idx] in _TITLE_CONNECTORS:
+        idx -= 1
+    vocab = craft_vocabulary()
+    run: List[str] = []
+    while idx >= 0:
+        token = tokens[idx]
+        if (token in _TITLE_CONNECTORS or token in _TITLE_STOPPERS
+                or token in _LYRIC_ANCHORS or token in vocab):
+            break
+        run.append(token)
+        idx -= 1
+    run.reverse()
+    return run
+
+
+def title_hunt_reason(query: str) -> str:
+    """Naam-wali bol-talaash ki naapi hui wajah — warna "" (khaali)."""
+    tokens = _WORD_RE.findall(str(query or "").lower())
+    for at, token in enumerate(tokens):
+        if token not in _LYRIC_ANCHORS:
+            continue
+        run = _title_run(tokens, at)
+        if len(run) >= TITLE_HUNT_MIN_RUN:
+            return "naam jaisa shabd-jhund: " + " ".join(run)
+        if len(run) == 1:
+            # Ek anjaan shabd tab hi naam maana jaata hai jab query me uske
+            # alawa kuch bhi na ho ("kesariya song lyrics") — koi teesra shabd
+            # aaya to faisla topic aur naam ke beech ka anumaan ban jaata,
+            # isliye guard chup rehta hai (`LYRICS_HUNT_KNOWN_LIMIT`).
+            rest = [tok for tok in tokens
+                    if tok not in _LYRIC_ANCHORS
+                    and tok not in _TITLE_CONNECTORS
+                    and tok not in run]
+            if not rest:
+                return "sirf naam aur bol ki maang: " + run[0]
+    return ""
+
+
 def is_lyrics_hunt(query: str) -> bool:
     """True = ye query kisi maujooda gaane ke BOL/file dhoondh rahi hai."""
-    return bool(_LYRICS_HUNT_RE.search(str(query or "")))
+    text = str(query or "")
+    if _LYRICS_HUNT_RE.search(text):
+        return True
+    return bool(title_hunt_reason(text))
 
 
 # Har seed ke saath `why` jaata hai, taaki report me dikhe "ye query kis liye
@@ -763,6 +911,35 @@ def study(question: str, sources: Iterable[Any] = (), form: str = "",
     }
 
 
+def not_asked(reason: str = "kuch banane ki farmaish nahi thi") -> Dict[str, Any]:
+    """#155c — lane ka taala: craft ki farmaish hi nahi thi.
+
+    `study()` ka dhaancha wahi rehta hai, par `ran: False` aur khaali
+    `prompt_block`/`queries` ke saath. Kyun zaroori hai: pehle ye study HAR
+    sawaal par chal jaati thi, isliye trading ka model maangne par bhi "GAANA
+    LIKHNE KI HIDAYAT" wala block aur songwriting wali search queries ban jaati
+    thi. `wanted: False` isi baat ka naapa hua record hai — "kuch mila nahi"
+    nahi, "maanga hi nahi gaya".
+    """
+    return {
+        "ran": False,
+        "wanted": False,
+        "ask": None,
+        "ask_dict": {},
+        "queries": [],
+        "plan": {},
+        "guidance": {},
+        "prompt_block": "",
+        "guidance_source_count": 0,
+        "style_conventions_read": False,
+        "gemini_calls": GEMINI_CALLS,
+        "network_used": NETWORK_USED,
+        "audio_generated": AUDIO_GENERATED,
+        "cannot_measure": list(CANNOT_MEASURE_EXTRA),
+        "note": str(reason or ""),
+    }
+
+
 # ── #131 NAAP ─────────────────────────────────────────────────────────────────
 # Ulta bhaav. Sirf wahi jode jo sach me aapas me katte hain: "judaai + pyaar"
 # ek hi sad gaane me normal hai, isliye wo jodi YAHAN NAHI hai.
@@ -849,7 +1026,23 @@ _MUSIC_CLAIM_RE = re.compile(
     r"\b(?:dhun|tune|melody)\b"
     r"|\bchartbuster\b|\bguaranteed\s+hit\b"
     r"|\bsunne\s+me\s+(?:maza|mast|kamaal)\b"
-    r"|\bhar\s+koi\s+(?:pasand|gaayega|sunega)\b", re.I)
+    r"|\bhar\s+koi\s+(?:pasand|gaayega|sunega)\b"
+    # "Iski dhun bahut sureeli LAGEGI" — ye bhi bina-naap daawa hai, sirf narm
+    # shabd me. Isko pakadne ke liye do cheez chahiye: music ka noun + tareef ka
+    # shabd + AANE WALE waqt ka kriya. Aakhri shart jaan-boojh kar hai: "dhun
+    # sureeli rakhein" ek hidaayat hai (kya banana hai), daawa nahi (kaisa
+    # banega) — hidaayat ko FAIL karna khud ek galat naap hoga.
+    r"|\b(?:dhun|tune|melody|music|arrangement|beat|awaaz)\b[^.\n]{0,40}?"
+    r"\b(?:sureeli|sureela|surili|surila|madhur|melodious|soulful|catchy|"
+    r"dilkash|rooh|magical|jaadui)\w*\b[^.\n]{0,20}?"
+    r"\b(?:lagegi|lagega|lagenge|banegi|banega|hogi|hoga|rahegi|rahega|"
+    r"aayegi|aayega|niklegi|will\s+(?:be|sound))\b"
+    # Angrezi me kram ulta hota hai: "the melody WILL BE soulful".
+    r"|\b(?:dhun|tune|melody|music|arrangement|beat)\b[^.\n]{0,30}?"
+    r"\b(?:will\s+(?:be|sound)|is\s+going\s+to\s+(?:be|sound)|sounds)\b"
+    r"[^.\n]{0,20}?"
+    r"\b(?:sureeli|sureela|surili|surila|madhur|melodious|soulful|catchy|"
+    r"dilkash|magical|jaadui|mast|zabardast|amazing|perfect|best)\w*\b", re.I)
 
 
 def music_claims_in(text: str) -> List[str]:

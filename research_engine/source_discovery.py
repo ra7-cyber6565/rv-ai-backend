@@ -45,6 +45,9 @@ from .models import SourceRecord
 from .network_safety import public_error
 from . import songcraft
 from . import listener_study
+from . import music_study
+from . import trademodel
+from . import exammodel
 
 
 class SourceDiscovery:
@@ -330,6 +333,131 @@ class SourceDiscovery:
                               self._single(connector, clean, listener_limit)))
             elif plan.get("web", True):
                 tasks.append(("listener_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # MUSIC DIRECTION ki research (#140c) — craft aur listener tier ke SAATH,
+        # dono ke slot cheene bina. Teesra tier isliye ki intel ki maang ka
+        # teesra hissa hai: "konsa tone bnega music kaisa bnega" — tempo, scale/
+        # raag, vaadya, aawaz aur arrangement ke peeche PADHI HUI baat. Iski
+        # ginti craft/listener me mila dena wahi jhooth hota jise #133/#134 me
+        # rokha gaya tha, isliye label bhi alag hai: `music_study_<lane>`.
+        #
+        # Budget jaan-boojh kar chhota (`MAX_MUSIC_QUERIES`, per-connector 2 tak).
+        music_limit = max(1, min(2, max_per_connector))
+        seen_music = set()
+        for entry in list(plan.get("music_study", []))[
+                :music_study.MAX_MUSIC_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "web").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), "web"
+            key = clean.casefold()
+            if not clean or key in seen_music or key in seen_craft \
+                    or key in seen_listener:
+                # Dono purane tier bhi dekhe jaate hain: ek hi query teen label
+                # ke saath teen baar bhejna network aur budget dono ka nuksaan.
+                continue
+            # Chauthi deewar (planner + craft + listener tier ke baad) — bol/
+            # karaoke wali query yahan se bhi network par nahi jaati.
+            if songcraft.is_lyrics_hunt(clean):
+                continue
+            seen_music.add(key)
+            connector = None
+            if lane == "books" and book_name:
+                connector = self.books.by_name(book_name)
+            elif lane == "papers" and paper_name:
+                connector = self.papers.by_name(paper_name)
+            elif lane == "media" and media_name:
+                connector = self.media.by_name(media_name)
+            if connector is not None:
+                tasks.append(("music_study_" + lane,
+                              self._single(connector, clean, music_limit)))
+            elif plan.get("web", True):
+                tasks.append(("music_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # TRADING MODEL ka TRADE-STUDY (#150d) — SIRF tab jab planner ne
+        # `trade_study` bhara ho. Ye tier gaane ke teen tier se poori tarah ALAG
+        # hai: alag label (`trade_study_<lane>`), alag budget, aur `is_lyrics_hunt`
+        # ka guard yahan JAAN-BOOJH KAR nahi hai — wo gaane ki lane ka pehra hai,
+        # trading ki query par use lagana lane mixing hi hota (intel ki shart:
+        # "sab mix mt kr dena"). Isi wajah se yahan `seen_craft`/`seen_listener`/
+        # `seen_music` bhi nahi dekhe jaate: un teen se koi query milti hi nahi.
+        #
+        # Kram planner se aata hai aur wo institutional-first hai — exchange/
+        # regulator ka document pehle (web lane), phir theory/paper, phir concept
+        # ki kitaab. Yahan wo kram badla nahi jaata.
+        trade_limit = max(1, min(2, max_per_connector))
+        seen_trade = set()
+        for entry in list(plan.get("trade_study", []))[
+                :trademodel.MAX_STUDY_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "web").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), "web"
+            key = clean.casefold()
+            if not clean or key in seen_trade:
+                continue
+            seen_trade.add(key)
+            connector = None
+            if lane == "books" and book_name:
+                connector = self.books.by_name(book_name)
+            elif lane == "papers" and paper_name:
+                connector = self.papers.by_name(paper_name)
+            if connector is not None:
+                tasks.append(("trade_study_" + lane,
+                              self._single(connector, clean, trade_limit)))
+            elif plan.get("web", True):
+                # `lane == "web"` ka asli raasta yahi hai (exchange/regulator ka
+                # document webpage hai, paper nahi), aur lane band hone par bhi
+                # naam se saaf rahe ki ye trade-study thi.
+                tasks.append(("trade_study_web",
+                              self._web_chain(clean, max(1, min(2, max_web)))))
+
+        # EXAM/PADHAI ka EXAM-STUDY (#171d) — SIRF tab jab planner ne
+        # `exam_study` bhara ho. Ye tier baaki chaaron se ALAG hai: alag label
+        # (`exam_study_<lane>_<channel>`), alag budget, aur `is_lyrics_hunt` ka
+        # guard yahan JAAN-BOOJH KAR nahi hai — wo gaane ki lane ka pehra hai,
+        # exam ki query par use lagana lane mixing hi hota. Isi wajah se
+        # `seen_craft`/`seen_listener`/`seen_music`/`seen_trade` bhi nahi dekhe
+        # jaate: un chaaron se koi query milti hi nahi.
+        #
+        # Ek baat khaas hai: exammodel ke lane ka naam CONNECTOR ka naam NAHI
+        # hai (`official`/`textbook`/`pedagogy`/`practice`). Isliye yahan saaf
+        # mapping likhi hai — padhne wali kitaab wala lane book connector par,
+        # "kaise padhein" wala research paper connector par, aur official/
+        # practice web par (board ka syllabus PDF webpage hai, paper nahi).
+        # Label me DONO rehte hain: kaun lane thi AUR asal me kis channel par
+        # gayi. Sirf lane likhna us haalat me jhoot hota jab paper connector na
+        # mile aur query chup-chaap web par chali jaaye.
+        exam_limit = max(1, min(2, max_per_connector))
+        seen_exam = set()
+        for entry in list(plan.get("exam_study", []))[
+                :exammodel.MAX_STUDY_QUERIES]:
+            if isinstance(entry, dict):
+                clean = str(entry.get("query") or "").strip()
+                lane = str(entry.get("lane") or "").strip().lower()
+            else:
+                clean, lane = str(entry or "").strip(), ""
+            key = clean.casefold()
+            if not clean or key in seen_exam:
+                continue
+            seen_exam.add(key)
+            connector = None
+            channel = "web"
+            if lane == exammodel.LANE_TEXTBOOK and book_name:
+                connector = self.books.by_name(book_name)
+                channel = "books"
+            elif lane == exammodel.LANE_PEDAGOGY and paper_name:
+                connector = self.papers.by_name(paper_name)
+                channel = "papers"
+            if connector is not None:
+                tasks.append((f"exam_study_{lane}_{channel}",
+                              self._single(connector, clean, exam_limit)))
+            elif plan.get("web", True):
+                tasks.append((f"exam_study_{lane or 'web'}_web",
                               self._web_chain(clean, max(1, min(2, max_web)))))
 
         return tasks

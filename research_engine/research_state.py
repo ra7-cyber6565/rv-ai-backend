@@ -93,6 +93,20 @@ class ResearchState:
     # Har state ke saath uski ek-line wajah — UI ise seedha dikha sakta hai.
     reasons: Dict[str, str] = field(default_factory=dict)
     conflicts: List[str] = field(default_factory=list)
+    # ── #155d — do NAYI cheezein, dono default khaali ─────────────────────────
+    # Khaali rehne par is class ka bartaav bilkul purana hai (koi nayi row nahi
+    # chhapti, koi naya conflict nahi banta) — isliye ye ADD hai, badlav nahi.
+    #
+    # 1. `deliverable` = `deliverable_guard.public_record(...)`. Ye chaar research
+    #    state mein SHAAMIL NAHI hai aur unhe badalta bhi nahi: "gaana ban gaya"
+    #    ka matlab "evidence mazboot hai" nahi, aur "evidence kam hai" ka matlab
+    #    "gaana nahi bana" nahi. Isi do-matlab wali mix ne pichhle live run mein
+    #    gaane ko gayab karke bhi report ko bhara-bhara dikhaya tha.
+    # 2. `counts` = kachche source aur seedhe kaam ke source ki ALAG ginti. Ek hi
+    #    report mein "40 sources use hue" aur `EVIDENCE NONE` saath dikh chuke
+    #    hain — dono sach the, par ek line wajah kahin likhi nahi thi.
+    deliverable: Dict = field(default_factory=dict)
+    counts: Dict = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         for name, allowed in _FAMILIES:
@@ -131,6 +145,11 @@ class ResearchState:
             "reasons": dict(self.reasons),
             "conflicts": list(self.conflicts),
             "verified_allowed": self.verified_allowed,
+            # #155d — paanchvi/chhathvi cheez ALAG key mein. Chaar state ki
+            # vocabulary ismein ghusti nahi, warna UI ise "paanchva state" samajh
+            # kar VERIFIED ke hisaab mein le aata.
+            "deliverable": dict(self.deliverable),
+            "counts": dict(self.counts),
             # Ye line UI ke liye hai: chaar state ek jagah, ek hi vocabulary.
             "explain": {
                 "job_status": JOB_EXPLAIN.get(self.job_status, ""),
@@ -280,11 +299,91 @@ def prior_art_flag(hypotheses: Optional[Sequence[Dict]] = None) -> Optional[bool
 
 
 # ── 5. conflicts ─────────────────────────────────────────────────────────────
+# #155d ke do naam — ek jagah likhe hain taaki test aur UI dono yahin se padhein.
+DELIVERABLE_ROW_TITLE = "Maanga hua deliverable"
+DELIVERABLE_RULE_LINE = (
+    "Ye chaar research state mein SHAAMIL NAHI hai: \"bana kar de diya\" ka "
+    "matlab \"evidence mazboot hai\" nahi, aur \"evidence kam hai\" ka matlab "
+    "\"jo banane ko kaha tha wo nahi bana\" nahi.")
+COUNT_NOTE_TITLE = "Do ginti, do matlab"
+
+# #155d — `deliverable_guard` apne state PREFIX ke saath bhejta hai
+# (`DELIVERABLE_MISSING`), par is module ko wo guard import NAHI karna chahiye:
+# guard `craft` ko import karta hai aur research_state sabse neeche ki layer hai.
+# Isliye prefix yahan hata kar milaan hota hai, aur dono naam (`MISSING` aur
+# `DELIVERABLE_MISSING`) chalte hain. Ye ek CONTRACT hai, andaaza nahi —
+# `tests/test_deliverable_guard.py` guard ke ASLI constants se ise pin karta hai,
+# taaki kal naam badle to test RED ho, ye check chup-chaap band na ho jaaye.
+DELIVERABLE_PREFIX = "DELIVERABLE_"
+UNDELIVERED_STATES = ("MISSING", "BLOCKED")
+
+
+def deliverable_token(state) -> str:
+    """`DELIVERABLE_MISSING` → `MISSING` (jo bhi aaye, waisa hi upper-case)."""
+    token = str(state or "").strip().upper()
+    if token.startswith(DELIVERABLE_PREFIX):
+        token = token[len(DELIVERABLE_PREFIX):]
+    return token
+
+
+def undelivered(state) -> bool:
+    """Maangi hui cheez jawab mein NAHI hai (MISSING/BLOCKED) — sirf ye do."""
+    return deliverable_token(state) in UNDELIVERED_STATES
+
+
+def deliverable_line(deliverable: Optional[Dict] = None) -> str:
+    """`deliverable_guard` ke record se ek imaandaar row (na ho to khaali).
+
+    Ye kuch tay nahi karta — sirf guard ne jo NAAPA hai use dikhata hai. Guard ka
+    record na ho, ya usme "maanga hi nahi gaya" likha ho, to ye row chhapti hi
+    nahi: bina maange "deliverable: nahi bana" likhna bhi ek jhooth hai.
+    """
+    rec = deliverable if isinstance(deliverable, dict) else {}
+    if not rec or not rec.get("asked"):
+        return ""
+    state = deliverable_token(rec.get("state"))
+    if not state:
+        return ""
+    why = str(rec.get("reason") or rec.get("note") or "")
+    form = str(rec.get("form") or "")
+    title = DELIVERABLE_ROW_TITLE + (f" ({form})" if form else "")
+    return f"- {title}: **{state}**" + (f" — {why}" if why else "")
+
+
+def count_note(counts: Optional[Dict] = None) -> str:
+    """Kachche source vs seedhe kaam ke source — ek line mein farak.
+
+    Kyun (2026-08-30, live song run): ek hi report mein `EVIDENCE NONE` aur "40
+    sources use hue" saath chhapa. Dono sach the — 40 mile the, aur unme se
+    sawaal ke seedhe kaam ka ek bhi nahi tha — par kahin ye ek line likhi nahi
+    thi, isliye report apne aap se ulti lagti thi.
+
+    Dono ginti ek jaisi ho, ya koi ginti na aayi ho, to line chhapti nahi.
+    """
+    data = counts if isinstance(counts, dict) else {}
+    raw = data.get("raw_sources")
+    direct = data.get("directly_relevant_sources")
+    if raw is None or direct is None:
+        return ""
+    try:
+        raw_n, direct_n = int(raw), int(direct)
+    except (TypeError, ValueError):
+        return ""
+    if raw_n == direct_n:
+        return ""
+    return (f"{COUNT_NOTE_TITLE}: {raw_n} source DHOONDHE/utha kar padhe gaye, "
+            f"par sawaal ke SEEDHE kaam ke inme se {direct_n} nikle. Neeche "
+            f"evidence ki haalat is doosri ginti par tay hoti hai, pehli par "
+            f"nahi — isliye 'itne source mile' aur 'evidence kam hai' dono ek "
+            f"saath sach ho sakte hain.")
+
+
 def detect_conflicts(job_status: str, answer_state: str, evidence_state: str,
                      novelty_state: str, *,
                      prior_art_search: Optional[bool] = None,
                      counter_search: Optional[bool] = None,
-                     top_label: str = "") -> List[str]:
+                     top_label: str = "",
+                     deliverable: Optional[Dict] = None) -> List[str]:
     """
     Do state ek doosre se ulti baat kah rahi hon to use likh do.
 
@@ -321,6 +420,21 @@ def detect_conflicts(job_status: str, answer_state: str, evidence_state: str,
             answer_state != ANSWER_COMPLETE:
         out.append(f"Top label '{label.strip()}' verified-jaisa hai par jawab "
                    f"{answer_state} hai — label jawab se aage nahi ja sakta.")
+    # #155d — maangi hui cheez BANI hi nahi, par jawab "COMPLETE"? Ye asli
+    # contradiction hai, aur ise dikhana hi is poore batch ka maqsad hai: pichhla
+    # live run gaana gira kar bhi report ko bhara-bhara dikha gaya tha. State
+    # yahan CHUP-CHAAP badalti nahi — sirf conflict likhta hai, jisse
+    # `verified_allowed` apne aap False ho jaata hai.
+    rec = deliverable if isinstance(deliverable, dict) else {}
+    if rec.get("asked") and answer_state == ANSWER_COMPLETE:
+        state = deliverable_token(rec.get("state"))
+        if undelivered(state):
+            why = str(rec.get("reason") or rec.get("note") or "").strip()
+            out.append(
+                "Jawab COMPLETE bataya gaya par jo cheez banane ko kaha gaya "
+                f"tha wo jawab mein nahi hai (deliverable: {state})"
+                + (f" — {why}" if why else "")
+                + ". Research poori ho jaana maangi hui cheez ban jaana nahi hai.")
     return out
 
 
@@ -338,7 +452,10 @@ def build_state(*, ledger: Optional[Dict] = None, answer_text: str = "",
                 top_label: str = "",
                 crashed: bool = False, recovered: bool = False,
                 running: bool = False, queued: bool = False,
-                finished: bool = True) -> ResearchState:
+                finished: bool = True,
+                deliverable: Optional[Dict] = None,
+                raw_source_count: Optional[int] = None,
+                directly_relevant_count: Optional[int] = None) -> ResearchState:
     """Chaaron state + conflicts ek hi jagah se — orchestrator isi ko bulata hai."""
     job = job_status_of(finished=finished, crashed=crashed, recovered=recovered,
                         running=running, queued=queued)
@@ -357,7 +474,8 @@ def build_state(*, ledger: Optional[Dict] = None, answer_text: str = "",
     conflicts = detect_conflicts(job, answer, evidence, novelty,
                                  prior_art_search=prior_art_search,
                                  counter_search=counter_search,
-                                 top_label=top_label)
+                                 top_label=top_label,
+                                 deliverable=deliverable)
     reasons = {
         "job_status": JOB_EXPLAIN.get(job, ""),
         "answer_state": ANSWER_EXPLAIN.get(answer, ""),
@@ -368,10 +486,23 @@ def build_state(*, ledger: Optional[Dict] = None, answer_text: str = "",
     if not items:
         reasons["novelty_state"] = ("app ne is run mein koi apni hypothesis nahi "
                                    "banayi, isliye novelty ka sawaal hi nahi uthta")
+    # #155d — dono ginti waisi hi rakhi jaati hain jaisi mili. Yahan kuch jodna,
+    # ghatana ya "theek" karna mana hai: `count_note()` inhi do numbers se wajah
+    # likhta hai, aur agar ek bhi number na aaya ho to wo line chhapti hi nahi
+    # ("pata nahi" ko 0 likhna hi sabse purana jhooth tha).
+    counts: Dict = {}
+    if raw_source_count is not None:
+        counts["raw_sources"] = int(raw_source_count)
+    if directly_relevant_count is not None:
+        counts["directly_relevant_sources"] = int(directly_relevant_count)
+    if usable_source_count is not None:
+        counts["usable_sources"] = int(usable_source_count)
     return ResearchState(job_status=job, answer_state=answer,
                          evidence_state=evidence, novelty_state=novelty,
                          novelty_applicable=bool(items), reasons=reasons,
-                         conflicts=conflicts)
+                         conflicts=conflicts,
+                         deliverable=dict(deliverable or {}),
+                         counts=counts)
 
 
 # ── audit block (report ke audit section ke andar chhapta hai) ───────────────
@@ -407,6 +538,23 @@ def render_state_block(state) -> str:
                      "hypothesis nahi banayi)")
     lines.append("")
     lines.append(STATE_RULE_LINE)
+    # #155d — do ginti ka farak. Ye chaar row ke NEECHE aata hai, unke andar
+    # nahi: ye koi paanchvi state nahi, sirf ek wajah hai ki "itne source mile"
+    # aur "evidence kam hai" dono ek saath kaise sach hain.
+    note = count_note(data.get("counts"))
+    if note:
+        lines.append("")
+        lines.append(note)
+    # #155d — maangi hui cheez ki haalat. Alag block, alag niyam-line, taaki koi
+    # ise chaar research state mein ginne ki galti na kare.
+    row = deliverable_line(data.get("deliverable"))
+    if row:
+        lines.append("")
+        lines.append(f"**{DELIVERABLE_ROW_TITLE} (alag baat hai):**")
+        lines.append("")
+        lines.append(row)
+        lines.append("")
+        lines.append(DELIVERABLE_RULE_LINE)
     conflicts = list(data.get("conflicts") or [])
     if conflicts:
         lines.append("")
@@ -446,6 +594,11 @@ def coerce(value) -> Optional[ResearchState]:
         novelty_applicable=bool(value.get("novelty_applicable")),
         reasons=dict(value.get("reasons") or {}),
         conflicts=list(value.get("conflicts") or []),
+        # #155d — dict se wapas banate waqt bhi ye dono saath aate hain, warna
+        # UI/test round-trip par deliverable row aur ginti wali line gayab ho
+        # jaati (aur gayab hona hi is batch ka asli bug tha).
+        deliverable=dict(value.get("deliverable") or {}),
+        counts=dict(value.get("counts") or {}),
     )
 
 

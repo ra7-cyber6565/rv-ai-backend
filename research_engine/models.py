@@ -1147,5 +1147,82 @@ class ResearchResult:
     # Banane wala module: research_engine/listener_study.py
     listener_study: Dict = field(default_factory=dict)
 
+    # #140 — MUSIC STUDY ka record: music direction (chaal/tempo, scale ya raag,
+    # vaadya, aawaz, arrangement) ke PEECHE kitni CITED research padhi gayi,
+    # kaunse khaane khaali reh gaye, kitne number sirf SOURCE-REPORTED the, aur
+    # kitni line isliye hataayi gayi ki wo "dhun hit hogi" jaisa daawa kar rahi
+    # thi. Ye songcraft ke `music_direction_present` naap ki jagah NAHI leta:
+    # wahan sawaal hai "chaar khaane likhe gaye?", yahan "unke peeche padha hua
+    # kuch hai?". Isme `audio_generated`/`tune_made`/`heard`/`play_tested`
+    # hamesha False jaate hain: koi audio ya dhun nahi banti, app kuch sunta
+    # nahi, aur koi bajaakar test nahi karta. `wanted: False` matlab farmaish
+    # gaane ki hi nahi thi; `ran: False` matlab sur/saaz par kuch padha hi nahi
+    # gaya. Banane wala module: research_engine/music_study.py
+    music_study: Dict = field(default_factory=dict)
+
+    # #141 — SONG LAB ka record: gaane ke DRAFT ko app ne khud chaar alag naap se
+    # test kiya (dhaancha dobara ginna, bhaav ka arc, hook kitni baar aur kitni
+    # jaldi lauta, aur padhi hui riwaayat se milaan), phir kamzor line par
+    # KEEP/FIX/DROP faisla diya. Yahan do cheezein alag-alag hain: `drops` matlab
+    # line HATAAYI gayi (sirf toote niyam par — jhootha daawa), aur
+    # `redraft_notes` matlab line rakhi gayi par sudhaarne ko kaha gaya. Har DROP
+    # ke saath wajah likhi jaati hai, aur jo DROP mana kiya gaya uska code bhi
+    # (`refusals`) — kitni line hataayi ja sakti hai uski chhat hai, refrain
+    # kabhi nahi hataya jaata, aur naap kharaab ho to DROP palat diya jaata hai.
+    # `tests_pass` kisi bhi soorat me PROOF nahi hai: ye sirf likhe hue draft ki
+    # andaruni naap hai — na koi dhun bani, na kuch bajaakar sunaa gaya, na kisi
+    # asli sunne wale par aazmaaya gaya. `ran: False` matlab farmaish gaane ki
+    # nahi thi ya draft hi nahi mila. Banane wala module:
+    # research_engine/songlab.py
+    song_lab: Dict = field(default_factory=dict)
+    # #149 — BHAAV KI SHABDAWALI: `craft.MOODS` haath se likhi band list hai,
+    # isliye "aansu"/"viraha" jaise shabd naap se bahar reh jaate the. Ye record
+    # batata hai ki padhi hui source ke gloss-dhaanche se kitne naye bhaav-shabd
+    # seekhe gaye (`confirmed_count`, 2+ source ke saath), kitne sirf hint hain,
+    # aur kitni jodi kis naapi hui WAJAH se chhodi gayi (`rejects`). Do jhande
+    # hamesha saath jaate hain: `learned_cue_can_drop_a_line: False` (seekhe
+    # shabd se koi line hataayi nahi jaati — DROP ka haq sirf curated list ka
+    # hai) aur `feeling_proven: False` (shabd milna feeling ka saboot nahi).
+    # `ran: False` matlab kuch padha hi nahi gaya — "koi naya shabd nahi tha"
+    # nahi. Banane wala module: research_engine/mood_lexicon.py
+    mood_lexicon: Dict = field(default_factory=dict)
+    # #155 — DELIVERABLE GUARD ka record. Ye "kya bana" ka hisaab NAHI hai (wo
+    # `craft` me hai); ye is baat ka hisaab hai ki maanga hua deliverable JAWAB
+    # ME PAHUNCHA YA NAHI. Asli dikkat jisne isse janma: evidence-first boundary
+    # answer surface dobara banata tha aur CRAFT ka bana gaana us rebuild me
+    # gayab ho jaata tha. `state` ke paanch matlab alag-alag hain —
+    # DELIVERABLE_NOT_ASKED (farmaish hi nahi thi, answer chhua bhi nahi gaya),
+    # _PRESENT (pehle se tha), _RESTORED (gayab tha, wapas lagaya),
+    # _MISSING (bana hi nahi — guard ne naapi hui wajah likhi, khud kuch nahi
+    # banaya), _BLOCKED (ban gaya tha par usme evidence-label bacha tha, isliye
+    # jaan-boojh kar nahi lagaya). Naam se likha hua sach hamesha saath jaata
+    # hai: `is_evidence: False`, `counts_as_claim: False`,
+    # `guard_wrote_deliverable: False`, `quality_proven: False`,
+    # `gemini_calls: 0`. Banane wala module: research_engine/deliverable_guard.py
+    deliverable: Dict = field(default_factory=dict)
+    # #178f — FARMAISH ke DO contract ledger. Ye teeno LAB/craft record se ALAG
+    # cheez hain aur unki jagah nahi le sakte: `lab` app ki HYPOTHESIS ka test
+    # hai, `exam_lab` BANE HUE paper/plan ka test hai, aur ye do batate hain ki
+    # JO MAANGA GAYA THA usme se kya-kya asli me likha aur naapa gaya
+    # (`met_count` / `not_met_count` / `not_measured_count`, aur naam se
+    # `not_met` + `not_measured` list — buri khabar chhupti nahi).
+    #
+    # `exam_contract` exam/padhai ke 28 point ka hisaab rakhta hai, uske saath
+    # jhande: app kisi exam ki authority nahi (`is_exam_authority: False`), bana
+    # hua paper sirf practice ka hai (`paper_is_practice_only: True`), answer key
+    # app ki khud ki hai, aur "itne number aayenge"/"yahi sawaal aayega" ka koi
+    # vaada nahi (`prediction_claims` / `score_promises` naam se ginte hain).
+    # `trade_contract` trading ke 34 naap ka hisaab rakhta hai, uske saath:
+    # `live_tested: False`, `broker_connected: False`, order-book/tick data padha
+    # hi nahi, backtest bhavishya ka vaada nahi, aur ye nivesh ki salah nahi.
+    #
+    # Khaali dict ({}) ka matlab hai stage chali hi nahi (jawab ka text hi nahi
+    # bana) — "sab theek tha" NAHI. Farmaish us lane ki na ho to record me
+    # `wanted: False` aata hai, jo "chala par kuch naapa nahi gaya" se
+    # jaan-boojh kar alag rakha gaya hai. Banane wale module:
+    # research_engine/exammodel.py aur research_engine/trademodel.py
+    exam_contract: Dict = field(default_factory=dict)
+    trade_contract: Dict = field(default_factory=dict)
+
     def to_dict(self) -> Dict:
         return asdict(self)

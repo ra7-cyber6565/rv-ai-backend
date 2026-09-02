@@ -196,6 +196,42 @@ def _any(patterns, text: str) -> bool:
     return any(p.search(text) for p in patterns)
 
 
+# ── #155c — BANANE ki farmaish se research-deliverable NA ghade jaayein ───────
+#
+# Kyun ye guard bana (2026-08-30, intel ke live gaane wale run ke baad):
+# uske brief mein gaane ka DHAANCHA arrow ke saath likha tha —
+# "intro → verse 1 → chorus → verse 2 → bridge → outro". `_ARROW_CHAIN_RE` ne
+# use "second-order effects ki chain" samajh liya, aur report mein do jhooth
+# chhap gaye: (1) ledger mein "Second-order effects chain (intro → verse 1 →
+# chorus …) → nahi mili" — yaani ek aisi cheez ki KAMI dikhi jo maangi hi nahi
+# gayi thi, aur (2) reasoning prompt mein "## Second-Order Effects" heading ka
+# order chala gaya, jisne gaane ka budget khaya.
+#
+# Niyam sirf itna hai: arrow ka chain AKELA saboot nahi hai. Agar text mein
+# second-order/ripple/cascade jaisi ASLI cue bhi likhi ho, to chain pehle ki
+# tarah maangi hui hi maani jaati hai (research sawaalon ka bartaav 1 bit bhi
+# nahi badla). Cue na ho aur ask "kuch banane" ki ho, to arrow ko dhaancha maana
+# jaata hai.
+#
+# Aur hataya hua kuch CHUP-CHAAP nahi hatta: `suppressed` mein uski wajah aur
+# wahi arrow-steps record rehte hain, taaki audit mein dikhe ki kya-kyun gira.
+def creative_brief(question: str) -> bool:
+    """Ye ask "kuch bana kar do" wali hai ya nahi (0 Gemini call, 0 network).
+
+    Wahi `craft.detect()` jo prompt-side pehle se use hota hai — do jagah do
+    alag shart likhne se hi wo asymmetry banti hai jisme ek lane gate ke peeche
+    rehti hai aur doosri khuli. Import andar hai kyunki `craft` bada module hai
+    aur ye file `planner` se bhi import hoti hai; kuch toot jaaye to `False` —
+    shak mein guard LAGTA NAHI, yaani purana bartaav bacha rehta hai.
+    """
+    try:
+        from . import craft
+        return bool(craft.detect(question or "").get("is_request"))
+    except Exception:                                      # pragma: no cover
+        return False
+
+
+
 def parse_requests(question: str) -> Dict:
     """
     Prompt se explicit deliverables nikaalo — rule-based, ek bhi Gemini call
@@ -206,7 +242,23 @@ def parse_requests(question: str) -> Dict:
     count = hypothesis_count(text)
     wants_math = _any(_MATH_RES, text)
     steps = chain_steps(text)
-    wants_chain = bool(steps) or _any(_SECOND_ORDER_RES, text)
+    order_cue = _any(_SECOND_ORDER_RES, text)
+    wants_chain = bool(steps) or order_cue
+    # #155c — arrow ka chain akela saboot nahi. Cue na ho aur ask "bana kar do"
+    # wali ho, to wo gaane/kahaani ka dhaancha hai, "second-order effects" nahi.
+    suppressed: List[Dict] = []
+    is_creative = bool(steps) and not order_cue and creative_brief(text)
+    if is_creative:
+        suppressed.append({
+            "key": "second_order",
+            "reason": ("arrow wala chain banane ki farmaish ka DHAANCHA tha "
+                       "(jaise intro → verse → chorus), second-order effects ki "
+                       "demand nahi — text mein second-order/ripple/cascade "
+                       "jaisi koi cue nahi thi"),
+            "arrow_steps": list(steps),
+        })
+        wants_chain = False
+        steps = []
     return {
         "hypothesis_count": count,
         "wants_hypotheses": count > 0,
@@ -215,6 +267,9 @@ def parse_requests(question: str) -> Dict:
         "wants_second_order": wants_chain,
         "chain_steps": steps,
         "wants_red_team": _any(_RED_TEAM_RES, text),
+        # #155c — kya-kya suppress hua aur KYUN. Ye key ADD hui hai; koi purani
+        # key ka matlab nahi badla. Khaali list = kuch nahi hataya gaya.
+        "suppressed": suppressed,
         # §4 ki baaki saat demands + naam se maange gaye targets. Ye keys ADD
         # hui hain, koi purani key badli nahi — purane caller waise hi chalte
         # hain.

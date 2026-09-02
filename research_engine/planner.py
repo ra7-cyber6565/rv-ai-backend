@@ -18,12 +18,14 @@ from typing import Callable, Dict, List, Optional
 from . import classics as classics_mod
 from . import concept_ledger as ledger_mod
 from . import craft as craft_mod
+from . import exammodel
 from .connectors.classic_connector import langs_for_question as classic_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
 from . import facets as facets_mod
 from . import lenses as lens_mod
 from . import listener_study
+from . import music_study
 from .local_language import normalize
 from .market_data import market_intent
 from .patents import patent_intent
@@ -31,6 +33,7 @@ from .query_builder import is_instruction_prompt, search_query, topic_terms
 from . import query_hygiene
 from .requested import parse_requests
 from . import songcraft
+from . import trademodel
 from .specialist_domains import (
     build_specialist_plan,
     phrase_hit,
@@ -89,6 +92,11 @@ FIELD_MAP: Dict[str, List[str]] = {
     "prediction": ["Statistics", "Data Science", "Forecasting"],
     "philosophical": ["Philosophy", "Ethics", "Psychology", "Neuroscience"],
     "creative": ["Design", "Engineering", "Materials Science"],
+    # #171c: exam/padhai ki farmaish ka apna field-set. Ye QUESTION_TYPES me
+    # NAHI hai, isliye ye khud se kabhi detect nahi hota — sirf exam lane khulne
+    # par jodha jaata hai (purane sawaalon ka bartaav bilkul waisa hi rehta).
+    "educational": ["Education", "Cognitive Psychology",
+                    "Assessment and Measurement", "Curriculum Studies"],
     "unresolved_research": ["Research Methodology", "Domain-specific literature"],
     "factual": ["General Knowledge"],
 }
@@ -243,6 +251,67 @@ class ResearchPlanner:
             detected = ["factual"]
             fields = list(FIELD_MAP["factual"])
 
+        # ── #150c LANE ISOLATION: "banao" creative rachna nahi hai ────────────
+        # QUESTION_TYPES["creative"] me "banao"/"create"/"design" jaise shabd
+        # hain. Wo shabd sirf itna batate hain ki user kuch BANWANA chahta hai —
+        # ye nahi ki bani hui cheez ek creative rachna (gaana/kahani/kavita)
+        # hogi. "US100 aur XAUUSD ka scalping model banao" me bhi "banao" hai,
+        # aur usi ek shabd se aaj Design + Materials Science field aur ek
+        # creative sub-question trading ke jawab me ghus jaate the. intel ki
+        # shart: "sab mix mt kr dena — model mangu to gaane waali cheeje work
+        # krti dikhe to answer khraab ho jaaye".
+        #
+        # Faisla khud se nahi liya jaata, un do module se aata hai jo pehle se
+        # ye naapte hain:
+        #   craft.detect(q)["is_request"] → asli creative form maanga gaya
+        #   trademodel.is_request(q)      → trading model ki farmaish
+        # Sirf trading ki farmaish par "creative" type hataayi jaati hai; baaki
+        # har sawaal ka bartaav bilkul waisa hi rehta hai jaisa pehle tha.
+        build_cue = "creative" in detected
+        craft_ask = bool((craft_mod.detect(question) or {}).get("is_request"))
+        trade_ask = bool(trademodel.is_request(question))
+        if build_cue and trade_ask and not craft_ask:
+            detected = [qtype for qtype in detected if qtype != "creative"]
+            fields = [f for f in fields
+                      if f not in FIELD_MAP["creative"]
+                      or any(f in FIELD_MAP.get(other, [])
+                             for other in detected)]
+            if not detected:
+                detected = ["factual"]
+                fields = fields or list(FIELD_MAP["factual"])
+        # ── #171c LANE ISOLATION: exam/padhai bhi creative rachna nahi hai ──
+        # Wahi #150c ki bimari doosri jagah: "RPF SI ka paper banao" aur "class
+        # 10 maths ka syllabus cover karne ka plan banao" me bhi "banao" hai,
+        # aur usi ek shabd se Design/Materials Science field aur ek creative
+        # sub-question exam ke jawab me ghus jaate the. Faisla yahan bhi khud se
+        # nahi liya jaata — `exammodel.is_request()` se aata hai, jo do signal
+        # (exam/padhai ki cheez + banane/seekhne ki maang) par khulta hai.
+        # `craft_ask` ki chhoot barqaraar: agar user ne asal me koi rachna maangi
+        # (jaise "exam par kavita likho") to creative type nahi hataayi jaati.
+        exam_ask = bool(exammodel.is_request(question))
+        if build_cue and exam_ask and not craft_ask:
+            detected = [qtype for qtype in detected if qtype != "creative"]
+            fields = [f for f in fields
+                      if f not in FIELD_MAP["creative"]
+                      or any(f in FIELD_MAP.get(other, [])
+                             for other in detected)]
+            if not detected:
+                detected = ["factual"]
+                fields = fields or list(FIELD_MAP["factual"])
+        # Exam/padhai maangi gayi hai to uske apne field aane chahiye.
+        if exam_ask and "educational" not in detected:
+            detected.append("educational")
+            for f in FIELD_MAP["educational"]:
+                if f not in fields:
+                    fields.append(f)
+        # Trading model maanga gaya hai to uske apne field (Finance/Economics)
+        # aane chahiye — Design/Materials Science nahi.
+        if trade_ask and "financial" not in detected:
+            detected.append("financial")
+            for f in FIELD_MAP["financial"]:
+                if f not in fields:
+                    fields.append(f)
+
         primary = detected[:3]
         if len(detected) >= 3:
             primary = detected[:3] + ["multidisciplinary"]
@@ -258,7 +327,15 @@ class ResearchPlanner:
             "needs_books": (any(phrase_hit(q, h) for h in _BOOK_HINTS)
                             or "historical" in detected
                             or bool(specialist.get("needs_books"))),
-            "is_creative": "creative" in detected,
+            "is_creative": craft_ask or "creative" in detected,
+            # Purani keyword-hit gum nahi hoti — "user kuch banwana chahta hai"
+            # ka signal yahan alag se milta hai. `is_creative` ka matlab ab
+            # "creative rachna maangi gayi", aur ye do baatein ek nahi hain.
+            "wants_construction": build_cue or craft_ask,
+            # #171c: exam lane ka faisla ek hi jagah se milta hai, taaki aage ke
+            # stage (source_discovery, LAB) apni doosri copy na banayein.
+            "is_exam_ask": exam_ask,
+            "exam_reason": exammodel.request_reason(question),
             "is_unresolved": "unresolved_research" in detected,
             "specialist_active": bool(specialist.get("active")),
             "specialist_profile_keys": list(specialist.get("profile_keys", [])),
@@ -456,6 +533,34 @@ class ResearchPlanner:
             return specialist_qs
         plan = domain_detect(question)
 
+        # #150d — trading model ki farmaish par curated macro-econ intent bekaar
+        # hai. `domain.detect` is sawaal ka field `economics` nikalta hai, isliye
+        # round 1 me "minimum wage employment effect labour market gdp" jaisi
+        # query chali jaati thi — scalping model ke liye iska koi mol nahi. Ab un
+        # slots par institutional-first trade queries jaati hain (exchange/
+        # regulator ka document pehle). Base query apni jagah PEHLE number par hi
+        # rehti hai, aur non-trading sawaal par ye list khaali hoti hai — yaani
+        # wahan ye badlaav no-op hai.
+        trade_lead: List[str] = []
+        if trademodel.is_request(question):
+            trade_lead = list(trademodel.lead_queries(
+                trademodel.ask_of(question), limit=3))
+
+        # #171d — exam/padhai ki farmaish par bhi wahi baat. "RPF SI ka paper
+        # banao" par `domain.detect` ka curated intent set kaam ka nahi hai, aur
+        # "math basic se strong karun" par to bilkul nahi: uska jawab board ka
+        # apna syllabus aur padhai ki research deti hai. Un slots par ab
+        # official-first exam queries jaati hain.
+        #
+        # Do baatein jaan-boojh kar: (a) base query apni jagah PEHLE number par
+        # hi rehti hai, aur (b) trading ask par ye list khaali rehti hai
+        # (`not trade_lead`), taaki trading ka naapa hua kram 1 bit na badle.
+        # Non-exam sawaal par bhi khaali — yaani wahan ye badlaav no-op hai.
+        exam_lead: List[str] = []
+        if not trade_lead and exammodel.is_request(question):
+            exam_lead = list(exammodel.lead_queries(
+                exammodel.ask_of(question), limit=3))
+
         # §11 — round 2 se opposition side bhi dhoondhna ZAROORI hai. Pehle
         # (known domain wale path par) sirf support-side branch queries jaati
         # thi, aur phir bhi report "apparent agreement" likh deti thi. Ab
@@ -471,7 +576,8 @@ class ResearchPlanner:
                 # na plan hoti thi na report hoti thi. Ab intent-wise chalti
                 # hai: focus intents pehle, aur base query kabhi nahi girti.
                 intents = plan.search_intents(base, limit=3)
-                qs = [base] + [i["query"] for i in intents]
+                qs = [base] + (trade_lead or exam_lead
+                              or [i["query"] for i in intents])
             else:
                 qs = ([base]
                       + plan.fallback_queries(base, round_no=round_no, limit=2)
@@ -498,7 +604,12 @@ class ResearchPlanner:
                    if (q or "").strip().lower() != (base or "").strip().lower()]
 
         if round_no <= 1:
-            return [base, *lens_qs][:4] if lens_qs else [base]
+            # Trade queries lens se PEHLE — patla trading ask ("ek scalping setup
+            # banao 5M chart par") ka domain profile generic nikalta hai, aur us
+            # haalat me bhi institutional document sabse pehle jaana chahiye.
+            if trade_lead or exam_lead or lens_qs:
+                return [base, *trade_lead, *exam_lead, *lens_qs][:4]
+            return [base]
 
         queries = []
         fields = cls.get("relevant_fields", [])
@@ -702,8 +813,14 @@ class ResearchPlanner:
         # data par hota hai — isliye plan mein hi `not_financial_advice` line
         # saath chalti hai, taaki report bante waqt wo bhoolna mushkil ho.
         markets: List[str] = []
-        m_intent = market_intent(question or cls.get("question") or "",
-                                 domain_key=dplan.key)
+        # #150d — trading model ki farmaish ka faisla EK jagah se aata hai
+        # (`trademodel.is_request`), aur wahi faisla do kaam karta hai: (a) market
+        # series lane ka doosra signal ban jaata hai, aur (b) neeche trade-study
+        # tier kholta hai. Do jagah do list banana hi purani galti thi.
+        trade_text = question or cls.get("question") or ""
+        trade_ask = bool(trademodel.is_request(trade_text))
+        m_intent = market_intent(trade_text, domain_key=dplan.key,
+                                 trade_ask=trade_ask)
         market_reason = m_intent.get("reason", "")
         if not getattr(config, "use_datasets", True):
             market_reason = (f"{config.name} mode mein data lane band hai, "
@@ -777,6 +894,156 @@ class ResearchPlanner:
                 f"research dhoondhne ke liye {len(listener_queries)} query "
                 f"bani (kisi insaan par koi test nahi hua)")
 
+        # ── sur/taal/saaz ka MUSIC-STUDY lane (#140c) ───────────────────────
+        # Craft aur listener ke SAATH chalti hai, kisi ki jagah nahi: iska
+        # budget alag hai (`MAX_MUSIC_QUERIES`) taaki craft ki 6 aur listener ki
+        # 3 slot me se ek bhi na chhine. Yahan bhi koi gyaan nahi khulta — ye
+        # sirf query hai. Isliye `music_evidence_read` kabhi True nahi hota, aur
+        # `audio_generated`/`heard` naam se hi bata dete hain ki na koi dhun
+        # bani, na kuch suna gaya.
+        music_queries: List[Dict] = []
+        music_reason = ("farmaish gaane jaisi nahi lagi, isliye music-study "
+                        "band")
+        if not is_song:
+            pass
+        elif songcraft.is_lyrics_hunt(song_text):
+            music_reason = ("gaane ke BOL maange ja rahe the — us haalat me "
+                            "music direction ki research bhi nahi maangi jaati")
+        else:
+            m_budget = (1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else music_study.MAX_MUSIC_QUERIES)
+            music_queries = list(music_study.study_queries(
+                style_ask, limit=m_budget))
+            music_reason = (
+                f"gaane ki farmaish mili — kaunsa sur/taal/saaz kis bhaav ke "
+                f"saath, iski research dhoondhne ke liye {len(music_queries)} "
+                f"query bani (koi dhun nahi bani, kuch suna nahi gaya)")
+
+        # ── trading model ka TRADE-STUDY lane (#150d) ───────────────────────
+        # Craft/listener/music ke SAATH ka wahi dhaancha, par ek zaroori farak:
+        # ye lane un teenon se aazad hai. Gaane ka lane band ho tab bhi ye chalta
+        # hai, aur ye chale to gaane ka lane band NAHI hota (dono maange gaye ho
+        # to dono chalte hain) — intel ki shart yahi thi: "sab mix mt kr dena".
+        #
+        # Yahan KOI GYAAN NAHI khulta: ye sirf query hai. Isliye
+        # `trade_evidence_read` kabhi True nahi hota, aur `live_tested`/
+        # `broker_connected`/`order_book_read` naam se hi bata dete hain ki na
+        # koi trade chala, na kisi broker se baat hui, na order book padhi gayi.
+        trade_queries: List[Dict] = []
+        trade_ask_dict: Dict = {}
+        trade_reason = trademodel.request_reason(trade_text)
+        if trade_ask:
+            # Depth lane band nahi karti, chhoti karti hai — wahi niyam.
+            t_budget = (3 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else trademodel.MAX_STUDY_QUERIES)
+            t_ask = trademodel.ask_of(trade_text)
+            trade_ask_dict = t_ask.to_dict()
+            trade_queries = list(trademodel.lane_queries(t_ask, limit=t_budget))
+            if trade_queries:
+                # Reason lane ki ASLI ginti se banta hai, likhe hue daawe se
+                # nahi. Pehle yahan har haalat me "exchange/regulator ka
+                # document pehle" likha jaata tha — jabki instrument ka naam na
+                # aane par ek bhi venue query banti hi nahi. Wahi naam-vs-kaam
+                # ka farak is project me mana hai.
+                counted = [(lane, sum(1 for row in trade_queries
+                                      if row.get("lane") == lane))
+                           for lane in trademodel.STUDY_LANES]
+                got = dict(counted)
+                detail = ", ".join(f"{lane}:{n}" for lane, n in counted if n)
+                if got.get(trademodel.LANE_WEB):
+                    parts = ["exchange/regulator ka apna document sabse pehle"]
+                else:
+                    parts = ["koi jaana-pehchana instrument naam se nahi aaya, "
+                             "isliye is baar kisi exchange/regulator ka "
+                             "document nahi maanga gaya"]
+                if got.get(trademodel.LANE_PAPERS):
+                    parts.append("microstructure/liquidity/validation ke asli "
+                                 "paper")
+                if got.get(trademodel.LANE_BOOKS):
+                    parts.append("aur jis concept ka naam aaya uska empirical "
+                                 "test — naam se use sach nahi maana gaya")
+                trade_reason = (
+                    f"trading model ki farmaish mili — trade-study lane chali "
+                    f"({len(trade_queries)} query; {detail}); "
+                    + "; ".join(parts))
+            else:
+                # Farmaish mili par ek bhi query nahi bani — ye baat CHHUPTI
+                # nahi. Pehle yahi haalat me bhi "lane chali (0 query)" likha
+                # jaata tha, jo kaam aur kahaani ka farak tha: wahi jhoot is
+                # project me mana hai.
+                trade_reason = (
+                    "trading model ki farmaish mili par trade-study lane ki ek "
+                    "bhi query nahi bani — na koi jaana-pehchana instrument "
+                    "naam se aaya, na koi naam wala concept, na koi sakhti "
+                    "maangi gayi; isliye lane khaali hai (0 query) aur trading "
+                    "ka koi alag source padha nahi gaya")
+
+        # ── exam/padhai ka EXAM-STUDY lane (#171d) ───────────────────────────
+        # Trade-study wala hi dhaancha, aur wahi zaroori farak: ye lane baaki
+        # sabse AAZAD hai. Gaane ka lane band ho ya trading ka chal raha ho —
+        # is lane ka faisla sirf `exammodel.is_request()` se aata hai, jo DO
+        # signal par khulta hai (exam/subject ki cheez + banane ya seekhne ki
+        # maang). Isliye "hindi me gaana banao" par ye lane khulti hi nahi, aur
+        # yahi intel ki shart thi: "sab mix mt kr dena".
+        #
+        # Yahan KOI GYAAN NAHI khulta: ye sirf query hai. Isliye
+        # `exam_evidence_read` kabhi True nahi hota, aur chhah jhande naam se hi
+        # seema batate hain — app kisi board/commission ka hissa nahi, banaya
+        # hua paper sirf practice ka hai, answer key app ki apni banayi hui hai,
+        # "yahi question aayega" ka koi waada nahi, kitne number aayenge ka bhi
+        # nahi, aur koi leak/paid question bank chhua nahi gaya.
+        exam_text = question or cls.get("question") or ""
+        exam_ask = bool(exammodel.is_request(exam_text))
+        exam_queries: List[Dict] = []
+        exam_ask_dict: Dict = {}
+        exam_reason = exammodel.request_reason(exam_text)
+        if exam_ask:
+            # Depth lane band nahi karti, chhoti karti hai — wahi niyam.
+            e_budget = (exammodel.QUICK_STUDY_QUERIES
+                        if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else exammodel.MAX_STUDY_QUERIES)
+            e_ask = exammodel.ask_of(exam_text)
+            exam_ask_dict = e_ask.to_dict()
+            exam_queries = list(exammodel.lane_queries(e_ask, limit=e_budget))
+            if exam_queries:
+                # Reason lane ki ASLI ginti se banta hai, likhe hue daawe se
+                # nahi — trade lane par yahi galti pakdi gayi thi. Exam ka naam
+                # aur subject dono na aayein to official lane ki ek bhi query
+                # banti hi nahi, aur us haalat me "official document pehle"
+                # likhna naam-vs-kaam ka wahi farak hota.
+                counted = [(lane, sum(1 for row in exam_queries
+                                      if row.get("lane") == lane))
+                           for lane in exammodel.STUDY_LANES]
+                got = dict(counted)
+                detail = ", ".join(f"{lane}:{n}" for lane, n in counted if n)
+                if got.get(exammodel.LANE_OFFICIAL):
+                    parts = ["board/commission ka apna syllabus/notification "
+                             "sabse pehle"]
+                else:
+                    parts = ["na exam ka naam aaya na koi subject/level, isliye "
+                             "is baar kisi board/commission ka document nahi "
+                             "maanga gaya"]
+                if got.get(exammodel.LANE_TEXTBOOK):
+                    parts.append("topic ka asli daayra padhne wali kitaab se")
+                if got.get(exammodel.LANE_PEDAGOGY):
+                    parts.append("aur 'kaise padhein' ka jawab research se — "
+                                 "kisi ki raay se nahi")
+                if got.get(exammodel.LANE_PRACTICE):
+                    parts.append("purane paper se sirf DHAANCHA padha jaata hai, "
+                                 "uske question nahi")
+                exam_reason = (
+                    f"exam/padhai ki farmaish mili — exam-study lane chali "
+                    f"({len(exam_queries)} query; {detail}); "
+                    + "; ".join(parts))
+            else:
+                # Farmaish mili par ek bhi query nahi bani — ye baat CHHUPTI
+                # nahi (trade lane ka wahi niyam).
+                exam_reason = (
+                    "exam/padhai ki farmaish mili par exam-study lane ki ek bhi "
+                    "query nahi bani — na exam ka naam aaya, na koi subject, na "
+                    "koi class/level; isliye lane khaali hai (0 query) aur "
+                    "padhai ka koi alag source padha nahi gaya")
+
         return {
             "web": True,
             "papers": papers,
@@ -794,6 +1061,12 @@ class ResearchPlanner:
             "market_intent": {"wanted": bool(markets),
                               "market_signal": bool(m_intent.get("market_signal")),
                               "series_ask": bool(m_intent.get("series_ask")),
+                              # user ne khud series maangi (series_ask) aur
+                              # "model banane ke liye series chahiye"
+                              # (model_ask) do ALAG baatein hain — disclosure me
+                              # bhi alag rehni chahiye, warna audit me lagta hai
+                              # user ne data maanga tha jabki maanga nahi tha
+                              "model_ask": bool(m_intent.get("model_ask")),
                               "domain_economics": bool(
                                   m_intent.get("domain_economics")),
                               "reason": market_reason,
@@ -872,6 +1145,90 @@ class ResearchPlanner:
                 "mind_read": listener_study.MIND_READ,
                 "gemini_calls": listener_study.GEMINI_CALLS,
                 "reason": listener_reason},
+            # Music direction ka lane (#140c) — craft/listener se ALAG ginti,
+            # alag label. `music_evidence_read` yahan kabhi True nahi hota, aur
+            # chaar jhande naam se hi seema batate hain: koi audio nahi bani,
+            # koi dhun nahi bani, kuch suna nahi gaya, kisi ne bajaakar dekha
+            # nahi. Ye songcraft ke `music_direction_present` ki JAGAH nahi hai.
+            "music_study": music_queries,
+            "music_study_lane": {
+                "wanted": bool(music_queries),
+                "is_song_request": bool(is_song),
+                "query_count": len(music_queries),
+                "lanes": [str(row.get("lane") or "") for row in music_queries],
+                "reasons": [str(row.get("why") or "") for row in music_queries],
+                "lyrics_hunt_blocked": True,
+                "music_evidence_read": False,
+                "audio_generated": music_study.AUDIO_GENERATED,
+                "tune_made": music_study.TUNE_MADE,
+                "heard": music_study.HEARD,
+                "play_tested": music_study.PLAY_TESTED,
+                "replaces_music_direction_present": False,
+                "gemini_calls": music_study.GEMINI_CALLS,
+                "reason": music_reason},
+            # Trading model ka trade-study lane (#150d) — gaane ke teen lane se
+            # ALAG ginti, alag label (`trade_study_<lane>`). Ye bhi search PLAN
+            # hai, evidence nahi: `trade_evidence_read` yahan kabhi True nahi
+            # hota. Chaar jhande naam se hi seema batate hain — koi live/demo
+            # trade nahi chala, kisi broker se connection nahi, order book nahi
+            # padhi, tick data nahi padha. Aur `financial_advice` False hai.
+            "trade_study": trade_queries,
+            "trade_study_lane": {
+                "wanted": bool(trade_queries),
+                "is_trade_request": bool(trade_ask),
+                "query_count": len(trade_queries),
+                "lanes": [str(row.get("lane") or "") for row in trade_queries],
+                "reasons": [str(row.get("why") or "") for row in trade_queries],
+                # Ye jhanda BEHAVIOUR se banta hai: sach me pehli query
+                # exchange/regulator ki hai ya nahi. Hardcoded True likhna us
+                # ask par jhoot hota jahan instrument ka naam hi nahi aaya.
+                "institutional_first": bool(
+                    trade_queries and trade_queries[0].get("lane")
+                    == trademodel.LANE_WEB),
+                "ask": trade_ask_dict,
+                "trade_evidence_read": False,
+                "live_tested": trademodel.LIVE_TESTED,
+                "broker_connected": trademodel.BROKER_CONNECTED,
+                "order_book_read": trademodel.ORDER_BOOK_READ,
+                "tick_data_read": trademodel.TICK_DATA_READ,
+                "concepts_earn_their_place": trademodel.CONCEPTS_EARN_THEIR_PLACE,
+                "backtest_is_not_future": trademodel.BACKTEST_IS_NOT_FUTURE,
+                "financial_advice": trademodel.FINANCIAL_ADVICE,
+                "not_financial_advice": trademodel.NOT_ADVICE_NOTE,
+                "gemini_calls": trademodel.GEMINI_CALLS,
+                "network_used": trademodel.NETWORK_USED,
+                "reason": trade_reason},
+            # Exam/padhai ka EXAM-STUDY lane (#171d) — gaane ke teen lane aur
+            # trading ke lane se ALAG ginti, alag label (`exam_study_<lane>`).
+            # Ye bhi search PLAN hai, evidence nahi: `exam_evidence_read` yahan
+            # kabhi True nahi hota. Chhah jhande naam se hi seema batate hain,
+            # aur `not_official_note` wahi line hai jo jawab me bhi jaati hai.
+            "exam_study": exam_queries,
+            "exam_study_lane": {
+                "wanted": bool(exam_queries),
+                "is_exam_request": bool(exam_ask),
+                "query_count": len(exam_queries),
+                "lanes": [str(row.get("lane") or "") for row in exam_queries],
+                "reasons": [str(row.get("why") or "") for row in exam_queries],
+                # Ye jhanda BEHAVIOUR se banta hai: sach me pehli query board/
+                # commission ke apne document ki hai ya nahi. Hardcoded True
+                # likhna us ask par jhoot hota jahan exam ka naam hi nahi aaya.
+                "official_first": bool(
+                    exam_queries and exam_queries[0].get("lane")
+                    == exammodel.LANE_OFFICIAL),
+                "ask": exam_ask_dict,
+                "exam_evidence_read": False,
+                "paper_is_practice_only": exammodel.PAPER_IS_PRACTICE_ONLY,
+                "is_exam_authority": exammodel.IS_EXAM_AUTHORITY,
+                "answer_key_is_app_made": exammodel.ANSWER_KEY_IS_APP_MADE,
+                "question_prediction_promised":
+                    exammodel.QUESTION_PREDICTION_PROMISED,
+                "score_promised": exammodel.SCORE_PROMISED,
+                "leaked_paper_used": exammodel.LEAKED_PAPER_USED,
+                "not_official_note": exammodel.NOT_OFFICIAL_NOTE,
+                "gemini_calls": exammodel.GEMINI_CALLS,
+                "network_used": exammodel.NETWORK_USED,
+                "reason": exam_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────

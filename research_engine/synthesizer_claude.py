@@ -45,13 +45,37 @@ from .claim_labels import LABEL_RULE_PROMPT
 from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
+from .lab import MAX_AUDIT_LIMIT_LINES as LAB_MAX_AUDIT_LIMIT_LINES
+from .lab import (EXAM_MAX_AUDIT_LIMIT_LINES, exam_lab_limits,
+                  exam_lab_section)
 from .lab import lab_limits, lab_report_section
 from .craft import craft_limits, craft_section
 from .media_study import media_limits, media_section
 from .listener_study import (MAX_AUDIT_LIMIT_LINES
                             as LISTENER_MAX_AUDIT_LIMIT_LINES)
 from .listener_study import listener_limits, listener_section
-from .rejects import reject_limits, reject_section
+from .music_study import (MAX_AUDIT_LIMIT_LINES
+                          as MUSIC_MAX_AUDIT_LIMIT_LINES)
+from .music_study import music_limits, music_section
+from .songlab import MAX_AUDIT_LIMIT_LINES as SONGLAB_MAX_AUDIT_LIMIT_LINES
+from .songlab import songlab_limits, songlab_section
+from .mood_lexicon import MAX_AUDIT_LIMIT_LINES as MOOD_MAX_AUDIT_LIMIT_LINES
+from .mood_lexicon import mood_limits, mood_section
+# #178e — FARMAISH ke do contract ledger. Ye `lab` ke dono report se ALAG hain:
+# `lab_report_section` HYPOTHESIS ka test hai, `exam_lab_section` BANE HUE
+# paper/plan ka test hai, aur ye do batate hain ki JO MAANGA GAYA THA usme se
+# kya-kya asli me naapa gaya. Alias ke saath import kiya gaya hai kyunki dono
+# module me function ka naam ek jaisa (`section_lines`/`limits`) hai — bina
+# alias ek doosre ko chup-chaap dhak deta aur galat ledger chhap jaata.
+from .exammodel import (MAX_AUDIT_LIMIT_LINES
+                        as EXAM_CONTRACT_MAX_AUDIT_LIMIT_LINES)
+from .exammodel import limits as exam_contract_limits
+from .exammodel import section_lines as exam_contract_lines
+from .trademodel import (MAX_AUDIT_LIMIT_LINES
+                         as TRADE_CONTRACT_MAX_AUDIT_LIMIT_LINES)
+from .trademodel import limits as trade_contract_limits
+from .trademodel import section_lines as trade_contract_lines
+from .rejects import reject_limits, reject_section, unmeasured_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
@@ -183,6 +207,19 @@ _WHY_DISAGREE = {
                 "usko sahi maan lena bhi theek nahi — dekhna padta hai ki data "
                 "aur method kaisa tha."),
 }
+
+
+# #178e — contract ledger ki line-list se `###` block. `exammodel.section_lines`
+# aur `trademodel.section_lines` khud apna heading pehli line me dete hain, aur
+# farmaish us lane ki na ho (ya text hi na bana ho) to KHAALI list dete hain —
+# isliye yahan koi apna heading nahi lagaya jaata aur khaali list par khaali
+# string wapas jaati hai. Nateeja: song/science run me ye block chhapta hi
+# nahi, aur "contract naapa gaya" ka jhootha ishaara kabhi nahi banta.
+def _contract_block(lines: Optional[List[str]]) -> str:
+    rows = [str(line) for line in (lines or [])]
+    if not rows:
+        return ""
+    return "\n".join(rows).strip()
 
 
 class FinalSynthesizer:
@@ -1497,7 +1534,11 @@ Ab jawab likho:"""
                        reject_report: Optional[Dict] = None,
                        craft_report: Optional[Dict] = None,
                        media_report: Optional[Dict] = None,
-                       listener_report: Optional[Dict] = None) -> str:
+                       listener_report: Optional[Dict] = None,
+                       music_report: Optional[Dict] = None,
+                       exam_lab_report: Optional[Dict] = None,
+                       exam_contract_report: Optional[Dict] = None,
+                       trade_contract_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1616,7 +1657,10 @@ Ab jawab likho:"""
         # #116 — LAB ki seema NAAPI hui hai: kitne test pass/fail hue aur kaunsa
         # test data ke bina chala hi nahi. Ye line general disclaimer nahi hai,
         # isliye ye us run ke asli nateeje se banti hai.
-        for lab_line in lab_limits(lab_report)[:4]:
+        # Chhat #155e me `lab.MAX_AUDIT_LIMIT_LINES` se aane lagi: INSAAN par
+        # naapi jaane wali seema list me sabse aakhir me judti hai, aur purani
+        # `[:4]` par theek wahi line kat jaati thi.
+        for lab_line in lab_limits(lab_report)[:LAB_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {lab_line}")
         # #117 — reject ki ginti bhi audit me. "Kitni hataayi, kis wajah se,
         # kitni bina naap ke nikli" — teesri line hi wo bug pakadti hai jisme
@@ -1652,6 +1696,71 @@ Ab jawab likho:"""
         for listener_line in listener_limits(
                 listener_report)[:LISTENER_MAX_AUDIT_LIMIT_LINES]:
             tail.append(f"- {listener_line}")
+        # #140 — MUSIC STUDY ki apni naapi hui seema (kitni cited music-research
+        # padhi gayi, kaunse khaane khaali reh gaye, kitne number sirf source ke
+        # kahe hue the, aur ye ki koi dhun na bani na suni na bajaakar test hui).
+        # Ye listener/craft ki ginti me nahi ghulti — warna "chaar khaane likh
+        # diye" aur "unke peeche padha hua kuch hai" ek dikhne lagte, jo jhooth
+        # hai. Ceiling module se aati hai (`MAX_AUDIT_LIMIT_LINES`), yahan haath
+        # se likhi hui ginti nahi: nayi seema-line jud jaaye to purani kat kar
+        # audit chup-chaap jhootha ho jaata.
+        for music_line in music_limits(
+                music_report)[:MUSIC_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {music_line}")
+        # #141 — SONG LAB ki seema. Ye craft ki seema se alag hai: wahan "kya
+        # naapa gaya" tha, yahan "khud ke test ka matlab kitna hai" — aur jawab
+        # har haalat me ye rehta hai ki TESTED_PASS achha gaana hone ka saboot
+        # nahi, hataayi gayi line "kharaab" hone ka saboot nahi, aur bhaav ka
+        # test shabd se hua hai dil se nahi. Ceiling module se aati hai, haath se
+        # likhi ginti se nahi — warna nayi seema-line chup-chaap kat jaayegi.
+        for songlab_line in songlab_limits(
+                craft_report)[:SONGLAB_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {songlab_line}")
+        # #149 — BHAAV KI SHABDAWALI ki seema. Ye alag se jaati hai kyunki iska
+        # jhooth alag kism ka hai: "app ne naye bhaav-shabd seekh liye" sun kar
+        # lagta hai ab bhaav ki poori samajh aa gayi. Sach ye hai ki shabd sirf
+        # utne hain jitna padha gaya, sirf gloss ke dhaanche se aaye hain, do
+        # alag source ke bina naap me lagte hi nahi, aur seekha hua shabd kisi
+        # likhi hui LINE KO HATA nahi sakta. Ceiling module se aati hai — haath
+        # se likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
+        for mood_line in mood_limits(craft_report)[:MOOD_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {mood_line}")
+        # #171e — EXAM LAB ki seema. Ye LAB ki seema (`lab_limits`) me jaan-boojh
+        # kar nahi ghulti: wahan HYPOTHESIS naapi jaati hai, yahan BANA HUA
+        # paper/plan. Ek hi ginti me daalne se "app ne apna paper khud naapa" aur
+        # "app ki hypothesis test hui" ek dikhne lagte, aur padhne wala samajhta
+        # ki paper kisi science-test se paas hua hai. Sabse bada jhooth jo yahan
+        # se rukta hai wo hai "LAB pass ho gaya = ye asli exam jaisa paper hai".
+        # Ceiling module se aati hai (`EXAM_MAX_AUDIT_LIMIT_LINES`) — haath se
+        # likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
+        for exam_line in exam_lab_limits(
+                exam_lab_report)[:EXAM_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {exam_line}")
+        # #178e — FARMAISH ke contract ki seema. Ye teen aur ginti me jaan-boojh
+        # kar nahi ghulti: `lab_limits` HYPOTHESIS ke test ki seema hai,
+        # `exam_lab_limits` BANE HUE paper/plan ke test ki seema hai, aur ye do
+        # batati hain ki JO MAANGA GAYA THA uska naap kahan tak ja hi nahi
+        # sakta (app exam ki authority nahi hai, paper sirf practice ka hai,
+        # backtest bhavishya ka vaada nahi, ye nivesh ki salah nahi). Ek hi
+        # list me daalne se "app ne apna test paas kar liya" aur "farmaish ka
+        # ye hissa naapa hi nahi ja saka" ek jaise dikhne lagte — sabse bada
+        # jhooth jo yahan se rukta hai. Chhat dono module se aati hai (exam ka
+        # contract 10, trade ka 8) — haath se likhi ginti se nahi, warna nayi
+        # seema-line chup-chaap kat kar audit jhootha ho jaata. Farmaish us
+        # lane ki na ho to `not_asked` record aata hai — usme `checks` hi nahi
+        # hota, aur tab ye seema chhapti hi nahi (warna gaane ke jawab me exam
+        # ki paanch seema chipak jaati, jo padhne wale ko bewakoof banata hai).
+        # Dhyaan: in dono module ka `limits()` khud gate NAHI karta (bina report
+        # bhi pakki line deta hai) — isliye gate yahan lagta hai.
+        if (exam_contract_report or {}).get("checks"):
+            for exam_contract_line in exam_contract_limits(
+                    exam_contract_report)[:EXAM_CONTRACT_MAX_AUDIT_LIMIT_LINES]:
+                tail.append(f"- {exam_contract_line}")
+        if (trade_contract_report or {}).get("checks"):
+            for trade_contract_line in trade_contract_limits(
+                    trade_contract_report
+            )[:TRADE_CONTRACT_MAX_AUDIT_LIMIT_LINES]:
+                tail.append(f"- {trade_contract_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1905,7 +2014,11 @@ Ab jawab likho:"""
                  reject_report: Optional[Dict] = None,
                  craft_report: Optional[Dict] = None,
                  media_report: Optional[Dict] = None,
-                 listener_report: Optional[Dict] = None) -> str:
+                 listener_report: Optional[Dict] = None,
+                 music_report: Optional[Dict] = None,
+                 exam_lab_report: Optional[Dict] = None,
+                 exam_contract_report: Optional[Dict] = None,
+                 trade_contract_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1959,6 +2072,17 @@ Ab jawab likho:"""
                 reject_text = reject_section(reject_report)
                 if reject_text:
                     parts.append(reject_text)
+                # #155e — aur reject-list ke TURANT baad ek ALAG block: wo
+                # hypotheses jo naapi hi nahi ja sakti thin (jinka naap asli
+                # insaan ya uske body-signal par hota hai). Ye reject-list ke
+                # andar jaan-boojh kar NAHI daali gayi — "hataayi gayi" aur
+                # "yahan naapi nahi ja sakti" do bilkul alag baatein hain, aur
+                # dono ko ek list me daalna hi jhooth hota. Ye hypotheses jawab
+                # me apni jagah par bani rehti hain; yahan sirf ye likha hai ki
+                # unke saath koi PASS/FAIL kyun nahi lagaya gaya.
+                unmeasured_text = unmeasured_section(reject_report)
+                if unmeasured_text:
+                    parts.append(unmeasured_text)
                 # #121 — CRAFT: agar is run me kuch BANAYA gaya tha (gaana/
                 # kavita/letter...), to us draft ka naapa hua record bhi yahin
                 # `###` block me aata hai. Ye "acha bana hai" nahi kehta —
@@ -1967,6 +2091,16 @@ Ab jawab likho:"""
                 craft_text = craft_section(craft_report)
                 if craft_text:
                     parts.append(craft_text)
+                # #141 — aur uske TURANT baad SONG LAB: app ne khud us gaane ko
+                # chaar alag naap se test kiya, kaunsi line kis naapi hui wajah
+                # se hataayi (ya kyun NAHI hataayi ja saki), aur hataane ke baad
+                # poore draft ki naap dobara chali. Ye craft ke dhaanche wale
+                # naap ki jagah nahi leta — craft "kya bana" batata hai, SONG LAB
+                # "usko khud test karke kya nikla" batata hai. Gaane ke alawa
+                # kisi farmaish par yahan kuch chhapta hi nahi.
+                songlab_text = songlab_section(craft_report)
+                if songlab_text:
+                    parts.append(songlab_text)
                 # #133 — MEDIA: user ke video/audio ke likhit transcript me se
                 # kya padha gaya, har line ke saath samay/locator. Ye craft ke
                 # block ki jagah nahi leta — wo kitaab/paper se aata hai, ye
@@ -1989,6 +2123,63 @@ Ab jawab likho:"""
                 listener_text = listener_section(listener_report)
                 if listener_text:
                     parts.append(listener_text)
+                # #140 — aur uske SAATH music direction ke peeche padhi hui
+                # research: kaunsi chaal/scale/vaadya/aawaz/arrangement kis
+                # bhaav ke saath jodi jaati hai, har baat apne [source_id] ke
+                # saath. Ye songcraft ke "chaar khaane likhe gaye" naap ki jagah
+                # nahi leta aur listener/craft ki ginti me nahi ghulta. Isme
+                # source ka BPM/key sirf SOURCE-REPORTED likha jaata hai — app
+                # khud koi number tay nahi karta, aur dhun banti hi nahi.
+                music_text = music_section(music_report)
+                if music_text:
+                    parts.append(music_text)
+                # #149 — BHAAV KI SHABDAWALI: mood ke kaunse naye shabd PADHI
+                # HUI source se seekhe gaye (har shabd ke saath source id), aur
+                # kitni jodiyaan kis naapi hui wajah se chhod di gayi. Ye
+                # listener/music block ki jagah nahi leta: wo "bhaav kaise kaam
+                # karta hai" batate hain, ye sirf "kaunsa shabd kis bhaav ka
+                # ishaara hai" batata hai. Do saaf sach yahin likhe jaate hain —
+                # shabd mil jaana feeling ka saboot nahi, aur seekha hua shabd
+                # kisi likhi hui line ko HATA nahi sakta. Kuch seekha na gaya ho
+                # to yahan kuch chhapta hi nahi.
+                mood_text = mood_section(craft_report)
+                if mood_text:
+                    parts.append(mood_text)
+                # #171e — EXAM LAB: agar is run me paper/plan banaya gaya tha to
+                # app ne usko KHUD naapa (syllabus coverage, difficulty ka mix,
+                # ek jaise sawaal, ginti wale sawaal ka chalna, plan ka time
+                # budget). Ye LAB block ki jagah nahi leta — wo hypothesis ka
+                # test hai, ye BANE HUE paper/plan ka. Aur ye "asli exam jaisa
+                # hai" kabhi nahi kehta: har verdict ke saath likha hota hai ki
+                # paper practice ke liye hai aur difficulty ka naap proxy hai.
+                # Exam/padhai ki farmaish na ho to yahan kuch chhapta hi nahi.
+                exam_lab_text = exam_lab_section(exam_lab_report)
+                if exam_lab_text:
+                    parts.append(exam_lab_text)
+                # #178e — FARMAISH ka contract ledger. Ye upar ke dono LAB block
+                # se ALAG cheez hai aur unki jagah nahi le sakta:
+                #   * `lab_report_section` = app ki HYPOTHESIS ka test,
+                #   * `exam_lab_section`   = BANE HUE paper/plan ka test,
+                #   * ye do              = JO MAANGA GAYA THA usme se kya-kya
+                #                          asli me likha aur naapa gaya.
+                # Teeno ko ek jagah ghol dene se "app ne khud test paas kar
+                # liya" aur "farmaish ka aadha hissa naapa hi nahi gaya" ek
+                # jaise dikhne lagte — isliye heading, shabd aur ginti alag
+                # rakhi gayi hain (heading module ke andar se aati hai, yahan
+                # se nahi). Dono ledger khud band ho jaate hain: exam ki
+                # farmaish na ho to `exammodel.gate` `not_asked` deta hai aur
+                # `section_lines` khaali list — matlab gaane ya science ke
+                # jawab me yahan se ek shabd bhi nahi chhapta. Isse ulta bhi
+                # sach hai: exam/trading maanga gaya ho to buri khabar (NOT
+                # MET / naapa nahi gaya) SABSE PEHLE chhapti hai.
+                exam_contract_text = _contract_block(
+                    exam_contract_lines(exam_contract_report))
+                if exam_contract_text:
+                    parts.append(exam_contract_text)
+                trade_contract_text = _contract_block(
+                    trade_contract_lines(trade_contract_report))
+                if trade_contract_text:
+                    parts.append(trade_contract_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -2007,7 +2198,11 @@ Ab jawab likho:"""
                     reject_report=reject_report,
                     craft_report=craft_report,
                     media_report=media_report,
-                    listener_report=listener_report)
+                    listener_report=listener_report,
+                    music_report=music_report,
+                    exam_lab_report=exam_lab_report,
+                    exam_contract_report=exam_contract_report,
+                    trade_contract_report=trade_contract_report)
                 parts.append(engine_text)
             else:
                 if index == 1:

@@ -99,7 +99,14 @@ class _SeriesConnector(BaseConnector):
             is_primary=True,          # provider ka apna data
             peer_reviewed=None,       # data peer-review nahi hota
             full_text_available=True,
-            read_level="full",        # series poori padhi gayi hai
+            # #186c: pehle yahan "full" likha tha — aur wo `models.py` ki
+            # READ_LEVEL_ORDER me maujood hi nahi hai. Natija naapa gaya:
+            # `Source.reading_level()` value jaisi-ki-taisi lautata hai, isliye
+            # `access_depth()` ka fallback lag kar ye series "METADATA ONLY"
+            # (content dekha hi nahi gaya) dikhti thi, aur `read_level_counts()`
+            # sirf READ_LEVEL_ORDER ke naam ginta hai — matlab poori padhi hui
+            # series ginti se hi gayab thi. Sahi naam "full_text" hai.
+            read_level="full_text",   # series poori padhi gayi hai
             series_meta=series.to_dict(),
         )
 

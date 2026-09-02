@@ -425,7 +425,7 @@ def test_keyless_provider_record_carries_the_series():
     record = result["records"][0]
     assert isinstance(record, SourceRecord)
     assert record.source_type == SourceType.DATASET
-    assert record.read_level == "full" and record.is_primary is True
+    assert record.read_level == "full_text" and record.is_primary is True
     # Peer review data par lagta hi nahi — jhoothi mohar na lage.
     assert record.peer_reviewed is None
     meta = record.series_meta

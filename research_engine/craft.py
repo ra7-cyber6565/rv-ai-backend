@@ -36,7 +36,7 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
 
-from . import lang_bridge, songcraft
+from . import lang_bridge, mood_lexicon, songcraft
 
 # ── check status vocabulary (LAB se alag rakha gaya hai jaan-boojh kar) ───────
 # LAB hypothesis ke SACH ke baare me bolta hai; CRAFT sirf draft ke DHAANCHE ke
@@ -109,8 +109,82 @@ _MAKE_CUES: Tuple[str, ...] = (
     "bnaa", "banaiye", "banaye", "bnaye", "tayaar", "tayar", "draft",
     "write", "writing", "compose", "create", "make", "generate", "craft",
     "rachna", "rckhnaa", "sunao", "gao", "gaao",
+    # #186b: "tayaar" pehle se cue tha, par uski aam hindi spelling "taiyaar"
+    # nahi thi — isliye "gaana taiyaar karo" par poora CRAFT lane chup-chaap
+    # band reh jaata tha. Ye sirf SPELLING ki chhoot thi, naya matlab nahi.
+    "taiyaar", "taiyar", "tyar", "ready", "prepare",
 )
 _MAKE_SKELETONS: Tuple[str, ...] = ("bnd", "kmps", "krft", "drft", "gnrt")
+
+# ── #186b: MAANGNE wala tier (banane wale verb se ALAG) ─────────────────────
+# Naapa gaya: "ek sad gaana chahiye" / "ek gaana de do" par `detect()` False
+# lautata tha (`reason=no_make_verb`) — matlab intel ki sabse aam hindi phrasing
+# par gaana, kavita, kahani ka poora lane (songcraft → songlab → mood_lexicon →
+# listener/music study → deliverable_guard) chalta hi nahi tha aur uski jagah
+# research aa jaati thi. Ilaaj exammodel ke naape hue do-signal gate jaisa hai:
+# CHAAHNE wala verb bhi "make" signal hai, par wo KAMZOR signal hai — isliye
+# uspar samjhaane-wale sawaal ka pehra (neeche `_EXPLAIN_CUES`) lagta hai.
+# `_MAKE_CUES` me isliye nahi daala ki dono ka farak (`make_kind`) report me
+# saaf dikhe aur pehra sirf kamzor signal par lage.
+_WANT_CUES: Tuple[str, ...] = (
+    "chahiye", "chaahiye", "chaiye", "chahie", "chahiyee", "cahiye",
+    "chahta", "chahti", "chahunga", "chahoonga", "chaahta", "chahenge",
+    "dedo", "dijiye", "dijiyega", "dena", "want", "need",
+)
+# Do shabd wale cue: nanga "do" kabhi cue nahi ban sakta ("do doston ka
+# samvaad", "solution bhi do", "do line") — isliye jodi ke roop me dekha jaata
+# hai. Ye jodi lagataar tokens par milti hai.
+_WANT_PHRASES: Tuple[Tuple[str, ...], ...] = (
+    ("de", "do"), ("de", "dena"), ("de", "dijiye"), ("de", "doge"),
+    ("chahiye", "tha"),
+)
+
+# ── #186f: WANT tier ki naapi hui bachi hui seema (jaan-boojh kar) ───────────
+# Naapa gaya: "Kabir ki kavita chahiye" ab `is_request=True form=poem
+# make_kind=want` deta hai — yaani MAUJOOD rachna maangne wali farmaish naya
+# likhne wali farmaish jaisi padhi jaati hai. Ye #186b ke want-tier ke saath
+# aayi hai aur ye galat hai.
+#
+# Ise "<anjaan shabd> ki/ka <form>" par band karna aasan tha, par wo naap ke
+# baad chhod diya gaya: "barish ki kavita chahiye" ki shakal bilkul wahi hai
+# aur wo ASLI banane ki farmaish hai. Un dono ko shabd-list ke bina alag karna
+# aaj nahi ho sakta, aur galat band karna intel ki saaf shart todta hai —
+# "maanga hua gaana kabhi chup-chaap gayab na ho" (#155b). Do buraiyon me:
+#   * galat BAND karna  → maangi hui rachna banti hi nahi (chup-chaap nuksaan)
+#   * galat KHULA rakhna → app apni rachna likh deta hai, aur `deliverable_guard`
+#                          + label saaf likhte hain ki ye APP ne likhi hai
+# doosri buraai chhoti hai, isliye wahi chuni gayi. Yahi faisla #186e me bhi
+# hua tha (`songcraft.LYRICS_HUNT_KNOWN_LIMIT`) — ek hi soch, do jagah.
+WANT_TIER_KNOWN_LIMIT = (
+    "maangne wala verb (chahiye/de do) MAUJOOD rachna maangne aur NAYI rachna "
+    "maangne me farak nahi kar paata — 'Kabir ki kavita chahiye' bhi banane "
+    "wali farmaish padhi jaati hai. Ise band karne se 'barish ki kavita "
+    "chahiye' jaisi asli farmaish mar jaati, isliye khula rakha gaya hai aur "
+    "bani hui cheez par 'app ne likhi' ka label lagta hai.")
+
+# ── #186b: samjhaane wale sawaal ka pehra ───────────────────────────────────
+# Naapa gaya: "gaana kaise likhte hain" aur "gaana banane ka tarika batao" par
+# `detect()` True (form=song) de raha tha — yaani app tarika samjhane ki jagah
+# gaana likh deta. Wajah: `_cue_hit` ka prefix niyam ("likhte" → cue "likh").
+# Isliye do alag darje ban gaye:
+#   * SEEDHA hukum (token cue ke barabar: "likho", "banao", "likh do") — ispar
+#     pehra NAHI, warna "ek gaana likho aur batao kya soch ke likha" toot jaata.
+#   * DHALA hua roop (prefix/skeleton se mila: "likhte", "banane") aur MAANGNE
+#     wala verb — ye kamzor hain, inpar knowledge-frame ka pehra lagta hai.
+# Ye list poori nahi hai aur ye baat likhi ja rahi hai (test isi ko pin karta).
+EXPLAIN_CUE_LIST_IS_NOT_EXHAUSTIVE = True
+_EXPLAIN_CUES: Tuple[str, ...] = (
+    "matlab", "mtlb", "arth", "meaning", "means", "explain", "explanation",
+    "samjhao", "samjhaao", "samjha", "samjhaiye", "samjao", "samjhna",
+    "batao", "bata", "btao", "bataiye", "bataye", "batayen",
+    "kaise", "kese", "kaisa", "kaisi", "how", "kyun", "kyu", "kyon", "why",
+    "tarika", "tareeka", "tarike", "trika", "method", "process",
+    "baare", "bare", "about", "regarding",
+    "sikhao", "sikhaao", "sikhna", "sikhu", "sikhaiye", "seekhna", "seekhu",
+    "jankari", "jaankari", "information", "info", "itihas", "history",
+    "farak", "fark", "difference", "antar", "analysis", "review", "research",
+    "tips", "guide", "niyam", "rules", "theory", "concept",
+)
 
 
 @dataclass(frozen=True)
@@ -256,6 +330,34 @@ def _romans(text: str) -> List[str]:
         return re.findall(r"[a-z0-9]+", str(text or "").lower())
 
 
+def _cue_find(tokens: Sequence[str], romans: Sequence[str],
+              skels: Sequence[str] = ()) -> Tuple[str, str]:
+    """
+    `_cue_hit` ka wahi kaam, par ye batata bhi hai KAISE mila.
+
+    Wapas `(cue, kind)` — kind = "exact" (token bilkul cue hai), "prefix"
+    (token cue se shuru hota hai: "likhte" ← "likh"), "skeleton", ya `("", "")`.
+    Ye farak #186b me zaroori hua: seedha hukum aur dhala hua roop dono ek hi
+    cue par mil sakte hain, par bharosa dono ka barabar nahi hai.
+    """
+    for want in romans:
+        for tok in tokens:
+            if tok == want:
+                return want, "exact"
+            if len(want) >= 4 and tok.startswith(want):
+                return want, "prefix"
+    for want in skels:
+        if len(want) < _MIN_CUE_SKELETON:
+            continue
+        for tok in tokens:
+            try:
+                if lang_bridge.skeleton(tok) == want:
+                    return want, "skeleton"
+            except Exception:
+                continue
+    return "", ""
+
+
 def _cue_hit(tokens: Sequence[str], romans: Sequence[str],
              skels: Sequence[str] = ()) -> str:
     """
@@ -266,32 +368,101 @@ def _cue_hit(tokens: Sequence[str], romans: Sequence[str],
     par ittefaq ho jaata hai: "gaana" ka skeleton "gn" hai, aur "gyan"/"gaon"
     ka bhi wahi).
     """
-    for want in romans:
+    return _cue_find(tokens, romans, skels)[0]
+
+
+def _phrase_hit(tokens: Sequence[str],
+                phrases: Sequence[Sequence[str]]) -> str:
+    """Lagataar tokens par do-shabd ki jodi — mile to "de do" jaisa text."""
+    for phrase in phrases:
+        span = list(phrase)
+        if not span:
+            continue
+        limit = len(tokens) - len(span)
+        for start in range(0, max(0, limit) + 1):
+            if list(tokens[start:start + len(span)]) == span:
+                return " ".join(span)
+    return ""
+
+
+# ── ek-matlab-se-zyada wale cue: sandarbh ke bina cue nahi ───────────────────
+# Kuch shabd form ka naam bhi hain aur aam kaam ka shabd bhi. "cover" ka matlab
+# "cover letter" bhi hota hai aur "syllabus cover karna" bhi. #171c me naapa
+# gaya: "class 10 maths ka syllabus cover karne ka plan banao" is ek shabd se
+# LETTER ki farmaish ban jaata tha — padhai ka plan creative patra ban jaata.
+# Ilaaj cue ko HATAANA nahi hai (asli cover-letter ki farmaish zinda rehni
+# chahiye), cue ko saath me apna sandarbh maangna hai. Ye list poori nahi hai
+# aur ye baat likhi ja rahi hai.
+CONTEXT_ROMAN_LIST_IS_NOT_EXHAUSTIVE = True
+_CONTEXT_ROMANS: Dict[str, Tuple[str, ...]] = {
+    "cover": ("letter", "ltr", "patra", "ptr", "chitthi", "chithi", "mail",
+              "email", "application", "aplkn", "arji", "arzi", "resume", "cv",
+              "job", "naukri", "internship", "intern", "vacancy"),
+}
+
+
+def _context_ok(tokens: Sequence[str], cue: str) -> bool:
+    """Cue ko sandarbh chahiye ya nahi — aur mila ya nahi."""
+    wanted = _CONTEXT_ROMANS.get(str(cue or "").lower())
+    if not wanted:
+        return True
+    for want in wanted:
         for tok in tokens:
             if tok == want or (len(want) >= 4 and tok.startswith(want)):
-                return want
-    for want in skels:
-        if len(want) < _MIN_CUE_SKELETON:
-            continue
-        for tok in tokens:
-            try:
-                if lang_bridge.skeleton(tok) == want:
-                    return want
-            except Exception:
-                continue
-    return ""
+                return True
+    return False
+
+
+def explain_intent(question: str) -> str:
+    """Sawaal SAMJHAANE ka hai? — mila hua cue lauta do, warna "" (khaali)."""
+    return _cue_hit(_romans(question), _EXPLAIN_CUES)
+
+
+def _make_signal(tokens: Sequence[str]) -> Dict[str, str]:
+    """
+    Banane/maangne ka signal — aur uska darja.
+
+    Wapas: `cue` (mila hua text), `kind` ("make"/"want"/""), `strong`
+    ("yes"/"no": seedha hukum hai ya kamzor/dhala hua roop), `raw` (kaise mila).
+    Kram maayne rakhta hai — banane wala verb pehle, maangne wala baad me.
+    """
+    cue, raw = _cue_find(tokens, _MAKE_CUES, _MAKE_SKELETONS)
+    if cue:
+        return {"cue": cue, "kind": "make",
+                "strong": "yes" if raw == "exact" else "no", "raw": raw}
+    phrase = _phrase_hit(tokens, _WANT_PHRASES)
+    if phrase:
+        return {"cue": phrase, "kind": "want", "strong": "no",
+                "raw": "phrase"}
+    cue, raw = _cue_find(tokens, _WANT_CUES)
+    if cue:
+        return {"cue": cue, "kind": "want", "strong": "no", "raw": raw}
+    return {"cue": "", "kind": "", "strong": "no", "raw": ""}
 
 
 def detect(question: str) -> Dict[str, Any]:
     """
     Sawaal "kuch bana kar do" hai ya nahi — aur kya banana hai.
 
-    Do cheezein DONO chahiye: ek banane wala verb (likho/banao/write) aur ek
-    kism ka naam (gaana/kavita/letter). Sirf "kavita" par ye stage nahi chalta —
-    "Kabir ki kavita ke baare me batao" research hai, farmaish nahi.
+    Do cheezein DONO chahiye: ek banane/maangne wala signal (likho/banao/write
+    ya chahiye/de do) aur ek kism ka naam (gaana/kavita/letter). Sirf "kavita"
+    par ye stage nahi chalta — "Kabir ki kavita ke baare me batao" research hai,
+    farmaish nahi.
+
+    #186b ka teesra darja: KAMZOR signal (maangne wala verb, ya prefix se mila
+    dhala hua roop jaise "likhte"/"banane") par samjhaane wale sawaal ka pehra
+    lagta hai — "gaana kaise likhte hain" tarika poochh raha hai, gaana nahi
+    maang raha. SEEDHE hukum ("likho"/"banao") par ye pehra nahi lagta.
     """
     tokens = _romans(question)
-    make = _cue_hit(tokens, _MAKE_CUES, _MAKE_SKELETONS)
+    signal = _make_signal(tokens)
+    make = signal["cue"]
+    make_kind = signal["kind"]
+    explain = ""
+    if make and signal["strong"] != "yes":
+        explain = _cue_hit(tokens, _EXPLAIN_CUES)
+        if explain:
+            make, make_kind = "", ""
     hit_form: Optional[Form] = None
     form_cue = ""
     for form in FORMS:
@@ -300,16 +471,26 @@ def detect(question: str) -> Dict[str, Any]:
         # me chala jaaye, to bhi ye stage us par nahi chalega.
         if cue and cue.lower() in PROSE_DELIVERABLE_WORDS:
             cue = ""
+        # Teesri deewar: do-matlab wala cue apna sandarbh laaye, warna cue nahi.
+        if cue and not _context_ok(tokens, cue):
+            cue = ""
         if cue:
             hit_form, form_cue = form, cue
             break
     if not make or hit_form is None:
+        if not make:
+            # Imaandaar farak: cue tha hi nahi, ya tha par samjhaane wale
+            # sawaal ne roka. Dono ek naam se nahi likhe jaate.
+            reason = "explain_intent" if explain else "no_make_verb"
+        else:
+            reason = "no_form_word"
         return {"is_request": False, "form": "", "label": "",
-                "make_cue": make, "form_cue": form_cue,
-                "reason": "no_make_verb" if not make else "no_form_word"}
+                "make_cue": make, "make_kind": make_kind,
+                "form_cue": form_cue, "explain_cue": explain,
+                "reason": reason}
     return {"is_request": True, "form": hit_form.form_id,
-            "label": hit_form.label, "make_cue": make, "form_cue": form_cue,
-            "reason": ""}
+            "label": hit_form.label, "make_cue": make, "make_kind": make_kind,
+            "form_cue": form_cue, "explain_cue": explain, "reason": ""}
 
 
 # ── matra ka hisaab (laghu = 1, guru = 2) ────────────────────────────────────
@@ -748,8 +929,20 @@ def _cue_present(needle: str, *haystacks: str) -> bool:
     return any(pattern.search(h or "") for h in haystacks)
 
 
-def mood_hints(text: str) -> List[str]:
-    """Text me kaunse bhaav ke shabd mile (naam se — adhoori list se)."""
+def mood_hints(text: str,
+               learned: Sequence[Sequence[str]] = ()) -> List[str]:
+    """
+    Text me kaunse bhaav ke shabd mile (naam se — adhoori list se).
+
+    `learned` = `mood_lexicon.confirmed_pairs(...)` jaisa `(label, cue)` ka
+    jodaa: PADHI HUI source se seekhe shabd. Curated `MOODS` ka loop pehle
+    chalta hai aur usme se kuch HATAYA nahi gaya — learned cue sirf JODTE hain.
+
+    #149 ka sabse zaroori niyam: seekha hua shabd kabhi kisi line ko HATA nahi
+    sakta. Isliye jo raaste "ulta bhaav" dhoondhte hain (`_check_mood_conflict`,
+    `songlab` ka `line_mood_conflict`) wo is function ko `learned` ke BINA
+    bulate hain — unke liye curated list hi ek maatr adhikaar hai.
+    """
     plain = re.sub(r"\s+", " ", str(text or "").lower())
     roman = re.sub(r"\s+", " ", lang_bridge.roman(str(text or "")).lower())
     out: List[str] = []
@@ -758,6 +951,15 @@ def mood_hints(text: str) -> List[str]:
             if _cue_present(variant.lower(), plain, roman):
                 out.append(label)
                 break
+    for pair in learned or ():
+        try:
+            label, cue = str(pair[0] or ""), str(pair[1] or "")
+        except (IndexError, TypeError):
+            continue
+        if not label or not cue or label in out:
+            continue
+        if _cue_present(cue.lower(), plain, roman):
+            out.append(label)
     return out
 
 
@@ -796,6 +998,14 @@ class Spec:
     rhyme_required: bool = False
     hook_required: bool = False
     mood_asked: List[str] = field(default_factory=list)
+    # #149: PADHI HUI source se seekhe shabd ki wajah se jo bhaav EXTRA mile.
+    # Ye alag field isliye hai ki `mood_asked` khud na chaudi ho — warna
+    # `songlab._opposite_moods(spec.mood_asked)` bhi chaudi ho jaati aur ek
+    # seekha hua shabd line HATANE lagta. Wo hone nahi dena hai.
+    mood_asked_learned: List[str] = field(default_factory=list)
+    # `mood_lexicon.confirmed_pairs(...)` ka (label, cue) jodaa — do alag
+    # source se pakka hua ho tabhi yahaan aata hai.
+    mood_learned: List[List[str]] = field(default_factory=list)
     # #128: style/register/bhasha ki MAANG (songcraft.StyleAsk). Ye "us style ka
     # gyaan aa gaya" nahi hai — sirf "user ne kis cheez ka naam liya".
     style: Any = None
@@ -813,6 +1023,8 @@ class Spec:
             "rhyme_required": self.rhyme_required,
             "hook_required": self.hook_required,
             "mood_asked": list(self.mood_asked),
+            "mood_asked_learned": list(self.mood_asked_learned),
+            "mood_learned": [list(pair) for pair in self.mood_learned],
             "style": (self.style.to_dict()
                       if hasattr(self.style, "to_dict") else {}),
             "notes": list(self.notes),
@@ -824,13 +1036,19 @@ class Spec:
 
 
 def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
-               form: Optional[Form] = None) -> Optional[Spec]:
+               form: Optional[Form] = None,
+               mood_ledger: Optional[Dict[str, Any]] = None) -> Optional[Spec]:
     """
     Sawaal se SPEC banao — sirf jo SAAF maanga gaya ho.
 
     "shayad 8 line chahta hoga" wala andaza nahi lagate (requested.py ka wahi
     niyam). Jo user ne nahi bataya, uska target 0 rehta hai aur us par check
     `NOT_MEASURED` jaata hai — chuppi ko "sab theek" nahi padha jaana chahiye.
+
+    `mood_ledger` = `mood_lexicon.learn(sources)` ka report. Isse SIRF EXTRA
+    bhaav mil sakte hain (`spec.mood_asked_learned`); `spec.mood_asked` curated
+    list se hi banta hai, kyunki ulta-bhaav aur line-hataane wale raaste usi ko
+    padhte hain.
     """
     found = detection if detection is not None else detect(question)
     if not found.get("is_request"):
@@ -873,8 +1091,19 @@ def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
         spec.notes.append("Sawaal roman me hai, isliye script ka check nahi "
                           "chalega (Devanagari ya Hinglish — dono chal sakte).")
 
+    spec.mood_learned = [list(pair)
+                         for pair in mood_lexicon.confirmed_pairs(mood_ledger)]
     spec.mood_asked = mood_hints(text)
-    if not spec.mood_asked:
+    spec.mood_asked_learned = [mood
+                               for mood in mood_hints(text,
+                                                      learned=spec.mood_learned)
+                               if mood not in spec.mood_asked]
+    if spec.mood_asked_learned:
+        spec.notes.append(
+            "Kuch bhaav padhi hui source ke shabd se mile (%s) — inse mood "
+            "MET ho sakta hai, par inse koi line HATAYI nahi jaayegi."
+            % ", ".join(spec.mood_asked_learned))
+    if not spec.mood_asked and not spec.mood_asked_learned:
         spec.notes.append("User ne mood/bhaav naam se nahi bataya — mood ka "
                           "check nahi chalega.")
     if spec.line_target and spec.line_target < picked.min_lines:
@@ -882,6 +1111,11 @@ def build_spec(question: str, detection: Optional[Dict[str, Any]] = None,
                           "user ki ginti hi maani gayi.")
     # #128: style/bhasha/lehja ki maang padho (ADDRESSING only). Isse koi
     # MET/NOT_MET faisla nahi hota — sirf "user ne kya maanga" record hota hai.
+    # #149: yahaan JAAN-BOOJH kar sirf `mood_asked` jaata hai. `songcraft`
+    # `moods` ko `ask.moods` me rakhta hai aur `context_facts` usko
+    # `moods_asked` ke fallback ki tarah use karta hai — aur wahi `moods_asked`
+    # `_check_mood_conflict` ka ULTA-bhaav set banata hai. Seekha hua shabd
+    # wahaan pahunchne se line hataane ka khatra ban jaata.
     spec.style = songcraft.style_of(text, form=picked.form_id,
                                     moods=spec.mood_asked)
     for line in getattr(spec.style, "notes", ()) or ():
@@ -942,12 +1176,17 @@ def _words(text: str) -> List[str]:
             if w.strip(_EDGE_PUNCT)]
 
 
-def draft_facts(draft: str) -> Dict[str, Any]:
+def draft_facts(draft: str,
+                learned: Sequence[Sequence[str]] = ()) -> Dict[str, Any]:
     """
     Draft ke saare kachche number ek jagah — checks isi par chalte hain.
 
     Ek hi jagah se number nikaalne ka fayda: report me jo number dikhta hai wahi
     check ne bhi use kiya. Do jagah alag-alag hisaab = do alag sach.
+
+    #149: `moods` HAMESHA curated list se hi banti hai — ulta-bhaav (`songcraft.
+    _check_mood_conflict`) aur line-DROP wale raaste isi key ko padhte hain.
+    Seekhe shabd sirf `moods_wide` me jaate hain, jo positive naap padhta hai.
     """
     lines = lines_of(draft)
     stanzas = stanzas_of(draft)
@@ -962,6 +1201,8 @@ def draft_facts(draft: str) -> Dict[str, Any]:
         roman_tokens = [w.lower() for w in words]
     unique_ratio = (round(len(set(roman_tokens)) / len(roman_tokens), 4)
                     if roman_tokens else 0.0)
+    curated_moods = mood_hints(draft)
+    wide_moods = mood_hints(draft, learned=learned)
     return {
         "lines": lines,
         "line_count": len(lines),
@@ -977,7 +1218,10 @@ def draft_facts(draft: str) -> Dict[str, Any]:
         "cliches": cliches_in(draft),
         "appeal_claims": appeal_claims_in(draft),
         "script": lang_bridge.dominant_script(draft),
-        "moods": mood_hints(draft),
+        "moods": curated_moods,
+        "moods_wide": wide_moods,
+        "moods_learned_only": [mood for mood in wide_moods
+                               if mood not in curated_moods],
     }
 
 
@@ -1192,15 +1436,24 @@ def _check_appeal_claim(spec: Spec, facts: Dict[str, Any]) -> Check:
 
 
 def _check_mood_words(spec: Spec, facts: Dict[str, Any]) -> Check:
-    if not spec.mood_asked:
+    """
+    Maanga hua bhaav draft me shabd ke roop me hai ya nahi.
+
+    #149: yahaan curated + seekhe hue, dono chalte hain — kyunki ye check
+    SIRF "mila/nahi mila" bolta hai, kisi line ko hataata nahi. Isliye padhi
+    hui source ka shabd bhi MET bana sakta hai.
+    """
+    asked = list(spec.mood_asked) + [mood for mood in spec.mood_asked_learned
+                                     if mood not in spec.mood_asked]
+    if not asked:
         return _skip("mood_words_present", "no_mood_asked",
                      "User ne bhaav naam se nahi maanga.")
-    got = facts["moods"]
-    hit = [m for m in spec.mood_asked if m in got]
+    got = facts.get("moods_wide") or facts["moods"]
+    hit = [m for m in asked if m in got]
     ok = bool(hit)
     return _check("mood_words_present", MET if ok else NOT_MET,
                   measured=", ".join(got) if got else "koi nahi",
-                  target=", ".join(spec.mood_asked),
+                  target=", ".join(asked),
                   reason="" if ok else "mood_words_missing",
                   note=("Maange gaye bhaav ke shabd draft me hain. Dhyaan do: "
                         "shabd milna \"feeling aa gayi\" nahi hota — wo naapa "
@@ -1263,16 +1516,23 @@ def measure(draft: str, spec: Optional[Spec], study: Any = None,
     if not body:
         return {"status": NO_DRAFT, "checks": [], "measured": {},
                 "note": "Naapne ke liye draft hi nahi mila."}
-    facts = draft_facts(body)
+    facts = draft_facts(body, learned=spec.mood_learned)
     # #131: gaane ke naye naap ke liye alag context (mood arc, register,
     # style-fit, music direction). Ye banane me kuch toot jaaye to bhi poora
     # naap nahi girna chahiye — us haalat me songcraft ke check khud
     # NOT_MEASURED ho jaate hain (fail-closed).
+    #
+    # #149: `stanza_moods` me seekhe shabd bhi jaate hain, kyunki `songcraft.
+    # _check_mood_spread` sirf GINTA hai ki kitne band me bhaav ka shabd hai —
+    # ye positive naap hai. `facts["moods"]` curated hi rehta hai, isliye
+    # `_check_mood_conflict` (ulta bhaav) chauda nahi hota.
     try:
         stanzas = stanzas_of(body)
         facts["songcraft"] = songcraft.context_facts(
             body, spec=spec, study=study, context=context,
-            stanza_moods=[mood_hints("\n".join(stanza)) for stanza in stanzas],
+            stanza_moods=[mood_hints("\n".join(stanza),
+                                     learned=spec.mood_learned)
+                          for stanza in stanzas],
             stanza_line_counts=[len(stanza) for stanza in stanzas],
         )
     except Exception:
@@ -1313,6 +1573,10 @@ def measure(draft: str, spec: Optional[Spec], study: Any = None,
             "cliches": facts["cliches"],
             "script": facts["script"],
             "moods_in_draft": facts["moods"],
+            "moods_in_draft_wide": list(facts.get("moods_wide") or []),
+            "moods_from_read_sources": list(
+                facts.get("moods_learned_only") or []),
+            "mood_cues_learned": [list(pair) for pair in spec.mood_learned],
             "stanza_moods": list(
                 (facts.get("songcraft") or {}).get("stanza_moods") or []),
             "guidance_source_count": int(
@@ -1373,6 +1637,42 @@ _VERSE_MAX_LINE_CHARS = 70
 _NOT_VERSE_RE = re.compile(r"^\s*(?:#{1,6}\s|>|\||\d{1,2}[.)]\s|[-*•]\s|\*\*|"
                            r"https?://|Sources\b|VERIFIED\b|PARTIAL\b)")
 
+# Gaana antare me likha jaata hai aur antare ke BEECH ek khaali line hoti hai.
+# Pehle koi bhi khaali line run tod deti thi, isliye poore gaane me se sirf
+# PEHLA antara naapa jaata tha — aise haal me "antare-dar-antare bhaav ka arc"
+# jaisa test apne hi naam ka mazaak ban jaata hai. Ab ek khaali line antare ka
+# gap maani jaati hai; do ya zyada khaali line matlab "hissa yahan khatam".
+_VERSE_STANZA_GAP_LINES = 1
+
+# Gap ke BAAD aane wali pehli line par ek extra shart hai: agar wo samjhaane
+# wali prose lagti hai (poore vaakya ka viraam + kaafi shabd), to hum use
+# antara nahi maante aur hissa wahin khatam kar dete hain. Wajah wahi purani
+# hai — audit/explanation ka text naapna sabse bada khatra hai, kyunki tab
+# number sahi hote hain par kisi galat cheez ke. Ye shart sirf gap ke baad
+# lagti hai, antare ke andar ki line par nahi — isliye ek-antare wale draft ka
+# naap pehle jaisa hi rehta hai.
+_PROSE_AFTER_GAP_RE = re.compile(r"[.!?:;]\s*$")
+_PROSE_AFTER_GAP_WORDS = 5
+
+# Gap ke PEHLE ka hissa bhi antara jaisa hona chahiye: kam se kam do line. Ek
+# akeli line ("ye jawab hai" jaisi bhoomika) ke baad wala gap NAHI jodta —
+# warna jawab ki bhoomika hi draft me ghus jaati aur naap galat cheez par hoti.
+# Gaane ke beech aane wali ek-line wali tek se dikkat nahi hoti, kyunki tab tak
+# chalta hua hissa do line se bada ho chuka hota hai.
+_VERSE_MIN_BRIDGE_LINES = 2
+
+
+def _verse_len(rows: Sequence[str]) -> int:
+    """Run ki lambaai = sirf asli line, gap wali khaali line nahi."""
+    return sum(1 for row in rows if str(row).strip())
+
+
+def _looks_like_prose_after_gap(line: str) -> bool:
+    text = str(line or "").strip()
+    if not _PROSE_AFTER_GAP_RE.search(text):
+        return False
+    return len(text.split()) >= _PROSE_AFTER_GAP_WORDS
+
 
 def _verse_block(text: str) -> str:
     """
@@ -1381,29 +1681,53 @@ def _verse_block(text: str) -> str:
     Ye ANDAAZA hai, isliye source `verse_shape_guess` likha jaata hai aur report
     me saaf bola jaata hai ki draft marked block me nahi tha. Heading, bullet,
     quote, link aur status shabd (VERIFIED/PARTIAL) wali line verse nahi maani
-    jaati — warna audit ka text hi naapa jaane lagta hai.
+    jaati — warna audit ka text hi naapa jaane lagta hai. Antare ke beech ki ek
+    khaali line hissa nahi todti (dekho `_VERSE_STANZA_GAP_LINES`), taaki poora
+    gaana naapa jaaye, sirf pehla antara nahi.
     """
     best: List[str] = []
     current: List[str] = []
+    blanks = 0
     for raw in str(text or "").splitlines():
         line = raw.strip()
-        ok = (line and len(line) <= _VERSE_MAX_LINE_CHARS
+        if not line:
+            if current and _verse_len(current) >= _VERSE_MIN_BRIDGE_LINES:
+                blanks += 1
+                if blanks > _VERSE_STANZA_GAP_LINES:
+                    if _verse_len(current) > _verse_len(best):
+                        best = current
+                    current, blanks = [], 0
+                continue
+            if _verse_len(current) > _verse_len(best):
+                best = current
+            current, blanks = [], 0
+            continue
+        ok = (len(line) <= _VERSE_MAX_LINE_CHARS
               and not _NOT_VERSE_RE.match(raw))
+        if ok and blanks and _looks_like_prose_after_gap(line):
+            ok = False
         if ok:
+            if current and blanks:
+                current.append("")
+            blanks = 0
             current.append(line)
             continue
-        if len(current) > len(best):
+        if _verse_len(current) > _verse_len(best):
             best = current
-        current = []
-    if len(current) > len(best):
+        current, blanks = [], 0
+    if _verse_len(current) > _verse_len(best):
         best = current
-    if len(best) < _VERSE_MIN_RUN:
+    if _verse_len(best) < _VERSE_MIN_RUN:
         return ""
-    return "\n".join(best)
+    return "\n".join(best).strip("\n")
 
 
 # ── reject + dobara likhwana (ek hi round, bounded) ─────────────────────────
 MAX_REVISION_ROUNDS = 1
+
+# SONG LAB ki note prompt me bandhi hui hain — warna ek lambe gaane ki poori
+# line-list prompt me chali jaati aur asli naap ka feedback usme dab jaata.
+MAX_LAB_NOTES_IN_PROMPT = 10
 
 
 def revision_notes(measured: Optional[Dict[str, Any]]) -> List[str]:
@@ -1419,16 +1743,27 @@ def revision_notes(measured: Optional[Dict[str, Any]]) -> List[str]:
 
 
 def revision_prompt_block(spec: Optional[Spec],
-                          measured: Optional[Dict[str, Any]]) -> str:
+                          measured: Optional[Dict[str, Any]],
+                          guidance_blocks: Sequence[str] = (),
+                          lab_notes: Sequence[str] = ()) -> str:
     """
     Dobara likhne ke liye seedha, naapa hua feedback.
 
     Isme koi "acha likho" jaisi khaali baat nahi hai — sirf wahi baat jo naapi
     ja chuki hai, number ke saath. Jo cheez naapi nahi ja sakti (pasand, viral)
     uska zikr yahan bhi nahi hota.
+
+    `guidance_blocks` = padhi hui baat (craft-study/media/listener/music lane se
+    aaye hue block). Ye khud kabhi dobara-likhwane ki WAJAH nahi bante — wajah
+    sirf naap ka fail hona hai — par jab dobara likhwaya jaa raha ho to padhi
+    hui baat saath jaani chahiye, warna doosra draft pehle se kam padha hua
+    hoga. `lab_notes` = SONG LAB ki line-level naapi hui note.
+
+    Dono default me khaali hain, isliye purana output bilkul waisa hi rehta hai.
     """
     notes = revision_notes(measured)
-    if spec is None or not notes:
+    lab = [str(note).strip() for note in (lab_notes or []) if str(note).strip()]
+    if spec is None or not (notes or lab):
         return ""
     lines = ["DOBARA LIKHO — pehle draft ka naap poora nahi utra.", ""]
     lines.append("Kya banana hai: " + spec.label)
@@ -1450,10 +1785,21 @@ def revision_prompt_block(spec: Optional[Spec],
     if spec.mood_asked:
         lines.append("Bhaav: " + ", ".join(spec.mood_asked))
     lines.append("")
-    lines.append("Naap me ye cheezein pass nahi hui:")
-    for note in notes:
-        lines.append("- " + note)
-    lines.append("")
+    if notes:
+        lines.append("Naap me ye cheezein pass nahi hui:")
+        for note in notes:
+            lines.append("- " + note)
+        lines.append("")
+    if lab:
+        lines.append("SONG LAB ki line-level naap (har baat naapi hui hai):")
+        for note in lab[:MAX_LAB_NOTES_IN_PROMPT]:
+            lines.append(note if note.startswith(("-", "*")) else "- " + note)
+        lines.append("")
+    for block in (guidance_blocks or []):
+        text = str(block or "").strip()
+        if text:
+            lines.append(text)
+            lines.append("")
     lines.append("Sirf naya draft bhejo, isi shakal me (koi explanation nahi):")
     lines.append("```" + DRAFT_FENCE)
     lines.append("<naya draft>")
@@ -1620,6 +1966,10 @@ def _empty_report(reason: str, note: str) -> Dict[str, Any]:
         "policy": POLICY.to_dict(),
         "songcraft": _songcraft_block(None),
         "songcraft_policy": songcraft.policy(),
+        # Shape dono raaston me ek jaisi rahe — warna padhne wale ko "key hi
+        # nahi hai" aur "stage chala hi nahi" me farq karna padta.
+        "song_lab": {"ran": False, "status": NOT_RUN,
+                     "reason": "craft_stage_not_run"},
         "cannot_measure": list(CANNOT_MEASURE)
                           + list(songcraft.CANNOT_MEASURE_EXTRA),
         "disclaimer": CRAFT_DISCLAIMER,
@@ -1628,9 +1978,57 @@ def _empty_report(reason: str, note: str) -> Dict[str, Any]:
     }
 
 
+def _songlab_module() -> Any:
+    """
+    songlab ko function ke andar import kiya jaata hai — jaan-boojh kar.
+
+    songlab khud craft ko import karta hai (matra, cliché, score, line ki
+    definition — sab ek hi jagah se aane chahiye). Top par import karne se cycle
+    ban jaata. Import na ho paaye to stage `ran: False` ke saath wajah likhta
+    hai, chup-chaap skip nahi hota.
+    """
+    try:
+        from . import songlab as _songlab
+    except Exception:
+        return None
+    return _songlab
+
+
+def _song_lab_pass(draft: str, spec: Optional[Spec], study: Any, context: str,
+                   measured: Dict[str, Any]
+                   ) -> Tuple[Dict[str, Any], str, Dict[str, Any]]:
+    """
+    SONG LAB chalao aur uska saaf kiya hua draft aage le jao.
+
+    Teen cheez wapas: lab ki report, (mumkin hai badla hua) draft, aur us draft
+    ki taaza craft naap. Gaane ke alawa kisi form par SONG LAB khud hi `NOT_RUN`
+    lauta deta hai, isliye gate do jagah nahi likha gaya.
+
+    Line hatti hai to naap DOBARA hoti hai — purani naap naye draft par chipka
+    dena sabse aasaan jhooth hota, aur wahi yahan mumkin nahi.
+    """
+    songlab = _songlab_module()
+    if songlab is None:
+        return ({"ran": False, "status": NOT_RUN,
+                 "reason": "song_lab_module_import_failed"}, draft, measured)
+    report = songlab.run_song_lab(draft, spec=spec, study=study,
+                                  context=context)
+    if not report.get("ran"):
+        return report, draft, measured
+    new_draft = str(report.get("draft_out") or "")
+    if report.get("draft_changed") and new_draft.strip():
+        new_context = (context.replace(draft, new_draft, 1)
+                       if draft and draft in context else context)
+        measured = measure(new_draft, spec, study=study, context=new_context)
+        draft = new_draft
+    return report, draft, measured
+
+
 def run_craft(question: str, answer_text: str,
               reviser: Optional[Callable[[str], str]] = None,
-              study: Any = None) -> Dict[str, Any]:
+              study: Any = None,
+              guidance_blocks: Sequence[str] = (),
+              mood_ledger: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Poora CRAFT stage: farmaish pehchaano → SPEC → draft dhoondo → naapo →
     (zaroorat par) ek baar dobara likhwao → sach ke saath lauta do.
@@ -1646,6 +2044,15 @@ def run_craft(question: str, answer_text: str,
     `study` (songcraft.study(...) ka nateeja) sirf tab kuch badalta hai jab usme
     ASLI padhi hui baat ho. Nahi diya gaya to gaane wale naye naap NOT_MEASURED
     rehte hain — "padha hi nahi" ko "theek hai" nahi likha jaata.
+
+    `guidance_blocks` = padhi hui baat ke block (craft-study / media / listener /
+    music lane se). Ye sirf DOBARA likhwane ke prompt me jaate hain; khud kabhi
+    dobara likhwane ki wajah nahi bante. Khaali chhod do to output bilkul purana
+    hi rehta hai.
+
+    `mood_ledger` = `mood_lexicon.learn(sources)` ka report (#149). Nahi diya to
+    sab kuch bilkul pehle jaisa chalta hai. Diya to sirf POSITIVE naap chaudi
+    hoti hai — kisi line ke hataane me iska koi haath nahi hota.
     """
     detection = detect(question)
     if not detection.get("is_request"):
@@ -1653,7 +2060,7 @@ def run_craft(question: str, answer_text: str,
             str(detection.get("reason") or "not_a_craft_request"),
             "Ye kuch banane ki farmaish nahi lagi, isliye CRAFT ka naap chala "
             "hi nahi.")
-    spec = build_spec(question, detection=detection)
+    spec = build_spec(question, detection=detection, mood_ledger=mood_ledger)
     if spec is None:
         return _empty_report("no_spec",
                              "Farmaish se koi naapne laayak SPEC nahi bana.")
@@ -1661,18 +2068,29 @@ def run_craft(question: str, answer_text: str,
     draft, source = extract_draft(answer_text, spec)
     first_draft = draft
     measured = measure(draft, spec, study=study, context=answer_text)
+    # SONG LAB dobara-likhwane se PEHLE chalta hai, taaki uski line-level note
+    # usi ek bounded call me jaa sake. Baad me chalane par ya to note bekaar
+    # jaati, ya doosri Gemini call lagti — dono galat.
+    lab_report, draft, measured = _song_lab_pass(draft, spec, study,
+                                                 answer_text, measured)
+    lab_notes = [str(note) for note in (lab_report.get("redraft_notes") or [])]
     revision: Dict[str, Any] = {"attempted": False, "ran": False, "rounds": 0,
                                 "kept": "pehla", "notes": [], "reason": ""}
     gemini_calls = 0
     notes = revision_notes(measured)
     revision["notes"] = notes
+    revision["lab_notes"] = lab_notes
 
-    if measured.get("status") == DRAFT_WEAK and notes:
+    # Do alag wajah, ek hi bounded call: craft ka naap fail hua, YA SONG LAB ne
+    # line-level kuch naapa hua nikala. Doosri wajah sirf gaane par aati hai.
+    if ((measured.get("status") == DRAFT_WEAK and notes) or lab_notes):
         if reviser is None:
             revision["reason"] = "reviser_not_available"
         else:
             revision["attempted"] = True
-            prompt = revision_prompt_block(spec, measured)
+            prompt = revision_prompt_block(spec, measured,
+                                           guidance_blocks=guidance_blocks,
+                                           lab_notes=lab_notes)
             new_text = ""
             try:
                 new_text = str(reviser(prompt) or "")
@@ -1697,8 +2115,13 @@ def run_craft(question: str, answer_text: str,
                 new_measured = measure(new_draft, spec, study=study,
                                        context=new_context)
                 revision["second_status"] = new_measured.get("status")
+                # Naye draft par bhi SONG LAB — "test jis draft par pass hua" aur
+                # "jo draft diya gaya" kabhi alag nahi ho sakte.
+                new_lab, new_draft, new_measured = _song_lab_pass(
+                    new_draft, spec, study, new_context, new_measured)
                 if _revision_is_better(new_measured, measured):
                     draft, source, measured = new_draft, new_source, new_measured
+                    lab_report = new_lab
                     revision["kept"] = "doosra"
                 else:
                     revision["kept"] = "pehla"
@@ -1736,6 +2159,17 @@ def run_craft(question: str, answer_text: str,
         "policy": POLICY.to_dict(),
         "songcraft": _songcraft_block(study, spec),
         "songcraft_policy": songcraft.policy(),
+        # #149: kaun se bhaav-shabd PADHI HUI source se seekhe gaye — ginti,
+        # reject ki wajah aur "feeling saabit nahi hui" ka saaf label. Poora
+        # ledger yahi baithta hai (source id ke saath), taaki synthesizer ko
+        # doosra pass na chahiye: jis ledger se naap chali usi ka record chhape.
+        "mood_lexicon": (dict(mood_ledger) if isinstance(mood_ledger, dict)
+                         else mood_lexicon.not_run(
+                             "craft ko koi mood ledger nahi diya gaya")),
+        "mood_lexicon_record": mood_lexicon.public_record(mood_ledger),
+        # SONG LAB ki poori report — line ka naap, hataai ka ledger, chaar test.
+        # Ye us draft ki hai jo `final_draft` me hai, kisi purane ki nahi.
+        "song_lab": lab_report,
         "cannot_measure": list(CANNOT_MEASURE)
                           + list(songcraft.CANNOT_MEASURE_EXTRA),
         "disclaimer": CRAFT_DISCLAIMER,

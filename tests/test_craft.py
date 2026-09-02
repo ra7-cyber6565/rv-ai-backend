@@ -730,10 +730,27 @@ def test_craft_never_borrows_lab_or_proof_words():
                                _fenced(_SONG)),
                craft.run_craft(_Q_HARD, "koi draft nahi")]
     for report in reports:
-        blob = repr(report) + craft.craft_section(report) + " ".join(
+        # SONG LAB ki report craft ke andar NESTED aati hai aur usme uske apne
+        # test-status (TESTED_PASS/...) hote hain — wo uski apni zubaan hai,
+        # craft ki udhaar li hui nahi. Isliye scan craft ke APNE hisse par hota
+        # hai, aur neeche alag se pin kiya gaya hai ki dono zubaan mix na ho.
+        own = {key: value for key, value in report.items() if key != "song_lab"}
+        blob = repr(own) + craft.craft_section(report) + " ".join(
             craft.craft_limits(report))
         for word in _LAB_WORDS:
             assert word not in blob, word
+        # craft ka apna status kabhi lab ka status nahi ban sakta
+        assert report["status"] in craft.DRAFT_STATUSES
+        for word in _LAB_WORDS:
+            assert word != report["status"]
+        for check in report.get("checks") or []:
+            assert check.get("status") in craft.CHECK_STATUSES
+        # nested report apni pehchaan ke saath aaye — bina attribution uske
+        # shabd craft ke lagne lagte
+        lab = report.get("song_lab") or {}
+        assert "ran" in lab
+        if lab.get("ran"):
+            assert lab.get("disclaimer") and lab.get("policy")
 
 
 def test_craft_statuses_are_its_own_words():
@@ -770,11 +787,22 @@ def test_orchestrator_runs_the_stage_and_carries_its_report():
 def test_the_revision_call_uses_the_budget_that_already_exists():
     src = _src("orchestrator.py")
     where = src.index('out["craft"] = craft.run_craft(')
-    window = src[max(0, where - 900):where]
+    # Purana needle ek 900-akshar ki khidki thi. #141 me beech me guidance
+    # blocks judte hi wo TOOT gayi — halaanki behaviour bilkul sahi tha. Ab
+    # khidki CRAFT stage ki asli shuruaat se naapi jaati hai, kisi jaadui
+    # number se nahi.
+    start = src.index('craft_text = out["final"]')
+    assert start < where
+    window = src[start:where]
     # Naya budget nahi banta: usi brain se, aur sirf tab jab call bacha ho.
     assert "brain.remaining >= 1" in window
     assert 'brain.generate(prompt, "craft_redraft")' in window
     assert "QuotaExhausted" in window
+    # Is khidki me koi doosra reasoning engine khada nahi hota, warna kharcha
+    # chup-chaap badh jaata.
+    assert "GeminiReasoning(" not in window
+    # Ek hi redraft call — do jagah likhne se ginti do baar hoti.
+    assert window.count('brain.generate(prompt, "craft_redraft")') == 1
 
 
 def test_synthesizer_puts_the_block_in_the_lab_section_and_the_audit_tail():
@@ -831,10 +859,120 @@ def test_the_instruction_forbids_the_claim_that_cannot_be_measured():
     assert "naapa hi nahi ja sakta" in craft.DRAFT_INSTRUCTION
 
 
+# ── 13. antare ke beech ka gap — poora gaana naapa jaaye, pehla antara hi nahi ─
+# Ye hissa `_verse_block` ke gap-niyam par hai. Pehle koi bhi khaali line run
+# tod deti thi, isliye marked block na hone par sirf PEHLA antara naapa jaata
+# tha — aur "antare-dar-antare bhaav ka arc" jaisa test apne hi naam ka mazaak
+# ban jaata tha. Saath hi ye bhi pinned hai ki gap ka faayda utha kar audit/
+# explanation ka prose draft me na ghus jaaye.
+_THREE_STANZA = ("tanhai mere paas baith gayi\n"
+                 "raat gehri hai mera man akela\n"
+                 "\n"
+                 "chand bhi aaj lagta hai akela\n"
+                 "door kahin ek diya jal raha\n"
+                 "\n"
+                 "mere andar bhi kuch chal raha\n"
+                 "ye kahani mere saath reh gayi")
+
+_HOOK_STANZAS = ("tanhai mere paas baith gayi\n"
+                 "raat gehri hai mera man akela\n"
+                 "\n"
+                 "chand bhi aaj lagta hai akela\n"
+                 "door kahin ek diya jal raha\n"
+                 "\n"
+                 "tanhai mere paas baith gayi\n"
+                 "mere andar bhi kuch chal raha")
 
 
+def test_a_blank_line_between_stanzas_does_not_cut_the_song_in_half():
+    text = ("Ye aapka gaana hai jo maine likha hai.\n\n" + _THREE_STANZA +
+            "\n\nAUDIT: is gaane ko neeche naapa gaya hai.\n")
+    draft, source = craft.extract_draft(text, _song_spec())
+    assert source == "verse_shape_guess"
+    assert draft == _THREE_STANZA
+    # 6 asli line, 3 antare — na bhoomika, na AUDIT ki line
+    assert len(craft.lines_of(draft)) == 6
+    assert len(craft.stanzas_of(draft)) == 3
+    assert craft.lines_of(draft)[-1] == "ye kahani mere saath reh gayi"
+    assert "AUDIT" not in draft and "Ye aapka gaana" not in draft
 
 
+def test_the_gap_rule_is_what_makes_a_stanza_wise_naap_possible():
+    """Pehla antara akela uthne par stanza-wise naap ka matlab hi khatam."""
+    only_first = _THREE_STANZA.split("\n\n")[0]
+    assert len(craft.stanzas_of(only_first)) == 1
+    whole = craft._verse_block(_THREE_STANZA)
+    assert len(craft.stanzas_of(whole)) == 3
+    # run ki lambaai me gap wali khaali line nahi ginti
+    assert craft._verse_len(whole.splitlines()) == 6
+    assert craft._verse_len(["a", "", "b", "   ", "c"]) == 3
+    assert craft._verse_len([]) == 0
 
 
+def test_the_gap_rule_is_what_lets_the_hook_be_counted_at_all():
+    whole = craft._verse_block(_HOOK_STANZAS)
+    assert craft.refrain_of(whole)["times"] == 2
+    only_first = _HOOK_STANZAS.split("\n\n")[0]
+    assert craft.refrain_of(only_first)["times"] == 1
 
+
+def test_two_blank_lines_mean_the_song_ended_there():
+    text = ("tanhai mere paas baith gayi\n"
+            "raat gehri hai mera man akela\n"
+            "chand bhi aaj lagta hai akela\n"
+            "\n"
+            "\n"
+            "door kahin ek diya jal raha\n"
+            "mere andar bhi kuch chal raha")
+    got = craft._verse_block(text)
+    assert craft._VERSE_STANZA_GAP_LINES == 1
+    assert got == ("tanhai mere paas baith gayi\n"
+                   "raat gehri hai mera man akela\n"
+                   "chand bhi aaj lagta hai akela")
+    assert "door kahin" not in got
+
+
+def test_prose_after_the_gap_is_not_taken_as_the_next_stanza():
+    """Gap ke baad samjhaane wala vaakya = hissa khatam, warna audit naapa jaata."""
+    text = ("tanhai mere paas baith gayi\n"
+            "raat gehri hai mera man akela\n"
+            "chand bhi aaj lagta hai akela\n"
+            "\n"
+            "Is gaane me maine tanhai ko ek dost banaya hai.\n"
+            "aur phir wo chali gayi")
+    got = craft._verse_block(text)
+    assert "Is gaane me" not in got
+    assert "aur phir wo chali gayi" not in got
+    assert len(craft.lines_of(got)) == 3
+    # shart do cheezon par hai: poore vaakya ka viraam AUR kaafi shabd
+    assert craft._looks_like_prose_after_gap(
+        "Is gaane me maine tanhai ko ek dost banaya hai.") is True
+    assert craft._looks_like_prose_after_gap("bas do teen shabd.") is False
+    assert craft._looks_like_prose_after_gap(
+        "raat gehri hai mera man akela") is False
+    assert craft._PROSE_AFTER_GAP_WORDS == 5
+
+
+def test_a_single_line_before_the_gap_is_not_a_stanza():
+    """Ek akeli bhoomika-line ke baad wala gap NAHI jodta."""
+    text = ("ye gaana hai\n"
+            "\n"
+            "tanhai mere paas baith gayi\n"
+            "raat gehri hai mera man akela\n"
+            "chand bhi aaj lagta hai akela")
+    got = craft._verse_block(text)
+    assert craft._VERSE_MIN_BRIDGE_LINES == 2
+    assert "ye gaana hai" not in got
+    assert len(craft.lines_of(got)) == 3
+    assert len(craft.stanzas_of(got)) == 1
+
+
+def test_a_too_long_line_still_breaks_the_run_even_across_a_gap():
+    text = ("tanhai mere paas baith gayi\n"
+            "raat gehri hai mera man akela\n"
+            "\n" + ("y" * (craft._VERSE_MAX_LINE_CHARS + 1)) + "\n"
+            "door kahin ek diya jal raha\n"
+            "mere andar bhi kuch chal raha")
+    # dono taraf ke tukde `_VERSE_MIN_RUN` se chhote — isliye andaza hi nahi
+    assert craft._VERSE_MIN_RUN == 3
+    assert craft._verse_block(text) == ""
