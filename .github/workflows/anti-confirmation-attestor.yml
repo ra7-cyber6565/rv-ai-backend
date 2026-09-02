@@ -39,7 +39,7 @@ jobs:
 
       - name: Run anti-confirmation independent-validation adversarial gate
         run: |
-          pytest -q \
+          python -m pytest -q \
             tests/test_anti_confirmation_attestor.py \
             tests/test_maturity_policy_extensions.py \
             tests/test_maturity_specialized_route_overrides.py
