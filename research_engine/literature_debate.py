@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Dict, List, Mapping, Sequence, Tuple
 
 from .models import EvidencePack, SourceRecord
 from .source_prompt_guard import looks_instruction_like
@@ -238,6 +238,7 @@ class AutonomousLiteratureDebate:
             return self._invalid("question_required")
 
         selected, excluded = _independent_sources(pack)
+        selected_by_id = {source.source_id: source for source in selected}
         buckets: Dict[str, List[DebateArgument]] = {role: [] for role in _ROLE_ORDER}
         seen_text: set[tuple[str, str]] = set()
         counter = 0
@@ -294,18 +295,30 @@ class AutonomousLiteratureDebate:
         }]
         edges: List[Dict[str, Any]] = []
         actor_nodes: set[str] = set()
+
+        def ensure_actor_node(source_id: str) -> str:
+            actor_id = f"ACTOR:{source_id}"
+            if actor_id in actor_nodes:
+                return actor_id
+            source = selected_by_id.get(source_id)
+            if source is None:
+                return ""
+            actor, basis = _actor(source)
+            actor_nodes.add(actor_id)
+            nodes.append({
+                "id": actor_id,
+                "kind": "source_actor",
+                "source_id": source_id,
+                "label": actor,
+                "actor_basis": basis,
+                "retracted": source.retracted is True,
+            })
+            return actor_id
+
         for argument in all_arguments:
-            actor_id = f"ACTOR:{argument.source_id}"
-            if actor_id not in actor_nodes:
-                actor_nodes.add(actor_id)
-                nodes.append({
-                    "id": actor_id,
-                    "kind": "source_actor",
-                    "source_id": argument.source_id,
-                    "label": argument.actor,
-                    "actor_basis": argument.actor_basis,
-                    "retracted": argument.retracted,
-                })
+            actor_id = ensure_actor_node(argument.source_id)
+            if not actor_id:
+                continue
             nodes.append({
                 "id": argument.argument_id,
                 "kind": "argument",
@@ -321,7 +334,7 @@ class AutonomousLiteratureDebate:
                 "relation": _RELATION[argument.role],
             })
 
-        valid_ids = {source.source_id for source in selected}
+        valid_ids = set(selected_by_id)
         for index, contradiction in enumerate(list(contradictions or [])[:30], 1):
             ids = []
             for sid in _SOURCE_ID_RE.findall(str(contradiction)):
@@ -340,7 +353,16 @@ class AutonomousLiteratureDebate:
                 ),
             })
             for sid in ids:
-                edges.append({"from": f"ACTOR:{sid}", "to": cid, "relation": "participates_in"})
+                actor_id = ensure_actor_node(sid)
+                if actor_id:
+                    edges.append({"from": actor_id, "to": cid, "relation": "participates_in"})
+
+        # Graph integrity is a hard contract: never emit an edge to a node that
+        # is absent merely because a source had contradiction metadata but no
+        # lexical argument sentence.
+        node_ids = {str(node.get("id") or "") for node in nodes}
+        if any(edge.get("from") not in node_ids or edge.get("to") not in node_ids for edge in edges):
+            return self._invalid("debate_graph_integrity_failure")
 
         missing = [
             _ROLE_LABELS[role] for role, present in role_presence.items() if not present
