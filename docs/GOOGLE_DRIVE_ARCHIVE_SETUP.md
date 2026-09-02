@@ -9,7 +9,7 @@ Infinity Research AI does **not** wait for TeraBox approval. Google Drive can be
 - Do not enable paid Google Cloud billing for this project just to increase Drive/API quota.
 - If Drive quota/storage/API access is exhausted, archive upload fails and the local file is retained/retried. The app must not switch to paid storage automatically.
 - A local file may be deleted only after the exact cloud copy has a matching SHA-256 proof in the archive manifest. Matching size alone is **not** enough for destructive cleanup.
-- If encrypted archive mode is required, the backend fails closed unless the selected rclone remote is locally verified as backend type `crypt`.
+- Once Google Drive archiving is enabled, encrypted rclone `crypt` is the **fail-closed default**. A plain Drive remote works only if the operator deliberately sets `GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false`.
 
 ## One-time laptop setup
 
@@ -20,7 +20,7 @@ Infinity Research AI does **not** wait for TeraBox approval. Google Drive can be
 5. Keep rclone's config file private. It contains OAuth material and must never be committed.
 6. Test the remote locally with a harmless listing before enabling the backend provider.
 
-## Recommended optional encryption: rclone crypt
+## Secure default: rclone crypt
 
 For archive-at-rest encryption, use rclone's mature `crypt` backend instead of application-written crypto. Infinity Research AI does not receive, generate or store the crypt password/salt.
 
@@ -28,25 +28,14 @@ For archive-at-rest encryption, use rclone's mature `crypt` backend instead of a
 2. Create another remote, for example `infinitycrypt`, with backend type **crypt**.
 3. Point that crypt remote at a folder on the already-authenticated Drive remote, for example `infinitydrive:InfinityResearchAIEncrypted`.
 4. Let rclone generate/use strong crypt credentials interactively. Do **not** paste them into `.env`, source code, GitHub issues or shell-history commands.
-5. Verify locally with `rclone listremotes --long`. The selected archive remote must appear with type `crypt` before enabling fail-closed encryption mode.
+5. Verify locally with `rclone listremotes --long`. The selected archive remote must appear with type `crypt` before enabling Drive archive with the default security policy.
 6. Keep an independent recovery copy of the crypt password/salt or the private rclone configuration in a secure offline location. Losing the crypt credentials can make the archive permanently unreadable. Do not keep the only recovery copy inside the same encrypted Drive archive.
 
 The underlying Google Drive remote then sees encrypted file contents and, depending on the crypt configuration, encrypted file/directory names. The backend still operates on the logical decrypted path through rclone.
 
 ## Backend `.env`
 
-Plain Drive archive:
-
-```env
-CLOUD_ARCHIVE_PROVIDER=google-drive-rclone
-GOOGLE_DRIVE_RCLONE_REMOTE=infinitydrive
-GOOGLE_DRIVE_ARCHIVE_ROOT=InfinityResearchAI
-GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false
-RCLONE_EXE=rclone
-RCLONE_TIMEOUT_SECONDS=1800
-```
-
-Encrypted archive (recommended when cloud copies may contain private research data):
+Encrypted archive — recommended/default security posture:
 
 ```env
 CLOUD_ARCHIVE_PROVIDER=google-drive-rclone
@@ -57,7 +46,18 @@ RCLONE_EXE=rclone
 RCLONE_TIMEOUT_SECONDS=1800
 ```
 
-When `GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=true`, startup/provider construction refuses to archive unless `rclone listremotes --long` identifies the configured remote as type `crypt`. A normal Drive remote, missing rclone, unreadable config or unverifiable type is treated as **not ready**; local files remain retained.
+Plain Drive archive — explicit operator opt-out from at-rest crypt protection:
+
+```env
+CLOUD_ARCHIVE_PROVIDER=google-drive-rclone
+GOOGLE_DRIVE_RCLONE_REMOTE=infinitydrive
+GOOGLE_DRIVE_ARCHIVE_ROOT=InfinityResearchAI
+GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false
+RCLONE_EXE=rclone
+RCLONE_TIMEOUT_SECONDS=1800
+```
+
+If the flag is absent, the code behaves as though `GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=true`. Startup/provider construction refuses to archive unless `rclone listremotes --long` identifies the configured remote as type `crypt`. A normal Drive remote, missing rclone, unreadable config or unverifiable type is treated as **not ready**; local files remain retained. This archive failure does not make completed research fail.
 
 If `rclone.exe` is not on PATH, set `RCLONE_EXE` to its local executable path in your private `.env` only.
 
@@ -65,7 +65,7 @@ If `rclone.exe` is not on PATH, set `RCLONE_EXE` to its local executable path in
 
 The adapter first uploads one exact logical file with `rclone copyto`, then reads remote metadata with `rclone lsjson --stat --files-only --hash`.
 
-For destructive-retention safety the backend now requires a matching **SHA-256**, not just the same byte count:
+For destructive-retention safety the backend requires a matching **SHA-256**, not just the same byte count:
 
 - if the selected backend exposes a valid native SHA-256, that hash is compared with the local file;
 - if native SHA-256 is unavailable, the adapter runs `rclone hashsum SHA256 <logical-remote-file> --download`, which reads the remote object back through rclone and hashes the logical bytes locally;
@@ -75,6 +75,8 @@ For destructive-retention safety the backend now requires a matching **SHA-256**
 This stronger verification can use extra Drive bandwidth/time because a provider without native SHA-256 may need one complete read-back after upload. That cost is intentional: the app prefers retaining a local duplicate over deleting the only known-good copy on the strength of file size alone.
 
 The archive manifest records verification strength separately. `verified=true` can describe an observed matching remote object, but **local cleanup additionally requires `checksum_verified=true` / `verification_method=size+sha256`**. Old manifest rows that predate this proof are treated as checksum-unverified until revalidated.
+
+The final verification check, local removal and manifest deletion mark are serialized against concurrent re-upload attempts. This closes the verification-to-delete race where a cloud object could otherwise start being replaced after a successful check but just before the local copy was deleted.
 
 If the selected remote is a verified rclone crypt remote, encryption/decryption happens inside rclone before/after the underlying Drive backend. The Infinity Research AI code does not implement cryptography itself and never calls `rclone config show`, so OAuth/crypt secret material is not pulled into API status output.
 
@@ -96,7 +98,7 @@ This drill does not weaken the backend's deletion rule: local deletion still req
 
 - GitHub: source code, tests, docs and version history.
 - `D:\InfinityResearchAI`: bounded active working/runtime files.
-- Google Drive: temporary large archive, preferably ciphertext through `infinitycrypt`.
+- Google Drive: temporary large archive, ciphertext through `infinitycrypt` by default.
 - TeraBox: optional future migration target only if official API access and zero-cost terms are confirmed.
 
 ## Future TeraBox migration
