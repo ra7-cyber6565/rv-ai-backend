@@ -2,7 +2,7 @@
 
 The goal is simple: D: is a fast working area, not an endlessly growing archive.
 This module never deletes arbitrary files. Cleanup is allowed only for files that
-ArchiveManifest has already marked VERIFIED in cloud storage.
+ArchiveManifest has marked VERIFIED *and* content-checksum verified in cloud.
 """
 from __future__ import annotations
 
@@ -120,11 +120,13 @@ def cleanup_verified_archives(
     *,
     target_reclaim_bytes: int,
 ) -> dict:
-    """Delete only cloud-VERIFIED local copies until target bytes are reclaimed.
+    """Delete only strongly cloud-verified local copies until target is reclaimed.
 
     Security rules:
     - file must still exist;
     - the exact provider/path-aware archive record must be verified;
+    - matching remote SHA-256 proof is mandatory; size-only verification is not
+      sufficient for destructive cleanup;
     - local path must be inside configured Infinity storage root;
     - symlinks are never deleted through this cleanup path.
     """
@@ -145,7 +147,11 @@ def cleanup_verified_archives(
         if item.get("local_deleted") is True:
             continue
         if not manifest.safe_to_delete_local(archive_ref):
-            skipped.append({"path": path, "reason": "not_verified"})
+            if item.get("verified") is True and item.get("checksum_verified") is not True:
+                reason = "checksum_not_verified"
+            else:
+                reason = "not_verified"
+            skipped.append({"path": path, "reason": reason})
             continue
         if not _inside_root(path, root):
             skipped.append({"path": path, "reason": "outside_storage_root"})
