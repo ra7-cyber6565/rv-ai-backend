@@ -191,7 +191,7 @@ def _git(root, *args):
     return proc.stdout.strip()
 
 
-def test_repository_facade_uses_clean_git_head_keyed_ledger_and_tracked_stage_policy(tmp_path):
+def _repository_fixture(tmp_path):
     root = tmp_path / "repo"
     root.mkdir()
     _git(root, "init", "-q")
@@ -235,7 +235,11 @@ def test_repository_facade_uses_clean_git_head_keyed_ledger_and_tracked_stage_po
         verifier="ci", observed_at=100.0,
     )
     anchor = ledger.create_anchor(current_revision=revision, issued_at=101.0)
+    return root, revision, ledger_path, anchor
 
+
+def test_repository_facade_uses_clean_git_head_keyed_ledger_and_tracked_stage_policy(tmp_path):
+    root, revision, ledger_path, anchor = _repository_fixture(tmp_path)
     matrix = audit_repository_stage_matrix(
         repo_root=root,
         ledger_path=ledger_path,
@@ -253,10 +257,19 @@ def test_repository_facade_uses_clean_git_head_keyed_ledger_and_tracked_stage_po
     assert matrix.all_142_verified is False
 
 
-def test_repository_facade_rejects_dirty_checkout_before_stage_claim(tmp_path):
-    # Reuse the strict parser failure property directly: a stage policy file is
-    # not enough to make an untrusted repository state scoreable.
-    malformed = json.loads(json.dumps(STAGE_POLICY))
-    malformed["stages"][0]["proof_kinds"] = []
-    with pytest.raises(ValueError, match="partition every proof kind"):
-        parse_stage_policy(json.dumps(malformed).encode("utf-8"))
+def test_repository_facade_rejects_real_dirty_checkout_before_stage_claim(tmp_path):
+    root, _revision, ledger_path, anchor = _repository_fixture(tmp_path)
+    # Modify an already tracked proof subject after the trusted revision/anchor.
+    # A caller must not obtain even a partial Stage-A/F score from this checkout.
+    (root / "research_engine" / "question.py").write_text(
+        "VALUE = 999\n", encoding="utf-8"
+    )
+    assert _git(root, "status", "--porcelain")
+    with pytest.raises(ValueError, match="clean Git checkout"):
+        audit_repository_stage_matrix(
+            repo_root=root,
+            ledger_path=ledger_path,
+            integrity_key=KEY,
+            anchor_token=anchor,
+            now=102.0,
+        )
