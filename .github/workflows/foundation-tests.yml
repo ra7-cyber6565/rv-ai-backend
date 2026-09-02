@@ -65,6 +65,21 @@ jobs:
             tests/test_causal_chain_quality.py \
             tests/test_ui_hygiene.py
 
+      # #40/#103 are production extensions, not optional demo files. Keep their
+      # bridge/safety/maturity invariants visible as their own fast CI gate in
+      # addition to the complete pytest pass below.
+      - name: Run advanced integration release gate
+        run: |
+          pytest -q \
+            tests/test_advanced_discovery_extensions.py \
+            tests/test_capability_maturity.py \
+            tests/test_literature_debate.py \
+            tests/test_triple_implementation.py \
+            tests/test_triple_task_adapter.py \
+            tests/test_triple_verification_bridge.py \
+            tests/test_advanced_integration_release_gate.py
+          python scripts/audit_advanced_integration.py
+
       # Keep CI and the user's Windows laptop on exactly the same release gate.
       # The runner itself compiles sources, runs focused integration tests,
       # test_research_engine.py, every standalone tests/test_*.py file, and the
