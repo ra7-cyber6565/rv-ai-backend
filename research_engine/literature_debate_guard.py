@@ -1,16 +1,17 @@
 """Fail-closed reliability guard for #103 Autonomous Literature Debate.
 
 The base debate engine reconstructs arguments from retrieved text and already
-handles mirrors, retractions, prompt injection and missing author metadata.  One
+handles mirrors, retractions, prompt injection and missing author metadata. One
 additional distinction is needed at the production boundary: an argument being
-*present* in a current source is not the same as that source being strong enough
-to count toward ``DEBATE_MAP_READY``.
+*present* in available source text is not the same as that source being strong
+enough to count toward ``DEBATE_MAP_READY``.
 
 This facade preserves every grounded argument but only counts an argument as
 ``reliable_current_evidence`` when the same source also clears conservative
-access/relevance/source-quality gates.  A search snippet, a barely-related
-source, or a source whose quality is not established can therefore remain
-visible as context without silently promoting the debate to "ready".
+access/relevance/source-quality gates. A search snippet, a barely-related
+source, retracted historical material, or a source whose quality is not
+established can therefore remain visible as context without silently promoting
+the debate to "ready".
 
 No model/network call is added and no source text is rewritten.
 """
@@ -47,9 +48,9 @@ def _read_level(source: SourceRecord) -> str:
 def source_reliability(source: SourceRecord | None) -> Tuple[bool, str]:
     """Return whether a source may count toward debate *readiness* and why.
 
-    This is intentionally stricter than "may appear in the debate map".  The
+    This is intentionally stricter than "may appear in the debate map". The
     base engine may retain a retracted source as historical context and may show
-    shallow text as an available argument.  Neither should be allowed to make a
+    shallow text as an available argument. Neither should be allowed to make a
     three-role debate look independently well-supported.
     """
     if source is None:
@@ -82,7 +83,7 @@ def source_reliability(source: SourceRecord | None) -> Tuple[bool, str]:
 class GuardedAutonomousLiteratureDebate(_BaseDebate):
     """Base grounded debate + independent depth/quality readiness gate."""
 
-    reliability_schema_version = "1.2"
+    reliability_schema_version = "1.3"
 
     def reconstruct(self, question: str, pack: EvidencePack, contradictions=()) -> Dict[str, Any]:
         report = super().reconstruct(question, pack, contradictions=contradictions)
@@ -93,15 +94,15 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
         if not isinstance(role_slots, Mapping):
             return report
 
-        # Preserve the base engine's lexical-grounding fact separately from the
-        # stricter readiness decision.  A role can exist in available snippet
-        # text while still being too shallow/weak to count as reliable current
-        # debate evidence.  Conflating those two states would make the audit lie.
+        # Lexical grounded presence comes from the argument rows themselves. The
+        # base engine historically derived ``missing_roles_in_available_text``
+        # from *reliable-current* presence, which means a retracted argument was
+        # incorrectly reported as absent from the retrieved text even though the
+        # row was visibly present. Keep these state machines separate here.
         grounded_presence = {
             role: bool(role_slots.get(role) or [])
             for role in _ROLE_ORDER
         }
-        base_missing_available = list(report.get("missing_roles_in_available_text") or [])
 
         by_id = {
             str(getattr(source, "source_id", "") or ""): source
@@ -144,20 +145,18 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
 
         report["role_presence_grounded_available_text"] = grounded_presence
         report["role_presence_reliable"] = role_presence
-        # Keep the base field semantically exact: it answers only whether a role
-        # was found in available grounded text, not whether that role passed the
-        # stronger readiness gate.
-        report["missing_roles_in_available_text"] = base_missing_available
+        report["missing_roles_in_available_text"] = [
+            _ROLE_LABELS[role]
+            for role in _ROLE_ORDER
+            if not grounded_presence.get(role)
+        ]
         report["missing_roles_for_ready_debate"] = [
             _ROLE_LABELS[role]
             for role in _ROLE_ORDER
             if not role_presence.get(role)
         ]
 
-        all_arguments = sum(
-            len(role_slots.get(role) or [])
-            for role in _ROLE_ORDER
-        )
+        all_arguments = sum(len(role_slots.get(role) or []) for role in _ROLE_ORDER)
         if not all_arguments:
             report["status"] = "INSUFFICIENT_GROUNDED_ARGUMENTS"
         elif all(role_presence.values()) and len(reliable_origins) >= 3:
@@ -195,9 +194,6 @@ class GuardedAutonomousLiteratureDebate(_BaseDebate):
         return report
 
 
-# Production integration imports this compatibility name.  Direct users of the
-# base module remain unchanged, while the advanced-discovery path gets the
-# stricter readiness semantics.
 AutonomousLiteratureDebate = GuardedAutonomousLiteratureDebate
 
 
