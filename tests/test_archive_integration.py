@@ -1,8 +1,5 @@
 from pathlib import Path
-import os
 import subprocess
-
-import pytest
 
 from storage.google_drive_rclone import detect_rclone_remote_type
 from utils.archive_manifest import ArchiveManifest, sha256_file
@@ -103,10 +100,10 @@ def test_destructive_cleanup_requires_real_checksum_proof(monkeypatch, tmp_path)
     assert manifest.get(archive_id)["local_deleted"] is True
 
 
-def test_destructive_cleanup_holds_manifest_lock_across_check_remove_and_mark():
-    """Keep the TOCTOU critical section explicit at the destructive boundary."""
+def test_destructive_cleanup_holds_manifest_transaction_across_check_remove_and_mark():
+    """Keep the cross-process TOCTOU critical section explicit."""
     cleanup = _read("utils/storage_quota.py")
-    lock = cleanup.index("with manifest._lock")
+    lock = cleanup.index("with manifest.transaction()")
     check = cleanup.index("manifest.safe_to_delete_local(archive_ref)", lock)
     remove = cleanup.index("os.remove(path)", check)
     mark = cleanup.index("manifest.mark_local_deleted(archive_ref)", remove)
