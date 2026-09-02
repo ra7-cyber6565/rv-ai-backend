@@ -27,16 +27,21 @@ def test_103_mapping_stays_below_verified_without_execution_or_global_review():
     row = capability_maturity(103)
     assert row["name"] == "Autonomous Literature Debate"
     assert row["implementation"]["module"] == "research_engine/literature_debate.py"
+    assert row["implementation"]["readiness_guard"] == "research_engine/literature_debate_guard.py"
     assert row["implementation"]["production_wiring"] == "research_engine/advanced_discovery_integrated.py"
     assert "tests/test_literature_debate.py" in row["implementation"]["tests"]
+    assert "tests/test_literature_debate_guard.py" in row["implementation"]["tests"]
+    assert row["implementation"]["grounded_presence_separate_from_readiness"] is True
     assert row["implementation"]["fail_closed"] is True
     assert row["proof"]["repository_implementation_present"] is True
     assert row["proof"]["current_full_gate_execution_proven"] is False
     assert row["proof"]["grounded_available_text_reconstruction_proven_by_execution"] is False
+    assert row["proof"]["depth_relevance_quality_readiness_gate_proven_by_execution"] is False
     assert row["proof"]["systematic_review_completeness_proven"] is False
     assert row["proof"]["live_independent_validation_proven"] is False
     assert row["claim_ceiling"] == "IMPLEMENTED_PENDING_EXECUTION_PROOF"
     assert "global literature completeness" in row["cannot_claim"]
+    assert "snippet or low-quality argument means reliable debate readiness" in row["cannot_claim"]
     assert "invented researcher identities" in row["cannot_claim"]
 
 
