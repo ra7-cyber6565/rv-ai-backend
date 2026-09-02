@@ -19,6 +19,8 @@ Package layout:
     reasoning_router_integrated.py
                               provider fallback + latest pass accounting facade
     source_prompt_guard.py    untrusted source-data / prompt-injection boundary
+    advanced_discovery_integrated.py
+                              additive #40/#103 advanced-discovery facade
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -45,6 +47,11 @@ Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
 EvidencePack rendering in a strict evidence-only boundary, quotes every source
 line, neutralizes instruction-like source text without deleting research
 content, strips hidden bidi/control characters, and bounds hostile metadata.
+
+Advanced-discovery extensions preserve the base scientific-discovery engine and
+add separately-audited #40 triple independent numeric implementation and #103
+autonomous literature debate records. They perform no network/model call at
+package import and fail closed without promoting the base report.
 """
 from __future__ import annotations
 
@@ -80,6 +87,16 @@ from .models import (
 # Installation is deterministic and performs no network/model call.
 from .source_prompt_guard import install as _install_source_prompt_guard
 _install_source_prompt_guard()
+
+# Preserve the current base advanced-discovery implementation and add #40/#103
+# through an additive subclass. Orchestrator imports the class directly from
+# ``advanced_discovery``; patching that module export here keeps the real
+# production path on the integrated facade without duplicating the base engine.
+from . import advanced_discovery as _advanced_discovery
+from .advanced_discovery_integrated import (
+    IntegratedScientificDiscoveryEngine as _IntegratedScientificDiscoveryEngine,
+)
+_advanced_discovery.ScientificDiscoveryEngine = _IntegratedScientificDiscoveryEngine
 
 # Prompt-level structured coverage is useful but not enforcement.  Install a
 # final serialization gate so a long explicit outline cannot leave the engine
