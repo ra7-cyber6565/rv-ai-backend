@@ -9,6 +9,12 @@ If no labelled factual/evidence claim can be checked, source grounding fails
 closed to UNKNOWN/UNVERIFIABLE. Independent arithmetic/physics verification is
 preserved as a separate dimension rather than being erased by a missing A-E
 claim.
+
+The facade also bridges the base verifier's machine-normalized arithmetic and
+percentage checks into #40 Triple Independent Implementation tasks *before* the
+public check label is simplified.  This preserves the claimed RHS for an
+independent Python/R/Decimal consistency check without making the public check
+identity unstable or accepting arbitrary prose as executable math.
 """
 from __future__ import annotations
 
@@ -17,6 +23,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .evidence_verification import EvidenceVerifier
+from .triple_task_adapter import derive_triple_tasks
 from .verification_claude import Check
 from .verification_claude import VerificationReport as _ClaudeVerificationReport
 from .verification_claude import VerificationEngine as _ClaudeVerificationEngine
@@ -25,10 +32,16 @@ from .verification_claude import VerificationEngine as _ClaudeVerificationEngine
 @dataclass
 class VerificationReport(_ClaudeVerificationReport):
     evidence_verification: Dict = field(default_factory=dict)
+    # Trusted machine-created bridge for #40. These are derived only from the
+    # base verifier's own normalized Check records, not from arbitrary user prose.
+    triple_implementation_tasks: List[Dict] = field(default_factory=list)
+    triple_task_adapter: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         data = super().to_dict()
         data["evidence_verification"] = self.evidence_verification
+        data["triple_implementation_tasks"] = list(self.triple_implementation_tasks)
+        data["triple_task_adapter"] = dict(self.triple_task_adapter)
         return data
 
 
@@ -77,10 +90,27 @@ class VerificationEngine(_ClaudeVerificationEngine):
             question=question,
         )
         ev = self.evidence_verifier.verify(answer, pack).to_dict()
+
+        # IMPORTANT: derive #40 tasks from the BASE verifier checks before the
+        # user-facing arithmetic name loses its claimed RHS.  The adapter accepts
+        # only the exact {check, passed, detail} schema and exact arithmetic / %
+        # grammar, so arbitrary answer prose never becomes executable formula
+        # input through this bridge.
+        base_check_rows = [check.to_dict() for check in list(base.checks or [])]
+        triple_adaptation = derive_triple_tasks({"checks": base_check_rows})
+        triple_tasks = list(triple_adaptation.get("tasks") or [])
+        triple_meta = {
+            key: value
+            for key, value in triple_adaptation.items()
+            if key != "tasks"
+        }
+
         # Direct ``check_math`` diagnostics retain the claimed result in the
         # check name (useful when comparing correct/incorrect equations). The
-        # integrated report exposes the operation as the stable check identity;
-        # pass/fail plus detail carries the verdict/result separately.
+        # integrated public report exposes the operation as the stable check
+        # identity; pass/fail plus detail carries the verdict/result separately.
+        # #40 still receives the original claimed RHS through the trusted bridge
+        # above, so presentation normalization cannot erase verification data.
         report_checks: List[Check] = []
         arithmetic_name = re.compile(
             r"^(\d[\d,]*(?:\.\d+)?)\s*([+\-*x×/])\s*"
@@ -103,6 +133,8 @@ class VerificationEngine(_ClaudeVerificationEngine):
             limits=list(base.limits),
             physics=dict(getattr(base, "physics", {}) or {}),
             evidence_verification=ev,
+            triple_implementation_tasks=triple_tasks,
+            triple_task_adapter=triple_meta,
         )
 
         mapping = [
