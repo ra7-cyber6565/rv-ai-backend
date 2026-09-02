@@ -154,10 +154,10 @@ def test_only_one_mood_reaches_the_query_list():
 def test_a_free_text_mood_can_never_become_a_network_query():
     """Ye teesri deewar hai, aur jaan-boojh kar hai.
 
-    `songcraft.is_lyrics_hunt()` bare "<gaane ka naam> song lyrics" nahi pakadta
-    (regex chaudi karne se jaayaz seed bhi block ho jaati). Mood se query BANTI
-    hai, isliye mood ka roop hi bandha hua hai: chhota ASCII shabd, warna mood
-    chhoot jaata hai — seeds phir bhi chalti hain.
+    `songcraft.is_lyrics_hunt()` #186e ke baad naam wali bol-talaash pakadta hai,
+    par uski bachi hui seema (ek hi anjaan shabd) par ye deewar zaroori rehti
+    hai. Mood se query BANTI hai, isliye mood ka roop hi bandha hua hai: chhota
+    ASCII shabd, warna mood chhoot jaata hai — seeds phir bhi chalti hain.
     """
     assert ls.safe_mood("dukh") == "dukh"
     assert ls.safe_mood("  Yaad  ") == "yaad"
@@ -722,28 +722,37 @@ def test_the_planner_opens_the_lane_only_for_a_song_and_keeps_craft_whole():
 def test_the_planner_shuts_the_lane_for_a_lyrics_hunt():
     """Bol maangne par sunne wale ki research bhi nahi maangi jaati.
 
-    Aur jahan ye gate CHOOK jaata hai (bare "<naam> song lyrics likh do" —
-    `songcraft.is_lyrics_hunt` ki jaani hui seema) wahan bhi lane khulne se
-    koi bol network par nahi jaata: listener query user ke shabd se nahi,
-    seeds + `safe_mood` se banti hai. Ye test dono baat pin karta hai.
+    #186e ke baad NAAM wali bol-talaash bhi pakdi jaati hai — "arijit singh tum
+    hi ho song lyrics likh do" pehle is gate se nikal jaati thi (yahi wo "jaani
+    hui seema" thi jo is test me likhi rehti thi). Jo seema ab bachi hai wo
+    `songcraft.LYRICS_HUNT_KNOWN_LIMIT` me saaf likhi hai: ek hi anjaan shabd
+    plus koi teesra shabd. Wahan bhi lane khulne se koi bol network par nahi
+    jaata: listener query user ke shabd se nahi, seeds + `safe_mood` se banti
+    hai. Ye test teeno baat pin karta hai.
     """
     planner = ResearchPlanner()
     config = depth.get_depth_config("DEEP")
-    caught = "gaana likho aur tum hi ho ke gaane ke bol bhi de do"
-    assert sc.is_lyrics_hunt(caught) is True
-    assert craft.detect(caught).get("is_request") is True   # gaane ki farmaish
-    plan = planner.connector_plan({"question": caught}, config, caught)
-    assert plan["listener_study"] == []
-    assert plan["listener_study_lane"]["wanted"] is False
-    assert "BOL" in plan["listener_study_lane"]["reason"]
+    for caught in ("gaana likho aur tum hi ho ke gaane ke bol bhi de do",
+                   "arijit singh tum hi ho song lyrics likh do"):
+        assert sc.is_lyrics_hunt(caught) is True, caught
+        # dono haalat me farmaish gaane ki hai — lane phir bhi band hoti hai
+        assert craft.detect(caught).get("is_request") is True, caught
+        plan = planner.connector_plan({"question": caught}, config, caught)
+        assert plan["listener_study"] == [], caught
+        assert plan["listener_study_lane"]["wanted"] is False, caught
+        assert "BOL" in plan["listener_study_lane"]["reason"], caught
 
-    missed = "arijit singh tum hi ho song lyrics likh do"
-    assert sc.is_lyrics_hunt(missed) is False       # jaani hui seema
+    # Bachi hui seema: ek anjaan shabd ("chaleya") + doosre shabd. Guard yahan
+    # jaan-boojh kar chup rehta hai (wahi shakal ek TOPIC ki bhi hoti hai), aur
+    # is deewar ka kaam wahi purana hai — user ka shabd query me na jaaye.
+    missed = "chaleya song lyrics likh do"
+    assert sc.is_lyrics_hunt(missed) is False       # LYRICS_HUNT_KNOWN_LIMIT
+    assert "anjaan shabd" in sc.LYRICS_HUNT_KNOWN_LIMIT
     leaky = planner.connector_plan({"question": missed}, config, missed)
+    assert leaky["listener_study"], missed
     for row in leaky["listener_study"]:
         low = str(row["query"]).casefold()
-        assert "lyrics" not in low and "arijit" not in low
-        assert "tum hi ho" not in low
+        assert "lyrics" not in low and "chaleya" not in low
 
 
 def test_the_orchestrator_and_result_wiring_stay_in_place():

@@ -75,8 +75,10 @@ MIN_QUERY_CHARS = 8
 # (slow/mid/fast) aur style id (jaise "sad_slow"). Dono app ke apne chhote
 # ASCII token hain, isliye yahan wahi shakal chalti hai — koi lamba free text
 # ("<gaane ka naam> song lyrics") tempo ke bhes me network query me nahi ghus
-# sakta. Ye deewar `songcraft.is_lyrics_hunt()` ki jaani-maani kami (bare "song
-# lyrics") par jaan-boojh kar rakhi gayi hai.
+# sakta. Ye deewar #186e ke baad bhi khadi rehti hai: `songcraft.is_lyrics_hunt()`
+# ab NAAM wali bol-talaash bhi pakadta hai, par uski bachi hui seema
+# (`songcraft.LYRICS_HUNT_KNOWN_LIMIT` — ek hi anjaan shabd) par ye pehra
+# jaan-boojh kar rakha gaya hai.
 _SAFE_FAMILY_RE = re.compile(r"^[a-z]{3,6}$")
 _SAFE_STYLE_RE = re.compile(r"^[a-z][a-z_]{1,22}$")
 

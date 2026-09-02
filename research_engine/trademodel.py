@@ -1224,8 +1224,19 @@ _POINT_CUES: Dict[str, Tuple[str, ...]] = {
                    "information available at t"),
     "realistic_costs": ("spread", "commission", "slippage", "latency",
                         "transaction cost", "cost per trade"),
-    "failure_classification": ("failure class", "loss class", "why it lost",
-                               "loss reason", "failure mode", "haar ki wajah"),
+    # #186d: `_has()` shabd ki seema par milata hai — isliye cue "failure class"
+    # text "failure classification" ko NAHI pakadta tha (naapa gaya: point
+    # NOT_MEASURED = "zikr nahi mila", jabki spec me sabse aam sarkari phrasing
+    # wahi hai). Cue chaudi ki gayi hai, koi cue hataya nahi gaya. Ye sirf
+    # NOT_MEASURED ko MET/NOT_MET bana sakti hai — kisi MET ko kamzor nahi kar
+    # sakti, kyunki number ki shart waise hi lagi rehti hai.
+    "failure_classification": ("failure class", "failure classes",
+                               "failure classification", "failure taxonomy",
+                               "loss class", "loss classes",
+                               "loss classification", "per-loss", "per loss",
+                               "why it lost", "loss reason", "failure mode",
+                               "postmortem", "post-mortem", "post mortem",
+                               "haar ki wajah", "haar ki class"),
     "red_team": ("red team", "red-team", "curve fit", "curve-fit",
                  "data mining", "overfit", "cherry pick", "survivorship",
                  "structural change", "falsif"),

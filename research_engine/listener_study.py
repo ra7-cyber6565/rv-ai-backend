@@ -68,9 +68,10 @@ MIN_QUERY_CHARS = 8
 # Mood ka naam `craft.MOODS` ke label se aata hai — "dukh", "judaai", "yaad"
 # jaisa ek chhota ASCII shabd. Mood se query BANTI hai, isliye yahan sirf wahi
 # shakal chalti hai; koi bhi lambi/free text (jaise "<gaane ka naam> song
-# lyrics") mood ke bhes me network query me nahi ghus sakti. Ye teesri deewar
-# `songcraft.is_lyrics_hunt()` ki jaani-maani kami (bare "song lyrics") par
-# jaan-boojh kar rakhi gayi hai.
+# lyrics") mood ke bhes me network query me nahi ghus sakti. Ye deewar #186e ke
+# baad bhi khadi rehti hai: `songcraft.is_lyrics_hunt()` ab NAAM wali bol-talaash
+# bhi pakadta hai, par uski bachi hui seema (`songcraft.LYRICS_HUNT_KNOWN_LIMIT`
+# — ek hi anjaan shabd) par ye pehra jaan-boojh kar rakha gaya hai.
 _SAFE_MOOD_RE = re.compile(r"^[a-z]{2,14}$")
 
 

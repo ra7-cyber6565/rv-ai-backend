@@ -109,8 +109,82 @@ _MAKE_CUES: Tuple[str, ...] = (
     "bnaa", "banaiye", "banaye", "bnaye", "tayaar", "tayar", "draft",
     "write", "writing", "compose", "create", "make", "generate", "craft",
     "rachna", "rckhnaa", "sunao", "gao", "gaao",
+    # #186b: "tayaar" pehle se cue tha, par uski aam hindi spelling "taiyaar"
+    # nahi thi — isliye "gaana taiyaar karo" par poora CRAFT lane chup-chaap
+    # band reh jaata tha. Ye sirf SPELLING ki chhoot thi, naya matlab nahi.
+    "taiyaar", "taiyar", "tyar", "ready", "prepare",
 )
 _MAKE_SKELETONS: Tuple[str, ...] = ("bnd", "kmps", "krft", "drft", "gnrt")
+
+# ── #186b: MAANGNE wala tier (banane wale verb se ALAG) ─────────────────────
+# Naapa gaya: "ek sad gaana chahiye" / "ek gaana de do" par `detect()` False
+# lautata tha (`reason=no_make_verb`) — matlab intel ki sabse aam hindi phrasing
+# par gaana, kavita, kahani ka poora lane (songcraft → songlab → mood_lexicon →
+# listener/music study → deliverable_guard) chalta hi nahi tha aur uski jagah
+# research aa jaati thi. Ilaaj exammodel ke naape hue do-signal gate jaisa hai:
+# CHAAHNE wala verb bhi "make" signal hai, par wo KAMZOR signal hai — isliye
+# uspar samjhaane-wale sawaal ka pehra (neeche `_EXPLAIN_CUES`) lagta hai.
+# `_MAKE_CUES` me isliye nahi daala ki dono ka farak (`make_kind`) report me
+# saaf dikhe aur pehra sirf kamzor signal par lage.
+_WANT_CUES: Tuple[str, ...] = (
+    "chahiye", "chaahiye", "chaiye", "chahie", "chahiyee", "cahiye",
+    "chahta", "chahti", "chahunga", "chahoonga", "chaahta", "chahenge",
+    "dedo", "dijiye", "dijiyega", "dena", "want", "need",
+)
+# Do shabd wale cue: nanga "do" kabhi cue nahi ban sakta ("do doston ka
+# samvaad", "solution bhi do", "do line") — isliye jodi ke roop me dekha jaata
+# hai. Ye jodi lagataar tokens par milti hai.
+_WANT_PHRASES: Tuple[Tuple[str, ...], ...] = (
+    ("de", "do"), ("de", "dena"), ("de", "dijiye"), ("de", "doge"),
+    ("chahiye", "tha"),
+)
+
+# ── #186f: WANT tier ki naapi hui bachi hui seema (jaan-boojh kar) ───────────
+# Naapa gaya: "Kabir ki kavita chahiye" ab `is_request=True form=poem
+# make_kind=want` deta hai — yaani MAUJOOD rachna maangne wali farmaish naya
+# likhne wali farmaish jaisi padhi jaati hai. Ye #186b ke want-tier ke saath
+# aayi hai aur ye galat hai.
+#
+# Ise "<anjaan shabd> ki/ka <form>" par band karna aasan tha, par wo naap ke
+# baad chhod diya gaya: "barish ki kavita chahiye" ki shakal bilkul wahi hai
+# aur wo ASLI banane ki farmaish hai. Un dono ko shabd-list ke bina alag karna
+# aaj nahi ho sakta, aur galat band karna intel ki saaf shart todta hai —
+# "maanga hua gaana kabhi chup-chaap gayab na ho" (#155b). Do buraiyon me:
+#   * galat BAND karna  → maangi hui rachna banti hi nahi (chup-chaap nuksaan)
+#   * galat KHULA rakhna → app apni rachna likh deta hai, aur `deliverable_guard`
+#                          + label saaf likhte hain ki ye APP ne likhi hai
+# doosri buraai chhoti hai, isliye wahi chuni gayi. Yahi faisla #186e me bhi
+# hua tha (`songcraft.LYRICS_HUNT_KNOWN_LIMIT`) — ek hi soch, do jagah.
+WANT_TIER_KNOWN_LIMIT = (
+    "maangne wala verb (chahiye/de do) MAUJOOD rachna maangne aur NAYI rachna "
+    "maangne me farak nahi kar paata — 'Kabir ki kavita chahiye' bhi banane "
+    "wali farmaish padhi jaati hai. Ise band karne se 'barish ki kavita "
+    "chahiye' jaisi asli farmaish mar jaati, isliye khula rakha gaya hai aur "
+    "bani hui cheez par 'app ne likhi' ka label lagta hai.")
+
+# ── #186b: samjhaane wale sawaal ka pehra ───────────────────────────────────
+# Naapa gaya: "gaana kaise likhte hain" aur "gaana banane ka tarika batao" par
+# `detect()` True (form=song) de raha tha — yaani app tarika samjhane ki jagah
+# gaana likh deta. Wajah: `_cue_hit` ka prefix niyam ("likhte" → cue "likh").
+# Isliye do alag darje ban gaye:
+#   * SEEDHA hukum (token cue ke barabar: "likho", "banao", "likh do") — ispar
+#     pehra NAHI, warna "ek gaana likho aur batao kya soch ke likha" toot jaata.
+#   * DHALA hua roop (prefix/skeleton se mila: "likhte", "banane") aur MAANGNE
+#     wala verb — ye kamzor hain, inpar knowledge-frame ka pehra lagta hai.
+# Ye list poori nahi hai aur ye baat likhi ja rahi hai (test isi ko pin karta).
+EXPLAIN_CUE_LIST_IS_NOT_EXHAUSTIVE = True
+_EXPLAIN_CUES: Tuple[str, ...] = (
+    "matlab", "mtlb", "arth", "meaning", "means", "explain", "explanation",
+    "samjhao", "samjhaao", "samjha", "samjhaiye", "samjao", "samjhna",
+    "batao", "bata", "btao", "bataiye", "bataye", "batayen",
+    "kaise", "kese", "kaisa", "kaisi", "how", "kyun", "kyu", "kyon", "why",
+    "tarika", "tareeka", "tarike", "trika", "method", "process",
+    "baare", "bare", "about", "regarding",
+    "sikhao", "sikhaao", "sikhna", "sikhu", "sikhaiye", "seekhna", "seekhu",
+    "jankari", "jaankari", "information", "info", "itihas", "history",
+    "farak", "fark", "difference", "antar", "analysis", "review", "research",
+    "tips", "guide", "niyam", "rules", "theory", "concept",
+)
 
 
 @dataclass(frozen=True)
@@ -256,6 +330,34 @@ def _romans(text: str) -> List[str]:
         return re.findall(r"[a-z0-9]+", str(text or "").lower())
 
 
+def _cue_find(tokens: Sequence[str], romans: Sequence[str],
+              skels: Sequence[str] = ()) -> Tuple[str, str]:
+    """
+    `_cue_hit` ka wahi kaam, par ye batata bhi hai KAISE mila.
+
+    Wapas `(cue, kind)` — kind = "exact" (token bilkul cue hai), "prefix"
+    (token cue se shuru hota hai: "likhte" ← "likh"), "skeleton", ya `("", "")`.
+    Ye farak #186b me zaroori hua: seedha hukum aur dhala hua roop dono ek hi
+    cue par mil sakte hain, par bharosa dono ka barabar nahi hai.
+    """
+    for want in romans:
+        for tok in tokens:
+            if tok == want:
+                return want, "exact"
+            if len(want) >= 4 and tok.startswith(want):
+                return want, "prefix"
+    for want in skels:
+        if len(want) < _MIN_CUE_SKELETON:
+            continue
+        for tok in tokens:
+            try:
+                if lang_bridge.skeleton(tok) == want:
+                    return want, "skeleton"
+            except Exception:
+                continue
+    return "", ""
+
+
 def _cue_hit(tokens: Sequence[str], romans: Sequence[str],
              skels: Sequence[str] = ()) -> str:
     """
@@ -266,19 +368,20 @@ def _cue_hit(tokens: Sequence[str], romans: Sequence[str],
     par ittefaq ho jaata hai: "gaana" ka skeleton "gn" hai, aur "gyan"/"gaon"
     ka bhi wahi).
     """
-    for want in romans:
-        for tok in tokens:
-            if tok == want or (len(want) >= 4 and tok.startswith(want)):
-                return want
-    for want in skels:
-        if len(want) < _MIN_CUE_SKELETON:
+    return _cue_find(tokens, romans, skels)[0]
+
+
+def _phrase_hit(tokens: Sequence[str],
+                phrases: Sequence[Sequence[str]]) -> str:
+    """Lagataar tokens par do-shabd ki jodi — mile to "de do" jaisa text."""
+    for phrase in phrases:
+        span = list(phrase)
+        if not span:
             continue
-        for tok in tokens:
-            try:
-                if lang_bridge.skeleton(tok) == want:
-                    return want
-            except Exception:
-                continue
+        limit = len(tokens) - len(span)
+        for start in range(0, max(0, limit) + 1):
+            if list(tokens[start:start + len(span)]) == span:
+                return " ".join(span)
     return ""
 
 
@@ -310,16 +413,56 @@ def _context_ok(tokens: Sequence[str], cue: str) -> bool:
     return False
 
 
+def explain_intent(question: str) -> str:
+    """Sawaal SAMJHAANE ka hai? — mila hua cue lauta do, warna "" (khaali)."""
+    return _cue_hit(_romans(question), _EXPLAIN_CUES)
+
+
+def _make_signal(tokens: Sequence[str]) -> Dict[str, str]:
+    """
+    Banane/maangne ka signal — aur uska darja.
+
+    Wapas: `cue` (mila hua text), `kind` ("make"/"want"/""), `strong`
+    ("yes"/"no": seedha hukum hai ya kamzor/dhala hua roop), `raw` (kaise mila).
+    Kram maayne rakhta hai — banane wala verb pehle, maangne wala baad me.
+    """
+    cue, raw = _cue_find(tokens, _MAKE_CUES, _MAKE_SKELETONS)
+    if cue:
+        return {"cue": cue, "kind": "make",
+                "strong": "yes" if raw == "exact" else "no", "raw": raw}
+    phrase = _phrase_hit(tokens, _WANT_PHRASES)
+    if phrase:
+        return {"cue": phrase, "kind": "want", "strong": "no",
+                "raw": "phrase"}
+    cue, raw = _cue_find(tokens, _WANT_CUES)
+    if cue:
+        return {"cue": cue, "kind": "want", "strong": "no", "raw": raw}
+    return {"cue": "", "kind": "", "strong": "no", "raw": ""}
+
+
 def detect(question: str) -> Dict[str, Any]:
     """
     Sawaal "kuch bana kar do" hai ya nahi — aur kya banana hai.
 
-    Do cheezein DONO chahiye: ek banane wala verb (likho/banao/write) aur ek
-    kism ka naam (gaana/kavita/letter). Sirf "kavita" par ye stage nahi chalta —
-    "Kabir ki kavita ke baare me batao" research hai, farmaish nahi.
+    Do cheezein DONO chahiye: ek banane/maangne wala signal (likho/banao/write
+    ya chahiye/de do) aur ek kism ka naam (gaana/kavita/letter). Sirf "kavita"
+    par ye stage nahi chalta — "Kabir ki kavita ke baare me batao" research hai,
+    farmaish nahi.
+
+    #186b ka teesra darja: KAMZOR signal (maangne wala verb, ya prefix se mila
+    dhala hua roop jaise "likhte"/"banane") par samjhaane wale sawaal ka pehra
+    lagta hai — "gaana kaise likhte hain" tarika poochh raha hai, gaana nahi
+    maang raha. SEEDHE hukum ("likho"/"banao") par ye pehra nahi lagta.
     """
     tokens = _romans(question)
-    make = _cue_hit(tokens, _MAKE_CUES, _MAKE_SKELETONS)
+    signal = _make_signal(tokens)
+    make = signal["cue"]
+    make_kind = signal["kind"]
+    explain = ""
+    if make and signal["strong"] != "yes":
+        explain = _cue_hit(tokens, _EXPLAIN_CUES)
+        if explain:
+            make, make_kind = "", ""
     hit_form: Optional[Form] = None
     form_cue = ""
     for form in FORMS:
@@ -335,12 +478,19 @@ def detect(question: str) -> Dict[str, Any]:
             hit_form, form_cue = form, cue
             break
     if not make or hit_form is None:
+        if not make:
+            # Imaandaar farak: cue tha hi nahi, ya tha par samjhaane wale
+            # sawaal ne roka. Dono ek naam se nahi likhe jaate.
+            reason = "explain_intent" if explain else "no_make_verb"
+        else:
+            reason = "no_form_word"
         return {"is_request": False, "form": "", "label": "",
-                "make_cue": make, "form_cue": form_cue,
-                "reason": "no_make_verb" if not make else "no_form_word"}
+                "make_cue": make, "make_kind": make_kind,
+                "form_cue": form_cue, "explain_cue": explain,
+                "reason": reason}
     return {"is_request": True, "form": hit_form.form_id,
-            "label": hit_form.label, "make_cue": make, "form_cue": form_cue,
-            "reason": ""}
+            "label": hit_form.label, "make_cue": make, "make_kind": make_kind,
+            "form_cue": form_cue, "explain_cue": explain, "reason": ""}
 
 
 # ── matra ka hisaab (laghu = 1, guru = 2) ────────────────────────────────────

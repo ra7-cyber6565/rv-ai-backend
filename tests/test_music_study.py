@@ -884,28 +884,37 @@ def test_the_planner_opens_the_lane_only_for_a_song_and_keeps_the_others_whole()
 def test_the_planner_shuts_the_lane_for_a_lyrics_hunt():
     """Bol maangne par music direction ki research bhi nahi maangi jaati.
 
-    Aur jahan ye gate CHOOK jaata hai (bare "<naam> song lyrics likh do" —
-    `songcraft.is_lyrics_hunt` ki jaani hui seema) wahan bhi lane khulne se koi
-    bol network par nahi jaata: music query user ke shabd se nahi, seeds +
-    `safe_family`/`safe_style` se banti hai. Ye test dono baat pin karta hai.
+    #186e ke baad NAAM wali bol-talaash bhi pakdi jaati hai — "arijit singh tum
+    hi ho song lyrics likh do" pehle is gate se nikal jaati thi (yahi wo "jaani
+    hui seema" thi jo is test me likhi rehti thi). Jo seema ab bachi hai wo
+    `songcraft.LYRICS_HUNT_KNOWN_LIMIT` me saaf likhi hai: ek hi anjaan shabd
+    plus koi teesra shabd. Wahan bhi lane khulne se koi bol network par nahi
+    jaata: music query user ke shabd se nahi, seeds + `safe_family`/`safe_style`
+    se banti hai. Ye test teeno baat pin karta hai.
     """
     planner = ResearchPlanner()
     config = depth.get_depth_config("DEEP")
-    caught = "gaana likho aur tum hi ho ke gaane ke bol bhi de do"
-    assert sc.is_lyrics_hunt(caught) is True
-    assert craft.detect(caught).get("is_request") is True   # gaane ki farmaish
-    plan = planner.connector_plan({"question": caught}, config, caught)
-    assert plan["music_study"] == []
-    assert plan["music_study_lane"]["wanted"] is False
-    assert "BOL" in plan["music_study_lane"]["reason"]
+    for caught in ("gaana likho aur tum hi ho ke gaane ke bol bhi de do",
+                   "arijit singh tum hi ho song lyrics likh do"):
+        assert sc.is_lyrics_hunt(caught) is True, caught
+        # dono haalat me farmaish gaane ki hai — lane phir bhi band hoti hai
+        assert craft.detect(caught).get("is_request") is True, caught
+        plan = planner.connector_plan({"question": caught}, config, caught)
+        assert plan["music_study"] == [], caught
+        assert plan["music_study_lane"]["wanted"] is False, caught
+        assert "BOL" in plan["music_study_lane"]["reason"], caught
 
-    missed = "arijit singh tum hi ho song lyrics likh do"
-    assert sc.is_lyrics_hunt(missed) is False       # jaani hui seema
+    # Bachi hui seema: ek anjaan shabd ("chaleya") + doosre shabd. Guard yahan
+    # jaan-boojh kar chup rehta hai (wahi shakal ek TOPIC ki bhi hoti hai), aur
+    # is deewar ka kaam wahi purana hai — user ka shabd query me na jaaye.
+    missed = "chaleya song lyrics likh do"
+    assert sc.is_lyrics_hunt(missed) is False       # LYRICS_HUNT_KNOWN_LIMIT
+    assert "anjaan shabd" in sc.LYRICS_HUNT_KNOWN_LIMIT
     leaky = planner.connector_plan({"question": missed}, config, missed)
+    assert leaky["music_study"], missed
     for row in leaky["music_study"]:
         low = str(row["query"]).casefold()
-        assert "lyrics" not in low and "arijit" not in low
-        assert "tum hi ho" not in low
+        assert "lyrics" not in low and "chaleya" not in low
 
 
 def test_the_orchestrator_and_result_wiring_stay_in_place():
