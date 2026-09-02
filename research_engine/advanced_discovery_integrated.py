@@ -22,10 +22,64 @@ from .triple_implementation import TripleIndependentImplementation
 from .triple_task_adapter import derive_triple_tasks, run_adapted_triple
 
 
+_TRIPLE_FAILURE_STATUSES = {
+    "ASSESSMENT_ERROR",
+    "INVALID_TASK_SET",
+    "INVALID_EXPECTED_VALUE",
+    "CLAIM_MISMATCH",
+}
+
+
+def _normalize_triple_record(value: Mapping[str, Any] | None) -> Dict[str, Any]:
+    """Keep #40's public shape stable even when an inner adapter fails.
+
+    ``run_adapted_triple`` deliberately catches backend exceptions so the base
+    discovery report survives.  That means the outer ``try`` here does not see
+    those failures.  Older adapter error records omitted ``maturity_proof``;
+    callers then crashed while trying to inspect the fail-closed state.  A
+    failure-report that causes a KeyError is not actually fail-closed.
+
+    This normalizer only fills conservative defaults.  Existing proof fields
+    from a successful triple engine are preserved.  Failure-like statuses force
+    hardware/live/MAX claims false so an incomplete auxiliary capability can
+    never be mistaken for real-world validation.
+    """
+    triple: Dict[str, Any] = dict(value or {})
+    triple.setdefault("schema_version", "1.0")
+    triple.setdefault("capability_id", 40)
+    triple.setdefault("capability", "Triple Independent Implementation")
+    triple.setdefault("status", "ASSESSMENT_ERROR")
+    triple.setdefault("all_requested_tasks_agree", False)
+    triple.setdefault("all_expected_values_match", False)
+    triple.setdefault("results", [])
+    triple.setdefault(
+        "task_adapter",
+        {"status": "UNKNOWN", "derived": False, "source": "unknown"},
+    )
+
+    proof = dict(triple.get("maturity_proof") or {})
+    proof.setdefault("production_module", True)
+    proof.setdefault("fail_closed_contract", True)
+    proof.setdefault("real_r_runtime_observed_this_run", False)
+    proof.setdefault("hardware_validation", False)
+    proof.setdefault("live_independent_validation", False)
+    proof.setdefault("max_or_verified_real_world_claim", False)
+
+    if str(triple.get("status") or "") in _TRIPLE_FAILURE_STATUSES:
+        triple["all_requested_tasks_agree"] = False
+        triple["all_expected_values_match"] = False
+        proof["hardware_validation"] = False
+        proof["live_independent_validation"] = False
+        proof["max_or_verified_real_world_claim"] = False
+
+    triple["maturity_proof"] = proof
+    return triple
+
+
 class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine):
     """Base discovery engine plus fail-closed independent capability records."""
 
-    integration_schema_version = "1.2"
+    integration_schema_version = "1.3"
 
     def __init__(
         self,
@@ -90,16 +144,13 @@ class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine):
                     "derived": False,
                     "source": "unknown",
                 },
-                "maturity_proof": {
-                    "production_module": True,
-                    "fail_closed_contract": True,
-                    "real_r_runtime_observed_this_run": False,
-                    "hardware_validation": False,
-                    "live_independent_validation": False,
-                    "max_or_verified_real_world_claim": False,
-                },
                 "note": "#40 assessment fail-closed raha; base discovery result ko promote nahi kiya gaya.",
             }
+        # The adapter itself catches backend errors, so normalize its returned
+        # record as well as the outer-exception path.  This guarantees one stable
+        # machine-readable fail-closed contract to API/UI/tests.
+        triple = _normalize_triple_record(triple)
+
         try:
             debate = self.literature_debate.reconstruct(
                 question,
@@ -135,6 +186,7 @@ class IntegratedScientificDiscoveryEngine(_BaseScientificDiscoveryEngine):
             "base_discovery_preserved": True,
             "triple_task_adapter_wired": True,
             "expected_value_gate_wired": True,
+            "stable_fail_closed_maturity_shape": True,
         }
         return report
 
