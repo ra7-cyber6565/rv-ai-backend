@@ -42,9 +42,12 @@ from .evidence_drafting import (
     audit_claims_against_manifest, build_critical_evidence_sections,
     build_evidence_draft_manifest,
 )
+from .epistemic_governance import build_runtime_evidence_packet
+from .experiment_intelligence import build_runtime_experiment_packet
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
+from .knowledge_watch import KnowledgeWatch, update_from_research_run
 from . import lab
 from . import craft
 from . import songcraft
@@ -80,6 +83,7 @@ from .research_state import inject_state_block, state_warnings
 from .run_status import COMPLETE, INCOMPLETE, evaluate as evaluate_status
 from .run_status import human_reason, split_messages
 from .source_discovery import SourceDiscovery
+from .source_integrity import analyze_evidence_pack
 from .specialist_domains import build_evidence_lane_report
 from .synthesizer import FinalSynthesizer
 from .vector_search import VectorSearch
@@ -1598,6 +1602,29 @@ class DeepResearchEngine:
                 "abstract/snippet level par hai. Wajah: "
                 + (reading.get("entries", [{}])[0].get("reason", "unknown"))[:120])
 
+        # #115–#118 — production source-integrity audit runs on the exact pack
+        # that continues into contradiction/reasoning/synthesis. It is review
+        # evidence, not an automatic fraud verdict and not a silent delete gate.
+        try:
+            source_integrity = analyze_evidence_pack(pack)
+        except Exception as exc:
+            source_integrity = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "high_risk": False,
+                "clean_bill_of_health": False,
+                "findings": [],
+                "quarantine_candidates": [],
+                "limitations": ["source integrity assessment failed closed"],
+            }
+            round_error_details.append(
+                f"source integrity assessment: {type(exc).__name__}")
+        if source_integrity.get("high_risk"):
+            warnings.append(
+                "Source-integrity audit mein high-risk duplication/provenance "
+                "signal mila; ise fraud proof nahi maana gaya, par strong release "
+                "label human review tak blocked hai.")
+
         # Specialist topics get a deterministic, structured evidence boundary
         # before any model reasoning.  This does not upgrade source quality; it
         # only prevents official records, traditions, allegations and empirical
@@ -2038,6 +2065,54 @@ class DeepResearchEngine:
         verification["evidence_first_audit"] = evidence_first_audit
         verification["evidence_first_manifest"] = (
             passes.get("evidence_first_manifest") or {})
+        try:
+            watch_directory = (
+                self.memory.directory if self.memory is not None else
+                __import__("utils.storage_paths", fromlist=["ensure_layout"])
+                .ensure_layout()["research_memory"])
+            knowledge_watch = update_from_research_run(
+                KnowledgeWatch(watch_directory, self.project_id),
+                pack=pack, claim_checks=claim_checks)
+        except Exception as exc:
+            knowledge_watch = {
+                "ran": False,
+                "pending_revalidations": None,
+                "truth_proven": False,
+                "error": "knowledge watch failed closed",
+            }
+            technical_errors.append(f"knowledge watch: {type(exc).__name__}")
+        try:
+            epistemic_packet = build_runtime_evidence_packet(
+                question=question,
+                claim_checks=claim_checks,
+                pack=pack,
+                disconfirming_search_performed=axis_counter_search is True,
+            )
+        except Exception as exc:
+            epistemic_packet = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "assessments": [],
+                "all_standards_passed": False,
+                "truth_proven": False,
+                "confidence_is_truth_probability": False,
+                "limitations": ["epistemic governance failed closed"],
+            }
+            technical_errors.append(f"epistemic governance: {type(exc).__name__}")
+        try:
+            experiment_packet = build_runtime_experiment_packet(
+                passes["hypotheses"])
+        except Exception as exc:
+            experiment_packet = {
+                "ran": False,
+                "status": "ASSESSMENT_ERROR",
+                "selection_performed": False,
+                "recommended_experiment": None,
+                "truth_proven": False,
+                "real_world_approval_implied": False,
+                "blockers": ["experiment intelligence failed closed"],
+            }
+            technical_errors.append(f"experiment intelligence: {type(exc).__name__}")
         # point 11 — kitni hypotheses evidence ke hisaab se banayi ja sakti thi,
         # ye ginti bhi API/Android tak jaani chahiye (report ke text ke alawa).
         if passes.get("hypothesis_gate"):
@@ -2145,6 +2220,10 @@ class DeepResearchEngine:
         }
         coverage["specialist_research"] = specialist_report
         coverage["research_assurance"] = research_assurance
+        coverage["source_integrity"] = source_integrity
+        coverage["epistemic_governance"] = epistemic_packet
+        coverage["experiment_intelligence"] = experiment_packet
+        coverage["knowledge_watch"] = knowledge_watch
         honesty = {
             "citations_verified": len(report.cited),
             "cited": report.cited,
@@ -2297,6 +2376,14 @@ class DeepResearchEngine:
             evidence_level = (
                 f"🟡 MIXED — MARATHON research-process coverage {percent}% rahi; "
                 "ye truth probability nahi hai aur process target poora nahi hua"
+            )
+
+        if (source_integrity.get("high_risk")
+                and any((evidence_level or "").startswith(f"✅ {word}")
+                        for word in ("VERIFIED", "STRONG"))):
+            evidence_level = (
+                "🟡 MIXED — source-integrity audit mein high-risk review signal "
+                "mila; fraud prove nahi hua, par strong label blocked hai"
             )
 
         # §17 — reasoning pass ne jo calculation records nikaale the wahi aage
@@ -2659,6 +2746,10 @@ class DeepResearchEngine:
             discovery=discovery_analysis,
             specialist_research=specialist_report,
             research_assurance=research_assurance,
+            source_integrity=source_integrity,
+            epistemic_packet=epistemic_packet,
+            experiment_intelligence=experiment_packet,
+            knowledge_watch=knowledge_watch,
             gemini_calls_used=passes["calls"],
             warnings=warnings,
             status=run_status.code,

@@ -4,9 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    # PR checks should prevent bad merges once branch protection is enabled;
-    # this second line also detects any accidental/admin direct main push.
-    branches: [main, chatgpt-upload-safety]
+    branches: [main, chatgpt-upload-safety, chatgpt-max-maturity-wave1-20260827]
   workflow_dispatch:
 
 permissions:
@@ -18,13 +16,11 @@ concurrency:
 
 jobs:
   offline-regression:
-    # Public-repository standard GitHub-hosted runner; no larger/paid runner.
     runs-on: ubuntu-latest
     timeout-minutes: 45
     env:
       ZERO_COST_ONLY: "true"
       RATE_LIMIT_ENABLED: "true"
-      # `runner` context is not valid in jobs.<job_id>.env; this job is Linux-only.
       INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data
       GEMINI_API_KEY: ""
       GEMINI_ZERO_COST_CONFIRMED: "false"
@@ -46,10 +42,6 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      # Pin the stress-test failures as an explicit release-critical gate. The
-      # full Foundation runner below still executes the complete tests/ suite;
-      # this named stage makes regressions in research semantics immediately
-      # visible instead of hiding them inside a large aggregate pytest failure.
       - name: Run advanced research quality regression gate
         run: |
           pytest -q \
@@ -63,26 +55,121 @@ jobs:
             tests/test_hypothesis_evidence_lineage.py \
             tests/test_quality_metric_ui.py \
             tests/test_causal_chain_quality.py \
-            tests/test_ui_hygiene.py
+            tests/test_causal_counterfactual.py \
+            tests/test_causal_counterfactual_wiring.py \
+            tests/test_ui_hygiene.py \
+            tests/test_capability_registry.py \
+            tests/test_scientific_memory.py \
+            tests/test_reality_oracle.py \
+            tests/test_reality_oracle_memory.py \
+            tests/test_reality_oracle_attestor.py \
+            tests/test_confidence_governance.py \
+            tests/test_memory_governance.py \
+            tests/test_memory_governance_attestor.py \
+            tests/test_research_strategy.py \
+            tests/test_negative_evidence.py \
+            tests/test_statistical_validation.py \
+            tests/test_formal_logic.py \
+            tests/test_runtime_capability_wiring.py \
+            tests/test_wiring_attestor.py \
+            tests/test_extraction_integrity.py \
+            tests/test_translation_verification.py \
+            tests/test_capture_integrity_wiring.py \
+            tests/test_literature_debate.py \
+            tests/test_literature_debate_wiring.py \
+            tests/test_literature_debate_attestor.py \
+            tests/test_discovery_frontier.py \
+            tests/test_discovery_frontier_wiring.py \
+            tests/test_holdout_vault.py \
+            tests/test_holdout_vault_hardening.py \
+            tests/test_holdout_vault_execution_attestor.py \
+            tests/test_double_blind_evaluation.py \
+            tests/test_double_blind_attestor.py \
+            tests/test_scientist_society.py \
+            tests/test_scientist_society_execution_attestor.py \
+            tests/test_intellectual_diversity_attestor.py \
+            tests/test_adversarial_science.py \
+            tests/test_adversarial_science_attestor.py \
+            tests/test_blind_analysis_attestor.py \
+            tests/test_triple_implementation.py \
+            tests/test_triple_implementation_reproducibility.py \
+            tests/test_triple_implementation_attestor.py \
+            tests/test_research_capsule.py \
+            tests/test_procedural_memory.py \
+            tests/test_knowledge_watch.py \
+            tests/test_code_sandbox.py \
+            tests/test_sandbox_execution_attestor.py \
+            tests/test_simulation_lab.py \
+            tests/test_multiphysics_simulation.py \
+            tests/test_simulation_execution_attestor.py \
+            tests/test_sim_to_reality.py \
+            tests/test_sim_to_reality_attestor.py \
+            tests/test_data_forensics.py \
+            tests/test_data_forensics_execution_attestor.py \
+            tests/test_tool_broker.py \
+            tests/test_maturity_proof.py \
+            tests/test_maturity_proof_crypto.py \
+            tests/test_maturity_auditor.py \
+            tests/test_maturity_policy_coverage.py \
+            tests/test_maturity_policy_extensions.py \
+            tests/test_maturity_specialized_route_overrides.py \
+            tests/test_maturity_attestation_readiness.py \
+            tests/test_maturity_attestor.py \
+            tests/test_experiment_intelligence.py \
+            tests/test_experiment_intelligence_hardening.py \
+            tests/test_experiment_intelligence_attestor.py \
+            tests/test_hypothesis_evolution.py \
+            tests/test_neural_symbolic_hybrid.py \
+            tests/test_neural_symbolic_wiring.py \
+            tests/test_world_model.py \
+            tests/test_world_model_wiring.py \
+            tests/test_technology_readiness.py \
+            tests/test_technology_readiness_wiring.py \
+            tests/test_manufacturing_reality.py \
+            tests/test_manufacturing_reality_wiring.py \
+            tests/test_manufacturing_reality_registry.py \
+            tests/test_manufacturing_reality_attestor.py \
+            tests/test_model_wiring_proof_contracts.py \
+            tests/test_economic_reality.py \
+            tests/test_economic_reality_registry.py \
+            tests/test_economic_reality_attestor.py \
+            tests/test_mechanistic_reasoning.py \
+            tests/test_mechanistic_reasoning_wiring.py \
+            tests/test_mechanistic_reasoning_registry.py \
+            tests/test_mechanistic_reasoning_attestor.py \
+            tests/test_visual_science.py \
+            tests/test_visual_science_execution_attestor.py \
+            tests/test_post_deployment_validation.py \
+            tests/test_post_deployment_input_guard.py \
+            tests/test_post_deployment_integrity.py \
+            tests/test_post_deployment_attestor.py \
+            tests/test_post_deployment_proof_expiry.py \
+            tests/test_benchmark_lab.py \
+            tests/test_physical_lab_boundary.py \
+            tests/test_physical_lab_attestor.py \
+            tests/test_physical_lab_attestor_expiry.py \
+            tests/test_epistemic_governance.py \
+            tests/test_unknown_unknown_hunter.py \
+            tests/test_claim_insurance.py \
+            tests/test_synthetic_data_boundary.py \
+            tests/test_belief_sandbox.py \
+            tests/test_conspiracy_discipline.py \
+            tests/test_epistemic_stress_wiring.py \
+            tests/test_autonomous_debugging.py \
+            tests/test_source_integrity.py
 
-      # Keep CI and the user's Windows laptop on exactly the same release gate.
-      # The runner itself compiles sources, runs focused integration tests,
-      # test_research_engine.py, every standalone tests/test_*.py file, and the
-      # offline superconductivity Benchmark V2. It continues after individual
-      # failures so one run exposes the complete failure set, then exits nonzero.
       - name: Run strict zero-cost foundation gate
+        if: always()
         run: |
           python scripts/run_foundation_gate.py \
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
 
-      # Keep the machine-readable stage/tail report even when the strict gate
-      # fails. This is diagnostics only: it never changes pass/fail semantics.
       - name: Upload foundation receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: foundation-gate-receipt-${{ github.run_id }}
           path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 1

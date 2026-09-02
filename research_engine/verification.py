@@ -1,14 +1,9 @@
-"""Integrated verification facade: Claude physics/math + ChatGPT A-E honesty.
+"""Integrated verification facade: computational checks + A-E + capture integrity.
 
-``verification_claude.py`` is the exact latest Claude verification implementation
-from main (including unit-aware physics sanity checks). This facade deliberately
-adds stricter claim-level A-E verification on top, so structural citation IDs
-can never by themselves produce SOURCE GROUNDED.
-
-If no labelled factual/evidence claim can be checked, source grounding fails
-closed to UNKNOWN/UNVERIFIABLE. Independent arithmetic/physics verification is
-preserved as a separate dimension rather than being erased by a missing A-E
-claim.
+A-E remain citation/relevance/support/depth/source-quality checks. Transformed
+text adds a separate F_capture_integrity check for OCR/translation provenance.
+A valid citation or A-E pass cannot by itself make weak transformed text
+SOURCE GROUNDED.
 """
 from __future__ import annotations
 
@@ -33,7 +28,7 @@ class VerificationReport(_ClaudeVerificationReport):
 
 
 class VerificationEngine(_ClaudeVerificationEngine):
-    """Claude computational/physics checks + cumulative same-source A-E gate."""
+    """Computational/physics checks + cumulative same-source evidence gate."""
 
     def __init__(self):
         super().__init__()
@@ -77,10 +72,6 @@ class VerificationEngine(_ClaudeVerificationEngine):
             question=question,
         )
         ev = self.evidence_verifier.verify(answer, pack).to_dict()
-        # Direct ``check_math`` diagnostics retain the claimed result in the
-        # check name (useful when comparing correct/incorrect equations). The
-        # integrated report exposes the operation as the stable check identity;
-        # pass/fail plus detail carries the verdict/result separately.
         report_checks: List[Check] = []
         arithmetic_name = re.compile(
             r"^(\d[\d,]*(?:\.\d+)?)\s*([+\-*x×/])\s*"
@@ -111,6 +102,7 @@ class VerificationEngine(_ClaudeVerificationEngine):
             ("C_support", "Claim cited text/excerpt se support hoti hai"),
             ("D_depth", "Claim ke liye source enough depth tak padha gaya"),
             ("E_quality", "Supporting source ki quality evidence ke layak hai"),
+            ("F_capture_integrity", "OCR/translation capture integrity strong-claim use ke layak hai"),
         ]
         states = ev.get("checks") or {}
         for key, human_name in mapping:
@@ -123,25 +115,22 @@ class VerificationEngine(_ClaudeVerificationEngine):
         gate_passed = bool(ev.get("gate_passed"))
 
         if claims_checked == 0:
-            # No check ran != pass. Legacy/Claude structural source grounding is
-            # not enough if there was no claim that A-E could inspect.
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
             report.warnings.append(
-                "Claim-level evidence verification A-E apply nahi ho saki kyunki "
-                "koi labelled factual/evidence claim detect nahi hui. Valid citation "
-                "ID ko akela source verification nahi maana gaya."
+                "Claim-level evidence verification (A-E + capture-integrity F) apply "
+                "nahi ho saki kyunki koi labelled factual/evidence claim detect nahi "
+                "hui. Valid citation ID ko akela source verification nahi maana gaya."
             )
         elif not gate_passed:
             report.warnings.append(
-                "Valid citation IDs mile, lekin claim-level evidence verification A-E "
-                "poori pass nahi hui. Isliye answer ko fully source-verified nahi maana gaya."
+                "Claim-level evidence verification fail-closed rahi: valid citation IDs "
+                "mile, lekin same-source A-E aur separate capture-integrity F gate poori "
+                "pass nahi hui. Isliye answer ko fully source-verified nahi maana gaya."
             )
             if report.status == "SOURCE GROUNDED":
                 report.status = "UNVERIFIABLE HERE"
             elif report.status == "COMPUTATIONALLY VERIFIED":
-                # Calculation correct ho sakti hai, factual premise source-level
-                # par incomplete ho sakta hai — dono ko ek label mein mix na karo.
                 report.status = "COMPUTATIONALLY VERIFIED (partial)"
         elif report.status in {"UNVERIFIABLE HERE", "LOGICALLY CONSISTENT"}:
             report.status = "SOURCE GROUNDED"

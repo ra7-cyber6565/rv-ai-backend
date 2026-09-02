@@ -2,6 +2,27 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Independent audit update — 2026-08-28
+
+- Production `main` audited at `8c8ee5fe8cb3b4644b52eb644904267156494300`;
+  Foundation CI was green with 2,007 pytest tests, API smoke 42/42,
+  cross-domain 649/649 and superconductivity 156/156.
+- PR #62 remains **UNMERGED / NOT ACCEPTED**. Its large maturity wave is
+  substantial standalone code, but most modules are not yet invoked by the
+  production question-to-answer path. Passing unit tests are not production
+  wiring proof.
+- Capability 14 (Formal Logic) and 112 (Capability Discovery) now require a
+  revision-bound `production_wiring` receipt; CODE+TEST alone cannot mark them
+  VERIFIED.
+- Dark-matter acceptance is now a mandatory Foundation receipt stage. The
+  newly enforced run exposed and closed the DM-05 warning-token regression;
+  current offline result is 328/328, 18/18 closed.
+- The post-deployment validator now rejects NaN/infinity with a domain-level
+  `must be finite` error before canonical receipt hashing.
+- Exact current PR-head GitHub CI is still the merge authority. Claude's local
+  Windows worktrees/stashes have not been read, applied, popped, reset or
+  overwritten by this branch.
+
 ## Hard rules
 
 - ₹0 only. No paid API/model/service, no silent paid fallback, no surprise billing.

@@ -225,7 +225,8 @@ def install() -> None:
                 warnings.append(
                     f"Hypothesis {index} ka evidence-lineage fail hua — mechanism/"
                     f"reasoning ke {bad} step same-source support se backed nahi the "
-                    "aur [INFERENCE]/[NO-SOURCE] se disclose bhi nahi hue."
+                    "aur inference ya unsupported-assumption label se disclose bhi "
+                    "nahi hue."
                 )
         return warnings
 
