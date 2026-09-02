@@ -6,9 +6,9 @@ or uploaded document can contain text such as "ignore previous instructions",
 reasoning prompt without a trust boundary creates an indirect prompt-injection
 path.
 
-This module deliberately does *not* delete suspicious source content: a security
-paper may legitimately discuss prompt injection, and deleting its words would
-corrupt evidence. Instead it:
+This module deliberately does *not* delete suspicious source content from the
+model-facing evidence pack: a security paper may legitimately discuss prompt
+injection, and deleting its words would corrupt evidence. Instead it:
 
 - wraps every rendered EvidencePack in an explicit UNTRUSTED-SOURCE boundary;
 - quotes every source-data line with a DATA> prefix;
@@ -18,12 +18,11 @@ corrupt evidence. Instead it:
   reorder instructions;
 - bounds metadata fields as well as excerpts, so hostile metadata cannot turn a
   small source into an unbounded prompt;
-- keeps source IDs/read-depth/provenance intact for citation verification.
+- keeps source IDs/read-depth/provenance intact for citation verification;
+- installs a stricter no-model fallback guard that skips instruction-like
+  sentences and retracted/rejected sources when no LLM prompt exists at all.
 
 The guard is pure Python, deterministic, ₹0, and performs no network/model call.
-`install()` replaces only EvidencePack.to_prompt_block at the package boundary,
-so Claude-owned retrieval/relevance modules do not need to be edited while they
-are under active cross-domain work.
 """
 from __future__ import annotations
 
@@ -42,8 +41,9 @@ _BIDI_CONTROLS = {
     "\u202e", "\u2066", "\u2067", "\u2068", "\u2069",
 }
 
-# Intentionally narrow/high-signal. We mark rather than remove, so false
-# positives do not destroy evidence in AI-security papers.
+# Intentionally narrow/high-signal. Model-facing prompts mark rather than remove
+# these lines. The no-model fallback uses the same detector to skip them because
+# there is no higher-level instruction/data boundary in that path.
 _INJECTION_PATTERNS = tuple(re.compile(p, re.IGNORECASE) for p in (
     r"\bignore\s+(?:all\s+|any\s+|the\s+)?(?:previous|prior|above)\s+(?:instructions?|messages?|rules?|prompt)\b",
     r"\b(?:system|developer)\s+(?:prompt|message|instructions?)\b",
@@ -171,11 +171,16 @@ def guarded_prompt_block(pack: EvidencePack, max_chars_per_source: int = 1200) -
 
 
 def install() -> None:
-    """Install the package-boundary guard exactly once."""
+    """Install model-prompt and deterministic-fallback source guards exactly once."""
     current = getattr(EvidencePack, "to_prompt_block", None)
-    if current is guarded_prompt_block:
-        return
-    EvidencePack.to_prompt_block = guarded_prompt_block  # type: ignore[assignment]
+    if current is not guarded_prompt_block:
+        EvidencePack.to_prompt_block = guarded_prompt_block  # type: ignore[assignment]
+
+    # Quota exhaustion uses local_reasoning without any LLM prompt, so the
+    # prompt delimiter above cannot protect that path. Install its stricter
+    # sentence/source filter from the same package boundary.
+    from .local_reasoning_guard import install as install_local_reasoning_guard
+    install_local_reasoning_guard()
 
 
 __all__ = [
