@@ -40,7 +40,9 @@ def test_remote_path_traversal_and_remote_switch_are_blocked(monkeypatch):
         provider._target("other:secret.txt")
 
 
-def test_stat_reads_size_and_sha256_without_exposing_token(monkeypatch):
+def test_stat_reads_size_and_native_sha256_without_exposing_token(monkeypatch):
+    native_hash = "A1" * 32
+
     def fake_run(cmd, **kwargs):
         assert kwargs["shell"] is False
         assert cmd[0] == "/fake/rclone"
@@ -50,21 +52,83 @@ def test_stat_reads_size_and_sha256_without_exposing_token(monkeypatch):
             "Size": 1234,
             "IsDir": False,
             "ID": "drive-object-id",
-            "Hashes": {"MD5": "abcd", "SHA-256": "A1B2C3"},
+            "Hashes": {"MD5": "abcd", "SHA-256": native_hash},
         }
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps(payload), stderr="")
 
     provider = _provider(monkeypatch, runner=fake_run)
     obj = provider.stat("research/paper.pdf")
     assert obj.size == 1234
-    assert obj.sha256 == "a1b2c3"
+    assert obj.sha256 == native_hash.lower()
     assert obj.etag == "drive-object-id"
+
+
+def test_stat_downloads_and_hashes_when_remote_has_no_native_sha256(monkeypatch):
+    expected_hash = "b7" * 32
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(cmd)
+        if cmd[1] == "lsjson":
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=json.dumps({
+                    "Size": 77,
+                    "IsDir": False,
+                    "Hashes": {"MD5": "abcd"},
+                }),
+                stderr="",
+            )
+        assert cmd[1:] == [
+            "hashsum",
+            "SHA256",
+            "drive:InfinityResearchAI/research/paper.pdf",
+            "--download",
+        ]
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=f"{expected_hash}  paper.pdf\n",
+            stderr="provider notice must not become verification data",
+        )
+
+    provider = _provider(monkeypatch, runner=fake_run)
+    obj = provider.stat("research/paper.pdf")
+    assert obj.size == 77
+    assert obj.sha256 == expected_hash
+    assert [call[1] for call in calls] == ["lsjson", "hashsum"]
+
+
+def test_missing_download_hash_refuses_verification(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        if cmd[1] == "lsjson":
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout=json.dumps({"Size": 9, "IsDir": False, "Hashes": {}}),
+                stderr="",
+            )
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout="",
+            stderr="oauth_token=DO-NOT-LEAK",
+        )
+
+    provider = _provider(monkeypatch, runner=fake_run)
+    with pytest.raises(RuntimeError) as captured:
+        provider.stat("research/paper.pdf")
+    text = str(captured.value)
+    assert "SHA-256" in text
+    assert "DO-NOT-LEAK" not in text
 
 
 def test_upload_uses_copyto_exact_file_then_stats(monkeypatch, tmp_path):
     local = tmp_path / "paper.pdf"
     local.write_bytes(b"abc")
     calls = []
+    native_hash = "c3" * 32
 
     def fake_run(cmd, **kwargs):
         calls.append(cmd)
@@ -76,13 +140,18 @@ def test_upload_uses_copyto_exact_file_then_stats(monkeypatch, tmp_path):
         return subprocess.CompletedProcess(
             cmd,
             0,
-            stdout=json.dumps({"Size": 3, "IsDir": False, "Hashes": {}}),
+            stdout=json.dumps({
+                "Size": 3,
+                "IsDir": False,
+                "Hashes": {"SHA256": native_hash},
+            }),
             stderr="",
         )
 
     provider = _provider(monkeypatch, runner=fake_run)
     out = provider.upload_file(str(local), "research/paper.pdf")
     assert out.size == 3
+    assert out.sha256 == native_hash
     assert [call[1] for call in calls] == ["copyto", "lsjson"]
 
 
@@ -111,6 +180,7 @@ def test_status_contains_no_oauth_material(monkeypatch):
     assert status["remote_name"] == "drive"
     assert status["encryption_required"] is False
     assert status["encryption_verified"] is None
+    assert status["content_verification"] == "sha256-required"
     assert "token" not in repr(status).lower()
     assert "secret" not in repr(status).lower()
 
