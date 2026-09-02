@@ -44,6 +44,38 @@ _CAPABILITIES: Dict[int, Dict[str, Any]] = {
             "100/100 or max maturity without executed evidence",
         ],
     },
+    103: {
+        "id": 103,
+        "name": "Autonomous Literature Debate",
+        "implementation": {
+            "module": "research_engine/literature_debate.py",
+            "production_wiring": "research_engine/advanced_discovery_integrated.py",
+            "tests": [
+                "tests/test_literature_debate.py",
+                "tests/test_advanced_discovery_extensions.py",
+            ],
+            "fail_closed": True,
+            "adversarial_tests_defined": True,
+        },
+        "proof": {
+            "repository_implementation_present": True,
+            "production_wiring_present": True,
+            "test_definitions_present": True,
+            "current_full_gate_execution_proven": False,
+            "grounded_available_text_reconstruction_proven_by_execution": False,
+            "systematic_review_completeness_proven": False,
+            "live_independent_validation_proven": False,
+            "hardware_or_physical_validation_proven": False,
+        },
+        "claim_ceiling": "IMPLEMENTED_PENDING_EXECUTION_PROOF",
+        "cannot_claim": [
+            "global literature completeness",
+            "missing critique means no critique exists",
+            "missing replication failure means replication succeeded",
+            "invented researcher identities",
+            "100/100 or max maturity without executed evidence",
+        ],
+    },
 }
 
 
