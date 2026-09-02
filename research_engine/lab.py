@@ -69,6 +69,11 @@ from .advanced_discovery import NumericExecutionPolicy, SafeNumericExecutor
 # isliye yahan import karne se koi cycle nahi banta). Naam yahan chhota rakha
 # gaya hai par value wahi hai — do jagah do string rakhna hi purani galti hai.
 from .rejects import HUMAN_SUBJECT_ON_CRAFT_ASK as HUMAN_SUBJECT_ON_CRAFT
+# #188b — "kaunsa shabd topic ka hai" ka faisla app ke apne hygiene module se
+# hota hai. `query_hygiene` is import ke liye safe hai: wo `query_builder` ko
+# sirf function ke ANDAR import karta hai, isliye koi cycle nahi banta. Nayi
+# keyword list banana hi purani galti hai — wahi tokenizer dobara use hota hai.
+from . import query_hygiene
 
 # ── status vocabulary ────────────────────────────────────────────────────────
 # Chaar asli nateeje + ek "chala hi nahi". NOT_RUN alag rakha gaya hai kyunki
@@ -339,6 +344,126 @@ def human_subject_phrase(hypothesis: Dict[str, Any]) -> str:
         return ""
     return human_subject_hit(*(_text_of(hypothesis, key)
                                for key in _HUMAN_SUBJECT_FIELDS))
+
+
+# ── #188b — "number mil gaya" ≠ "IS daawe ka number mil gaya" ────────────────
+# NAAPI HUI BIMARI (offline probe, 2026-09-02). SCIENCE run (craft_ask=False),
+# hypothesis "Listeners ki GSR 20% se zyada badhegi jab chorus aayega", aur
+# evidence me sirf perovskite solar cell ke paper:
+#
+#     RESULT threshold  TESTED_PASS  all_measurements_satisfy
+#            expected='> 20 %'  observed='26.1 % [S1], 24.5 % [S2]'
+#
+# Yaani solar cell ki efficiency se GSR ka daawa "PASS" ho gaya. Wajah: grading
+# sirf DIMENSION milati thi, aur "percent" kisi bhi cheez ka hota hai. Jhoota
+# PASS na-chale test se zyada khatarnaak hai — isliye do taale lagte hain, aur
+# dono SIRF un dimension par jinke number ka apna koi vishay nahi hota.
+#
+# JAAN-BOOJH KAR KYA NAHI KIYA: physical dimension (temperature/pressure/energy
+# /length/...) par ye shart NAHI lagti. Naapa hua kaaran: "Tc" jaisa 2-akshar ka
+# symbol tokenizer se nikal jaata hai ("Tc 250 K se zyada hoga" ke topic shabd
+# sirf ['family'] nikle), to overlap maangte hi ek SAHI test DATA_MISSING ho
+# jaata. Sahi test maar dena bhi nuksaan hai — isliye scope chhota rakha gaya.
+def needs_subject_match(dimension: str) -> bool:
+    """Kya is dimension ke number ka apna koi vishay nahi hota?
+
+    `percent` har cheez ka hota hai (efficiency, GSR, win rate, mehngai), aur
+    `bare:<shabd>` me unit hi nahi hoti. Sirf inhi par "number kis baare me hai"
+    poochha jaata hai; K/Pa/J/m/s waale number khud apna vishay bata dete hain.
+
+    Naapa hua sach (chhupaya nahi ja raha): AAJ threshold recipe par sirf
+    `percent` aata hai — `bare:*` sirf direction ke pair (`_bare_quantity`) me
+    banta hai. `bare:` yahan aage ke liye likha hai, taaki koi nayi recipe
+    bina-unit ginti par threshold banaye to wo bhi is shart me aa jaaye.
+    """
+    dim = str(dimension or "")
+    return dim == "percent" or dim.startswith("bare:")
+
+
+# Nateeje ke naam. String hi rehne dena — report, test aur logs inhi par tikte
+# hain (do jagah do string rakhna hi purani galti hai).
+REASON_HUMAN_SIGNAL = "human_signal_not_gradable_here"
+REASON_SUBJECT_MISMATCH = "no_measurement_about_this_subject"
+
+# Ye do baat likhi hui seema hain — chhupaayi nahi jaati.
+SUBJECT_MATCH_KNOWN_LIMIT = (
+    "Subject-milaan sirf bina-unit naap (percent / bina-unit ginti) par lagta "
+    "hai. K, Pa, J, m, s jaise number apna vishay khud bata dete hain, isliye "
+    "wahan purana rasta bilkul waisa hi chalta hai."
+)
+HUMAN_SIGNAL_KNOWN_LIMIT = (
+    "Insaani signal (GSR/EEG/HRV/cortisol/listening test) ka percent daawa app "
+    "ke andar PASS nahi banta — chahe kisi paper me wo number likha ho. Ye "
+    "jaan-boojh kar rakha gaya hai: aisa number asli logon par naapa jaata hai, "
+    "aur uska faisla app ke shabd-milaan se karna jhooth hoga."
+)
+
+# Ye list `_HUMAN_SUBJECT_RE` se JAAN-BOOJH KAR chhoti hai, aur wajah likhi ja
+# rahi hai. Wo list ek DUSRA sawaal poochhti hai — "is farmaish par insaan wala
+# test PLAN karna chahiye ya nahi" — jahan chaudi jaal ka nuksaan sirf itna hai
+# ki ek test plan nahi hota. Yahan sawaal GRADING ka hai, jahan chaudi jaal ek
+# SAHI science test ko DATA_MISSING kar degi: "pulse duration", "sky survey",
+# "subjects of the study", "interview" — ye shabd optics/astronomy/statistics me
+# roz aate hain. Isliye yahan sirf wo phrase hain jinka matlab insaani body/brain
+# signal ya insaani panel ke alawa kuch nahi ho sakta.
+_BODY_SIGNAL_RE = re.compile(
+    r"\bg\.?s\.?r\b|\bgalvanic skin\b|\bskin conductance\b|\bE\.?D\.?A\b|"
+    r"\be\.?e\.?g\b|\bf\.?m\.?r\.?i\b|\bfnirs\b|\bmeg\b|"
+    r"\bbrain (?:scan|activity|wave)\b|\balpha (?:wave|power|band)\b|"
+    r"\bh\.?r\.?v\b|\bheart rate\b|\bblood pressure\b|\bcortisol\b|"
+    r"\bpupil (?:dilation|diameter)\b|\beye[-\s]?track\w*\b|"
+    r"\bskin temperature\b|\bgoosebumps?\b|\bfrisson\b|"
+    r"\blisten(?:er|ing) (?:test|study|panel|experiment|session)s?\b|"
+    r"\bfocus group\b|\blikert\b|\bself[-\s]?report\w*\b|"
+    r"\b\d+\s*logon\s+(?:par|pe|ko|se)\b|\blogon\s+(?:par|pe)\s+test\b|"
+    r"\bshrota\w*\b|\bsunne\s+walon\s+(?:par|pe|se|ko)\b|"
+    r"\bdil\s*ki\s*dhadkan\b|\bpaseena\b",
+    re.IGNORECASE)
+
+
+def body_signal_hit(*texts: str) -> str:
+    """Pehla phrase jo ASLI logon ke body/brain signal ki naap maangta hai."""
+    for text in texts:
+        found = _BODY_SIGNAL_RE.search(str(text or ""))
+        if found:
+            return found.group(0).strip()
+    return ""
+
+
+# Chaar akshar ka stem: "badhegi/badha/badhta" ek hi jad se aate hain, aur
+# "listener/listeners" ko do alag shabd maanna hi galti hoti. Stemmer library
+# nahi laayi ja rahi (₹0, offline, aur ek nayi dependency ka mol nahi hai).
+_SUBJECT_STEM_CHARS = 4
+
+
+def _subject_stems(text: str) -> set:
+    """Daawe ke topic shabd + unke chhote stem — ek hi set me."""
+    stems: set = set()
+    for token in query_hygiene.content_tokens(text or ""):
+        stems.add(token)
+        if len(token) > _SUBJECT_STEM_CHARS:
+            stems.add(token[:_SUBJECT_STEM_CHARS])
+    return stems
+
+
+def subject_overlap(claim: str, context: str) -> str:
+    """Pehla topic shabd jo daawe aur is number ke aas-paas — DONO me hai.
+
+    Khaali wapsi ka matlab: "number to mila, par kisi shabd se ye daawe se juda
+    hi nahi". Topic shabd `query_hygiene.content_tokens` se aate hain, isliye
+    junk/function shabd ("ka", "hoga", "kaam") is rishte ko jhootha nahi bana
+    sakte.
+    """
+    stems = _subject_stems(claim)
+    if not stems:
+        return ""
+    for token in query_hygiene.content_tokens(context or ""):
+        if token in stems:
+            return token
+        if (len(token) > _SUBJECT_STEM_CHARS
+                and token[:_SUBJECT_STEM_CHARS] in stems):
+            return token
+    return ""
 
 
 @dataclass
@@ -802,20 +927,29 @@ def _direction_pair(text: str) -> Tuple[Optional[Tuple[Any, Any]], str]:
     return None, "pair_not_comparable"
 
 
-def _tagged_quantities(text: str, dimension: str
-                       ) -> List[Tuple[str, Any]]:
-    """(source_id, Quantity) — sirf usi dimension ke, line ke tag ke saath.
+def _tagged_rows(text: str, dimension: str
+                 ) -> Tuple[List[Tuple[str, Any, str]], Dict[str, str]]:
+    """(source_id, Quantity, us number ki apni line) + har source ki pehli line.
 
     Ek hi source ka title aur snippet dono me wahi number likha ho to wo EK
     naap hai, do nahi — warna report "3 numbers mile" keh kar evidence ko
     zyada dikhata hai.
+
+    Doosri wapsi (`titles`) #188b ke liye hai: `evidence_text()` har source ko
+    title → snippet → full_text ke kram me likhta hai, isliye kisi tag ki PEHLI
+    line uska title hoti hai. "[S1] 26.1%" jaisi akeli line me koi topic shabd
+    hi nahi hota, isliye subject-milaan number ki line ke SAATH uske source ka
+    title bhi padhta hai.
     """
-    rows: List[Tuple[str, Any]] = []
+    rows: List[Tuple[str, Any, str]] = []
+    titles: Dict[str, str] = {}
     seen: set = set()
     for line in (text or "").splitlines():
         tag_match = _TAG_RE.match(line)
         tag = tag_match.group(1) if tag_match else ""
         body = line[tag_match.end():] if tag_match else line
+        if tag and tag not in titles:
+            titles[tag] = body.strip()
         for quantity in physics_checks.parse_quantities(body):
             if quantity.dimension != dimension or quantity.si is None:
                 continue
@@ -823,8 +957,19 @@ def _tagged_quantities(text: str, dimension: str
             if key in seen:
                 continue
             seen.add(key)
-            rows.append((tag, quantity))
-    return rows
+            rows.append((tag, quantity, body.strip()))
+    return rows, titles
+
+
+def _tagged_quantities(text: str, dimension: str
+                       ) -> List[Tuple[str, Any]]:
+    """(source_id, Quantity) — purana aakar, ab `_tagged_rows` ke upar.
+
+    Jise sirf (tag, quantity) chahiye wo yahi bulaata hai. Do jagah do parser
+    rakhna hi purani galti hai, isliye asli kaam ek hi function karta hai.
+    """
+    rows, _titles = _tagged_rows(text, dimension)
+    return [(tag, quantity) for tag, quantity, _line in rows]
 
 
 def _run_numeric_formula(spec: TestSpec, policy: LabPolicy,
@@ -884,15 +1029,46 @@ def _run_threshold(spec: TestSpec, policy: LabPolicy,
     if spec.target_si is None:
         return _result(spec, DATA_MISSING, reason_code="no_target_value",
                        detail="Daawe me koi naapne layak number+unit nahi tha.")
-    rows = _tagged_quantities(spec.evidence_text, spec.dimension)
+    # #188b, TAALA 1 — bina-unit naap par insaani signal ka daawa app ke andar
+    # PASS nahi ban sakta. Ye #155e ke craft-time darwaze ki JAGAH nahi hai: wo
+    # spec banne se PEHLE rokta hai aur sirf craft farmaish par; ye har run me
+    # GRADING ke waqt rokta hai, aur sirf percent/bina-unit dimension par.
+    signal = (body_signal_hit(spec.text)
+              if needs_subject_match(spec.dimension) else "")
+    if signal:
+        return _result(spec, DATA_MISSING, reason_code=REASON_HUMAN_SIGNAL,
+                       expected=f"{spec.target_value:g} {spec.target_unit}",
+                       detail=f"Ye daawa asli logon par naapi jaane wali cheez "
+                              f"ka hai (\"{signal}\"). Sources me likha koi "
+                              f"{spec.target_unit or 'number'} isi naap ka hai "
+                              "ya kisi aur cheez ka — ye app sirf shabd padhkar "
+                              "tay nahi kar sakta, isliye koi nateeja nahi diya "
+                              "gaya. Asli listening/lab test hi ise naapega.")
+    rows, titles = _tagged_rows(spec.evidence_text, spec.dimension)
     if not rows:
         return _result(spec, DATA_MISSING,
                        reason_code="no_matching_measurement",
                        expected=f"{spec.target_value:g} {spec.target_unit}",
                        detail=f"Sources me is daawe ke jaisa ({spec.dimension}) "
                               "koi naapa hua number nahi mila.")
+    # #188b, TAALA 2 — bina-unit number ka vishay bhi milna chahiye. Context =
+    # us number ki apni line + usi source ki pehli line (title), kyunki
+    # "[S1] 26.1%" me koi topic shabd hi nahi hota.
+    off_topic: List[Tuple[str, Any]] = []
+    if needs_subject_match(spec.dimension):
+        kept: List[Tuple[str, Any, str]] = []
+        for tag, quantity, line in rows:
+            title = titles.get(tag, "")
+            context = f"{title}\n{line}" if title and title != line else line
+            if subject_overlap(spec.text, context):
+                kept.append((tag, quantity, line))
+            else:
+                off_topic.append((tag, quantity))
+        rows = kept
+    pairs: List[Tuple[str, Any]] = [(tag, quantity)
+                                    for tag, quantity, _line in rows]
     ok, bad = [], []
-    for tag, quantity in rows:
+    for tag, quantity in pairs:
         holds = (quantity.si > spec.target_si if spec.relation == "gt"
                  else quantity.si < spec.target_si)
         (ok if holds else bad).append((tag, quantity))
@@ -903,6 +1079,21 @@ def _run_threshold(spec: TestSpec, policy: LabPolicy,
         return ", ".join(f"{q.label()}" + (f" [{t}]" if t else "")
                          for t, q in rows_in[:4])
 
+    # Jo number chhode gaye wo CHHUPTE nahi — teeno nateeje ke saath jaate hain.
+    skipped = (f" {len(off_topic)} number is daawe ke baare me nahi tha, isliye "
+               f"chhoda gaya: {show(off_topic)}." if off_topic else "")
+    if not pairs:
+        return _result(spec, DATA_MISSING, reason_code=REASON_SUBJECT_MISMATCH,
+                       expected=expected, observed=show(off_topic),
+                       evidence_ids=[t for t, _ in off_topic if t],
+                       numbers={"off_topic_numbers": len(off_topic),
+                                "graded_numbers": 0},
+                       detail=f"Is naap ({spec.dimension}) ke {len(off_topic)} "
+                              f"number mile — {show(off_topic)} — par unme se "
+                              "koi is daawe ke baare me nahi tha (na number ki "
+                              "line me, na uske source ke title me daawe ka koi "
+                              "shabd). Bina-unit ginti har cheez ki hoti hai, "
+                              "isliye sirf number milne par nateeja nahi nikala.")
     if ok and bad:
         return _result(spec, DATA_MISSING,
                        reason_code="mixed_evidence_no_verdict", expected=expected,
@@ -910,18 +1101,18 @@ def _run_threshold(spec: TestSpec, policy: LabPolicy,
                        evidence_ids=[t for t, _ in (ok + bad) if t],
                        detail=f"Daawa poora karte hain: {show(ok)}; ulta kehte "
                               f"hain: {show(bad)}. Dono taraf evidence hai, "
-                              "isliye koi ek nateeja nahi nikala gaya.")
+                              "isliye koi ek nateeja nahi nikala gaya." + skipped)
     if ok:
         return _result(spec, TESTED_PASS, expected=expected, observed=show(ok),
                        evidence_ids=[t for t, _ in ok if t],
                        reason_code="all_measurements_satisfy",
                        detail=f"Sources ke {len(ok)} naape hue number is daawe "
-                              "ke saath hain.")
+                              "ke saath hain." + skipped)
     return _result(spec, TESTED_FAIL, expected=expected, observed=show(bad),
                    evidence_ids=[t for t, _ in bad if t],
                    reason_code="measurements_contradict",
                    detail=f"Sources ke {len(bad)} naape hue number is daawe ke "
-                          "ULTE hain.")
+                          "ULTE hain." + skipped)
 
 
 def _run_direction(spec: TestSpec, policy: LabPolicy,
