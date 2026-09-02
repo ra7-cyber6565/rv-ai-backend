@@ -19,6 +19,8 @@ Package layout:
     reasoning_router_integrated.py
                               provider fallback + latest pass accounting facade
     source_prompt_guard.py    untrusted source-data / prompt-injection boundary
+    source_independence_guard.py
+                              work identity vs publisher/origin concentration split
     advanced_discovery_integrated.py
                               additive #40/#103 advanced-discovery facade
     critic.py                 Critic
@@ -47,6 +49,12 @@ Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
 EvidencePack rendering in a strict evidence-only boundary, quotes every source
 line, neutralizes instruction-like source text without deleting research
 content, strips hidden bidi/control characters, and bounds hostile metadata.
+
+Evidence independence and source-origin concentration are separate concepts.
+The source-independence guard counts same-work mirrors/DOIs/patent families once
+without collapsing two genuinely different studies merely because they share a
+journal/repository domain. Ranking concentration keeps its separate legacy origin
+cap, so this honesty fix does not let one provider flood the source list.
 
 Advanced-discovery extensions preserve the base scientific-discovery engine and
 add separately-audited #40 triple independent numeric implementation and #103
@@ -83,6 +91,12 @@ from .models import (
     SourceType,
     label_to_claim_type,
 )
+
+# Split "same work?" from "same source origin?" before evidence/debate modules
+# are imported. This is deterministic/₹0 and preserves the ranking origin cap.
+from .source_independence_guard import install as _install_source_independence_guard
+_install_source_independence_guard()
+
 # Every normal package import receives the same source-data trust boundary.
 # Installation is deterministic and performs no network/model call.
 from .source_prompt_guard import install as _install_source_prompt_guard
@@ -98,7 +112,7 @@ from .advanced_discovery_integrated import (
 )
 _advanced_discovery.ScientificDiscoveryEngine = _IntegratedScientificDiscoveryEngine
 
-# Prompt-level structured coverage is useful but not enforcement.  Install a
+# Prompt-level structured coverage is useful but not enforcement. Install a
 # final serialization gate so a long explicit outline cannot leave the engine
 # as COMPLETE when one of the user's high-level requested parts is absent.
 # This is delivery-only: it never upgrades evidence/truth/confidence.
@@ -113,10 +127,10 @@ from .depth import DepthConfig, get_depth_config, quota_note
 from .controversial_texts import install as _install_controversial_text_lane
 _install_controversial_text_lane()
 
-# Illegal/high-risk subject matter is not blanket-hidden.  Keep contextual,
+# Illegal/high-risk subject matter is not blanket-hidden. Keep contextual,
 # historical, legal, defensive and harm-reduction research visible, but seal a
 # deterministic prompt/output boundary against operational wrongdoing or serious
-# harm.  This does not weaken authentication, network safety, source trust or
+# harm. This does not weaken authentication, network safety, source trust or
 # evidence gates and performs no network/model call at install time.
 from .safety_information_boundary import install as _install_safety_information_boundary
 _install_safety_information_boundary()
@@ -124,7 +138,7 @@ _install_safety_information_boundary()
 # Stress-test hardening: long multi-domain questions get facet-wise evidence
 # axes, distinctive proposition relevance, same-proposition contradiction
 # checks, substantive section coverage, conservative hypothesis confidence and
-# a stricter synthesis contract.  This layer is deterministic and can only
+# a stricter synthesis contract. This layer is deterministic and can only
 # reject/downgrade/require more evidence; it never upgrades a truth claim.
 from .advanced_research_quality import install as _install_advanced_research_quality
 _install_advanced_research_quality()
@@ -160,7 +174,7 @@ from .specialist_lane_quality import install as _install_specialist_lane_quality
 _install_specialist_lane_quality()
 
 # Hypothesis prose can sound mechanistic even when the cited papers only support
-# a neighbouring behavioural claim.  Audit mechanism/reasoning step-by-step
+# a neighbouring behavioural claim. Audit mechanism/reasoning step-by-step
 # against the existing same-source relevance+support verifier; unsupported steps
 # must be disclosed as INFERENCE/NO-SOURCE and can only lower confidence.
 from .hypothesis_evidence_lineage import install as _install_hypothesis_evidence_lineage
