@@ -1,4 +1,4 @@
-"""Non-blocking API for long DEEP/MAXIMUM research runs."""
+"""Non-blocking API for long DEEP/MAXIMUM/MARATHON research runs."""
 from __future__ import annotations
 
 from typing import Dict, Optional
@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from research_engine.depth import BOOL_FIELDS, depth_limits
+from research_engine.quality_release import enforce_quality_release
 from utils.admin_guard import require_admin
 from utils.job_access import job_access
 from utils.progress_tracker import STAGES, get_progress
@@ -33,6 +34,7 @@ class ResearchJobRequest(BaseModel):
     use_papers: Optional[bool] = None
     use_books: Optional[bool] = None
     use_datasets: Optional[bool] = None
+    use_patents: Optional[bool] = None
     use_red_team: Optional[bool] = None
 
 
@@ -131,7 +133,7 @@ def start_research_job(
     """Start long research only inside the caller's private project namespace."""
     require_project_access(request.project_id, x_project_token)
     mode = (request.depth_mode or "DEEP").upper().strip()
-    if mode not in {"QUICK", "DEEP", "MAXIMUM", "CUSTOM"}:
+    if mode not in {"QUICK", "DEEP", "MAXIMUM", "MARATHON", "CUSTOM"}:
         raise HTTPException(status_code=400, detail="depth_mode invalid hai")
     if not (request.question or "").strip():
         raise HTTPException(status_code=400, detail="question khaali nahi ho sakta")
@@ -217,8 +219,16 @@ def research_job_result(
     if not isinstance(result, dict):
         return result
     response = dict(result)
-    response["research_progress"] = _progress_result_snapshot(job_id)
-    return response
+    progress = _progress_result_snapshot(job_id)
+    response["research_progress"] = progress
+    # Final research quality is enforced on the user-facing copy, after the
+    # bounded progress snapshot is attached.  Persisted job bytes are never
+    # mutated and a recovered/legacy result cannot keep a false VERIFIED badge.
+    return enforce_quality_release(
+        response,
+        recovery_used=bool(response.get("recovered") or response.get("recovery_used")),
+        progress_snapshot=progress,
+    )
 
 
 @router.get("/research-jobs")

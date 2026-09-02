@@ -321,6 +321,22 @@ def test_answer_report():
     check("junk source ki wajah likhi hai", "domain mismatch" in reasons, reasons)
     check("bina citation wale FACT ki wajah bhi likhi hai",
           "koi [S#] citation nahi" in reasons, reasons)
+    data = rep.to_dict()
+    eq("unsupported strong label ho to release gate fail closed",
+       data["gate_passed"], False)
+    eq("strong gate ne teen strong lines check ki", data["strong_claims_checked"], 3)
+    eq("unmein sirf asli A-E supported line pass hui", data["strong_claims_passed"], 1)
+
+
+def test_claim_release_gate_passes_when_no_unsupported_strong_label_escapes():
+    good = CV.verify_answer(f"[ESTABLISHED FACT] {CLAIM_SC} [S1]", PACK).to_dict()
+    eq("same-source A-E supported strong claim gate pass", good["gate_passed"], True)
+    eq("good strong claim counted", good["strong_claims_passed"], 1)
+
+    reported = CV.verify_answer(f"[SOURCE-REPORTED] {CLAIM_SC} [S2]", PACK).to_dict()
+    eq("honest weak label strong-label safety gate ko fail nahi karta",
+       reported["gate_passed"], True)
+    eq("weak label par gate applicable nahi", reported["gate_applicable"], False)
 
 
 def test_note_and_block():
@@ -509,6 +525,7 @@ def main() -> int:
     test_e_source_quality()
     test_verdicts()
     test_answer_report()
+    test_claim_release_gate_passes_when_no_unsupported_strong_label_escapes()
     test_note_and_block()
     test_opt_in_label_gate()
     test_strict_label_contract()
@@ -521,8 +538,6 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
-
 
 
 

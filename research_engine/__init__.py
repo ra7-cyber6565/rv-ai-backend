@@ -19,9 +19,6 @@ Package layout:
     reasoning_router_integrated.py
                               provider fallback + latest pass accounting facade
     source_prompt_guard.py    untrusted source-data / prompt-injection boundary
-    triple_implementation.py  #40 Python/R/math independent consistency check
-    advanced_discovery_integrated.py
-                              additive advanced-discovery production facade
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -29,9 +26,11 @@ Package layout:
     synthesizer.py            FinalSynthesizer
     orchestrator.py           DeepResearchEngine
 
-Heavy modules lazily import so ``import research_engine`` remains cheap. A tiny
-pure-Python domain ambiguity guard is installed immediately because every later
-planner/relevance/connector caller must share the same domain decision.
+Most heavy modules lazily import so ``import research_engine`` remains cheap.
+Small deterministic routing/guard modules may preload the planner, but perform no
+network or model calls. A pure-Python domain ambiguity guard is installed
+immediately because every later planner/relevance/connector caller must share
+the same domain decision.
 
 The reasoning router is also installed at package-import time, but performs NO
 network call then. It simply replaces the exported ``GeminiReasoning`` class
@@ -46,16 +45,18 @@ Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
 EvidencePack rendering in a strict evidence-only boundary, quotes every source
 line, neutralizes instruction-like source text without deleting research
 content, strips hidden bidi/control characters, and bounds hostile metadata.
-
-Advanced-discovery extensions use the same package-boundary pattern: the strong
-base engine remains unchanged, while a subclass adds separately-tested
-capabilities such as #40. The patch performs no model/network call at import.
 """
 from __future__ import annotations
 
 # Install before planner/relevance/connectors bind domain.detect. This module is
 # pure Python and has no heavy dependency/network side effect.
 from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
+
+# Focus guard sc-guard ke BAAD lagti hai (isliye ye sabse bahar ki parat hai):
+# ek-do ittefaqiya shabd se poora multi-domain sawaal kisi ek strict field ka
+# nahi ban jaata. Naapa gaya: 1617-token sawaal "economics" (strict) ban gaya
+# tha aur 15 me se 13 sahi sources hard-reject ho gaye the.
+from . import domain_focus_guard as _domain_focus_guard  # noqa: F401
 
 # Preserve Claude's Gemini implementation as the primary, but let every normal
 # import (including orchestrator's direct module import) see the resilient
@@ -80,18 +81,80 @@ from .models import (
 from .source_prompt_guard import install as _install_source_prompt_guard
 _install_source_prompt_guard()
 
-# Preserve the base advanced-discovery implementation and add non-overlapping
-# capabilities through an additive subclass. Orchestrator imports the class
-# directly from ``advanced_discovery``; patching that exported class here makes
-# the production path use the integrated facade without editing the orchestrator
-# or any concurrently-owned OCR/translation/capture/fetch/evidence modules.
-from . import advanced_discovery as _advanced_discovery
-from .advanced_discovery_integrated import (
-    IntegratedScientificDiscoveryEngine as _IntegratedScientificDiscoveryEngine,
-)
-_advanced_discovery.ScientificDiscoveryEngine = _IntegratedScientificDiscoveryEngine
+# Prompt-level structured coverage is useful but not enforcement.  Install a
+# final serialization gate so a long explicit outline cannot leave the engine
+# as COMPLETE when one of the user's high-level requested parts is absent.
+# This is delivery-only: it never upgrades evidence/truth/confidence.
+from .result_coverage_gate import install as _install_result_coverage_gate
+_install_result_coverage_gate()
 
 from .depth import DepthConfig, get_depth_config, quota_note
+
+# Relevant banned/censored/controversial books are a research lane, not a truth
+# shortcut. The deterministic wrapper only adds bounded legal-access search
+# directions and synthesis rules; it never marks a source verified/relevant.
+from .controversial_texts import install as _install_controversial_text_lane
+_install_controversial_text_lane()
+
+# Illegal/high-risk subject matter is not blanket-hidden.  Keep contextual,
+# historical, legal, defensive and harm-reduction research visible, but seal a
+# deterministic prompt/output boundary against operational wrongdoing or serious
+# harm.  This does not weaken authentication, network safety, source trust or
+# evidence gates and performs no network/model call at install time.
+from .safety_information_boundary import install as _install_safety_information_boundary
+_install_safety_information_boundary()
+
+# Stress-test hardening: long multi-domain questions get facet-wise evidence
+# axes, distinctive proposition relevance, same-proposition contradiction
+# checks, substantive section coverage, conservative hypothesis confidence and
+# a stricter synthesis contract.  This layer is deterministic and can only
+# reject/downgrade/require more evidence; it never upgrades a truth claim.
+from .advanced_research_quality import install as _install_advanced_research_quality
+_install_advanced_research_quality()
+
+# Keep the legacy outline-delivery API stable while preserving PR #51's stricter
+# semantic coverage as a separate evidence-first production gate. This avoids
+# false 0/N coverage on fully surfaced answers without letting heading-only
+# stress-test answers pass as substantively complete.
+from .advanced_semantic_coverage import install as _install_advanced_semantic_coverage
+_install_advanced_semantic_coverage()
+
+# Final stress-test closure: classify specialist evidence lanes from each source
+# itself (not from unrelated active facets), expose missing required source
+# families, fail COMPLETE closed when evidence-first specialist lanes are empty,
+# and require sensitivity/scenario analysis for explicit optimization/simulation
+# models. This layer only tightens completion; it never upgrades evidence.
+from .final_stress_hardening import install as _install_final_stress_hardening
+_install_final_stress_hardening()
+
+# A giant multi-profile question must not spend the bounded specialist-query
+# budget only on the first profiles in the taxonomy. Rotate explicit source
+# families across rounds and scope archive/book leads to the profile that asked
+# for them. This is search planning only; scheduled queries never count as
+# evidence until normal relevance/verification gates accept retrieved sources.
+from .source_family_query_fairness import install as _install_source_family_query_fairness
+_install_source_family_query_fairness()
+
+# A searched/retrieved source is still only a candidate. Required specialist
+# lanes count as covered only when their candidates pass relevance, access-depth
+# and source-role qualification (plus proposition support for empirical lanes).
+# Weak candidates remain visible but can only downgrade/block COMPLETE.
+from .specialist_lane_quality import install as _install_specialist_lane_quality
+_install_specialist_lane_quality()
+
+# Hypothesis prose can sound mechanistic even when the cited papers only support
+# a neighbouring behavioural claim.  Audit mechanism/reasoning step-by-step
+# against the existing same-source relevance+support verifier; unsupported steps
+# must be disclosed as INFERENCE/NO-SOURCE and can only lower confidence.
+from .hypothesis_evidence_lineage import install as _install_hypothesis_evidence_lineage
+_install_hypothesis_evidence_lineage()
+
+# Explicit causal/second-order chains are now a deterministic delivery contract,
+# not only a synthesis instruction. Every requested arrow must be represented and
+# epistemically labelled; strong evidence labels additionally need a same-edge
+# citation. Missing/ambiguous links can only downgrade COMPLETE, never upgrade it.
+from .causal_chain_quality import install as _install_causal_chain_quality
+_install_causal_chain_quality()
 
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
@@ -102,6 +165,8 @@ __all__ = [
     "SourceDiscovery", "DeepResearchEngine", "AgentManager", "manager",
     "VerificationEngine", "HypothesisEngine", "ResearchMemory",
     "ScientificDiscoveryEngine", "SafeNumericExecutor",
+    "ExamIntelligenceEngine", "ExamLedgerStore",
+    "ReadingSessionStore", "ResumableReadingManager",
     "FinalSynthesizer", "GeminiReasoning", "Critic", "VectorSearch",
     "KnowledgeGraphAdapter", "DocumentProcessor", "PDFProcessor",
     "OCRProcessor", "TranscriptProcessor", "ContentFetcher",
@@ -120,6 +185,10 @@ _LAZY = {
     "ResearchMemory": ".research_memory",
     "ScientificDiscoveryEngine": ".advanced_discovery",
     "SafeNumericExecutor": ".advanced_discovery",
+    "ExamIntelligenceEngine": ".exam_intelligence",
+    "ExamLedgerStore": ".exam_intelligence",
+    "ReadingSessionStore": ".reading_sessions",
+    "ResumableReadingManager": ".reading_sessions",
     "FinalSynthesizer": ".synthesizer",
     "GeminiReasoning": ".gemini_reasoning",
     "Critic": ".critic",

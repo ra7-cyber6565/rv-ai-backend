@@ -178,6 +178,49 @@ def _zero_cost_chain() -> AuditCheck:
     )
 
 
+def _foundation_workflow_safe() -> AuditCheck:
+    """Catch expressions that GitHub rejects before any CI job can start."""
+    text = _read(".github/workflows/foundation-tests.yml")
+    required = (
+        "ubuntu-latest",
+        "scripts/run_foundation_gate.py",
+        "pull_request:\n    branches: [main]",
+        "INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data",
+    )
+    missing = [needle for needle in required if needle not in text]
+    push_block = re.search(r"(?ms)^  push:\s*\n(?P<body>(?: {4}.*\n?)*)", text)
+    main_push = bool(
+        push_block
+        and re.search(r"(?m)^    branches:\s*\[[^\]]*\bmain\b",
+                      push_block.group("body"))
+    )
+    if not main_push:
+        missing.append("push trigger for main")
+    node24_actions = {
+        "actions/checkout": re.search(
+            r"actions/checkout@v(?:[5-9]|[1-9]\d+)\b", text
+        ),
+        "actions/setup-python": re.search(
+            r"actions/setup-python@v(?:[6-9]|[1-9]\d+)\b", text
+        ),
+    }
+    legacy_actions = [name for name, match in node24_actions.items() if not match]
+    if legacy_actions:
+        missing.append(
+            "Node 24-compatible action major(s): " + ", ".join(legacy_actions)
+        )
+    invalid_job_env = "INFINITY_DATA_ROOT: ${{ runner." in text
+    return AuditCheck(
+        name="ci:foundation-workflow-valid-contexts",
+        passed=bool(text) and not missing and not invalid_job_env,
+        detail=(
+            "foundation workflow has valid triggers, Node 24 actions, and Linux temp root"
+            if text and not missing and not invalid_job_env
+            else f"missing={missing}; invalid_runner_context={invalid_job_env}"
+        ),
+    )
+
+
 def _fallback_wired() -> AuditCheck:
     init = _read("research_engine/__init__.py")
     synth = _read("research_engine/synthesizer.py")
@@ -256,6 +299,8 @@ def _project_isolation() -> AuditCheck:
     agent = _read("api/agent_routes.py")
     jobs = _read("api/job_routes.py")
     rag = _read("api/routes.py")
+    exam = _read("api/exam_routes.py")
+    reading = _read("api/reading_routes.py")
     web = _read("web/index.html")
     limiter = _read("utils/request_guard.py")
 
@@ -274,6 +319,9 @@ def _project_isolation() -> AuditCheck:
         (agent, "require_project_access(request.project_id, x_project_token)", "chat/deep guard"),
         (jobs, "require_project_access(request.project_id, x_project_token)", "job-create guard"),
         (rag, "require_project_access(", "RAG/upload namespace guard"),
+        (exam, "require_project_access(request.project_id, x_project_token)",
+         "exam-analysis namespace guard"),
+        (reading, "require_project_access(", "resumable-reading namespace guard"),
         (web, 'API+"/api/v1/session"', "web session creation"),
         (web, '"X-Project-Token":PROJECT.token', "web project bearer header"),
         (web, "async function projectPost", "web stale-session recovery wrapper"),
@@ -353,12 +401,15 @@ def run_audit() -> AuditReport:
         "main.py",
         "api/job_routes.py",
         "api/session_routes.py",
+        "api/exam_routes.py",
+        "api/reading_routes.py",
         "research_engine/orchestrator.py",
         "research_engine/source_discovery.py",
         "research_engine/content_fetcher.py",
         "research_engine/network_safety.py",
         "research_engine/evidence.py",
         "research_engine/claim_verification.py",
+        "research_engine/locator_policy.py",
         "research_engine/contradiction.py",
         "research_engine/gemini_reasoning.py",
         "research_engine/reasoning_router.py",
@@ -366,7 +417,24 @@ def run_audit() -> AuditReport:
         "research_engine/offline_reasoner.py",
         "research_engine/hypothesis.py",
         "research_engine/advanced_discovery.py",
+        "research_engine/research_assurance.py",
+        "research_engine/specialist_domains.py",
+        "research_engine/multilingual_research.py",
+        "research_engine/exam_intelligence.py",
+        "docs/EXAM_INTELLIGENCE.md",
+        "research_engine/reading_sessions.py",
+        "docs/RESUMABLE_READING.md",
+        "docs/EVIDENCE_MUTATION_MATRIX.md",
+        "docs/LENS_ENGINE_AUDIT.md",
+        "docs/MARATHON_RESEARCH_ASSURANCE.md",
+        "docs/RELEASE_SIGNOFF_CHECKLIST.md",
+        "research_engine/patents.py",
+        "research_engine/connectors/patent_connector.py",
         "scripts/run_live_zero_cost_gate.py",
+        "scripts/run_deployed_readonly_smoke.py",
+        "scripts/run_offline_api_smoke.py",
+        "RUN_LIVE_ZERO_COST_GATE.ps1",
+        "START_BACKEND.bat",
         "research_engine/verification.py",
         "research_engine/synthesizer.py",
         "research_engine/presentation_guard.py",
@@ -396,7 +464,18 @@ def run_audit() -> AuditReport:
         "tests/test_network_safety.py",
         "tests/test_unverified_semantics.py",
         "tests/test_advanced_discovery.py",
+        "tests/test_specialist_research.py",
+        "tests/test_research_assurance.py",
+        "tests/test_marathon_all_rounds.py",
+        "tests/test_exam_intelligence.py",
+        "tests/test_resumable_reading.py",
+        "tests/test_evidence_mutation_matrix.py",
+        "tests/test_lens_independent_audit.py",
+        "tests/test_deployed_readonly_smoke.py",
+        "tests/test_patents.py",
+        "tests/test_chat_resilience.py",
         "tests/test_live_zero_cost_gate.py",
+        "tests/test_windows_launchers.py",
         "tests/benchmark_cross_domain.py",
         "tests/benchmark_superconductivity.py",
     )
@@ -409,6 +488,8 @@ def run_audit() -> AuditReport:
             "protect_free_quota",
             "include_router",
             "reasoning_status",
+            "include_router(exam_router",
+            "include_router(reading_router",
         ),
         _release_honesty(),
         _contains(
@@ -433,12 +514,168 @@ def run_audit() -> AuditReport:
             '"max_inferred_without_experiment": 3',
         ),
         _contains(
+            "research_engine/specialist_domains.py",
+            "class SpecialistProfile",
+            '"official_document_record"',
+            '"traditional_belief_text"',
+            '"allegation_or_conspiracy_claim"',
+            '"app_original_hypothesis"',
+            '"truth_probability_claim_allowed": False',
+            "def build_evidence_lane_report(",
+        ),
+        _contains(
+            "research_engine/multilingual_research.py",
+            "def build_multilingual_plan(",
+            '"original_preserved": True',
+            '"paywall_or_copyright_bypass": False',
+            "Glossary-assisted search is not full-text translation",
+        ),
+        _contains(
+            "research_engine/exam_intelligence.py",
+            "class ExamIntelligenceEngine",
+            "expanding-window temporal holdout",
+            "CALIBRATED_ON_WALK_FORWARD_HISTORY",
+            "APP-ORIGINAL EXAM HYPOTHESIS",
+            "HEURISTIC STUDY PRIORITY — NOT PROBABILITY",
+            "ExclusiveProcessFileLock",
+        ),
+        _contains(
+            "research_engine/reading_sessions.py",
+            "class ReadingSessionStore",
+            "class ResumableReadingManager",
+            "pending_semantic_translation_review",
+            "text_extraction_is_not_comprehension",
+            "password_drm_paywall_bypass",
+            "ExclusiveProcessFileLock",
+        ),
+        _contains(
+            "research_engine/locator_policy.py",
+            "def exact_locator_available(",
+            "exact page ka pata nahi",
+            "abstract/snippet",
+        ),
+        _contains(
+            "research_engine/dedup.py",
+            "normalize_doi",
+            "merge_exact_duplicate",
+            "sabse gehra available",
+            "doi_key != twin_doi",
+        ),
+        _contains(
+            "research_engine/lenses.py",
+            "CORPUS_LENS_POLICY_VERSION",
+            "eligible_corpus_records",
+            "candidate_lineage",
+            "scoring_anchor_frozen",
+        ),
+        _contains(
+            "scripts/run_deployed_readonly_smoke.py",
+            "DEPLOYED_READONLY_ZERO_MODEL_SMOKE",
+            "no_model_or_research_route_called",
+            "capabilities_or_secrets_recorded",
+            "--execute",
+        ),
+        _contains(
+            "research_engine/planner.py",
+            "build_specialist_plan(",
+            "specialist_queries(",
+            '"official_archive_queries"',
+            '"book_queries"',
+        ),
+        _contains(
+            "research_engine/source_discovery.py",
+            'plan.get("official_archive_queries", [])',
+            'plan.get("book_queries", [])',
+            '"official_archive_web"',
+        ),
+        _contains(
+            "research_engine/orchestrator.py",
+            "build_evidence_lane_report(",
+            "specialist_report=specialist_report",
+            "specialist_research=specialist_report",
+        ),
+        _contains(
+            "research_engine/depth.py",
+            "MARATHON = DepthConfig(",
+            'name="MARATHON"',
+            '"MARATHON": MARATHON',
+            "require_all_rounds=True",
+            "research_process_target_percent=90",
+        ),
+        _contains(
+            "research_engine/orchestrator.py",
+            "build_research_assurance(",
+            'coverage["research_assurance"]',
+            'research_assurance=research_assurance',
+        ),
+        _contains(
+            "api/job_routes.py",
+            '"MARATHON"',
+        ),
+        _contains(
+            "web/index.html",
+            'data-mode="MARATHON"',
+            'requestedMode==="MARATHON"',
+        ),
+        _contains(
+            "research_engine/planner.py",
+            "patent_intent(",
+            '"patents": patents',
+            'getattr(config, "use_patents"',
+        ),
+        _contains(
+            "research_engine/orchestrator.py",
+            "self._patent_prior_art(",
+            "novelty_overclaim(",
+            'coverage["prior_art"]',
+        ),
+        _contains(
+            "api/agent_routes.py",
+            "use_patents: Optional[bool]",
+        ),
+        _contains(
+            "api/job_routes.py",
+            "use_patents: Optional[bool]",
+        ),
+        _contains(
             "scripts/run_live_zero_cost_gate.py",
             "def preflight(",
+            "def _validate_runtime_storage(",
             "inspect_zero_cost_config",
             "has_model_layer_usable_now",
             "def evaluate_result(",
+            "LIVE_DEPTH_MODES",
+            '"marathon_process_target"',
+            '"--depth-mode"',
+            "live_research_execution_failed",
+            '"--data-root"',
             '"contains_credentials": False',
+        ),
+        _contains(
+            "RUN_LIVE_ZERO_COST_GATE.ps1",
+            "$PSScriptRoot",
+            '"--data-root"',
+            '"--depth-mode"',
+            '[ValidateSet("MAXIMUM", "MARATHON")]',
+            "$gateExitCode",
+        ),
+        _contains(
+            "START_BACKEND.bat",
+            'cd /d "%~dp0"',
+            "venv\\Scripts\\python.exe",
+            "--host 127.0.0.1 --port 8000",
+        ),
+        _contains(
+            "scripts/run_offline_api_smoke.py",
+            "TemporaryDirectory",
+            '"GEMINI_API_KEY": ""',
+            '"GROQ_API_KEY": ""',
+            '"OPENROUTER_API_KEY": ""',
+            '"OLLAMA_ENABLED": "false"',
+            'client.post("/api/v1/session")',
+            'client.post("/api/v1/chat"',
+            'client.post("/api/v1/research-jobs"',
+            '"unsupported VERIFIED claim is blocked"',
         ),
         _contains(
             "research_engine/content_fetcher.py",
@@ -486,11 +723,7 @@ def run_audit() -> AuditReport:
         _storage_fail_closed(),
         _no_wildcard_cors(),
         _obvious_secret_scan(),
-        _contains(
-            ".github/workflows/foundation-tests.yml",
-            "ubuntu-latest",
-            "scripts/run_foundation_gate.py",
-        ),
+        _foundation_workflow_safe(),
         _contains(
             "scripts/run_foundation_gate.py",
             "architecture_audit",
@@ -499,6 +732,10 @@ def run_audit() -> AuditReport:
             "test_network_safety.py",
             "test_unverified_semantics.py",
             "test_advanced_discovery.py",
+            "test_specialist_research.py",
+            "run_offline_api_smoke.py",
+            "test_patents.py",
+            "test_chat_resilience.py",
             "test_live_zero_cost_gate.py",
             "test_reasoning_router_integration.py",
             "test_provider_health.py",

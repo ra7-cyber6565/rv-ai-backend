@@ -20,9 +20,11 @@ import unicodedata
 from typing import Dict, List, Optional
 from urllib.parse import urlparse
 
+from .answer_order import section_start
 from .models import EvidencePack
 from .offline_reasoner import OfflineEvidenceReasoner
 from .presentation_guard import PresentationGuard
+from .specialist_domains import render_evidence_lane_report
 from .synthesizer_claude import *  # noqa: F401,F403 - compatibility exports
 from .synthesizer_claude import FinalSynthesizer as _ClaudeFinalSynthesizer
 
@@ -69,11 +71,44 @@ def _safe_source_url(value: object) -> str:
 class FinalSynthesizer(_ClaudeFinalSynthesizer):
     """Claude latest formatter + final truth/presentation guardrails."""
 
+    # §9 — access depth ka vocabulary ab sirf `models.ACCESS_DEPTH_LABELS` mein
+    # rehta hai (paanch allowed label). Pehle yahan apni alag wording thi
+    # ("FULL-TEXT VERIFIED ACCESS", "PATENT CLAIMS REVIEWED") — do jagah do
+    # bhasha se report aur claim-check ek doosre se ulta bolne lagte the, aur
+    # "VERIFIED" shabd access ke saath lagna hi §8 ka rule todta hai. Iska
+    # matlab yahan koi feature nahi gaya: patent ke claims ab
+    # `RELEVANT SECTIONS REVIEWED` bante hain (models.py mein tay), aur patent
+    # ke "legal dawa, proof nahi" wali baat neeche `_KIND_WORDS` + patent gates
+    # se aati hai.
+    _KIND_WORDS = {
+        **_ClaudeFinalSynthesizer._KIND_WORDS,
+        "patent": "patent document (legal filing; scientific proof nahi)",
+    }
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.presentation_guard = PresentationGuard()
         self.offline_reasoner = OfflineEvidenceReasoner()
         self.last_presentation_check: Dict = {}
+
+    def prompt(self, question: str, analysis: str, critique: str,
+               hypothesis_text: str, pack: EvidencePack, plan: Dict,
+               memory_note: str = "", evidence_first_block: str = "") -> str:
+        """Build the legacy human-first prompt, then seal the pre-draft contract.
+
+        P0-B builds the evidence manifest before model prose exists. The
+        orchestrator passes that exact block here during synthesis. Appending it
+        *after* the broad legacy source/context prompt keeps the preselection
+        contract as the final instruction boundary and avoids modifying the
+        Claude-owned formatter itself.
+        """
+        prompt = super().prompt(
+            question, analysis, critique, hypothesis_text, pack, plan, memory_note
+        )
+        block = str(evidence_first_block or "").strip()
+        if not block:
+            return prompt
+        return f"{prompt.rstrip()}\n\n{block}"
 
     def extractive_summary(self, question: str, pack: EvidencePack) -> str:
         """No-model fallback used by the orchestrator when every AI pass is empty.
@@ -93,6 +128,83 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             return summary.replace("## Seedha jawab\n", f"## Seedha jawab\n{honesty}\n\n", 1)
         return f"## Seedha jawab\n{honesty}\n\n{summary}"
 
+    _STRONG_MODEL_LABEL = re.compile(
+        r"\[\s*(?:ESTABLISHED(?:\s+FACT)?|FACT|STRONG\s+EVIDENCE)\s*\]",
+        re.IGNORECASE,
+    )
+
+    def bind_evidence_first_critical_sections(
+        self,
+        text: str,
+        *,
+        direct_answer: str,
+        conclusion: str,
+    ) -> tuple[str, Dict]:
+        """Replace only critical model sections with preselected evidence prose.
+
+        Prompt adherence is not a proof boundary.  When the orchestrator detects
+        an unsupported or post-hoc-supported critical draft, this method replaces
+        Direct Answer and Conclusion with deterministic preselected prose. Other
+        useful model sections remain intact. Remaining strong labels are lowered
+        to SOURCE-REPORTED and pass through A-E again, so a broad-context claim
+        cannot stay critical merely because the model used a confident label.
+        """
+        direct = str(direct_answer or "").strip()
+        final = str(conclusion or "").strip()
+        if not direct or not final:
+            return text or "", {
+                "applied": False,
+                "reason": "preselected_critical_prose_unavailable",
+                "replaced_sections": [],
+                "strong_labels_lowered": 0,
+            }
+        try:
+            found, leftover = self.split_model_sections(text or "")
+        except Exception:  # noqa: BLE001 - fail closed without losing the answer
+            return text or "", {
+                "applied": False,
+                "reason": "model_section_parse_failed",
+                "replaced_sections": [],
+                "strong_labels_lowered": 0,
+            }
+
+        replaced = []
+        if str(found.get(0, "") or "").strip():
+            replaced.append("direct_answer")
+        if str(found.get(8, "") or "").strip():
+            replaced.append("conclusion")
+        found[0] = direct
+        found[8] = final
+
+        lowered = 0
+        for key in list(found):
+            if key in (0, 8):
+                continue
+            value = str(found.get(key, "") or "")
+            value, count = self._STRONG_MODEL_LABEL.subn("[SOURCE-REPORTED]", value)
+            found[key] = value
+            lowered += count
+        leftover, count = self._STRONG_MODEL_LABEL.subn(
+            "[SOURCE-REPORTED]", str(leftover or "")
+        )
+        lowered += count
+
+        parts: List[str] = []
+        if leftover.strip():
+            parts.append(leftover.strip())
+        for key in sorted(k for k in found if isinstance(k, int)):
+            title = SECTION_TITLES[key] if 0 <= key < len(SECTION_TITLES) else str(key)
+            parts.append(f"## {title}\n{found[key]}".rstrip())
+        for key in [k for k in found if not isinstance(k, int)]:
+            parts.append(f"## {key}\n{found[key]}".rstrip())
+        rebound = "\n\n".join(part for part in parts if part.strip())
+        return rebound, {
+            "applied": True,
+            "reason": "critical_draft_failed_preselected_evidence_boundary",
+            "replaced_sections": replaced,
+            "strong_labels_lowered": lowered,
+        }
+
     @staticmethod
     def _is_partial_large_source(source) -> bool:
         total = int(getattr(source, "pages_total", 0) or 0)
@@ -106,19 +218,20 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
         abstract = int(levels.get("abstract", 0) or 0)
         snippet = int(levels.get("snippet", 0) or 0)
         meta = int(levels.get("metadata", 0) or 0)
+        claims = int(levels.get("claims", 0) or 0)
         partial = [
             s for s in (getattr(pack, "sources", None) or [])
             if FinalSynthesizer._is_partial_large_source(s)
         ]
         full_whole = max(0, full - len(partial))
 
-        if not (full or abstract or snippet or meta):
+        if not (full or abstract or snippet or meta or claims):
             return (
                 "**Kitna gehra padha gaya:** iska data available nahi hai, isliye "
                 "source-access depth ko verify nahi kiya ja saka."
             )
 
-        total = full + abstract + snippet + meta
+        total = full + abstract + snippet + meta + claims
         lines = [
             "**Kitna gehra padha gaya (access depth confidence ko affect karti hai, "
             "lekin claim verification alag A-E check se hoti hai) — "
@@ -146,6 +259,11 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 f"- {abstract}/{total} source ka sirf abstract mila — paper ka summary, poora "
                 "method/result context nahi. Isse strong fact automatically nahi banta."
             )
+        if claims:
+            lines.append(
+                f"- {claims}/{total} patent ke claims process hue. Ye invention par "
+                "LEGAL dawe hain; experimental result ya scientific verification nahi."
+            )
         if snippet:
             lines.append(
                 f"- {snippet}/{total} source se sirf ek chhota snippet mila. Ye weak/supporting "
@@ -157,9 +275,14 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
                 "verify nahi ki ja sakti."
             )
         if not full:
+            # §9 — is line mein jaan-boojh kar "full-text verified" shabd nahi
+            # likha jaata, chahe wo negation mein ho. Access-depth detector
+            # (bilkul theek) us phrase ko dhoondta hai, aur apni hi imaandaar
+            # line se audit mein "1 overclaim" ki jhoothi ginti ban rahi thi.
             lines.append(
-                "- Kisi source ka full-text-level access nahi mila, isliye strong claims "
-                "ko full-text verified kehna allowed nahi hai."
+                "- Kisi source ka full-text-level access nahi mila, isliye strong "
+                "claims ke liye 'poora text padh kar check kiya' wala dava bhi "
+                "allowed nahi hai."
             )
         return "\n".join(lines)
 
@@ -195,6 +318,11 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             if s.peer_reviewed is True:
                 about.append("peer-reviewed")
             lines = [head, f"- Ye kya hai: {', '.join(x for x in about if x)}."]
+            if getattr(s, "is_patent", False):
+                lines.append(
+                    "- Evidence rule: patent ke claims legal dawe hain; inhe paper, "
+                    "experiment ya independently verified scientific result nahi maana gaya."
+                )
 
             took = _safe_source_display(s.snippet, 220)
             if took:
@@ -202,20 +330,11 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
             else:
                 lines.append("- Isse kya liya gaya: kuch nahi — content mila hi nahi.")
 
-            level = s.reading_level()
-            if level == "full_text" and self._is_partial_large_source(s):
-                access = (
-                    f"PARTIAL FULL-TEXT REVIEW — large document ke {int(s.pages_read)}/"
-                    f"{int(s.pages_total)} relevant pages process hue; poora document "
-                    "padha gaya aisa claim nahi hai"
-                )
-            elif level == "full_text":
-                access = (
-                    "FULL-TEXT VERIFIED ACCESS — legally available full text process hua; "
-                    "claim ka support/entailment alag evidence-verification gate check karta hai"
-                )
-            else:
-                access = self._ACCESS_WORDS.get(level, level)
+            # §9 — ek hi jagah se label: partial-page reading `RELEVANT SECTIONS
+            # REVIEWED` banti hai (poora document padha gaya aisa dava nahi),
+            # patent ke claims bhi wahi, aur "FULL TEXT ACCESSED" sirf access
+            # kehta hai — verification ka dava kabhi nahi.
+            access = s.access_depth_note()
             lines.append(f"- Kitna padha gaya: {access}.")
             if getattr(s, "read_note", ""):
                 lines.append(f"- Reading scope: {_safe_source_display(s.read_note, 500)}")
@@ -257,7 +376,37 @@ class FinalSynthesizer(_ClaudeFinalSynthesizer):
 
     def assemble(self, *args, **kwargs) -> str:
         """Assemble with Claude features, then enforce the user's A-L presentation gate."""
+        specialist_report = kwargs.pop("specialist_report", None)
         report = super().assemble(*args, **kwargs)
+        specialist_block = render_evidence_lane_report(specialist_report or {})
+        if specialist_block:
+            # System-owned deterministic boundary.  It sits immediately before
+            # app-generated hypotheses, so official/traditional/allegation lanes
+            # cannot visually merge into the hypothesis section.  Sources and
+            # the technical audit remain the final two sections.
+            # §12 (2026-08-22) — anchor ab canonical key se milta hai. Pehle
+            # yahan literal `"## Humari Hypotheses"` dhoonda jaata tha; heading
+            # `APP ORIGINAL RESEARCH LAB` ho jaane ke baad wo find() hamesha -1
+            # deta aur specialist block chup-chaap Sources se pehle (ya report ke
+            # aakhir mein) chala jaata tha. Purana naam fallback mein rakha hai,
+            # taaki legacy synthesizer se bani report par bhi kaam kare.
+            anchor = section_start(report, "original_lab")
+            if anchor < 0:
+                anchor = report.find("## Humari Hypotheses")
+            if anchor < 0:
+                anchor = section_start(report, "audit")
+            if anchor < 0:
+                anchor = section_start(report, "sources")
+            if anchor < 0:
+                report = f"{report.rstrip()}\n\n{specialist_block}".strip()
+            else:
+                report = (
+                    report[:anchor].rstrip()
+                    + "\n\n"
+                    + specialist_block
+                    + "\n\n"
+                    + report[anchor:].lstrip()
+                )
         pack = kwargs.get("pack")
         if pack is None and len(args) > 1:
             pack = args[1]

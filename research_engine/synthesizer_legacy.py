@@ -653,9 +653,15 @@ Ab jawab likho:"""
         return "\n".join(lines)
 
     # ── §13 + §14: sources ki imaandaar list ─────────────────────────────────
+    # §9 (2026-08-22): "FULL-TEXT VERIFIED" label yahan se bhi hata diya gaya.
+    # Ye file legacy hai (live path `synthesizer.py`/`synthesizer_claude.py` se
+    # chalta hai), par banned label kahin bhi pada rehna galat hai — "poora text
+    # mil gaya" aur "dava verify ho gaya" ek baat nahi hai, aur ye file kabhi
+    # dobara chali to wahi purana jhooth chhap jaayega.
     _ACCESS_WORDS = {
-        "full_text": "FULL-TEXT VERIFIED — poora text padha gaya",
-        "abstract": "ABSTRACT REVIEWED — sirf abstract (summary) padha gaya",
+        "full_text": "FULL TEXT ACCESSED — poora text padha gaya (iska matlab "
+                     "dava verify hua nahi hai)",
+        "abstract": "ABSTRACT ONLY — sirf abstract (summary) padha gaya",
         "snippet": "SNIPPET ONLY — sirf ek chhota hissa mila",
         "metadata": "METADATA ONLY — sirf title/details mile, content nahi",
     }
@@ -899,6 +905,23 @@ Ab jawab likho:"""
         for extra in (self._reading_line(coverage), self._quality_line(coverage, pack)):
             if extra:
                 lines.append(extra)
+        assurance = coverage.get("research_assurance") or {}
+        if assurance.get("active"):
+            percent = assurance.get("research_process_coverage_percent", 0)
+            target = assurance.get("target_percent", 0)
+            state = ("target poora hua" if assurance.get("target_met")
+                     else "target poora nahi hua")
+            lines.append(
+                f"- MARATHON research-process coverage: {percent}% (target "
+                f"{target}%; {state}). Ye answer ki truth probability, trading "
+                f"profitability ya hypothesis success probability nahi hai."
+            )
+            saturation = assurance.get("saturation") or {}
+            if saturation.get("reason"):
+                lines.append(f"- Bounded saturation: {saturation['reason']}.")
+            gaps = assurance.get("gaps") or []
+            if gaps:
+                lines.append("- Process gaps: " + ", ".join(str(x) for x in gaps) + ".")
         return "\n".join(lines)
 
     # ── "aapne jo maanga tha" ka honest hisaab ───────────────────────────────
@@ -1372,4 +1395,3 @@ Ab jawab likho:"""
         lines.append("Inhe jodkar koi conclusion humne nahi nikala — wo kaam reasoning "
                      "pass ka tha, jo is baar poora nahi hua.")
         return "\n\n".join(lines)
-

@@ -1,4 +1,5 @@
 import os
+import re
 
 # .env must be loaded BEFORE storage routing. Otherwise a laptop setting such as
 # INFINITY_DATA_ROOT=D:\InfinityResearchAI would be seen too late and caches
@@ -13,12 +14,14 @@ STORAGE_STATUS = configure_process_storage()
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from api.routes import router as rag_router
 from api.agent_routes import router as agent_router
 from api.job_routes import router as job_router
 from api.archive_routes import router as archive_router
 from api.session_routes import router as session_router
+from api.exam_routes import router as exam_router
+from api.reading_routes import router as reading_router
 from knowledge.routes import router as knowledge_router
 from storage.provider_factory import provider_status
 from utils.body_limit import RequestBodyLimitMiddleware
@@ -33,10 +36,12 @@ from utils.request_guard import (
 )
 from utils.reasoning_status import reasoning_status
 from utils.project_access import project_access
+from utils.release_identity import deployment_revision
 
 ZERO_COST_STATUS = enforce_zero_cost_config()
 CORS_ORIGINS = allowed_cors_origins()
 RELEASE_STATE = "foundation_verification_pending"
+BUILD_REVISION = deployment_revision()
 
 app = FastAPI(
     title="RV AI",
@@ -144,6 +149,8 @@ app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
 app.include_router(agent_router, prefix="/api/v1", tags=["Agents"])
 app.include_router(job_router, prefix="/api/v1", tags=["Research Jobs"])
 app.include_router(archive_router, prefix="/api/v1", tags=["Archive"])
+app.include_router(exam_router, prefix="/api/v1", tags=["Exam Intelligence"])
+app.include_router(reading_router, prefix="/api/v1", tags=["Resumable Reading"])
 app.include_router(knowledge_router, prefix="/api/v1", tags=["Knowledge"])
 
 
@@ -161,6 +168,10 @@ def _runtime_safety_status() -> dict:
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "release_state": RELEASE_STATE,
+        # A Git SHA is public build provenance, not a credential. Empty means
+        # the host did not provide a validated full revision, so deployment
+        # sign-off must fail closed instead of guessing which code is live.
+        "build_revision": BUILD_REVISION,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
         "project_isolation": project_access.status(),
@@ -172,11 +183,56 @@ def _runtime_safety_status() -> dict:
     }
 
 
+def _website_html() -> str:
+    """Return the shipped client with honest lifecycle and quality metrics.
+
+    `COMPLETE` is an internal lifecycle stage meaning the worker stopped and a
+    result is available. It is not proof that the result status is COMPLETE;
+    the final quality gate may correctly downgrade it to PARTIAL. Keep the
+    internal stage key for polling compatibility while making the user-facing
+    label describe only what is actually known.
+
+    Process coverage and semantic requested-content coverage are also different
+    measurements. Inject the distinction from their structured backend fields so
+    a 90%+ process checklist can never look like a 90% truth/answer-quality score.
+    The transform is presentation-only and never changes a backend result.
+    """
+    with open(INDEX_HTML, "r", encoding="utf-8") as handle:
+        html = handle.read()
+    html = re.sub(
+        r'''["']?COMPLETE["']?\s*:\s*["']Research complete["']''',
+        '"COMPLETE":"Research run finished"',
+        html,
+        count=1,
+    )
+
+    helper = '''function qualityMetricLines(data){
+  const out=[],ra=(data&&data.research_assurance)||{},cov=(data&&data.coverage)||{};
+  const process=Number(ra.research_process_coverage_percent);
+  if(Number.isFinite(process))out.push("Research-process coverage: "+process+"% — checklist execution; answer ki truth/quality probability nahi.");
+  const sem=(cov.structured_answer_semantic&&typeof cov.structured_answer_semantic==="object")?cov.structured_answer_semantic:{};
+  const semantic=Number(sem.semantic_coverage_percent);
+  if(Number.isFinite(semantic))out.push("Semantic requested-content coverage: "+semantic+"% — requested parts ki substantive delivery; truth probability nahi.");
+  if(out.length===2)out.push("Process % aur semantic % alag metrics hain; process score ko answer-quality/truth score mat maano.");
+  return out;
+}
+'''
+    marker = "function auditHtml(split,data){"
+    if "function qualityMetricLines(data){" not in html and marker in html:
+        html = html.replace(marker, helper + marker, 1)
+
+    anchor = '  if(Array.isArray(data.quality_repairs)&&data.quality_repairs.length)bits.push("Gate repairs: "+joinLabels(data.quality_repairs));'
+    metric_line = "  for(const metric of qualityMetricLines(data))bits.push(metric);"
+    if metric_line not in html and anchor in html:
+        html = html.replace(anchor, anchor + "\n" + metric_line, 1)
+    return html
+
+
 @app.get("/")
 def website():
     """RV AI website — same origin as the API."""
     if os.path.exists(INDEX_HTML):
-        return FileResponse(INDEX_HTML, media_type="text/html")
+        return HTMLResponse(_website_html())
     return api_info()
 
 

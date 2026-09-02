@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field, asdict
 from enum import Enum
 from typing import Dict, List, Optional
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 from .quality_signals import (
     METHODOLOGY_RANK,
@@ -20,6 +20,10 @@ from .quality_signals import (
     methodology_rank,
     replication_label,
 )
+# patents.py bhi dependency-free hai aur models se KUCH import nahi karta,
+# isliye ye import safe hai (koi circular import nahi).
+from .patents import PATENT_EVIDENCE_NOTE
+from .patents import family_key as patent_family_key
 
 
 # ── Source types (Spec Section 2) ─────────────────────────────────────────────
@@ -31,19 +35,127 @@ class SourceType(str, Enum):
     ENCYCLOPEDIA = "encyclopedia"  # Wikipedia/Wikimedia
     DATASET = "dataset"            # government/public dataset
     TRANSCRIPT = "transcript"      # video/audio transcript
+    # Patent ek LEGAL document hai — iske claims legal dawe hote hain, koi
+    # experiment se saabit nateeja nahi. Isliye ise WEB/PAPER mein chhupana
+    # galat tha: paper maan lene par peer-review/quality scoring usko science
+    # ki tarah treat karti, aur "patent claim" report mein fact ban jaata.
+    PATENT = "patent"
 
 
 # ── Reading levels (Spec Section 2 ka honesty rule) ──────────────────────────
 # "Karodon sources mein search karna" aur "karodon sources ka poora text
 # padhna" alag cheezein hain. Isliye system har source ke saath ye level
 # report karta hai, aur final report mein isi ka breakdown chhapta hai.
-READ_LEVEL_ORDER = ["metadata", "snippet", "abstract", "full_text"]
+#
+# "claims" patent ke liye ek ASLI level hai: patent ka abstract padhna aur uske
+# claims padhna do bilkul alag gehraiyan hain, aur "patent padha" ka dawa sirf
+# claims/description process hone par hi sach hota hai. Ye list sirf display
+# order ke liye use hoti hai (read_level_counts), isliye naya level jodna kisi
+# purane consumer ko nahi todta.
+READ_LEVEL_ORDER = ["metadata", "snippet", "abstract", "claims", "full_text"]
 READ_LEVEL_LABELS = {
     "metadata": "sirf metadata (title/author/year)",
     "snippet": "search snippet",
     "abstract": "abstract",
+    "claims": "patent ke claims (legal dawe) process hue",
     "full_text": "full text",
 }
+
+
+def normalize_doi(value: object) -> str:
+    """Canonical DOI identity across URL, ``doi:`` and case variants."""
+    raw = unquote(str(value or "")).strip().casefold()
+    if not raw:
+        return ""
+    raw = re.sub(r"^doi\s*:\s*", "", raw)
+    raw = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", raw)
+    raw = raw.split("#", 1)[0].split("?", 1)[0].strip()
+    if not raw.startswith("10.") or "/" not in raw:
+        return ""
+    return raw.rstrip(".,; ")
+
+
+# ── §9 — ACCESS DEPTH ka poora vocabulary (sirf ye paanch label allowed) ──────
+#
+# Kyun (dark-matter run): report mein "FULL-TEXT VERIFIED" chhapta tha. Us ek
+# label ne DO alag baaton ko ek bana diya — "text mil gaya" aur "claim verify ho
+# gaya". S12 sirf abstract par tha aur phir bhi "full-text verified" dikha.
+# Isliye:
+#   * access depth = humne kitna TEXT dekha (ye label)
+#   * verification  = claim ko us text ne support kiya ya nahi (alag field,
+#                     claim_verification.py mein)
+# "VERIFIED" shabd is vocabulary mein jaan-boojh kar nahi hai.
+ACCESS_METADATA = "METADATA ONLY"
+ACCESS_SNIPPET = "SNIPPET ONLY"
+ACCESS_ABSTRACT = "ABSTRACT ONLY"
+ACCESS_SECTIONS = "RELEVANT SECTIONS REVIEWED"
+ACCESS_FULL = "FULL TEXT ACCESSED"
+
+ACCESS_DEPTH_ALLOWED = (ACCESS_METADATA, ACCESS_SNIPPET, ACCESS_ABSTRACT,
+                        ACCESS_SECTIONS, ACCESS_FULL)
+
+# read_level (andar ka naam) → §9 ka label
+ACCESS_DEPTH_LABELS = {
+    "metadata": ACCESS_METADATA,
+    "snippet": ACCESS_SNIPPET,
+    "abstract": ACCESS_ABSTRACT,
+    # patent ke claims poora document nahi hote — wo document ka ek chuna hua
+    # hissa hai, isliye "sections" family mein aata hai.
+    "claims": ACCESS_SECTIONS,
+    "full_text": ACCESS_FULL,
+}
+
+ACCESS_DEPTH_EXPLAIN = {
+    ACCESS_METADATA: "sirf title/author/year mile — content dekha hi nahi gaya",
+    ACCESS_SNIPPET: "sirf search ka chhota tukda mila",
+    ACCESS_ABSTRACT: "sirf abstract (summary) padha gaya, poora paper nahi",
+    ACCESS_SECTIONS: "document ke chune hue hisse padhe gaye, poora document nahi",
+    ACCESS_FULL: "poora text process hua",
+}
+
+
+# ── §20 — chaar ALAG state machine (ek doosre ka matlab nahi nikaalte) ────────
+#
+# Pichhli galti: "provider ka job complete ho gaya" ko "jawab poora ho gaya"
+# maan liya gaya tha, aur "citation theek hai" ko "evidence strong hai". Isliye
+# ab chaaron cheezein alag naam se, alag values mein rehti hain.
+
+# 1. Job (background kaam) ki haalat — sirf process ke baare mein.
+JOB_QUEUED = "QUEUED"
+JOB_RUNNING = "RUNNING"
+JOB_FINISHED = "FINISHED"          # kaam ruk gaya — jawab acha hai ya nahi, ye ISSE pata NAHI chalta
+JOB_FAILED = "FAILED"
+JOB_RECOVERED = "RECOVERED"        # connection toota tha, result history se wapas mila
+JOB_STATES = (JOB_QUEUED, JOB_RUNNING, JOB_FINISHED, JOB_FAILED, JOB_RECOVERED)
+
+# 2. Jawab poora hua ya nahi — contract ke against (requested.contract_ledger).
+ANSWER_COMPLETE = "COMPLETE"
+ANSWER_PARTIAL = "PARTIAL"
+ANSWER_INSUFFICIENT = "INSUFFICIENT EVIDENCE"
+ANSWER_FAILED = "FAILED"
+ANSWER_STATES = (ANSWER_COMPLETE, ANSWER_PARTIAL, ANSWER_INSUFFICIENT,
+                 ANSWER_FAILED)
+
+# 3. Evidence ki haalat — retrieval/verification se, LLM ke bharose se nahi.
+EVIDENCE_STRONG = "STRONG"
+EVIDENCE_MODERATE = "MODERATE"
+EVIDENCE_WEAK = "WEAK"
+EVIDENCE_MIXED = "MIXED"                 # support aur counter dono mile
+EVIDENCE_NONE = "NO USABLE EVIDENCE"
+EVIDENCE_NOT_CHECKED = "NOT CHECKED"     # check hua hi nahi — "zero" se ALAG
+EVIDENCE_STATES = (EVIDENCE_STRONG, EVIDENCE_MODERATE, EVIDENCE_WEAK,
+                   EVIDENCE_MIXED, EVIDENCE_NONE, EVIDENCE_NOT_CHECKED)
+
+# 4. Novelty ki haalat — §14 ka poora whitelist (isse bahar koi shabd nahi).
+NOVELTY_KNOWN = "KNOWN IDEA"
+NOVELTY_KNOWN_VARIANT = "KNOWN VARIANT"
+NOVELTY_MINOR = "MINOR MODIFICATION"
+NOVELTY_POSSIBLE = "POSSIBLY NOVEL — NO CLOSE MATCH FOUND"
+NOVELTY_UNVERIFIED = "NOVELTY UNVERIFIED"
+NOVELTY_DUPLICATE = "REJECTED AS DUPLICATE"
+NOVELTY_STATES = (NOVELTY_KNOWN, NOVELTY_KNOWN_VARIANT, NOVELTY_MINOR,
+                  NOVELTY_POSSIBLE, NOVELTY_UNVERIFIED, NOVELTY_DUPLICATE)
+
 
 
 # ── Claim classification (Spec Section 7) ────────────────────────────────────
@@ -166,6 +278,32 @@ class SourceRecord:
     relevance_parts: Dict = field(default_factory=dict)
     rejected_reason: str = ""              # khaali = reject nahi hua
 
+    # ── PATENT ka structured metadata (patents.PatentMeta.to_dict()) ─────────
+    # Khaali dict = ye patent nahi hai (ya provider ne kuch structured nahi
+    # diya). Yahan dict rakha hai, dataclass nahi, do wajah se:
+    #   1. `asdict()`/`to_dict()` bina kisi extra code ke API tak le jaata hai,
+    #   2. models.py ko patents.PatentMeta par type-level nirbhar nahi hona
+    #      padta (dependency-free rehna is file ka rule hai).
+    # Isme kabhi guess ki hui value nahi jaati — jo provider ne nahi diya, wo
+    # field khaali rehti hai aur `missing_fields` mein naam se dikhti hai.
+    patent_meta: Dict = field(default_factory=dict)
+
+    # ── MARKET/ECONOMIC TIME SERIES ka structured data (#118) ────────────────
+    # Khaali dict = is source ke saath koi time-ordered series nahi aayi.
+    # Bhara hua = provider ne KHUD period→value ki jodi di
+    # (`market_data.MarketSeries.to_dict()`), yaani ye number kisi text se
+    # anumaan lagakar nahi nikale gaye.
+    #
+    # Ye field isliye zaroori hai ki LAB ka walk-forward test bina NETWORK
+    # chalta hai (`LabPolicy.network_used = False` ka waada). Series network
+    # wale discovery step mein aati hai aur yahan baith jaati hai; lab use
+    # sirf PADHTA hai. Iske bina lab ko khud fetch karna padta — aur wo waada
+    # toot jaata.
+    #
+    # Isme kabhi "market advice" nahi jaati: `to_dict()` khud hi
+    # `not_financial_advice` aur `past_data_only` line saath le kar chalti hai.
+    series_meta: Dict = field(default_factory=dict)
+
     # ── helpers ──
     @property
     def domain(self) -> str:
@@ -181,13 +319,37 @@ class SourceRecord:
         return re.sub(r"\s+", " ", t).strip()
 
     @property
+    def is_patent(self) -> bool:
+        return self.source_type == SourceType.PATENT
+
+    @property
+    def patent_family_key(self) -> str:
+        """Ek invention ki ek key (US/EP/WO members ek hi key par)."""
+        if not self.patent_meta:
+            return ""
+        return patent_family_key(self.patent_meta)
+
+    @property
     def independence_key(self) -> str:
         """
         Spec Section 7: "ek hi information ki 100 copied websites ko 100
         independent sources mat maano." DOI same = same work. Warna domain.
+
+        PATENT ka apna rule pehle aata hai: ek hi invention US, EP aur WO —
+        teen jagah publish hoti hai. Teeno ka domain bhi same provider ka hota
+        hai aur DOI kisi ka nahi hota, to purana rule unhe "domain:data.epo.org"
+        par ek saath daal deta — yaani do ALAG inventions bhi ek hi origin gin
+        jaate aur cap_per_origin unme se ek ko phenk deta. Family key se dono
+        baatein theek hoti hain: ek family = ek evidence, alag family = alag
+        evidence.
         """
-        if self.doi:
-            return f"doi:{self.doi.lower()}"
+        if self.is_patent:
+            family = self.patent_family_key
+            if family:
+                return family
+        doi = normalize_doi(self.doi)
+        if doi:
+            return f"doi:{doi}"
         if self.source_type == SourceType.DOCUMENT:
             return f"doc:{self.title.lower()}"
         return f"domain:{self.domain}" if self.domain else f"title:{self.normalized_title[:60]}"
@@ -200,9 +362,22 @@ class SourceRecord:
         # is source ko normal evidence ki tarah use nahi karna.
         if self.retracted is True:
             bits.append("RETRACTION se juda — evidence ki tarah use na karein")
+        # Patent ka warning bhi utna hi zaroori hai: prompt mein "patent" shabd
+        # dikhna kaafi nahi hai, kyunki model patent ke claims ko aasani se
+        # "proven result" maan leta hai. Isliye seedhi bhasha mein likha jaata
+        # hai ki ye legal dawa hai.
+        if self.is_patent:
+            bits.append(PATENT_EVIDENCE_NOTE)
+            number = (self.patent_meta or {}).get("number", "")
+            if number:
+                bits.append(str(number))
+            status = (self.patent_meta or {}).get("status_label", "")
+            if status:
+                bits.append(str(status))
         if self.source_type == SourceType.DOCUMENT:
             bits.append("tumhara uploaded document")
         else:
+
             # §6: content se nikala hua kind pehle. Connector-based mota label
             # (source_type) tab hi bolte hain jab content kuch pakka na bata
             # sake — warna "review" ko "dataset" keh dena jhooth ban jaata hai.
@@ -263,30 +438,87 @@ class SourceRecord:
         if self.read_level:
             return self.read_level
         text = (self.snippet or "").strip()
+        # PATENT: gehrai ka jawab patent_meta ke ASLI text se aata hai (kitne
+        # chars claims/description ke roop mein process hue), snippet ki lambai
+        # se nahi. Ye andaaza nahi hai — connector ne jo text sach mein diya
+        # hai, sirf usi par ye level banta hai, aur text na hone par "metadata"
+        # hi rehta hai.
+        if self.is_patent and self.patent_meta:
+            depth = str(self.patent_meta.get("read_depth") or "")
+            if depth in READ_LEVEL_ORDER:
+                return depth
         if not text:
             return "metadata"
         if self.source_type in (SourceType.PAPER,) and len(text) >= 250:
             return "abstract"
         return "snippet"
 
+    # ── §9 — access depth (5 allowed labels, "VERIFIED" inme se koi nahi) ─────
+    def access_depth(self) -> str:
+        """
+        Humne is source ka kitna TEXT dekha — sirf itni baat.
+
+        Ye claim ke sach hone ke baare mein KUCH NAHI kehta. "18 of 30 pages
+        padhe" ka imaandaar label `RELEVANT SECTIONS REVIEWED` hai, `FULL TEXT
+        ACCESSED` nahi — ye farq yahan ek hi jagah tay hota hai, taaki report,
+        claim-check aur UI teeno wahi ek baat bolein.
+        """
+        level = self.reading_level()
+        label = ACCESS_DEPTH_LABELS.get(level, ACCESS_METADATA)
+        if label == ACCESS_FULL:
+            pages_total = int(self.pages_total or 0)
+            pages_read = int(self.pages_read or 0)
+            # poore document ka dava sirf tab jab (a) page ginti pata na ho, ya
+            # (b) jitne page the utne padhe gaye hon
+            if pages_total and pages_read and pages_read < pages_total:
+                return ACCESS_SECTIONS
+        return label
+
+    def access_depth_note(self) -> str:
+        """Label + insaani matlab + (agar pata ho) page ginti."""
+        label = self.access_depth()
+        note = f"{label} — {ACCESS_DEPTH_EXPLAIN.get(label, '')}".rstrip(" —")
+        pages_total = int(self.pages_total or 0)
+        pages_read = int(self.pages_read or 0)
+        if pages_total and pages_read:
+            note += f" ({pages_read}/{pages_total} page process hue)"
+        elif pages_read:
+            note += f" ({pages_read} page process hue)"
+        return note
+
     def to_dict(self) -> Dict:
         d = asdict(self)
         d["source_type"] = self.source_type.value
         d["domain"] = self.domain
         d["reading_level"] = self.reading_level()
+        d["access_depth"] = self.access_depth()
+        d["access_depth_note"] = self.access_depth_note()
         d["methodology_label"] = methodology_label(self.methodology) if self.methodology else ""
         d["methodology_rank"] = self.methodology_rank
         d["quality_signals"] = self.quality_signal_bits()
+        if self.is_patent:
+            d["patent_family_key"] = self.patent_family_key
+            d["patent_evidence_note"] = PATENT_EVIDENCE_NOTE
         return d
+
 
 
 # ── Passage ──────────────────────────────────────────────────────────────────
 @dataclass
 class Passage:
-    """Kisi source ka wo hissa jo actually reasoning model ko bheja gaya."""
+    """Kisi source ka exact hissa + capture-time provenance/depth.
+
+    SourceRecord mutable hai: full-text reading ke baad uska read_level upgrade
+    ho sakta hai. Isliye passage ko capture ke waqt ka level alag freeze karna
+    zaroori hai; warna purana search snippet baad mein full-text evidence ban
+    sakta hai. Khaali fields legacy/manual callers ke liye backward-compatible
+    hain; production writers inhe explicitly set karte hain.
+    """
     source_id: str
     text: str
     locator: str = ""
+    provenance: str = ""
+    read_level_at_capture: str = ""
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -439,7 +671,29 @@ class EvidencePack:
         if borderline:
             parts.append(f"{borderline} source kamzor match ke hain — acche sources "
                          f"kam pad gaye the, isliye majboori mein liye gaye.")
+        # §6 (2026-08-22): "topic ka hai" aur "sawaal ki baat test karta hai" —
+        # ye do alag cheezein hain, aur report mein bhi alag likhni chahiye.
+        # Dark-matter run mein average match 0.43 tha aur usi ginti ko "evidence"
+        # kaha gaya tha, jabki kai source sirf usi field ke the.
+        prop = info.get("proposition") or {}
+        if prop:
+            yes = prop.get("tests_proposition")
+            no = prop.get("does_not_test")
+            und = prop.get("undecided")
+            parts.append(
+                f"Inme se {yes} source sawaal ki baat sach mein test karte hain, "
+                f"{no} nahi karte, aur {und} par faisla nahi ho saka (metadata "
+                f"itna hi mila) — aakhri ginti ko 'theek hai' na samjhein.")
         return " ".join(parts)
+
+    def proposition_report(self) -> Dict:
+        """§6 — relevance gate ka structured record (khaali dict = gate chala nahi)."""
+        return dict((self.retrieval_filter or {}).get("proposition") or {})
+
+    def reject_code_counts(self) -> Dict:
+        """§6 — kis code se kitne source hate (free-text nahi, ginne layak codes)."""
+        info = (self.retrieval_filter or {}).get("reject_codes") or {}
+        return dict(info.get("counts") or {})
 
     def reasoning_note(self) -> str:
         if self.reasoning_planned <= 0:
@@ -491,6 +745,23 @@ class EvidencePack:
             # [ESTABLISHED] label laga deta hai.
             if s.read_note:
                 meta.append(f"Read scope: {s.read_note}")
+            # PATENT ke liye ek aur line: kis daftar ka, kis family ka, aur
+            # kitna hissa (abstract / claims / description) sach mein process
+            # hua. Bina iske model "patent kehta hai X" ko "X saabit hai" bana
+            # deta hai — aur family info bina, ek hi invention ke US/EP/WO ko
+            # "teen patents isi baat par sehmat hain" likh deta hai.
+            if s.is_patent:
+                pm = s.patent_meta or {}
+                patent_bits = [b for b in (
+                    f"number: {pm.get('number', '')}" if pm.get("number") else "",
+                    f"office: {pm.get('jurisdiction_label', '')}" if pm.get("jurisdiction_label") else "",
+                    f"family: {pm.get('family_key', '')}" if pm.get("family_key") else "",
+                    f"claims: {pm.get('claim_count', 0)}" if pm.get("claim_count") else "claims text nahi mila",
+                    str(pm.get("status_label", "")),
+                ) if b]
+                meta.append("Patent info: " + " | ".join(patent_bits))
+                meta.append("Patent rule: " + PATENT_EVIDENCE_NOTE)
+
             body = (s.snippet or "").strip()[:max_chars_per_source]
             if body:
                 meta.append(f"Excerpt: {body}")
@@ -573,6 +844,77 @@ class EvidencePack:
     def retracted_sources(self) -> List[SourceRecord]:
         return [s for s in self.sources if s.retracted is True]
 
+    # ── PATENT roll-up (patent ≠ scientific proof) ───────────────────────────
+    def patent_sources(self) -> List[SourceRecord]:
+        return [s for s in self.sources if s.is_patent]
+
+    def science_sources(self) -> List[SourceRecord]:
+        """
+        Patent NIKAAL kar baaki sources — "scientific evidence" ki ginti isi
+        list par honi chahiye. Pehle poori list par ginti hoti, to 3 patent +
+        0 paper wala pack "3 sources sehmat hain" bol deta.
+        """
+        return [s for s in self.sources if not s.is_patent]
+
+    def patent_families(self) -> Dict[str, List[SourceRecord]]:
+        """family key → us family ke records (khaali key wale bahar)."""
+        groups: Dict[str, List[SourceRecord]] = {}
+        for s in self.patent_sources():
+            key = s.patent_family_key
+            if key:
+                groups.setdefault(key, []).append(s)
+        return groups
+
+    def patent_family_count(self) -> int:
+        """
+        Kitni ALAG inventions. Jis patent ka family key nahi bana (metadata
+        adhoora tha) usse alag-alag ginte hain — kyunki uske baare mein humein
+        pata NAHI hai ki wo kisi doosre ka family member hai ya nahi, aur
+        "pata nahi" ko "same family" maan lena evidence chhupana hoga.
+        """
+        keyed = self.patent_families()
+        unkeyed = len([s for s in self.patent_sources() if not s.patent_family_key])
+        return len(keyed) + unkeyed
+
+    def patent_read_depth_counts(self) -> Dict[str, int]:
+        counts: Dict[str, int] = {}
+        for s in self.patent_sources():
+            level = s.reading_level()
+            counts[level] = counts.get(level, 0) + 1
+        return {lvl: counts[lvl] for lvl in READ_LEVEL_ORDER if lvl in counts}
+
+    def patent_note(self) -> str:
+        """
+        Patent evidence ka imaandaar bayaan — ginti se banta hai, hardcoded
+        nahi. Do baatein jaan-boojh kar likhi jaati hain: (1) publications vs
+        alag families ka farq, aur (2) kitne patents ka claims text SACH MEIN
+        process hua — kyunki "patent padha" ka dawa sirf usi par ban sakta hai.
+        """
+        patents = self.patent_sources()
+        if not patents:
+            return ""
+        families = self.patent_family_count()
+        depth = self.patent_read_depth_counts()
+        read_deep = depth.get("claims", 0) + depth.get("full_text", 0)
+        note = (f"{len(patents)} patent publication mile, jo {families} alag "
+                f"invention family ko dikhate hain (ek hi invention ke US/EP/WO "
+                f"members ko alag evidence nahi gina gaya).")
+        if read_deep:
+            note += (f" Inme se {read_deep} ke claims/description sach mein "
+                     f"process hue; baaki par sirf metadata/abstract tak baat "
+                     f"ki ja sakti hai.")
+        else:
+            note += (" Kisi bhi patent ke claims/description process NAHI hue — "
+                     "isliye 'patent padha' jaisa dawa is jawab mein nahi "
+                     "banta.")
+        note += " " + PATENT_EVIDENCE_NOTE
+        if not self.science_sources():
+            note += (" CHETAVANI: is pack mein patent ke alawa koi source nahi "
+                     "hai — sirf patent ke bharose koi baat scientifically "
+                     "saabit nahi maani ja sakti.")
+        return note
+
+
     def strong_methodology_sources(self) -> List[SourceRecord]:
         return [s for s in self.sources if s.methodology_rank >= 5]
 
@@ -644,6 +986,10 @@ class EvidencePack:
             "offtopic_dropped": int((self.retrieval_filter or {}).get(
                 "dropped_offtopic") or 0),
             "relevance_note": self.relevance_note(),
+            # §6 — relevance gate ka structured hisaab (proposition-test +
+            # reject codes). Khaali dict = gate chala hi nahi, "sab pass" nahi.
+            "proposition_test": self.proposition_report(),
+            "relevance_reject_codes": self.reject_code_counts(),
             "reasoning_passes": f"{self.reasoning_done}/{self.reasoning_planned}",
             "reasoning_note": self.reasoning_note(),
             "methodologies": self.methodology_counts(),
@@ -652,7 +998,16 @@ class EvidencePack:
             "coi_checked_sources": len(
                 [s for s in self.sources if s.coi_disclosed is not None]),
             "quality_signal_note": self.quality_signal_note(),
+            # ── patent evidence, scientific evidence se ALAG ginti mein ──
+            # Ye keys hamesha rehti hain (0 bhi ek imaandaar jawab hai), taaki
+            # audit padhne wale ko pata rahe ki patent tier dekha gaya tha.
+            "patent_sources": len(self.patent_sources()),
+            "patent_families": self.patent_family_count(),
+            "patent_read_levels": self.patent_read_depth_counts(),
+            "science_sources": len(self.science_sources()),
+            "patent_note": self.patent_note(),
         }
+
 
     def to_dict(self) -> Dict:
         return {
@@ -696,6 +1051,13 @@ class ResearchResult:
     # Advanced scientific-discovery assessment.  Structured and optional so
     # older Android clients that ignore unknown fields remain compatible.
     discovery: Dict = field(default_factory=dict)
+    # Specialist evidence lanes keep empirical science, official/declassified
+    # records, historical/traditional texts, allegations and app-original
+    # hypotheses machine-readably separate.  Optional for old clients.
+    specialist_research: Dict = field(default_factory=dict)
+    # MARATHON-only measured checklist. Iska percentage answer/hypothesis ki
+    # truth, profitability ya real-world success probability nahi hai.
+    research_assurance: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 
@@ -712,6 +1074,144 @@ class ResearchResult:
     # Ye kabhi bhi user-facing jawab ka hissa nahi banta.
     technical_details: List[str] = field(default_factory=list)
     api_accounting: Dict = field(default_factory=dict)
+
+    # §4 + §7/§19 — "kya maanga gaya tha" (quality_contract), "kya asli mein
+    # mila" (quality_context) aur dono ka aamna-saamna (contract_ledger).
+    # Ye teen structured roop mein API/UI/final-gate tak jaate hain, taaki koi
+    # bhi in numbers ke liye answer ka text parse na kare — text parse karna hi
+    # wo raasta tha jisse audit ke andar ek doosre se ulte numbers aa gaye the.
+    quality_contract: Dict = field(default_factory=dict)
+    quality_context: Dict = field(default_factory=dict)
+    contract_ledger: Dict = field(default_factory=dict)
+
+    # §20 — chaar ALAG state ek hi dict mein: job_status / answer_state /
+    # evidence_state / novelty_state, plus `conflicts` aur `verified_allowed`.
+    # UI ko inme se kisi ek ka matlab doosre se nikaalna mana hai — pehle yahi
+    # hota tha ("job FINISHED" ko "jawab COMPLETE" padh liya jaata tha).
+    # Banane wala module: research_engine/research_state.py
+    research_state: Dict = field(default_factory=dict)
+
+    # #116 — LAB stage ka record: app ne apni hi hypothesis par kaunse
+    # computable test KHUD chalaye aur kya nikla. Khaali dict ka matlab
+    # "stage chala hi nahi" hai — "sab pass ho gaya" nahi. Isme koi bhi
+    # verdict real-world proof nahi hai (`real_world_experiment_pending`
+    # hamesha True aata hai), aur `TESTED_PASS` ka matlab sirf "app ke
+    # andar ka hisaab mila" hai. Banane wala module: research_engine/lab.py
+    lab: Dict = field(default_factory=dict)
+
+    # #117 — reject ledger: kaunsi hypothesis aage nahi badhi aur kis NAAP par
+    # (LAB ka fail, safety risks ki kami, ya "na test plan na prediction"), plus
+    # "wapas kab aa sakti hai". Khaali dict matlab ledger bana hi nahi — "kuch
+    # reject nahi hua" NAHI. Kisi bhi record me `is_disproved` hamesha False
+    # rehta hai: reject app ka faisla hai, duniya ka nahi.
+    # Banane wala module: research_engine/rejects.py
+    rejects: Dict = field(default_factory=dict)
+
+    # #121 — CRAFT stage ka record: jab farmaish kuch BANANE ki thi (gaana/
+    # kavita/letter/kahani/nibandh/slogan), to app ne apne hi draft ka DHAANCHA
+    # khud naapa — matra, tuk, hook ki jagah, dohraav, ghise phrase. Khaali dict
+    # matlab stage chala hi nahi. Yahan ka koi bhi number "likhawat acchi hai"
+    # ya "logon ko pasand aayegi" nahi kehta: wo `cannot_measure` me naam se
+    # likha rehta hai. Banane wala module: research_engine/craft.py
+    craft: Dict = field(default_factory=dict)
+
+    # #133 — MEDIA STUDY ka record: user ke video/audio ke LIKHIT transcript
+    # (captions ya aawaz se bana text) me se kitni CITED craft-hidayat mili,
+    # kaunse kism ka media tha, aur kitne transcript user ne khud diye the.
+    # `ran: False` matlab media padha hi nahi gaya — "media theek tha" NAHI.
+    # Isme `frames_read`/`audio_listened` hamesha False jaate hain: video ka
+    # frame/scene kabhi nahi padha jaata aur aawaz kabhi suni nahi jaati.
+    # Banane wala module: research_engine/media_study.py
+    media_study: Dict = field(default_factory=dict)
+
+    # #134 — LISTENER STUDY ka record: sunne wale ke bhaav/vyavhaar ke bare me
+    # padhi hui research se kitni CITED baat mili, kaun se pehlu (bhaav, yaad,
+    # apnapan, dohraav, sanskriti, vyavhaar) chhoote, aur kitni line sirf isliye
+    # hataayi gayi ki wo VAADA kar rahi thi. Ye craft ki ginti se alag rehta hai
+    # — "hunar padha" aur "logon ka dil samjha" ek baat nahi hai.
+    # Isme `listener_tested`/`audience_measured`/`mind_read` hamesha False jaate
+    # hain: gaana kisi asli insaan par test nahi hota, koi audience naapi nahi
+    # jaati, kisi ka dil "padha" nahi jaata. `wanted: False` matlab farmaish
+    # gaane ki hi nahi thi; `ran: False` matlab kuch padha hi nahi gaya.
+    # Banane wala module: research_engine/listener_study.py
+    listener_study: Dict = field(default_factory=dict)
+
+    # #140 — MUSIC STUDY ka record: music direction (chaal/tempo, scale ya raag,
+    # vaadya, aawaz, arrangement) ke PEECHE kitni CITED research padhi gayi,
+    # kaunse khaane khaali reh gaye, kitne number sirf SOURCE-REPORTED the, aur
+    # kitni line isliye hataayi gayi ki wo "dhun hit hogi" jaisa daawa kar rahi
+    # thi. Ye songcraft ke `music_direction_present` naap ki jagah NAHI leta:
+    # wahan sawaal hai "chaar khaane likhe gaye?", yahan "unke peeche padha hua
+    # kuch hai?". Isme `audio_generated`/`tune_made`/`heard`/`play_tested`
+    # hamesha False jaate hain: koi audio ya dhun nahi banti, app kuch sunta
+    # nahi, aur koi bajaakar test nahi karta. `wanted: False` matlab farmaish
+    # gaane ki hi nahi thi; `ran: False` matlab sur/saaz par kuch padha hi nahi
+    # gaya. Banane wala module: research_engine/music_study.py
+    music_study: Dict = field(default_factory=dict)
+
+    # #141 — SONG LAB ka record: gaane ke DRAFT ko app ne khud chaar alag naap se
+    # test kiya (dhaancha dobara ginna, bhaav ka arc, hook kitni baar aur kitni
+    # jaldi lauta, aur padhi hui riwaayat se milaan), phir kamzor line par
+    # KEEP/FIX/DROP faisla diya. Yahan do cheezein alag-alag hain: `drops` matlab
+    # line HATAAYI gayi (sirf toote niyam par — jhootha daawa), aur
+    # `redraft_notes` matlab line rakhi gayi par sudhaarne ko kaha gaya. Har DROP
+    # ke saath wajah likhi jaati hai, aur jo DROP mana kiya gaya uska code bhi
+    # (`refusals`) — kitni line hataayi ja sakti hai uski chhat hai, refrain
+    # kabhi nahi hataya jaata, aur naap kharaab ho to DROP palat diya jaata hai.
+    # `tests_pass` kisi bhi soorat me PROOF nahi hai: ye sirf likhe hue draft ki
+    # andaruni naap hai — na koi dhun bani, na kuch bajaakar sunaa gaya, na kisi
+    # asli sunne wale par aazmaaya gaya. `ran: False` matlab farmaish gaane ki
+    # nahi thi ya draft hi nahi mila. Banane wala module:
+    # research_engine/songlab.py
+    song_lab: Dict = field(default_factory=dict)
+    # #149 — BHAAV KI SHABDAWALI: `craft.MOODS` haath se likhi band list hai,
+    # isliye "aansu"/"viraha" jaise shabd naap se bahar reh jaate the. Ye record
+    # batata hai ki padhi hui source ke gloss-dhaanche se kitne naye bhaav-shabd
+    # seekhe gaye (`confirmed_count`, 2+ source ke saath), kitne sirf hint hain,
+    # aur kitni jodi kis naapi hui WAJAH se chhodi gayi (`rejects`). Do jhande
+    # hamesha saath jaate hain: `learned_cue_can_drop_a_line: False` (seekhe
+    # shabd se koi line hataayi nahi jaati — DROP ka haq sirf curated list ka
+    # hai) aur `feeling_proven: False` (shabd milna feeling ka saboot nahi).
+    # `ran: False` matlab kuch padha hi nahi gaya — "koi naya shabd nahi tha"
+    # nahi. Banane wala module: research_engine/mood_lexicon.py
+    mood_lexicon: Dict = field(default_factory=dict)
+    # #155 — DELIVERABLE GUARD ka record. Ye "kya bana" ka hisaab NAHI hai (wo
+    # `craft` me hai); ye is baat ka hisaab hai ki maanga hua deliverable JAWAB
+    # ME PAHUNCHA YA NAHI. Asli dikkat jisne isse janma: evidence-first boundary
+    # answer surface dobara banata tha aur CRAFT ka bana gaana us rebuild me
+    # gayab ho jaata tha. `state` ke paanch matlab alag-alag hain —
+    # DELIVERABLE_NOT_ASKED (farmaish hi nahi thi, answer chhua bhi nahi gaya),
+    # _PRESENT (pehle se tha), _RESTORED (gayab tha, wapas lagaya),
+    # _MISSING (bana hi nahi — guard ne naapi hui wajah likhi, khud kuch nahi
+    # banaya), _BLOCKED (ban gaya tha par usme evidence-label bacha tha, isliye
+    # jaan-boojh kar nahi lagaya). Naam se likha hua sach hamesha saath jaata
+    # hai: `is_evidence: False`, `counts_as_claim: False`,
+    # `guard_wrote_deliverable: False`, `quality_proven: False`,
+    # `gemini_calls: 0`. Banane wala module: research_engine/deliverable_guard.py
+    deliverable: Dict = field(default_factory=dict)
+    # #178f — FARMAISH ke DO contract ledger. Ye teeno LAB/craft record se ALAG
+    # cheez hain aur unki jagah nahi le sakte: `lab` app ki HYPOTHESIS ka test
+    # hai, `exam_lab` BANE HUE paper/plan ka test hai, aur ye do batate hain ki
+    # JO MAANGA GAYA THA usme se kya-kya asli me likha aur naapa gaya
+    # (`met_count` / `not_met_count` / `not_measured_count`, aur naam se
+    # `not_met` + `not_measured` list — buri khabar chhupti nahi).
+    #
+    # `exam_contract` exam/padhai ke 28 point ka hisaab rakhta hai, uske saath
+    # jhande: app kisi exam ki authority nahi (`is_exam_authority: False`), bana
+    # hua paper sirf practice ka hai (`paper_is_practice_only: True`), answer key
+    # app ki khud ki hai, aur "itne number aayenge"/"yahi sawaal aayega" ka koi
+    # vaada nahi (`prediction_claims` / `score_promises` naam se ginte hain).
+    # `trade_contract` trading ke 34 naap ka hisaab rakhta hai, uske saath:
+    # `live_tested: False`, `broker_connected: False`, order-book/tick data padha
+    # hi nahi, backtest bhavishya ka vaada nahi, aur ye nivesh ki salah nahi.
+    #
+    # Khaali dict ({}) ka matlab hai stage chali hi nahi (jawab ka text hi nahi
+    # bana) — "sab theek tha" NAHI. Farmaish us lane ki na ho to record me
+    # `wanted: False` aata hai, jo "chala par kuch naapa nahi gaya" se
+    # jaan-boojh kar alag rakha gaya hai. Banane wale module:
+    # research_engine/exammodel.py aur research_engine/trademodel.py
+    exam_contract: Dict = field(default_factory=dict)
+    trade_contract: Dict = field(default_factory=dict)
 
     def to_dict(self) -> Dict:
         return asdict(self)

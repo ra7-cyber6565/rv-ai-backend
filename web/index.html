@@ -13,9 +13,30 @@ header{height:58px;border-bottom:1px solid var(--line);display:flex;align-items:
 #scroll{flex:1;overflow:auto}#thread{max-width:var(--max);margin:auto;padding:24px 16px 120px}.welcome{text-align:center;max-width:590px;margin:11vh auto}.welcome h1{font-size:29px;margin:0 0 10px}.welcome p{color:var(--muted);margin:0}.chips{display:flex;flex-wrap:wrap;gap:9px;justify-content:center;margin-top:22px}.chip{border:1px solid var(--line);background:var(--soft);border-radius:12px;padding:10px 13px;cursor:pointer;font-size:14px}.chip:hover{border-color:var(--brand)}
 .msg{display:flex;gap:12px;padding:15px 0}.av{width:30px;height:30px;flex:0 0 30px;border-radius:8px;display:grid;place-items:center;font-size:11px;font-weight:750}.user .av{background:#eef2f7}.rv .av{background:var(--brand);color:#fff}.body{min-width:0;flex:1}.txt{line-height:1.68;overflow-wrap:anywhere;white-space:normal}.txt p{margin:0 0 11px}.txt p:last-child{margin-bottom:0}
 .thinking{display:inline-flex;gap:5px}.thinking i{width:7px;height:7px;border-radius:50%;background:#8b8b8b;animation:p 1.25s infinite}.thinking i:nth-child(2){animation-delay:.18s}.thinking i:nth-child(3){animation-delay:.36s}@keyframes p{0%,80%,100%{opacity:.25}40%{opacity:1}}
-.progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
-footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px 8px 8px 15px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 0;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
-@media(max-width:600px){header{padding:0 10px}.brand span:last-child{display:none}.modes button{padding:7px 10px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
+.progress{background:var(--soft);border:1px solid var(--line);border-radius:13px;padding:13px 14px}.stage{font-weight:650}.stagecount{font-size:12px;color:var(--muted);margin-top:5px}.bar{height:6px;border-radius:999px;background:#e5e7eb;margin:10px 0;overflow:hidden}.fill{height:100%;background:var(--brand);width:0;transition:width .35s}.log{font-size:12px;color:var(--muted);white-space:pre-wrap;max-height:105px;overflow:auto}.process{margin-top:14px;border:1px solid var(--line);border-radius:11px;background:var(--soft);padding:10px 12px}.process summary{cursor:pointer;font-weight:650}.process .meta{margin-top:7px}.process .log{margin-top:8px;max-height:180px}.note{margin-top:10px;background:var(--warn);color:var(--warnink);border:1px solid #f1deb6;border-radius:10px;padding:9px 11px;font-size:13px}.sources{margin-top:16px}.sources h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.src{padding:10px 11px;border:1px solid var(--line);border-radius:10px;margin:7px 0}.src a{color:#08795f;text-decoration:none;font-weight:650}.src a:hover{text-decoration:underline}.meta{color:var(--muted);font-size:12px;margin-top:3px}
+/* §20 — chaar ALAG state chaar box mein. Ek box ka matlab doosre se nikaalna mana hai. */
+.states{display:grid;grid-template-columns:repeat(auto-fit,minmax(166px,1fr));gap:8px;margin-top:14px}.st{border:1px solid var(--line);border-radius:11px;padding:9px 11px;background:var(--soft)}.st b{display:block;font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}.st span{display:block;margin-top:3px;font-weight:650;font-size:13px;overflow-wrap:anywhere}.st em{display:block;margin-top:4px;font-size:11px;color:var(--muted);font-style:normal;line-height:1.45}
+.rule{font-size:11px;color:var(--muted);margin-top:7px}
+.bad{margin-top:10px;background:#fdeceb;border:1px solid #f5c6c2;color:#8a2018;border-radius:10px;padding:9px 11px;font-size:13px}.bad ul{margin:6px 0 0;padding-left:19px}.recov{margin-top:10px;background:#eef7ff;border:1px solid #cfe4f7;color:#1a4b73;border-radius:10px;padding:9px 11px;font-size:13px}
+/* §21 — chhah tab. Har section theek ek tab mein jaata hai, koi hissa gayab nahi hota. */
+.tabs{display:flex;gap:4px;overflow-x:auto;margin-top:14px;border-bottom:1px solid var(--line)}.tab{border:0;border-bottom:2px solid transparent;background:transparent;padding:8px 11px;font:inherit;font-weight:650;font-size:13px;color:var(--muted);cursor:pointer;white-space:nowrap}.tab.on{color:var(--ink);border-bottom-color:var(--brand)}.tab .n{opacity:.7;font-weight:600}
+.pane{display:none;padding-top:13px}.pane.on{display:block}.pane h4{margin:14px 0 6px;font-size:13px}.pane h4:first-child{margin-top:0}
+/* §22 — 12 stage ki 12 row, hamesha. Job khatam hone par bhi ye panel rehta hai. */
+.stages{margin-top:6px}.strow{display:flex;gap:9px;padding:5px 0;border-bottom:1px dashed #f0f0f0;font-size:13px}.strow:last-child{border-bottom:0}.strow .mk{flex:0 0 18px;text-align:center}.strow .nm{font-weight:650}.strow .nt{color:var(--muted);font-size:12px;margin-top:2px;overflow-wrap:anywhere}.strow.pend{color:var(--muted)}.strow.pend .nm{font-weight:600}.strow.now .nm{color:var(--brand)}
+.card{border:1px solid var(--line);border-radius:11px;padding:10px 12px;margin:8px 0}.card h5{margin:0 0 5px;font-size:13px}.kv{font-size:12px;color:var(--muted);margin-top:3px;overflow-wrap:anywhere}
+.plain{line-height:1.66;overflow-wrap:anywhere}.plain p{margin:0 0 10px}.empty{color:var(--muted);font-size:13px;background:var(--soft);border:1px dashed var(--line);border-radius:10px;padding:10px 11px}
+footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transparent,#fff 24px);padding:26px 14px 12px}.composer{max-width:var(--max);margin:auto;border:1px solid var(--line);background:white;border-radius:17px;display:flex;align-items:flex-end;padding:8px;box-shadow:0 3px 16px #0000000d}.composer:focus-within{border-color:var(--brand)}textarea{border:0;outline:0;resize:none;flex:1;font:inherit;line-height:1.5;max-height:180px;padding:7px 7px;background:transparent}.send{width:38px;height:38px;border:0;border-radius:11px;background:var(--brand);color:#fff;font-size:19px;cursor:pointer}.send:disabled{opacity:.4;cursor:default}.foot{text-align:center;font-size:10px;color:var(--muted);margin-top:6px}
+/* "Apni PDF/notes do" — file user ke apne private session mein jaati hai, aur
+   uska label answer mein alag rehta hai. Yahan koi capability URL mein nahi. */
+.attach{width:38px;height:38px;flex:0 0 auto;border:0;border-radius:11px;background:var(--soft);color:#4b5563;font-size:16px;cursor:pointer;margin-right:2px}.attach:hover{background:#eef2f7}.attach:disabled{opacity:.45;cursor:default}.attach .n{font-size:11px;font-weight:750;margin-left:1px}
+.docs{max-width:var(--max);margin:0 auto 8px;border:1px solid var(--line);background:var(--soft);border-radius:15px;padding:11px 13px}.dochead{display:flex;align-items:center;gap:8px;font-size:13px}.dochead .x{margin-left:auto;border:0;background:transparent;font-size:14px;color:var(--muted);cursor:pointer}
+.docnote{font-size:11.5px;color:var(--muted);line-height:1.5;margin-top:5px}
+.docbtns{display:flex;flex-wrap:wrap;gap:7px;margin-top:9px}.dbtn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 11px;font:inherit;font-size:12.5px;cursor:pointer}.dbtn:hover{border-color:var(--brand)}.dbtn.go{background:var(--brand);border-color:var(--brand);color:#fff;font-weight:650}.dbtn:disabled{opacity:.45;cursor:default}
+.pastebox{width:100%;border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;margin-top:8px;font:inherit;font-size:13px;line-height:1.5;max-height:150px}
+.pname{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;font:inherit;font-size:12.5px;flex:1;min-width:150px}
+.docsep{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
+.doclist{margin-top:9px}.doc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:12.5px;overflow-wrap:anywhere}.doc b{font-weight:650}.doc .dm{color:var(--muted);font-size:11.5px;margin-top:2px}.doc.err{border-color:#f5c6c2;background:#fdeceb;color:#8a2018}.doc.err .dm{color:#8a2018}
+@media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
 <body>
@@ -25,13 +46,14 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
     <button class="on" data-mode="QUICK">Chat</button>
     <button data-mode="DEEP">Deep</button>
     <button data-mode="MAXIMUM">Max</button>
+    <button data-mode="MARATHON">Marathon</button>
   </div>
 </header>
 <div class="hint" id="hint">Chat — turant seedha jawab.</div>
 <div id="scroll"><main id="thread">
   <section class="welcome" id="welcome">
     <h1>Kya research karni hai?</h1>
-    <p>Normal baat ke liye Chat. Sources, evidence aur cross-check ke liye Deep ya Max.</p>
+    <p>Normal baat ke liye Chat. Sources aur cross-check ke liye Deep/Max; books, archives aur specialist lanes ke liye Marathon.</p>
     <div class="chips">
       <button class="chip" data-q="Explain black holes simply">Black holes simple words mein</button>
       <button class="chip" data-q="Room-temperature superconductors ka future evidence ke saath research karo">Superconductors research</button>
@@ -40,28 +62,94 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
   </section>
 </main></div>
 <footer>
-  <div class="composer"><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
+  <section class="docs" id="docs" hidden>
+    <div class="dochead"><strong>Tumhare diye documents</strong><button type="button" class="x" id="docsclose" title="Panel band karo" aria-label="Panel band karo">✕</button></div>
+    <div class="docnote" id="docnote">Copyright book ki poori copy internet se nahi laayi jaati — par tumhare paas jo PDF/notes/explanation already hai, wo yahan do to research usko padhegi. Ye file sirf is tab ki private session mein jaati hai, iska koi public link nahi banta, answer mein iska label alag rehta hai ("tumhara uploaded document"), aur akela uploaded document kisi baat ko VERIFIED nahi banata. Page refresh karne par session nayi ban jaati hai, tab files dobara deni hongi.</div>
+    <div class="docbtns">
+      <button type="button" class="dbtn" id="pickfile">File chuno (PDF, DOCX, TXT, MD, HTML, VTT, SRT)</button>
+      <button type="button" class="dbtn" id="pastetoggle">Explanation text paste karo</button>
+    </div>
+    <textarea class="pastebox" id="pastebox" rows="3" placeholder="Kisi book ka explanation, summary ya apne notes yahan paste karo…" hidden></textarea>
+    <div class="docbtns" id="pasteactions" hidden><input class="pname" id="pastename" type="text" maxlength="80" placeholder="Is text ka naam (jaise: geeta-explanation)"><button type="button" class="dbtn go" id="pastesend">Ye text do</button></div>
+    <input id="fileinput" type="file" multiple hidden accept=".pdf,.docx,.txt,.md,.markdown,.text,.html,.htm,.vtt,.srt">
+    <div class="doclist" id="doclist"></div>
+    <div class="docsep">
+      <div class="dochead"><strong>Audio, video, YouTube aur badi kitaab</strong></div>
+      <div class="docnote" id="medianote">Ye lane server ki asli capability par khulte hain — check ho raha hai…</div>
+      <div class="docbtns">
+        <button type="button" class="dbtn" id="pickmedia" disabled>Audio/video file do (local transcribe)</button>
+        <button type="button" class="dbtn" id="yttoggle" disabled>YouTube link do (public captions)</button>
+        <button type="button" class="dbtn" id="pickbook" disabled>Badi PDF/kitaab — page-by-page padho</button>
+      </div>
+      <div class="docbtns" id="ytactions" hidden><input class="pname" id="yturl" type="text" maxlength="300" placeholder="YouTube link ya video id"><button type="button" class="dbtn go" id="ytsend">Captions lo</button></div>
+      <input id="mediainput" type="file" hidden accept=".mp3,.wav,.m4a,.ogg,.flac,.aac,.wma,.mp4,.mov,.mkv,.webm,.m4b,.opus">
+      <input id="bookinput" type="file" hidden accept=".pdf">
+      <div class="doclist" id="booklist"></div>
+    </div>
+  </section>
+  <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
   <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
 </footer>
 <script>
 "use strict";
-const API="", IS_FILE=location.protocol==="file:";
+let API="";const IS_FILE=location.protocol==="file:";
+// Failover: agar aage Cloudflare Worker laga hai to wo /__rv/failover.json par
+// backup server ka URL batata hai. Na mile to yeh sab chup rehta hai aur page
+// bilkul pehle jaisa chalta hai — yeh sirf ek extra parat hai.
+const FAILOVER={backup:"",active:false,announced:false};
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
-const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — sabse gehri available research. Isme zyada time lag sakta hai."};
+const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — 5 full rounds, multilingual books, source-derived thinkers, counter-evidence aur 90% research-process target. Ye truth/profit probability nahi hai."};
 let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
 const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function htmlText(s){return esc(s).split(/\n{2,}/).map(p=>"<p>"+p.replace(/\n/g,"<br>")+"</p>").join("");}
 function safeHttpUrl(raw){const text=String(raw??"").trim();if(!text)return "";try{const u=new URL(text,location.origin);return (u.protocol==="http:"||u.protocol==="https:")?u.href:"";}catch(_){return "";}}
+// #113 — backend ki kai list dict ki list hoti hai (contract ledger ka
+// mandatory_missing = {key, what, got, why, ...}). Seedha join karne par browser
+// "[object Object]" chhaap deta tha, jisse user ko kuch bhi pata nahi chalta.
+// Isliye wahi field padhte hain jo backend likhta hai (what -> key), aur naam na
+// mile to record ka JSON dikhate hain — chupate nahi.
+const LABEL_KEYS=["what","key","label","title","name","id","reason","note","query"];
+function labelOf(item){
+  if(item===null||item===undefined)return "";
+  if(typeof item!=="object")return String(item).trim();
+  for(const k of LABEL_KEYS){const v=item[k];if(v!==null&&v!==undefined&&typeof v!=="object"&&String(v).trim())return String(v).trim();}
+  try{const j=JSON.stringify(item);return (j&&j!=="{}"&&j!=="[]")?j.slice(0,160):"";}catch(_){return "";}
+}
+function labelList(list,limit){const cap=Math.max(1,Number(limit||10)),out=[];
+  for(const item of (Array.isArray(list)?list:[])){const text=labelOf(item);if(text&&out.indexOf(text)<0)out.push(text);}
+  return out.length>cap?out.slice(0,cap).concat(["+"+(out.length-cap)+" aur"]):out;}
+function joinLabels(list,limit){return labelList(list,limit).join(", ");}
+// #113 — answer ke text mein source link markdown ("[Title](https://…)") ya khule
+// URL ki tarah aate hain. Pehle sirf escape hota tha, isliye woh click hi nahi
+// hote the aur bracket wala kachra dikhta tha. Kram source card wala hi hai:
+// escape PEHLE, phir sirf safeHttpUrl se paas hua http/https URL anchor banta hai
+// — isliye javascript: URL yahan se bhi nahi nikal sakti. Ek hi pass chalta hai,
+// isliye bane hue anchor ke andar dobara anchor nahi banta.
+const LINK_RE=/\[([^\]\n<>]{1,200})\]\((https?:\/\/[^\s<>"')]{1,600})\)|(https?:\/\/[^\s<>"')]{1,600})/g;
+function unesc(s){return String(s??"").replace(/&lt;/g,"<").replace(/&gt;/g,">").replace(/&quot;/g,'"').replace(/&#39;/g,"'").replace(/&amp;/g,"&");}
+function anchorHtml(labelHtml,escapedUrl){const raw=unesc(escapedUrl);if(/["'\s<>]/.test(raw))return "";const href=safeHttpUrl(raw);return href?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+esc(href)+'">'+labelHtml+'</a>':"";}
+function linkify(html){return String(html??"").replace(LINK_RE,(whole,label,mdUrl,bare)=>{
+  if(mdUrl){const md=anchorHtml(label,mdUrl);return md||whole;}
+  const raw=String(bare||""),clean=raw.replace(/[.,;:!?]+$/,""),tail=raw.slice(clean.length);
+  const one=anchorHtml(clean,clean);
+  return one?one+tail:whole;});}
+// #113 — kuch source ka title sirf punctuation hota hai ("—", "…", "***"). Woh
+// naam nahi hai; aisi soorat mein saaf http/https URL dikhate hain, aur woh bhi
+// na ho to "Source" — kachra ya javascript: jaisi URL label nahi banti.
+function hasWordChar(s){return /[\p{L}\p{N}]/u.test(String(s??""));}
+function sourceTitle(s){const t=String((s&&s.title)||"").trim();if(hasWordChar(t))return t;
+  const u=safeHttpUrl((s&&s.url)||"");return hasWordChar(u)?u:"Source";}
 function down(){scroll.scrollTop=scroll.scrollHeight;}
 function row(role){const w=$("#welcome");if(w)w.remove();const el=document.createElement("div");el.className="msg "+role;el.innerHTML='<div class="av">'+(role==="user"?"You":"IR")+'</div><div class="body"><div class="txt"></div></div>';thread.appendChild(el);down();return el.querySelector(".txt");}
 function thinking(el){el.innerHTML='<span class="thinking"><i></i><i></i><i></i></span>';}
 function answer(el,text){el.innerHTML=htmlText(text);down();}
 function note(el,text){const n=document.createElement("div");n.className="note";n.textContent=text;el.appendChild(n);}
 function friendly(el,text){answer(el,IS_FILE?"Ye page file se khula hai. Backend server ke URL se page kholo, tab research chalegi.":(text||"Request safely complete nahi hui."));}
-function clientFailure(status,data,area="Request"){
-  const code=Number(status||0),rawWait=Number(data?.retry_after_seconds||0),wait=rawWait>0?Math.max(1,Math.min(3600,rawWait)):0;
+function clientFailure(status,data,area="Request",aborted=false){
+  const code=Number(status||0),retryWait=Number(data?.retry_after_seconds||0),wait=retryWait>0?Math.max(1,Math.min(3600,retryWait)):0;
+  if(aborted)return area+" ka safe wait-time khatam ho gaya. Question input mein wapas rakh diya hai; background research ya retry use karo.";
   if(code===429)return wait?area+" limit abhi busy hai. "+wait+" second baad retry karo.":area+" limit abhi busy hai; thoda ruk kar retry karo.";
   if(code===503)return "Backend ka private session/research layer ready nahi hai. Backend configuration aur writable data root check karna hoga.";
   if(code===401||code===403||code===404)return "Private session valid nahi rahi. Page refresh karke question dobara bhejo.";
@@ -71,7 +159,57 @@ function clientFailure(status,data,area="Request"){
 }
 function restoreQuestion(message){if(!input.value.trim()){input.value=message;resize();}}
 function sleep(ms){return new Promise(r=>setTimeout(r,ms));}
-async function jsonFetch(url,opts){const r=await fetch(url,opts);let data={};try{data=await r.json();}catch(_){data={};}return {r,data};}
+// ── failover parat ──────────────────────────────────────────────────────────
+// Primary server jawab hi na de (network error ya gateway 502/503/504) tabhi
+// backup par jaate hain. App ne khud 500 diya to NAHI jaate — wo request andar
+// tak chali thi, usko dobara bhejna ek kaam do baar kara sakta hai.
+const DEAD_GATEWAY=[0,502,503,504];
+function backupUrl(url){
+  if(!FAILOVER.backup)return "";
+  const text=String(url||"");
+  if(text.indexOf(FAILOVER.backup)===0)return "";
+  if(text.charAt(0)==="/")return FAILOVER.backup+text;
+  try{const u=new URL(text,location.origin);return FAILOVER.backup+u.pathname+u.search;}catch(_){return "";}
+}
+function announceFailover(){
+  if(FAILOVER.announced)return;FAILOVER.announced=true;
+  answer(row("rv"),"Primary server ne jawab nahi diya, isliye main backup server par chala gaya hoon. Chhote sawaal turant chalenge. Agar koi lamba research (DEEP/MAX/MARATHON) beech mein tha to wo backup par maujood nahi hai — usko dobara bhejna padega. Backup par tumhaari khud upload ki hui PDF ka search band rehta hai; baaki sab chalta hai.");
+}
+function switchToBackup(){
+  if(!FAILOVER.backup||FAILOVER.active)return;
+  FAILOVER.active=true;API=FAILOVER.backup;resetProjectSession();announceFailover();
+}
+async function loadFailoverInfo(){
+  if(IS_FILE)return;
+  const {r,data}=await jsonFetch("/__rv/failover.json",{},4000);
+  if(!r.ok)return;
+  const backup=safeHttpUrl(data&&data.backup);
+  if(!backup)return;
+  const trimmed=backup.charAt(backup.length-1)==="/"?backup.slice(0,-1):backup;
+  if(trimmed.indexOf(location.origin)===0)return;   // khud ko backup nahi manna
+  FAILOVER.backup=trimmed;
+}
+async function jsonFetch(url,opts={},timeoutMs=0){
+  const first=await jsonFetchOnce(url,opts,timeoutMs);
+  if(first.aborted||first.r.ok||DEAD_GATEWAY.indexOf(Number(first.r.status||0))<0)return first;
+  const alt=backupUrl(url);
+  if(!alt)return first;
+  const second=await jsonFetchOnce(alt,opts,timeoutMs);
+  if(second.aborted||(!second.r.ok&&Number(second.r.status||0)===0))return first;
+  switchToBackup();
+  return second;
+}
+async function jsonFetchOnce(url,opts={},timeoutMs=0){
+  const ctrl=("AbortController" in window)?new AbortController():null;let timer=null;
+  if(ctrl&&timeoutMs>0)timer=setTimeout(()=>ctrl.abort(),timeoutMs);
+  try{
+    const request={...opts,cache:"no-store",signal:ctrl?ctrl.signal:undefined};
+    const r=await fetch(url,request);const raw=await r.text();let data={};
+    try{data=raw?JSON.parse(raw):{};}catch(_){data={};}
+    return {r,data,aborted:false};
+  }catch(e){return {r:{ok:false,status:0},data:{},aborted:!!(e&&e.name==="AbortError")};}
+  finally{if(timer)clearTimeout(timer);}
+}
 
 function resetProjectSession(){PROJECT.id="";PROJECT.token="";sessionPromise=null;}
 async function ensureSession(){
@@ -86,50 +224,621 @@ async function ensureSession(){
   try{return await sessionPromise;}catch(e){sessionPromise=null;throw e;}
 }
 function projectHeaders(){return {"Content-Type":"application/json","X-Project-Token":PROJECT.token};}
-async function projectPost(url,makePayload){
+async function projectPost(url,makePayload,timeoutMs=0){
   // A backend redeploy may rotate an ephemeral project-signing file while this
   // tab still has the old in-memory capability. One 404 refresh is safe; never
   // loop forever and never put either capability in a URL.
   for(let attempt=0;attempt<2;attempt++){
     await ensureSession();
     const payload=makePayload(PROJECT.id);
-    const out=await jsonFetch(API+url,{method:"POST",headers:projectHeaders(),body:JSON.stringify(payload)});
+    const out=await jsonFetch(API+url,{method:"POST",headers:projectHeaders(),body:JSON.stringify(payload)},timeoutMs);
     if(out.r.status!==404||attempt===1)return out;
     resetProjectSession();
   }
   throw new Error("project session recovery failed");
 }
 
-async function runChat(message,el){thinking(el);try{const {r,data}=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}));if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat"));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
+// ── "Apni PDF/notes do" ──────────────────────────────────────────────────────
+// Upload usi private session mein jaata hai jisme sawaal jaata hai, isliye
+// orchestrator._document_records() isi project ka vector collection padhta hai.
+// FormData par Content-Type browser khud boundary ke saath lagata hai, isliye
+// yahan projectHeaders() nahi — sirf capability header. Capability kabhi URL
+// mein nahi jaati, aur file kahin public nahi hoti.
+const DOC_EXT=[".pdf",".docx",".txt",".md",".markdown",".text",".html",".htm",".vtt",".srt"];
+const MAX_DOC_BYTES=60*1024*1024;
+const givenDocs=[];
+let uploading=false;
+const docs=$("#docs"),doclist=$("#doclist"),attach=$("#attach"),fileinput=$("#fileinput"),
+      pastebox=$("#pastebox"),pasteactions=$("#pasteactions"),pastename=$("#pastename");
+function docExt(name){const i=String(name||"").lastIndexOf(".");return i<0?"":String(name).slice(i).toLowerCase();}
+function renderDocs(){
+  doclist.innerHTML=givenDocs.map(d=>'<div class="doc'+(d.bad?" err":"")+'"><b>'+esc(d.name)+'</b><div class="dm">'+esc(d.state)+'</div></div>').join("");
+  const ready=givenDocs.filter(d=>d.ready).length;
+  attach.innerHTML="📎"+(ready?'<span class="n">'+esc(String(ready))+'</span>':"");
+  attach.title=ready?ready+" document diya hua hai":"Apni PDF/notes do";
+}
+async function uploadDoc(blob,name){
+  const entry={name:name,state:"Bheja ja raha hai…",ready:false,bad:false};
+  givenDocs.push(entry);renderDocs();
+  if(!DOC_EXT.includes(docExt(name))){entry.bad=true;entry.state="Ye format supported nahi hai. Supported: "+DOC_EXT.join(", ");renderDocs();return;}
+  if(!blob.size){entry.bad=true;entry.state="File khaali hai — padhne layak kuch nahi mila.";renderDocs();return;}
+  if(blob.size>MAX_DOC_BYTES){entry.bad=true;entry.state="File 60 MB se badi hai; chhote hisson mein do.";renderDocs();return;}
+  try{
+    let out={r:{ok:false,status:0},data:{},aborted:false};
+    for(let attempt=0;attempt<2;attempt++){
+      await ensureSession();
+      const fd=new FormData();
+      fd.append("file",blob,name);fd.append("project_id",PROJECT.id);fd.append("use_ocr","true");
+      out=await jsonFetch(API+"/api/v1/upload-document",{method:"POST",headers:{"X-Project-Token":PROJECT.token},body:fd},300000);
+      if(out.r.status!==404||attempt===1)break;
+      resetProjectSession();
+    }
+    const {r,data}=out;
+    if(!r.ok){entry.bad=true;entry.state=clientFailure(r.status,data,"Upload",out.aborted);renderDocs();return;}
+    const chunks=Number(data.chunks||0);
+    if(!chunks){entry.bad=true;entry.state="Process ho gayi, par padhne layak text nahi mila (scan-only ya khaali file). Research isko source nahi banayegi.";renderDocs();return;}
+    const notes=(Array.isArray(data.notes)?data.notes:[]).filter(Boolean).map(String);
+    entry.ready=true;
+    entry.state="Tayyar — "+chunks+" chunk"+(Number(data.chars_extracted||0)?" • "+Number(data.chars_extracted)+" characters":"")
+      +(data.kind?" • "+String(data.kind):"")+(notes.length?" • "+notes.join("; "):"")
+      +". Answer mein ye tumhare uploaded document ke label ke saath aayega.";
+  }catch(e){entry.bad=true;entry.state=clientFailure(0,{},"Upload");}
+  renderDocs();
+}
+async function uploadMany(items){
+  // Ek-ek karke, taaki upload rate limit aur backend OCR load na phate.
+  if(uploading||!items.length)return;
+  uploading=true;attach.disabled=true;
+  try{for(const it of items)await uploadDoc(it.blob,it.name);}
+  finally{uploading=false;attach.disabled=IS_FILE;}
+}
+attach.addEventListener("click",()=>{docs.hidden=!docs.hidden;});
+$("#docsclose").addEventListener("click",()=>{docs.hidden=true;});
+$("#pickfile").addEventListener("click",()=>{if(!IS_FILE)fileinput.click();});
+fileinput.addEventListener("change",()=>{
+  const items=Array.from(fileinput.files||[]).map(f=>({blob:f,name:f.name||"upload"}));
+  fileinput.value="";uploadMany(items);
+});
+$("#pastetoggle").addEventListener("click",()=>{
+  const show=pastebox.hidden;pastebox.hidden=!show;pasteactions.hidden=!show;if(show)pastebox.focus();
+});
+$("#pastesend").addEventListener("click",()=>{
+  const text=pastebox.value.trim();if(!text||IS_FILE)return;
+  const clean=String(pastename.value||"").trim().replace(/[^A-Za-z0-9 ._-]/g,"").trim().slice(0,60);
+  const base=clean||("pasted-note-"+(givenDocs.length+1));
+  const name=base.toLowerCase().endsWith(".txt")?base:base+".txt";
+  pastebox.value="";pastename.value="";
+  uploadMany([{blob:new Blob([text],{type:"text/plain"}),name:name}]);
+});
+// ── #120: audio / video / YouTube / badi kitaab ──────────────────────────────
+// Teen niyam yahan tay hain aur teeno screen par likhe jaate hain:
+//  1. Ye lane tabhi khulte hain jab server ki asli capability list kehti hai ki
+//     backend maujood hai. Capability na mile to lane BAND rehte hain — "shayad
+//     chal jaayega" dikhana jhooth hai.
+//  2. Video ka sirf AUDIO padha jaata hai. Koi frame, chehra, scene ya visual
+//     analysis nahi hota — aur ye baat button ke neeche likhi rehti hai.
+//  3. YouTube lane public CAPTIONS laata hai, audio transcription nahi; aur
+//     transcript milna "samajh liya" nahi hota.
+const MEDIA_EXT=[".mp3",".wav",".m4a",".ogg",".flac",".aac",".wma",".mp4",".mov",".mkv",".webm",".m4b",".opus"];
+const MAX_MEDIA_BYTES=200*1024*1024;
+const MAX_BOOK_BYTES=60*1024*1024;
+const BOOK_BATCH_PAGES=30;
+const CAPS={loaded:false,data:null,error:""};
+const NO_FRAME_NOTE="Video ka sirf audio padha jaata hai — frame, scene ya visual ka koi analysis nahi hota.";
+// Backend asli wajah `detail` mein bhejta hai — kabhi string, kabhi {message,hint}.
+// Sirf generic line dikhane se wajah gayab ho jaati hai, isliye jab asli text ho
+// to wahi jodte hain (yahan se koi URL/link nahi banti, sirf plain text).
+function detailText(data){
+  const d=(data&&typeof data==="object")?data.detail:null;
+  if(typeof d==="string")return d.trim().slice(0,400);
+  if(d&&typeof d==="object"&&!Array.isArray(d)){
+    const bits=[];
+    for(const k of ["message","hint","note","needs"]){const v=d[k];if(typeof v==="string"&&v.trim())bits.push(v.trim());}
+    return bits.join(" ").slice(0,400);
+  }
+  return "";
+}
+function needsText(bit,fallback){const n=String(bit.needs||"").trim();return (n||fallback).replace(/\.+$/,"");}
+function mediaFailure(status,data,area,aborted){
+  // Upload/ingest ke apne saaf jawab. Chat ki line ("question input mein wapas
+  // rakh diya hai") yahan jhooth hoti — koi question gaya hi nahi tha; aur 501
+  // par "retry karo" bhi jhooth hai, capability install hi nahi hai.
+  const real=detailText(data),code=Number(status||0),tail=real?" Backend ne kaha: "+real:"";
+  const wait=Math.max(0,Math.min(3600,Number((data&&data.retry_after_seconds)||0)));
+  if(aborted)return area+" ka safe wait-time khatam ho gaya. Ho sakta hai backend abhi bhi chala raha ho; chhote hisse mein dobara do."+tail;
+  if(code===400||code===422||code===501){
+    const why=code===501?"is server par ye capability install hi nahi hai, retry se nahi hogi"
+      :(code===400?"jo diya wo is lane ke liye supported nahi hai"
+                  :"di hui file/link se kaam layak content nahi nikla");
+    return area+" nahi ho saki — "+why+"."+tail;
+  }
+  if(code===429)return area+" limit abhi busy hai"+(wait?" — "+wait+" second baad dobara do.":"; thoda ruk kar dobara do.")+tail;
+  if(code===413)return area+" ke liye ye file server ki had se badi hai."+tail;
+  if(code===401||code===403||code===404)return "Private session valid nahi rahi, isliye ye "+area.toLowerCase()+" adhoori rah gayi. Page refresh karke file/link dobara do."+tail;
+  if(code===503)return "Backend ka private session/storage layer ready nahi hai, isliye ye lane abhi kaam nahi karega."+tail;
+  if(code>=500)return "Backend ne "+area.toLowerCase()+" complete nahi ki. Dobara try ho sakta hai, par pehle backend health check karo."+tail;
+  if(!code)return "Backend tak network connection nahi bana — kuch bhi upload/ingest nahi hua."+tail;
+  return area+" complete nahi hui (HTTP "+code+")."+tail;
+}
+function capBit(caps,key){const c=(caps&&typeof caps==="object")?caps[key]:null;return (c&&typeof c==="object")?c:{};}
+function mediaGate(caps){
+  const av=capBit(caps,"audio_video_transcription");
+  if(av.available===true){
+    const backend=String(av.backend||"").trim();
+    return {ok:true,why:"Local transcribe backend: "+(backend||"naam nahi bataya gaya")
+      +". Ye tumhari di hui file ka machine transcript hai — samajh (comprehension) nahi. "+NO_FRAME_NOTE};
+  }
+  return {ok:false,why:"Is server par local speech-to-text install nahi hai, isliye ye lane band hai. Chahiye: "
+    +needsText(av,"faster-whisper YA openai-whisper (free + local)")
+    +". Koi paid API ya platform download/bypass yahan use nahi hoti."};
+}
+function ytGate(caps){
+  const yt=capBit(caps,"youtube_captions");
+  if(yt.available===true)return {ok:true,why:"Ye video ke public captions hain, audio transcription nahi. Citations timestamp ke saath aayengi, aur caption milna samajh lena nahi hota."};
+  const flag=yt.enabled_flag===true,lib=yt.library_installed===true;
+  const miss=(!flag&&!lib)?"server ka ALLOW_YT_TRANSCRIPT flag band hai aur caption library bhi install nahi hai"
+    :(!flag?"caption library install hai, par server ka ALLOW_YT_TRANSCRIPT flag band hai"
+           :"flag on hai, par caption library install nahi hai");
+  return {ok:false,why:"YouTube captions lane band hai — "+miss+". Chahiye: "
+    +needsText(yt,"ALLOW_YT_TRANSCRIPT=true + youtube-transcript-api")+"."};
+}
+function bookGate(caps){
+  const pdf=capBit(caps,"pdf_text"),ocr=capBit(caps,"pdf_ocr_for_scanned_pages");
+  if(pdf.available!==true)return {ok:false,why:"PDF ka text nikaalne wali library is server par nahi hai, isliye page-by-page reading band hai. Chahiye: "+needsText(pdf,"pymupdf")+"."};
+  const scan=(ocr.available===true)?"Scan wale page ke liye OCR bhi available hai."
+    :("Scan-only page OCR ke bina unreadable rahenge — OCR is server par nahi hai (chahiye: "+needsText(ocr,"pytesseract + Tesseract binary")+").");
+  return {ok:true,why:"Kitaab ek hi baar mein poori nahi padhi jaati: "+BOOK_BATCH_PAGES
+    +" page ke bounded batch chalte hain aur tum jab chaaho aage badha sakte ho. "+scan
+    +" Text nikal jaana padh-kar-samajh lena nahi hai, aur adhoori reading kabhi \"poori kitaab padh li\" nahi kehlati."};
+}
+const media=$("#medianote"),mediainput=$("#mediainput"),bookinput=$("#bookinput"),
+      pickmedia=$("#pickmedia"),pickbook=$("#pickbook"),yttoggle=$("#yttoggle"),
+      ytactions=$("#ytactions"),yturl=$("#yturl"),booklist=$("#booklist");
+let capsPromise=null;
+async function loadCaps(){
+  if(CAPS.loaded)return CAPS;
+  if(capsPromise)return capsPromise;
+  capsPromise=(async()=>{
+    const {r,data}=await jsonFetch(API+"/api/v1/processing-capabilities",{},20000);
+    CAPS.loaded=true;
+    if(!r.ok||!data||typeof data!=="object"||Array.isArray(data)){
+      CAPS.data=null;
+      CAPS.error="Server ki capability list nahi mili (HTTP "+Number(r.status||0)
+        +"), isliye audio/video/YouTube/kitaab lane band rakhe hain. Jab tak sach pata nahi hai, band dikhana galat \"chal jaayega\" se behtar hai.";
+    }else{CAPS.data=data;CAPS.error="";}
+    return CAPS;
+  })();
+  try{return await capsPromise;}finally{capsPromise=null;}
+}
+function capsLines(caps){
+  const m=mediaGate(caps),y=ytGate(caps),b=bookGate(caps);
+  return [(m.ok?"✓":"✕")+" Audio/video: "+m.why,
+          (y.ok?"✓":"✕")+" YouTube: "+y.why,
+          (b.ok?"✓":"✕")+" Badi PDF/kitaab: "+b.why];
+}
+function applyCaps(){
+  if(IS_FILE)return;
+  if(!CAPS.loaded){media.textContent="Ye lane server ki asli capability par khulte hain — check ho raha hai…";return;}
+  if(!CAPS.data){pickmedia.disabled=true;yttoggle.disabled=true;pickbook.disabled=true;
+    media.textContent=CAPS.error;return;}
+  const m=mediaGate(CAPS.data),y=ytGate(CAPS.data),b=bookGate(CAPS.data);
+  pickmedia.disabled=!m.ok;yttoggle.disabled=!y.ok;pickbook.disabled=!b.ok;
+  if(!y.ok){ytactions.hidden=true;}
+  media.textContent=capsLines(CAPS.data).join(" ");
+}
+// Backend ka video-id parsing yahi hai (api/routes.py); client par pehle jaanch
+// lene se galat link bina request ke pakda jaata hai. Dono jagah ek hi niyam.
+function ytVideoId(raw){
+  const text=String(raw??"").trim();let id=text;
+  for(const marker of ["v=","youtu.be/","/shorts/","/embed/"]){
+    const at=text.indexOf(marker);
+    if(at>=0){id=text.slice(at+marker.length);break;}
+  }
+  id=id.split("&")[0].split("?")[0].replace(/^\/+/,"").replace(/\/+$/,"");
+  if(!id||id.length>64||!/^[A-Za-z0-9_-]+$/.test(id))return "";
+  return id;
+}
+async function projectForm(url,build,timeoutMs){
+  // Wahi discipline jo uploadDoc ki hai: FormData par Content-Type browser khud
+  // lagata hai, capability sirf header mein jaati hai (URL mein kabhi nahi), aur
+  // session ghoom jaane par ek hi baar refresh — infinite loop nahi.
+  let out={r:{ok:false,status:0},data:{},aborted:false};
+  for(let attempt=0;attempt<2;attempt++){
+    await ensureSession();
+    out=await jsonFetch(API+url,{method:"POST",headers:{"X-Project-Token":PROJECT.token},body:build(PROJECT.id)},timeoutMs);
+    if(out.r.status!==404||attempt===1)break;
+    resetProjectSession();
+  }
+  return out;
+}
+async function uploadMedia(blob,name){
+  const entry={name:name,state:"Bheja ja raha hai — local transcribe mein waqt lagta hai…",ready:false,bad:false};
+  givenDocs.push(entry);renderDocs();
+  if(!MEDIA_EXT.includes(docExt(name))){entry.bad=true;entry.state="Ye audio/video format supported nahi hai. Supported: "+MEDIA_EXT.join(", ");renderDocs();return;}
+  if(!blob.size){entry.bad=true;entry.state="File khaali hai — sunne layak kuch nahi mila.";renderDocs();return;}
+  if(blob.size>MAX_MEDIA_BYTES){entry.bad=true;entry.state="File 200 MB se badi hai; chhote hisson mein do.";renderDocs();return;}
+  try{
+    const out=await projectForm("/api/v1/transcribe-audio",id=>{
+      const fd=new FormData();fd.append("file",blob,name);fd.append("project_id",id);
+      fd.append("title",name);fd.append("lang","");return fd;},900000);
+    const {r,data}=out;
+    if(!r.ok){entry.bad=true;entry.state=mediaFailure(r.status,data,"Transcribe",out.aborted);renderDocs();return;}
+    const chunks=Number(data.chunks||0);
+    if(!chunks){entry.bad=true;entry.state="Transcribe chali par store karne layak text nahi bana. Research isko source nahi banayegi.";renderDocs();return;}
+    entry.ready=true;
+    entry.state="Tayyar — "+chunks+" timestamped chunk"
+      +(data.backend?" • local backend: "+String(data.backend):"")
+      +(data.duration_note?" • "+String(data.duration_note):"")
+      +(data.honesty_note?" • "+String(data.honesty_note):"")
+      +". "+NO_FRAME_NOTE
+      +" Machine transcript sunkar samajh lena nahi hai; answer mein ye tumhare diye document ke label ke saath aayega aur akela ye kisi baat ko VERIFIED nahi banata.";
+  }catch(e){entry.bad=true;entry.state=mediaFailure(0,{},"Transcribe",false);}
+  renderDocs();
+}
+async function ingestYt(raw){
+  const id=ytVideoId(raw);
+  const entry={name:id?("youtube:"+id):"youtube link",state:"Public captions maange ja rahe hain…",ready:false,bad:false};
+  givenDocs.push(entry);renderDocs();
+  if(!id){entry.bad=true;entry.state="Ye YouTube link/video id samajh nahi aayi. Poora link ya sirf video id do.";renderDocs();return;}
+  try{
+    const out=await projectPost("/api/v1/ingest-youtube",projectId=>({video:id,project_id:projectId,title:"youtube_"+id}),120000);
+    const {r,data}=out;
+    if(!r.ok){entry.bad=true;entry.state=mediaFailure(r.status,data,"YouTube captions",out.aborted);renderDocs();return;}
+    const chunks=Number(data.chunks||0);
+    if(!chunks){entry.bad=true;entry.state="Captions aaye par store karne layak block nahi bane. Research isko source nahi banayegi.";renderDocs();return;}
+    entry.ready=true;
+    entry.state="Tayyar — "+chunks+" timestamped block"
+      +(Number(data.cues||0)?" • "+Number(data.cues)+" caption cue":"")
+      +" • "+(String(data.honesty_note||"").trim()||"Ye video ke public captions hain, audio transcription nahi.")
+      +" "+NO_FRAME_NOTE;
+  }catch(e){entry.bad=true;entry.state=mediaFailure(0,{},"YouTube captions",false);}
+  renderDocs();
+}
+// Badi kitaab: ek baar mein poori nahi. Backend bounded batch mein page dekhta
+// hai aur har batch ke baad apni asli coverage batata hai — yahan wahi ginti
+// jaisi hai waisi dikhti hai. "Poori kitaab padh li" ka dawa app nahi karta.
+const bookRuns=[];
+function pctText(v){const n=Number(v);if(!isFinite(n)||n<0)return "pata nahi";return (Math.round(n*1000)/10)+"%";}
+function rangeText(list){
+  const rows=Array.isArray(list)?list:[],out=[];
+  for(const r of rows){
+    if(!r||typeof r!=="object")continue;
+    const a=Number(r.start||0),b=Number(r.end||0);
+    if(!a||!b)continue;
+    out.push(a===b?String(a):(a+"-"+b));
+  }
+  if(!out.length)return "";
+  return out.slice(0,8).join(", ")+(out.length>8?" (+"+(out.length-8)+" aur)":"");
+}
+function readingLine(session){
+  const st=(session&&typeof session==="object")?session:{};
+  const cov=(st.coverage&&typeof st.coverage==="object")?st.coverage:{};
+  const hon=(st.honesty&&typeof st.honesty==="object")?st.honesty:{};
+  const total=Number(cov.total_pages||0),bits=[];
+  bits.push("Status: "+(String(st.status||"").trim()||"pata nahi"));
+  const blocker=String(st.processing_blocker||"").trim();
+  if(blocker)bits.push("Ruka: "+blocker);
+  bits.push(total?("Page dekhe: "+pctText(cov.page_inspection_fraction)+" (kul "+total+" page)")
+                 :"Kul page ka pata nahi chala");
+  bits.push("Text mila: "+pctText(cov.text_available_fraction));
+  const gaps=rangeText(cov.unreadable_page_ranges);
+  if(gaps)bits.push("Padhe nahi ja sake page: "+gaps);
+  const pending=rangeText(cov.pending_translation_page_ranges);
+  if(pending)bits.push("Translation review pending page: "+pending);
+  bits.push("Dawa: "+(String(hon.completion_claim||"").trim()||"NOT_READ_YET"));
+  const next=Number(cov.next_page||0);
+  bits.push(next?("Agla batch page "+next+" se"):"Aage koi pending batch nahi");
+  return bits.join(" • ");
+}
+function bookDone(session){
+  const cov=((session&&typeof session==="object")?session.coverage:null)||{};
+  return !Number(cov.next_page||0);
+}
+function renderBooks(){
+  booklist.innerHTML=bookRuns.map((b,i)=>'<div class="doc'+(b.bad?" err":"")+'"><b>'+esc(b.name)+'</b>'
+    +'<div class="dm">'+esc(b.state)+'</div>'
+    +((b.sessionId&&!b.done&&!b.bad)?'<div class="docbtns"><button type="button" class="dbtn" data-book="'+i+'"'+(b.busy?" disabled":"")+'>Aage ke '+BOOK_BATCH_PAGES+' page padho</button></div>':"")
+    +'</div>').join("");
+}
+async function startBook(blob,name){
+  const run={name:name,sessionId:"",state:"Pehla bounded batch process ho raha hai…",bad:false,busy:true,done:false};
+  bookRuns.push(run);renderBooks();
+  try{
+    if(docExt(name)!==".pdf"){run.bad=true;run.state="Page-by-page reading abhi sirf PDF ke liye hai; dusre format 📎 wale document lane se do.";return;}
+    if(!blob.size){run.bad=true;run.state="File khaali hai — padhne layak kuch nahi mila.";return;}
+    if(blob.size>MAX_BOOK_BYTES){run.bad=true;run.state="File 60 MB se badi hai; chhote hisson mein do.";return;}
+    const out=await projectForm("/api/v1/reading-sessions/start",id=>{
+      const fd=new FormData();fd.append("file",blob,name);fd.append("project_id",id);
+      fd.append("title",name);fd.append("batch_pages",String(BOOK_BATCH_PAGES));
+      fd.append("use_ocr","true");return fd;},600000);
+    const {r,data}=out;
+    if(!r.ok){run.bad=true;run.state=mediaFailure(r.status,data,"Reading session",out.aborted);return;}
+    const s=(data&&typeof data.session==="object")?data.session:{};
+    run.sessionId=String(s.session_id||"");
+    run.done=bookDone(s);
+    run.state=readingLine(s);
+    if(!run.sessionId){run.bad=true;run.state="Session id nahi mila, isliye aage ke page nahi padhe ja sakte. "+run.state;}
+  }catch(e){run.bad=true;run.state=mediaFailure(0,{},"Reading session",false);}
+  finally{run.busy=false;renderBooks();}
+}
+async function resumeBook(index){
+  const run=bookRuns[Number(index)];
+  if(!run||run.busy||run.done||run.bad||!run.sessionId)return;
+  const before=run.state;
+  run.busy=true;run.state="Agle "+BOOK_BATCH_PAGES+" page padhe ja rahe hain…";renderBooks();
+  try{
+    const out=await projectPost("/api/v1/reading-sessions/"+encodeURIComponent(run.sessionId)+"/resume",
+      projectId=>({project_id:projectId,batch_pages:BOOK_BATCH_PAGES,use_ocr:true}),600000);
+    const {r,data}=out;
+    if(!r.ok){run.bad=true;run.state=mediaFailure(r.status,data,"Reading session",out.aborted)
+      +" Jahan tak pahunche the: "+before;return;}
+    const s=(data&&typeof data.session==="object")?data.session:{};
+    run.done=bookDone(s);run.state=readingLine(s);
+  }catch(e){run.bad=true;run.state=mediaFailure(0,{},"Reading session",false)+" Jahan tak pahunche the: "+before;}
+  finally{run.busy=false;renderBooks();}
+}
+async function mediaMany(items){
+  // Ek-ek karke: local transcribe CPU-bhaari hai, do file saath mein backend ko
+  // ragad deti hain. Wahi lock jo document upload use karta hai.
+  if(uploading||!items.length)return;
+  uploading=true;attach.disabled=true;
+  try{for(const it of items)await uploadMedia(it.blob,it.name);}
+  finally{uploading=false;attach.disabled=IS_FILE;}
+}
+pickmedia.addEventListener("click",()=>{if(!IS_FILE&&!pickmedia.disabled)mediainput.click();});
+mediainput.addEventListener("change",()=>{
+  const items=Array.from(mediainput.files||[]).map(f=>({blob:f,name:f.name||"media"}));
+  mediainput.value="";mediaMany(items);
+});
+pickbook.addEventListener("click",()=>{if(!IS_FILE&&!pickbook.disabled)bookinput.click();});
+bookinput.addEventListener("change",()=>{
+  const one=(bookinput.files||[])[0];bookinput.value="";
+  if(one)startBook(one,one.name||"book.pdf");
+});
+yttoggle.addEventListener("click",()=>{
+  if(yttoggle.disabled)return;
+  const show=ytactions.hidden;ytactions.hidden=!show;if(show)yturl.focus();
+});
+$("#ytsend").addEventListener("click",()=>{
+  const raw=yturl.value.trim();if(!raw||IS_FILE)return;
+  yturl.value="";ingestYt(raw);
+});
+booklist.addEventListener("click",e=>{
+  const t=e.target.closest("[data-book]");
+  if(!t||!booklist.contains(t))return;
+  resumeBook(t.dataset.book);
+});
+// Panel khulte waqt hi capability poochhi jaati hai — page load par nahi, taaki
+// jo user ye lane use hi nahi karta uske liye ek extra request na ho.
+attach.addEventListener("click",()=>{
+  if(docs.hidden||IS_FILE)return;
+  if(CAPS.loaded){applyCaps();return;}
+  loadCaps().then(applyCaps).catch(()=>{});
+});
 
-function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="log"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),log:el.querySelector(".log")};}
-function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0));const total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+Number(p.sources_discovered||0)+" sources • "+Number(p.full_text_sources_read||0)+" full-text";ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";if(Array.isArray(p.log)&&p.log.length)ui.log.textContent=p.log.slice(-4).map(x=>"• "+(STAGE_LABEL[x.stage]||x.stage)+(x.note?" — "+x.note:"")).join("\n");down();}
+async function runChat(message,el){thinking(el);try{let out={r:{ok:false,status:0},data:{},aborted:false};for(let attempt=0;attempt<2;attempt++){out=await projectPost("/api/v1/chat",projectId=>({message,history,project_id:projectId}),55000);if(out.r.ok||![0,502,503,504].includes(Number(out.r.status||0))||attempt===1)break;await sleep(1500);}const {r,data}=out;if(!r.ok){friendly(el,clientFailure(r.status,data,"Chat",out.aborted));restoreQuestion(message);return false;}if(data.start_research_job===true){return await runResearch(message,el,"QUICK");}const text=data.answer||"Is run mein readable jawab nahi mila.";answer(el,text);history.push({role:"rv",content:text});return true;}catch(e){friendly(el,clientFailure(0,{},"Chat"));restoreQuestion(message);return false;}}
+
+// §22 — 12 stage ki 12 row. Kabhi banaya hua "62%" nahi; sirf ginti aur record.
+// Jo stage chala hi nahi uska record "nahi chala" hai, aur jiska log trim ho gaya
+// uska record "pata nahi" — dono ko "pending" bana dena jhooth hota.
+function stageTable(p){
+  const prog=p||{},ran=new Map();
+  for(const s of (Array.isArray(prog.stages_completed)?prog.stages_completed:[]))if(!ran.has(s))ran.set(s,"");
+  const log=Array.isArray(prog.log)?prog.log:[];
+  for(const item of log){const s=item&&item.stage;if(s&&STAGES.includes(s))ran.set(s,String(item.note||""));}
+  const done=Math.max(0,Number(prog.stages_done||0)),trimmed=Math.max(0,done-ran.size);
+  const current=String(prog.current_stage||""),finished=ran.has("COMPLETE")||current==="COMPLETE";
+  return STAGES.map(stage=>{
+    const label=STAGE_LABEL[stage]||stage,live=(stage===current&&!finished);
+    if(ran.has(stage))return {stage,label,note:ran.get(stage),mk:live?"●":"✓",cls:live?"now":"done"};
+    if(trimmed>0)return {stage,label,mk:"?",cls:"pend",note:"Is stage ka record pata nahi — progress log ki sirf aakhri lines rakhi jaati hain."};
+    if(finished)return {stage,label,mk:"–",cls:"pend",note:"Is run mein ye stage chala hi nahi."};
+    return {stage,label,mk:"·",cls:"pend",note:"Abhi baaki hai."};
+  });
+}
+function stageRowsHtml(p){return '<div class="stages">'+stageTable(p).map(r=>'<div class="strow '+r.cls+'"><div class="mk">'+r.mk+'</div><div><div class="nm">'+esc(r.label)+'</div>'+(r.note?'<div class="nt">'+esc(r.note)+'</div>':'')+'</div></div>').join("")+'</div>';}
+function progressCounts(p){const prog=p||{};return Number(prog.sources_discovered||0)+" sources • "+Number(prog.documents_processed||0)+" documents • "+Number(prog.full_text_sources_read||0)+" full-text • "+Number(prog.evidence_conflicts_found||0)+" conflicts checked • "+Number(prog.reasoning_calls_used||prog.gemini_calls_used||0)+" reasoning calls";}
+function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="rows"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),rows:el.querySelector(".rows")};}
+function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0)),total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+progressCounts(p);ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";ui.rows.innerHTML=stageRowsHtml(p);down();}
 
 async function runResearch(question,el,requestedMode=mode){const ui=progressPanel(el);let jobId="",jobToken="";try{
   const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
+  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMinutes=requestedMode==="MARATHON"?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
     const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
-    if(prog.r.ok)paintProgress(ui,prog.data.progress);
+    if(prog.r.ok){const p=prog.data.progress||{};paintProgress(ui,p);const signature=[status.data.status,p.current_stage,p.stages_done,Array.isArray(p.log)?p.log.length:0].join("|");if(signature!==lastSignature){lastSignature=signature;lastChange=Date.now();}}
     if(status.data.status==="completed")break;
     if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
+    if(Date.now()>hardDeadline){friendly(el,"Research browser ki wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
+    if(Date.now()-lastChange>stallMs){friendly(el,`Research progress ${stallMinutes} minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.`);restoreQuestion(question);return false;}
     await sleep(1200);
   }
   const res=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/result",pollOpts);
   if(!res.r.ok){friendly(el,clientFailure(res.r.status,res.data,"Research result"));restoreQuestion(question);return false;}renderResearch(el,res.data);return true;
 }catch(e){friendly(el,clientFailure(0,{},"Research"));restoreQuestion(question);return false;}}
 
-function renderResearch(el,data){const text=data&&data.answer?data.answer:"Research complete hui, lekin readable answer nahi mila.";el.innerHTML=htmlText(text);history.push({role:"rv",content:text});const sources=Array.isArray(data?.sources)?data.sources:[];if(sources.length){const box=document.createElement("div");box.className="sources";let h="<h4>Sources ("+sources.length+")</h4>";for(const s of sources.slice(0,15)){const title=esc(s.title||s.url||"Source"),href=safeHttpUrl(s.url),url=href?esc(href):"",read=esc(s.reading_level||s.access_level||"");h+='<div class="src">'+(url?'<a target="_blank" rel="noopener noreferrer" href="'+url+'">'+title+'</a>':'<strong>'+title+'</strong>')+(read?'<div class="meta">Read: '+read+'</div>':'')+'</div>';}box.innerHTML=h;el.appendChild(box);}if(data?.evidence_level)note(el,"Evidence status: "+data.evidence_level);if(data?.research_status&&data.research_status!=="COMPLETE")note(el,"Research status: "+data.research_status);down();}
+// §12/§21 — answer ke `##` section kaun se hain, ye list backend ke
+// research_engine/answer_order.py se mirror hai (wahi canonical naam, wahi
+// aliases, wahi longest-alias rule). Test: tests/test_recovery_ui_contract.py
+// isi table ko HTML se nikaal kar backend ke saath match karta hai, isliye
+// heading badalne par chuppi nahi rahegi.
+const SECTIONS=[
+ ["direct_answer","Seedha jawab",["seedha jawab","direct answer"]],
+ ["established_knowledge","Established knowledge",["established knowledge","research se kya pata chala","established evidence"]],
+ ["supporting_evidence","Supporting evidence",["supporting evidence","evidence kya kehta hai"]],
+ ["counterevidence","Counterevidence",["counterevidence","counter evidence","counter-evidence","iske against kya mila","evidence against"]],
+ ["calculations","Calculations",["calculations","hisaab","quantitative checks"]],
+ ["unknowns","Unknowns",["unknowns","kya abhi unknown hai","what remains unknown"]],
+ ["conclusion","Evidence-based conclusion",["evidence-based conclusion","evidence based conclusion","final conclusion"]],
+ ["original_lab","APP ORIGINAL RESEARCH LAB",["app original research lab","humari hypotheses","app-generated research hypotheses"]],
+ ["audit","Audit and limits",["audit and limits","audit & limits","research quality","technical audit"]],
+ ["sources","Sources",["sources","references"]]];
+// Har canonical section theek EK tab mein. Jo heading pehchani na jaaye wo bhi
+// gayab nahi hoti — wo Jawab tab mein aati hai.
+const TAB_SECTIONS={answer:["direct_answer","conclusion"],evidence:["established_knowledge","supporting_evidence","counterevidence","calculations","unknowns"],lab:["original_lab"],sources:["sources"],audit:["audit"]};
+const TAB_NAMES={answer:"Jawab",evidence:"Evidence",lab:"Research Lab",sources:"Sources",process:"Process",audit:"Audit"};
+function normHead(raw){let s=String(raw??"").trim().replace(/^#+/,"").trim().replace(/^\d+[.)]\s*/,"").replace(/[*_`#]/g,"");s=Array.from(s).filter(ch=>/[\p{L}\p{N}\s]/u.test(ch)||"-/?&,:()'—–".includes(ch)).join("");return s.toLowerCase().split(/\s+/).filter(Boolean).join(" ");}
+function sectionKey(title){const t=normHead(title);if(!t)return "";for(const row of SECTIONS)if(t===normHead(row[1]))return row[0];let key="",len=0;for(const row of SECTIONS)for(const alias of row[2])if(t.includes(alias)&&alias.length>len){key=row[0];len=alias.length;}return key;}
+function splitAnswer(text){const src=String(text||""),re=/^##[ \t]+(.+?)[ \t]*$/gm,marks=[];let m;while((m=re.exec(src)))marks.push({title:m[1].trim(),start:m.index,bodyAt:re.lastIndex});
+  if(!marks.length)return {lead:src.trim(),blocks:[]};
+  const blocks=marks.map((mk,i)=>({key:sectionKey(mk.title),title:mk.title,body:src.slice(mk.bodyAt,i+1<marks.length?marks[i+1].start:src.length).trim()}));
+  return {lead:src.slice(0,marks[0].start).trim(),blocks};}
+function rich(text){return linkify(htmlText(text).replace(/\*\*([^*<>]{1,300}?)\*\*/g,"<strong>$1</strong>"));}
+function sectionHtml(split,keys){let out="";for(const b of split.blocks)if(keys.includes(b.key))out+='<h4>'+esc(b.title)+'</h4><div class="plain">'+rich(b.body||"(is section mein kuch likha nahi gaya.)")+'</div>';return out;}
+function emptyBox(text){return '<div class="empty">'+esc(text)+'</div>';}
+// Duplicate recovery footer live run mein do baar chhap gaya tha. Bilkul same
+// paragraph do baar dikhana kabhi bhi nayi jaankari nahi deta, isliye display par
+// pehla rakh kar baaki hata dete hain (text badalta nahi, sirf repeat hatta hai).
+function dedupeParas(text){const seen=new Set();return String(text||"").split(/\n{2,}/).filter(p=>{const key=p.trim();if(!key)return false;if(seen.has(key))return false;seen.add(key);return true;}).join("\n\n");}
+// §20 — chaar state chaar box. UI ek se doosra kabhi nahi nikaalta; record na ho
+// to seedha "record nahi mila" likhta hai.
+function stateBarHtml(state){
+  const s=(state&&typeof state==="object")?state:null;
+  if(!s||!s.job_status)return emptyBox("Is result mein chaar-state ka record nahi mila (purana ya recovered result ho sakta hai). UI khud se koi state guess nahi karta.");
+  const ex=s.explain||{},why=s.reasons||{};
+  const rows=[["Background job","job_status"],["Jawab poora hua?","answer_state"],["Evidence ki haalat","evidence_state"],["App ke idea ki novelty","novelty_state"]];
+  let html='<div class="states">';
+  for(const row of rows){const note=String(why[row[1]]||ex[row[1]]||"");html+='<div class="st"><b>'+esc(row[0])+'</b><span>'+esc(String(s[row[1]]||"—"))+'</span>'+(note?'<em>'+esc(note)+'</em>':'')+'</div>';}
+  html+='</div><div class="rule">Job poora hona ≠ jawab poora hona ≠ evidence mazboot hona ≠ idea naya hona. Chaaron alag se naapi jaati hain.'+(s.novelty_applicable===false?" (Novelty is run par laagu nahi — app ne apni koi hypothesis nahi banayi.)":"")+'</div>';
+  if(Array.isArray(s.conflicts)&&s.conflicts.length)html+='<div class="bad"><strong>State conflict — isliye "VERIFIED" jaisa top label allowed nahi:</strong><ul>'+s.conflicts.map(c=>'<li>'+esc(c)+'</li>').join("")+'</ul></div>';
+  return html;
+}
+// §22 recovery contract — banner theek EK baar, aur recovery ko evidence nahi kehta.
+function recoveryHtml(data){
+  const ctx=(data&&data.quality_context)||{},snap=(data&&data.research_progress)||{};
+  if(!(ctx.recovery_used===true||data.recovered===true||data.recovery_used===true))return "";
+  const kept=ctx.progress_snapshot_preserved===true||snap.available===true;
+  return '<div class="recov">♻️ <strong>Recovery use hui:</strong> pehla raasta poora nahi chala, isliye ye jawab bachaye gaye hisse se bana hai. '+(kept?"Research process ka record Process tab mein surakshit hai.":"Process ka record is result ke saath nahi aaya.")+' Recovery se evidence mazboot nahi hota — Evidence tab dekhein.</div>';
+}
+function claimsHtml(data){
+  const cc=((data.verification||{}).claim_checks)||null;
+  if(!cc||!Array.isArray(cc.claims))return emptyBox("Claim-level verification ka record nahi hai — matlab check chala hi nahi. Ise \"kuch galat nahi mila\" na padhein.");
+  if(!cc.claims.length)return emptyBox("Koi labelled + cited claim nahi mila, isliye claim-by-claim check chala hi nahi.");
+  return cc.claims.slice(0,40).map(c=>'<div class="card"><h5>'+esc(String(c.result||c.verdict_label||"—"))+(c.critical?" • critical claim":"")+'</h5><div class="plain">'+rich(String(c.claim||""))+'</div>'+(c.result_why?'<div class="kv">'+esc(c.result_why)+'</div>':'')+(c.reason?'<div class="kv">'+esc(c.reason)+'</div>':'')+'<div class="kv">Cited: '+(Array.isArray(c.cited_ids)&&c.cited_ids.length?esc(joinLabels(c.cited_ids,20)):"koi source cite nahi hua")+'</div></div>').join("");
+}
+function contraHtml(data){
+  const list=Array.isArray(data.contradictions)?data.contradictions:[],counter=(data.quality_context||{}).counter_search_performed;
+  const head=counter===true?"":emptyBox(counter===false?"Counter-side (against) search is run mein nahi chali — isliye \"koi contradiction nahi\" ka matlab \"dhoonda hi nahi\" hai.":"Counter-side search ka record nahi mila (chali ya nahi, pata nahi).");
+  if(!list.length)return head+emptyBox("Koi valid contradiction record nahi mila.");
+  return head+list.slice(0,25).map(c=>'<div class="card"><h5>'+esc(String(c.type||"contradiction"))+(c.severity?" • "+esc(String(c.severity)):"")+'</h5><div class="plain">'+rich(String(c.summary||""))+'</div>'+(c.source_a_claim?'<div class="kv">A: '+esc(String(c.source_a_claim))+'</div>':'')+(c.source_b_claim?'<div class="kv">B: '+esc(String(c.source_b_claim))+'</div>':'')+(Array.isArray(c.sources)&&c.sources.length?'<div class="kv">Sources: '+esc(joinLabels(c.sources,20))+'</div>':'')+(c.note?'<div class="kv">'+esc(String(c.note))+'</div>':'')+'</div>').join("");
+}
+function labHtml(split,data){
+  const list=Array.isArray(data.hypotheses)?data.hypotheses:[];
+  let out=sectionHtml(split,TAB_SECTIONS.lab)||emptyBox("Answer mein \"APP ORIGINAL RESEARCH LAB\" section nahi mila.");
+  if(!list.length)return out+emptyBox("App ne is run mein apni koi hypothesis nahi banayi. Patle evidence par hypothesis banana jaan-boojh kar mana hai.");
+  return out+'<h4>Hypothesis cards ('+list.length+')</h4>'+list.map((h,i)=>{
+    const done=(h.novelty_search||{}).performed;
+    return '<div class="card"><h5>'+esc(String(h.hypothesis_id||("RV-HYP-"+(i+1))))+' • app ka idea, established fact nahi</h5><div class="plain">'+rich(String(h.statement||h.simple||""))+'</div><div class="kv">Novelty: '+esc(String(h.novelty_status||"NOVELTY UNVERIFIED"))+' — prior-art search: '+(done===true?"chali":(done===false?"nahi chali":"record nahi"))+'</div><div class="kv">Testable: '+(h.is_testable?"haan":"nahi")+' • Confidence band: '+esc(String(h.confidence_band||"record nahi"))+'</div>'+(h.disclaimer?'<div class="kv">'+esc(String(h.disclaimer))+'</div>':'')+'</div>';
+  }).join("");
+}
+function auditHtml(split,data){
+  let out=sectionHtml(split,TAB_SECTIONS.audit)||emptyBox("Answer mein audit section nahi mila.");
+  const gate=data.quality_gate||{},led=data.contract_ledger||{};
+  const bits=[];
+  if(data.evidence_level)bits.push("Top label: "+data.evidence_level);
+  const status=String(data.status||"").trim(),ledState=String(led.result_state||"").trim();
+  const why=data.status_reason?" — "+data.status_reason:"";
+  const missing=Array.isArray(led.mandatory_missing)&&led.mandatory_missing.length?" (missing: "+joinLabels(led.mandatory_missing)+")":"";
+  // #113 — run status aur contract-ledger ka state bahut baar bilkul same hota
+  // hai ("PARTIAL"), aur do line likhne se ek hi baat do baar dikhti thi. Barabar
+  // hon to ek line, DONO naam usi line par — taaki ye chhupa na rahe ki ye do
+  // alag naap hain. Alag hon to alag line, warna farq gayab ho jaata.
+  if(status&&ledState&&status.toUpperCase()===ledState.toUpperCase())bits.push("Run status + contract ledger: "+status+why+missing);
+  else{if(status)bits.push("Run status: "+status+why);if(ledState)bits.push("Contract ledger: "+ledState+missing);}
+  if(gate.verified_allowed!==undefined)bits.push("Final quality gate: VERIFIED allowed = "+(gate.verified_allowed?"haan":"nahi"));
+  if(Array.isArray(data.quality_repairs)&&data.quality_repairs.length)bits.push("Gate repairs: "+joinLabels(data.quality_repairs));
+  if(bits.length)out+='<h4>Release checks</h4>'+bits.map(b=>'<div class="kv">'+esc(b)+'</div>').join("");
+  const warn=[];for(const w of (Array.isArray(data.warnings)?data.warnings:[]))if(w&&!warn.includes(String(w)))warn.push(String(w));
+  if(warn.length)out+='<h4>Warnings ('+warn.length+')</h4>'+warn.map(w=>'<div class="kv">• '+esc(w)+'</div>').join("");
+  const tech=Array.isArray(data.technical_details)?data.technical_details:[];
+  if(tech.length)out+='<details class="process"><summary>Technical details (developer ke liye — jawab ka hissa nahi)</summary><div class="log">'+esc(tech.join("\n"))+'</div></details>';
+  return out;
+}
+// #113 — "PARTIAL" ek hi screen par kai jagah chhap raha tha. State-bar mein
+// answer_state apni wajah ke saath pehle se hota hai, isliye neeche ki note sirf
+// tab dikhati hai jab woh kuch NAYA kehti hai (alag label, ya alag wajah). Poora
+// record Audit tab mein waisa hi rehta hai — kuch chhupta nahi.
+function statusNote(data){
+  const status=String((data&&data.status)||"").trim();
+  if(!status||status.toUpperCase()==="COMPLETE")return "";
+  const st=(data&&data.research_state&&typeof data.research_state==="object")?data.research_state:{};
+  const reason=String((data&&data.status_reason)||"").trim();
+  const shown=String(st.answer_state||"").trim().toUpperCase();
+  const shownWhy=String(((st.reasons||{}).answer_state)||((st.explain||{}).answer_state)||"").trim();
+  if(shown===status.toUpperCase()&&(!reason||reason===shownWhy))return "";
+  return "Run status: "+status+(reason?" — "+reason:"");
+}
+function processHtml(data){
+  const p=data.research_progress||{};
+  if(p.available!==true)return emptyBox("Is result ke saath research process ka snapshot nahi aaya, isliye stage-by-stage record nahi dikhaya ja sakta. (Job chal rahi thi tab ka live panel isse alag hai.)");
+  return '<div class="kv">'+esc(Number(p.stages_done||0)+"/"+Number(p.stages_total||STAGES.length)+" stages • "+progressCounts(p))+'</div>'+stageRowsHtml(p);
+}
+// §21 — chhah tab: Jawab / Evidence / Research Lab / Sources / Process / Audit.
+// Answer ka har section theek ek tab mein jaata hai; pehchani na jaane wali
+// heading aur bina-heading text Jawab tab mein aata hai, taaki kuch bhi gayab
+// na ho. Tab badalna sirf display hai — koi dobara request nahi jaati.
+function renderResearch(el,data){
+  data=(data&&typeof data==="object")?data:{};
+  const raw=data.answer?String(data.answer):"";
+  const text=raw.trim()?raw:"Research complete hui, lekin is run mein readable answer nahi bana.";
+  history.push({role:"rv",content:text});
+  const split=splitAnswer(dedupeParas(text));
+  const known=[].concat(TAB_SECTIONS.answer,TAB_SECTIONS.evidence,TAB_SECTIONS.lab,TAB_SECTIONS.sources,TAB_SECTIONS.audit);
+  let answerPane=(split.lead?'<div class="plain">'+rich(split.lead)+'</div>':"")+sectionHtml(split,TAB_SECTIONS.answer);
+  for(const b of split.blocks)if(!known.includes(b.key))answerPane+='<h4>'+esc(b.title)+'</h4><div class="plain">'+rich(b.body)+'</div>';
+  if(!answerPane)answerPane='<div class="plain">'+rich(text)+'</div>';
+  const evidencePane=sectionHtml(split,TAB_SECTIONS.evidence)+'<h4>Claim-by-claim check</h4>'+claimsHtml(data)+'<h4>Counter-side aur contradictions</h4>'+contraHtml(data);
+  const claimCount=(((data.verification||{}).claim_checks||{}).claims||[]).length;
+  const hypoCount=(Array.isArray(data.hypotheses)?data.hypotheses:[]).length;
+  const srcCount=(Array.isArray(data.sources)?data.sources:[]).length;
+  const snap=data.research_progress||{};
+  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:processHtml(data),audit:auditHtml(split,data)};
+  const badge={answer:"",evidence:claimCount?String(claimCount):"",lab:String(hypoCount),sources:String(srcCount),process:(snap.available===true?Number(snap.stages_done||0)+"/"+Number(snap.stages_total||STAGES.length):""),audit:String((((data.research_state||{}).conflicts)||[]).length||"")};
+  const order=["answer","evidence","lab","sources","process","audit"];
+  const box=document.createElement("div");
+  box.innerHTML=stateBarHtml(data.research_state)+recoveryHtml(data)
+    +'<div class="tabs">'+order.map((k,i)=>'<button type="button" class="tab'+(i?"":" on")+'" data-pane="'+k+'">'+esc(TAB_NAMES[k])+(badge[k]?' <span class="n">'+esc(badge[k])+'</span>':"")+'</button>').join("")+'</div>'
+    +order.map((k,i)=>'<div class="pane'+(i?"":" on")+'" data-pane="'+k+'">'+panes[k]+'</div>').join("");
+  box.addEventListener("click",e=>{const t=e.target.closest(".tab");if(!t||!box.contains(t))return;
+    box.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
+    box.querySelectorAll(".pane").forEach(p=>p.classList.toggle("on",p.dataset.pane===t.dataset.pane));});
+  el.innerHTML="";el.appendChild(box);
+  const sNote=statusNote(data);if(sNote)note(el,sNote);
+  down();
+}
+
+// Source card. Pehle scheme check (safeHttpUrl), USKE BAAD escape — sirf escape
+// karne se javascript: URL band nahi hoti, isliye kram badalna mana hai.
+function sourcesHtml(split,data){
+  const list=Array.isArray(data.sources)?data.sources:[];
+  let out="";
+  if(!list.length)out=emptyBox("Is run mein koi cited source record nahi mila.");
+  else out=list.slice(0,60).map(s=>{const href=safeHttpUrl(s.url),url=href?esc(href):"",title=esc(sourceTitle(s)),read=esc(String(s.access_depth||s.reading_level||""));
+    // User ka apna uploaded document: iska koi public link nahi hota, isliye
+    // anchor bhi nahi banta (chahe payload mein galti se url aa jaaye), aur
+    // label saaf likha jaata hai ki ye tumhari di hui copy hai.
+    const mine=String(s.source_type||"")==="document"||String(s.connector||"")==="user_pdf",link=mine?"":url;
+    return '<div class="src">'+(link?'<a target="_blank" rel="noopener noreferrer nofollow" href="'+link+'">'+title+'</a>':'<strong>'+title+'</strong>')+(mine?'<div class="meta">Tumhara diya document — ye app ne internet se nahi laaya, iska koi public link nahi hai. Akela ye kisi baat ko VERIFIED ya "sab sehmat hain" nahi banata.</div>':'')+(read?'<div class="meta">Kitna padha: '+read+'</div>':'')+(s.access_depth_note?'<div class="meta">'+esc(String(s.access_depth_note))+'</div>':'')+(s.patent_evidence_note?'<div class="meta">'+esc(String(s.patent_evidence_note))+'</div>':'')+'</div>';}).join("");
+  const raw=sectionHtml(split,TAB_SECTIONS.sources);
+  return out+(raw?'<details class="process"><summary>Answer ka Sources section (jaisa likha gaya)</summary>'+raw+'</details>':"");
+}
 
 async function submit(){const message=input.value.trim();if(!message||busy)return;busy=true;send.disabled=true;input.value="";resize();const u=row("user");u.textContent=message;history.push({role:"user",content:message});const r=row("rv");const completed=mode==="QUICK"?await runChat(message,r):await runResearch(message,r);if(!completed&&history.length&&history[history.length-1]?.role==="user")history.pop();busy=false;send.disabled=false;input.focus();}
 function resize(){input.style.height="auto";input.style.height=Math.min(180,input.scrollHeight)+"px";}input.addEventListener("input",resize);input.addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();submit();}});send.addEventListener("click",submit);
 document.querySelectorAll(".modes button").forEach(b=>b.addEventListener("click",()=>{document.querySelectorAll(".modes button").forEach(x=>x.classList.remove("on"));b.classList.add("on");mode=b.dataset.mode;$("#hint").textContent=HINT[mode];}));document.addEventListener("click",e=>{const c=e.target.closest(".chip");if(c){input.value=c.dataset.q;resize();submit();}});
-if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");}
+if(IS_FILE){const r=row("rv");answer(r,"Backend server ke URL se page kholo. File:// mode mein research API available nahi hoti.");
+  attach.disabled=true;attach.title="File:// mode mein upload available nahi hai";
+  pickmedia.disabled=true;yttoggle.disabled=true;pickbook.disabled=true;ytactions.hidden=true;
+  media.textContent="Ye page file se khula hai, isliye audio/video, YouTube aur kitaab wale lane bhi band hain. Backend server ke URL se page kholo.";
+  $("#docnote").textContent="Ye page file se khula hai, isliye document dena band hai. Backend server ke URL se page kholo.";}
 input.focus();
+// Backup ka pata background mein le aao — fail ho to kuch nahi badalta.
+loadFailoverInfo();
 </script>
 </body>
 </html>

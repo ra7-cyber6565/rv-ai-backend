@@ -23,8 +23,17 @@ SABSE ZAROORI RULE (Spec Section 2):
       * arXiv          → open-access preprint PDF
       * Internet Archive → sirf wo items jinka public djvu.txt maujood hai
       * Europe PMC     → sirf Open Access subset (isOpenAccess == "Y")
-      * Wikipedia      → official REST/Action API ka plaintext extract
+      * Wikipedia / Wikisource / Wikibooks → official Action API ka plaintext
+        extract (Wikisource = granth/classic ka MOOL TEXT, khuli licence)
+      * Project Gutenberg → unka apna publish kiya static plain-text file
+        (public domain). Gutenberg sirf PADHNE ka raasta hai, search ka nahi.
       * koi bhi direct .pdf link jo blocked publisher host par na ho
+
+    Sabse pehle `classics.copyright_stance()` chalta hai (route 0), baaki saare
+    route uske BAAD. Copyright-likely book kisi fetch path tak pahunchti hi
+    nahi; uske liye summary/vyakhya lane alag se search hoti hai aur source par
+    imaandaar note chipakta hai ("mool text nahi padha gaya"). Paper, dataset,
+    user ke apne PDF aur aam web page par ye stance koi NAYI rok nahi lagata.
 
     Paywalled publishers (Elsevier, Springer, Wiley, JSTOR, IEEE, ACM, Nature,
     NEJM, Lancet...) aur wo sites jinki ToS scraping mana karti hai
@@ -45,6 +54,7 @@ import tempfile
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, quote
 
+from . import classics
 from .connectors.base import SLOW_TIMEOUT
 from .models import EvidencePack, Passage, SourceRecord
 from .network_safety import (
@@ -199,14 +209,36 @@ class ContentFetcher:
         host = _host(url)
         path = urlparse(url).path or ""
 
-        # 1. Wikipedia — official API se saaf plaintext
-        if host.endswith("wikipedia.org") and "/wiki/" in path:
+        # 0. COPYRIGHT/LICENCE STANCE — sabse pehla faisla, aage ke SAARE route
+        #    iske BAAD aate hain. Isliye copyright-likely book kisi bhi fetch
+        #    path tak pahunch hi nahi sakti (route 5 ka host-list bhi is se
+        #    pehle nahi chalta). Rule `classics.py` me ek hi jagah rehte hain,
+        #    do jagah copy nahi hote — warna ek din dono alag ho jaate hain.
+        #    Default JAAN-BOOJHKAR "kuch mat roko" hai: paper/dataset/user-PDF/
+        #    web page par stance `not_book_like` hota hai aur full text allowed
+        #    rehta hai, isliye purane sab routes waise hi chalte hain.
+        stance = classics.copyright_stance(source)
+        if not stance.get("full_text_allowed"):
+            return {"ok": False, "reason": stance.get("reason") or
+                    "copyright/licence ki wajah se mool text nahi laaya gaya",
+                    "copyright_stance": stance,
+                    "read_ceiling": stance.get("read_ceiling") or "",
+                    "summary_lane": bool(stance.get("summary_lane"))}
+
+        # 1. Wikimedia text projects — official action API se saaf plaintext.
+        #    Wikipedia ke saath Wikisource/Wikibooks bhi, kyunki extract JSON ka
+        #    shape bilkul same hai aur mool text (granth/classic) wahin milta
+        #    hai. Ye scraping nahi — API hai, aur licence khuli hai.
+        if (host.endswith(("wikipedia.org", "wikisource.org", "wikibooks.org"))
+                and "/wiki/" in path):
             title = path.split("/wiki/", 1)[1]
             api = (f"https://{urlparse(url).netloc}/w/api.php?action=query&"
                    f"prop=extracts&explaintext=1&redirects=1&format=json&"
                    f"titles={title}")
+            project = host.rsplit(".", 2)[-2] if host.count(".") >= 1 else host
             return {"ok": True, "url": api, "kind": "wikipedia",
-                    "reason": "Wikipedia API plaintext extract"}
+                    "reason": f"{project} API plaintext extract",
+                    "copyright_stance": stance}
 
         # 2. arXiv — open access preprint
         if host.endswith("arxiv.org"):
@@ -225,6 +257,35 @@ class ContentFetcher:
                         "kind": "txt",
                         "reason": "Internet Archive public plain-text (djvu.txt)"}
             return {"ok": False, "reason": "archive.org identifier nahi mila"}
+
+        # 3b. Project Gutenberg — official plain-text file (public domain).
+        #     SEARCH ke liye Gutenberg ka koi official API nahi hai (gutendex
+        #     third-party hai, aur uska search page HTML), isliye Gutenberg is
+        #     lane me sirf PADHNE ka raasta hai: URL kahin aur se mil chuka ho,
+        #     to uska apna `cache/epub/<id>/pg<id>.txt` seedha padha ja sakta
+        #     hai. Ye unka publish kiya hua static file hai — koi paywall,
+        #     login ya robots-block todna nahi.
+        if host.endswith(("gutenberg.org", "gutenberg.net.au", "gutenberg.ca")):
+            # id → text mapping SIRF gutenberg.org ka hai. gutenberg.net.au aur
+            # gutenberg.ca alag numbering par chalte hain, isliye unka sirf wahi
+            # URL padha jaata hai jo pehle se .txt ho (galat guess se 404 aata,
+            # aur "padh liya" ka jhootha hisaab banta).
+            match = (re.search(r"/(?:ebooks|files|cache/epub)/(\d{1,7})", path)
+                     if host.endswith("gutenberg.org") else None)
+            if match:
+                book_id = match.group(1)
+                return {"ok": True, "kind": "txt",
+                        "url": (f"https://www.gutenberg.org/cache/epub/"
+                                f"{book_id}/pg{book_id}.txt"),
+                        "reason": "Project Gutenberg public-domain plain text",
+                        "copyright_stance": stance}
+            if path.lower().endswith(".txt"):
+                return {"ok": True, "url": url, "kind": "txt",
+                        "reason": "Project Gutenberg public-domain plain text",
+                        "copyright_stance": stance}
+            return {"ok": False,
+                    "reason": "Gutenberg book id URL se nahi nikla (search ke "
+                              "liye Gutenberg ka official API nahi hai)"}
 
         # 4. PubMed Central — sirf Open Access subset (lookup ke baad)
         if "ncbi.nlm.nih.gov" in host and "PMC" in url.upper():
@@ -537,7 +598,18 @@ class ContentFetcher:
             plan = self._europepmc_lookup(plan["needs_lookup"])
         if not plan.get("ok"):
             entry["reason"] = plan.get("reason", "koi free full-text route nahi")
+            # Copyright/licence ki wajah se ruke to wo alag baat hai — report me
+            # "padh nahi paaye" aur "padhna allowed nahi tha" ek jaise nahi
+            # dikhne chahiye, aur summary lane ka ishara bhi yahin se jaata hai.
+            if plan.get("copyright_stance"):
+                entry["copyright_stance"] = plan["copyright_stance"]
+                entry["summary_lane"] = bool(plan.get("summary_lane"))
+                entry["read_ceiling"] = plan.get("read_ceiling") or ""
             return entry
+
+        # Ceiling har haal me saath chalta hai (route ne stance bheja ho ya
+        # nahi), taaki "kitna padha" ka label ek hi jagah se tay ho.
+        stance = plan.get("copyright_stance") or classics.copyright_stance(source)
 
         directory = tempfile.mkdtemp(prefix="infinity_fetch_")
         try:
@@ -578,11 +650,25 @@ class ContentFetcher:
                 # chunks nahi bane par bhi text hai — seedha kaat lo
                 excerpts = [{"locator": "", "text": text[:budget_chars], "score": 0}]
 
+            # Licence ceiling ke baad asal me kaunsa level mila — yahi ek number
+            # aage ka poora label tay karta hai (source ka read_level, report ka
+            # hisaab, aur §9 ka access-depth line).
+            reached_level = classics.cap_read_level("full_text", stance)
+
             entry.update({"ok": True, "chars": len(text), "excerpts": excerpts,
                           "reason": plan.get("reason", ""),
                           "notes": processed.get("notes", []),
                           "kind": processed.get("kind", plan["kind"]),
                           "bytes": int(downloaded.get("bytes") or 0),
+                          # Licence stance saath chalta hai: `enrich()` isi se
+                          # read_level clamp karta hai, isliye "FULL TEXT
+                          # ACCESSED" wahan bolna structurally namumkin hai
+                          # jahan ceiling neeche hai.
+                          "copyright_stance": stance,
+                          "read_level": reached_level,
+                          "read_ceiling": stance.get("read_ceiling") or "",
+                          "copyright_note": classics.read_note(stance, reached_level),
+                          "summary_lane": bool(stance.get("summary_lane")),
                           # §12 — badi file streaming (page-by-page) se padhi
                           # gayi ya poori? Report mein yahi farak imaandaari se
                           # dikhna chahiye.
@@ -609,7 +695,10 @@ class ContentFetcher:
         par jinka full text milne ki sambhavna zyada hai.
         """
         report = {"attempted": 0, "succeeded": 0, "failed": 0, "skipped": 0,
-                  "chars_read": 0, "entries": [], "note": ""}
+                  "chars_read": 0, "entries": [], "note": "",
+                  # licence ceiling ki wajah se jo read "full text" nahi ban
+                  # paayi — ise succeeded ke andar chhupana nahi hai.
+                  "capped": 0, "copyright_blocked": 0}
         if not pack.sources or max_sources <= 0:
             report["note"] = ("Full-text reading nahi chali — "
                               + ("koi source nahi tha." if not pack.sources
@@ -638,15 +727,27 @@ class ContentFetcher:
 
             if not entry["ok"]:
                 report["failed"] += 1
+                if entry.get("copyright_stance") and not entry.get(
+                        "copyright_stance", {}).get("full_text_allowed"):
+                    report["copyright_blocked"] += 1
                 continue
 
             report["succeeded"] += 1
             report["chars_read"] += entry["chars"]
+            if (entry.get("read_level") or "full_text") != "full_text":
+                report["capped"] += 1
 
-            # source ko honestly upgrade karo
-            source.read_level = "full_text"
+            # source ko honestly upgrade karo — par ceiling se aage nahi.
+            # `entry["read_level"]` `classics.cap_read_level()` se aaya hai:
+            # aam source (paper/dataset/PDF/web) par wo "full_text" hi hota hai,
+            # aur licence-pratibandhit source par usse neeche. Yahan seedha
+            # "full_text" likhna hi wo jhooth tha jise band karna tha.
+            source.read_level = entry.get("read_level") or "full_text"
             source.full_text_chars = entry["chars"]
-            source.full_text_available = True
+            source.full_text_available = source.read_level == "full_text"
+            copyright_note = entry.get("copyright_note") or ""
+            if copyright_note:
+                source.read_note = copyright_note
 
             # §12 — agar file badi thi aur page-by-page padhi gayi, to yahan
             # likh do ki kitne pages mein se kaun chune gaye. read_level
@@ -655,7 +756,12 @@ class ContentFetcher:
             # "poora 300-page document padh liya" na samjhe.
             selection = entry.get("selection") or {}
             if entry.get("streamed") and selection:
-                source.read_note = selection.get("note", "") or ""
+                scope_note = selection.get("note", "") or ""
+                # Dono baat ho sakti hain: licence ki seema AUR page-selection ki
+                # seema. Ek doosre ko mitaye nahi — warna imaandaari ka aadha
+                # hissa chup ho jaata hai.
+                source.read_note = " | ".join(
+                    [note for note in (copyright_note, scope_note) if note])
                 source.pages_read = int(selection.get("pages_kept") or 0)
                 source.pages_total = int(selection.get("pages_total") or 0)
 
@@ -673,6 +779,15 @@ class ContentFetcher:
             if signals.get("methodology") and not source.methodology:
                 source.methodology = signals["methodology"]
 
+            # The source object has just been upgraded to full_text. Any
+            # passage captured before this successful read still represents the
+            # old snippet/abstract depth, so it must not survive as if it were a
+            # full-text passage. Keep other sources untouched.
+            pack.passages[:] = [
+                passage for passage in pack.passages
+                if passage.source_id != source.source_id
+            ]
+
             combined = []
             for excerpt in entry["excerpts"]:
                 locator = excerpt.get("locator") or ""
@@ -682,6 +797,8 @@ class ContentFetcher:
                     source_id=source.source_id,
                     text=excerpt["text"],
                     locator=locator,
+                    provenance="full_text_excerpt",
+                    read_level_at_capture=source.reading_level(),
                 ))
             # snippet ko full-text excerpt se badlo, taaki Gemini asli content
             # dekhe — warna download ka koi fayda hi nahi
@@ -697,8 +814,20 @@ class ContentFetcher:
     def reading_note(report: Dict) -> str:
         if not report.get("attempted"):
             return report.get("note", "Full-text reading nahi chali.")
-        bits = [f"{report['succeeded']}/{report['attempted']} sources ka full text "
+        # "succeeded" me wo read bhi hote hain jinhe licence ceiling ne poora
+        # full-text banne se roka. Unhe "full text padha gaya" me ginna wahi
+        # purani beimaani hoti, isliye ginti alag hai.
+        capped = int(report.get("capped") or 0)
+        full_read = max(0, int(report.get("succeeded") or 0) - capped)
+        bits = [f"{full_read}/{report['attempted']} sources ka full text "
                 f"padha gaya (~{report['chars_read']:,} chars)"]
+        if capped:
+            bits.append(f"{capped} source licence ceiling tak hi padhe gaye "
+                        f"(inhe 'full text padha' nahi kaha ja sakta)")
+        if report.get("copyright_blocked"):
+            bits.append(f"{report['copyright_blocked']} source copyright/licence "
+                        f"ki wajah se chhua hi nahi gaya — unke liye "
+                        f"summary/vyakhya wali lane chalti hai")
         if report.get("skipped"):
             bits.append(f"{report['skipped']} sources budget ke bahar the (sirf "
                         f"snippet/abstract level tak padhe gaye)")

@@ -13,6 +13,7 @@ The default mode is deliberately strict:
 - runs compile checks;
 - runs targeted infrastructure/integration pytest gates;
 - runs the complete ``tests/`` pytest suite (so pytest-only files really execute);
+- exercises the real FastAPI session/chat/async-job/result path with no network;
 - runs the legacy/core regression;
 - directly executes only test files that contain an explicit ``__main__`` harness;
 - runs a direct-provider-bypass audit;
@@ -38,8 +39,13 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Iterable, Sequence
 
-
 REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from utils.release_identity import repository_identity
+
+
 DEFAULT_TIMEOUT_SECONDS = 15 * 60
 
 # These files are the focused integration gates maintained by ChatGPT. The full
@@ -71,6 +77,7 @@ FOCUSED_PYTEST = (
     "tests/test_reasoning_status.py",
     "tests/test_gemini_key_status.py",
     "tests/test_quick_chat_resilience.py",
+    "tests/test_chat_resilience.py",
     "tests/test_gemini_diag_zero_call.py",
     "tests/test_quota_backup.py",
     "tests/test_provider_bypass_audit.py",
@@ -107,7 +114,20 @@ FOCUSED_PYTEST = (
     "tests/test_unverified_semantics.py",
     "tests/test_network_safety.py",
     "tests/test_advanced_discovery.py",
+    "tests/test_specialist_research.py",
+    "tests/test_research_assurance.py",
+    "tests/test_marathon_all_rounds.py",
+    "tests/test_exam_intelligence.py",
+    "tests/test_resumable_reading.py",
+    "tests/test_evidence_mutation_matrix.py",
+    "tests/test_lenses.py",
+    "tests/test_lens_independent_audit.py",
+    "tests/test_deployed_readonly_smoke.py",
+    "tests/test_release_identity.py",
+    "tests/test_release_bundle.py",
+    "tests/test_patents.py",
     "tests/test_live_zero_cost_gate.py",
+    "tests/test_windows_launchers.py",
     "tests/test_foundation_gate_runner.py",
 )
 
@@ -128,6 +148,9 @@ class GateReceipt:
     created_at_epoch: int
     python: str
     repo_root: str
+    code_revision: str
+    repository_clean: bool
+    code_identity_verified: bool
     offline_zero_cost: bool
     passed: bool
     failed_stages: list[str]
@@ -273,13 +296,29 @@ def _receipt_path(value: str | None, env: dict[str, str]) -> Path:
     return root / "audit" / "foundation_gate_latest.json"
 
 
-def _write_receipt(path: Path, stages: list[StageResult]) -> GateReceipt:
+def _write_receipt(
+    path: Path,
+    stages: list[StageResult],
+    *,
+    identity: dict[str, object] | None = None,
+) -> GateReceipt:
     failed = [stage.name for stage in stages if stage.status != "passed"]
+    code = repository_identity(REPO_ROOT) if identity is None else dict(identity)
+    identity_verified = bool(
+        code.get("available")
+        and code.get("revision")
+        and code.get("clean") is True
+    )
+    if not identity_verified:
+        failed.append("clean_repository_identity")
     receipt = GateReceipt(
-        schema_version=1,
+        schema_version=2,
         created_at_epoch=int(time.time()),
         python=sys.version.split()[0],
         repo_root=str(REPO_ROOT),
+        code_revision=str(code.get("revision") or ""),
+        repository_clean=bool(code.get("clean") is True),
+        code_identity_verified=identity_verified,
         offline_zero_cost=True,
         passed=not failed,
         failed_stages=failed,
@@ -307,6 +346,13 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
         # This is the real catch-all. Running a pytest-only file with `python`
         # merely imports/defines tests and exits 0 without executing assertions.
         plan.append(("all_pytest", [python, "-m", "pytest", "-q", "tests"]))
+
+    api_smoke = REPO_ROOT / "scripts" / "run_offline_api_smoke.py"
+    if api_smoke.is_file():
+        plan.append((
+            "offline_api_smoke",
+            [python, api_smoke.relative_to(REPO_ROOT).as_posix()],
+        ))
 
     if (REPO_ROOT / "test_research_engine.py").is_file():
         plan.append(("core_regression", [python, "test_research_engine.py"]))

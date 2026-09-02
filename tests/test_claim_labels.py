@@ -64,14 +64,17 @@ def test_full_text_source_keeps_established():
     pack = _pack({"S1": "full_text"})
     verdict, why = line_verdict("[ESTABLISHED] Density se travel kam hota hai [S1].", pack)
     assert verdict == ESTABLISHED, (verdict, why)
-    assert "full text padha gaya" in why
+    # §9 (2026-08-22): wajah mein ab wahi 5 allowed access label jaate hain jo
+    # models.py tay karta hai. Pehle yahan "full text padha gaya" likha jaata
+    # tha — 30 mein se 18 page wale source par wo line jhooth thi.
+    assert "FULL TEXT ACCESSED" in why, why
 
 
 def test_abstract_only_becomes_source_reported():
     pack = _pack({"S2": "abstract"})
     verdict, why = line_verdict("[ESTABLISHED] 30% kami hoti hai [S2].", pack)
     assert verdict == SOURCE_REPORTED, (verdict, why)
-    assert "full text nahi padha gaya" in why
+    assert "ABSTRACT ONLY" in why, why
 
 
 def test_snippet_and_metadata_also_become_source_reported():

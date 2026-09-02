@@ -20,7 +20,7 @@ def test_source_url_is_escaped_only_after_scheme_validation():
     render = text[text.index("function renderResearch"):text.index("async function submit")]
     assert "href=safeHttpUrl(s.url)" in render
     assert "url=href?esc(href):\"\"" in render
-    assert "rel=\"noopener noreferrer\"" in render
+    assert "rel=\"noopener noreferrer nofollow\"" in render
     # Regression target: escaping alone does not neutralize javascript: URLs.
     assert 'url=s.url?esc(s.url):""' not in render
 

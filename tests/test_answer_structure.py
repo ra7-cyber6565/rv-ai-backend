@@ -12,7 +12,12 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine.models import EvidencePack, SourceRecord, SourceType  # noqa: E402
-from research_engine.synthesizer import SECTION_TITLES, FinalSynthesizer  # noqa: E402
+from research_engine.synthesizer import (  # noqa: E402
+    CALC_HEADING,
+    EMIT_ORDER,
+    SECTION_TITLES,
+    FinalSynthesizer,
+)
 
 PASS = 0
 FAIL = 0
@@ -204,20 +209,36 @@ def main() -> int:
     positions = []
     for title in SECTION_TITLES:
         check(f"section maujood: {title}", pos(title) >= 0)
-        positions.append(pos(title))
-    check("order §16 ke mutabik ascending hai",
+    # §12 (2026-08-22) — SECTION_TITLES ka index ab sirf pehchan hai, chhapne ka
+    # kram `EMIT_ORDER` deta hai (app ki apni hypotheses conclusion ke BAAD, aur
+    # Sources sabse aakhir). Pehle yahan index-order hi expected order tha.
+    positions = [pos(SECTION_TITLES[i]) for i in EMIT_ORDER]
+    check("order §12 ke mutabik ascending hai",
           positions == sorted(positions) and -1 not in positions,
           str(positions))
+    check("Calculations section hamesha maujood hai", pos(CALC_HEADING) >= 0)
+    check("Calculations counterevidence ke baad aur Unknowns se pehle hai",
+          pos(SECTION_TITLES[4]) < pos(CALC_HEADING) < pos(SECTION_TITLES[7]))
+    check("hisaab na banne ki WAJAH likhi hai",
+          "Koi calculation is jawab mein nahi hai" in report)
+    check("APP ORIGINAL RESEARCH LAB ki heading bilkul wahi hai",
+          "\n## APP ORIGINAL RESEARCH LAB\n" in padded)
+    check("LAB section par warning sabse pehle hai",
+          "app ki KHUD ki soch hai" in
+          padded.split("\n## APP ORIGINAL RESEARCH LAB\n", 1)[1][:400])
     check("pehla section Seedha jawab hai",
           report.lstrip().startswith("## Seedha jawab"))
 
     print("\n[2] Technical cheezein main answer se pehle nahi")
-    first = report[:report.find("## Research se kya pata chala?")]
+    first = report[:report.find(f"## {SECTION_TITLES[1]}")]
     for bad in ("[PASS]", "[FAIL]", "Evidence Pack", "Connector Status",
                 "pipeline", "diagnostic"):
         check(f"'{bad}' Seedha jawab mein nahi hai", bad not in first)
-    check("audit section sabse aakhir mein hai",
-          pos("Research quality / technical audit") > pos("Sources") > 0)
+    # §12 — aakhir ke do section: pehle audit, phir Sources. Pehle iska ulta
+    # tha; ye badlaav jaan-boojh kar hai.
+    check("audit aur Sources sabse aakhir mein hain (audit pehle)",
+          0 < pos(SECTION_TITLES[10]) < pos(SECTION_TITLES[9])
+          and pos(SECTION_TITLES[9]) == max(positions))
     check("numbers-check audit mein hai, head mein nahi",
           "consistency" not in first)
 
@@ -226,12 +247,12 @@ def main() -> int:
     chain_pos = report.find("second-order effects")
     check("mathematical model render hua", math_pos > 0)
     check("second-order chain render hua", chain_pos > 0)
-    check("dono 'Evidence kya kehta hai?' se pehle hain",
-          0 < math_pos < report.find("## Evidence kya kehta hai?")
-          and 0 < chain_pos < report.find("## Evidence kya kehta hai?"))
+    check("dono supporting-evidence section se pehle hain",
+          0 < math_pos < report.find(f"## {SECTION_TITLES[3]}")
+          and 0 < chain_pos < report.find(f"## {SECTION_TITLES[3]}"))
 
     print("\n[4] Sub-headings apni jagah, leftover phenka nahi gaya")
-    section1 = report[pos("Research se kya pata chala?"):pos("Ye kyun hota hai?")]
+    section1 = report[pos(SECTION_TITLES[1]):pos(SECTION_TITLES[2])]
     check("### Fact section 1 ke andar hi raha", "### Fact" in section1)
     check("### Inference section 1 ke andar hi raha", "### Inference" in section1)
     check("bare label ko §7 wala matlab mil gaya",
@@ -257,11 +278,11 @@ def main() -> int:
         pack=pack, evidence_level="WEAK", confidence_note="", contradictions=[],
         hypotheses=[], verification=ver, coverage=cov, honesty=hon, consensus=cons)
     check("### wali report bhi theek parse hoti hai",
-          "Haan bilkul." in h3.split("## Research se kya pata chala?")[0]
+          "Haan bilkul." in h3.split(f"## {SECTION_TITLES[1]}")[0]
           and "Kyunki distance kam ho jaata hai." in h3)
     check("#### Example apne parent section mein raha",
           "Ek chhota sheher socho." in
-          h3.split("## Evidence kya kehta hai?")[0].split("## Ye kyun hota hai?")[-1])
+          h3.split(f"## {SECTION_TITLES[3]}")[0].split(f"## {SECTION_TITLES[2]}")[-1])
 
     print("\n[5] Hypothesis §6 template")
     check("Simple words mein: hai", "Simple words mein:" in report)
@@ -278,7 +299,12 @@ def main() -> int:
     check("ledger ka unmet item dikha", "3 hypotheses" in report)
 
     print("\n[7] §14 access levels")
-    for word in ("ABSTRACT REVIEWED", "SNIPPET ONLY"):
+    # §9 (2026-08-22): access-depth vocabulary sirf paanch label rakhta hai —
+    # METADATA ONLY / SNIPPET ONLY / ABSTRACT ONLY / RELEVANT SECTIONS REVIEWED /
+    # FULL TEXT ACCESSED (models.ACCESS_DEPTH_ALLOWED). Purana "ABSTRACT
+    # REVIEWED" jaan-boojh kar hataya gaya: "reviewed" se lagta tha ki paper
+    # padh kar check kiya gaya, jabki sirf summary mili thi.
+    for word in ("ABSTRACT ONLY", "SNIPPET ONLY"):
         check(f"{word} explain hua", word in report)
     check("full-text ka jhooth nahi bola",
           "FULL-TEXT VERIFIED" not in report or "poora text padha gaya" in report)

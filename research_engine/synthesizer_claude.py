@@ -9,12 +9,19 @@ palat deta hai:
     "DO NOT MIX INTERNAL RESEARCH LOGS WITH THE MAIN ANSWER.
      HUMAN-FRIENDLY ANSWER FIRST. TECHNICAL DETAILS LAST."
 
-Isliye ab report ka order ye hai:
+Isliye ab report ka order ye hai (§12 ka mandatory order, 2026-08-22):
 
-    Seedha jawab → Research se kya pata chala → Ye kyun hota hai →
-    Evidence kya kehta hai → Iske against kya mila → Humari hypotheses →
-    Hypothesis ko kaise test karenge → Kya abhi bhi unknown hai →
-    Final conclusion → Sources → Research quality / technical audit
+    Seedha jawab → Established knowledge → Ye kyun hota hai →
+    Supporting evidence → Counterevidence → Calculations → Unknowns →
+    Evidence-based conclusion → APP ORIGINAL RESEARCH LAB (app ki apni
+    hypotheses + unka test plan, saaf warning ke saath) →
+    Audit and limits → Sources
+
+Do cheezein yahan jaan-boojh kar badli gayi hain (dark-matter run ki dikkat):
+app ki apni hypotheses pehle evidence ke BEECH mein chhapti thi (padhne wale ko
+lagta tha ki wo bhi research ka nateeja hai), aur Sources audit se pehle aata
+tha. Ab hypotheses conclusion ke baad ek alag naam wale section mein hain, aur
+Sources sabse aakhir mein.
 
 Kuch cheezein JAAN-BOOJH KAR waisi hi rahi hain:
 
@@ -29,32 +36,80 @@ Kuch cheezein JAAN-BOOJH KAR waisi hi rahi hain:
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
+from .answer_order import LAB_HEADING as ANSWER_LAB_HEADING
+from .answer_order import LAB_WARNING, NO_CALC_REASONS, display_heading
 from .citation import CITATION_INSTRUCTION, CitationEngine
 from .claim_labels import LABEL_RULE_PROMPT
 from .claim_labels import human_note as label_human_note
 from .consensus_gate import CONSENSUS_UNAVAILABLE
 from .explain_style import style_block
+from .lab import MAX_AUDIT_LIMIT_LINES as LAB_MAX_AUDIT_LIMIT_LINES
+from .lab import (EXAM_MAX_AUDIT_LIMIT_LINES, exam_lab_limits,
+                  exam_lab_section)
+from .lab import lab_limits, lab_report_section
+from .craft import craft_limits, craft_section
+from .media_study import media_limits, media_section
+from .listener_study import (MAX_AUDIT_LIMIT_LINES
+                            as LISTENER_MAX_AUDIT_LIMIT_LINES)
+from .listener_study import listener_limits, listener_section
+from .music_study import (MAX_AUDIT_LIMIT_LINES
+                          as MUSIC_MAX_AUDIT_LIMIT_LINES)
+from .music_study import music_limits, music_section
+from .songlab import MAX_AUDIT_LIMIT_LINES as SONGLAB_MAX_AUDIT_LIMIT_LINES
+from .songlab import songlab_limits, songlab_section
+from .mood_lexicon import MAX_AUDIT_LIMIT_LINES as MOOD_MAX_AUDIT_LIMIT_LINES
+from .mood_lexicon import mood_limits, mood_section
+# #178e — FARMAISH ke do contract ledger. Ye `lab` ke dono report se ALAG hain:
+# `lab_report_section` HYPOTHESIS ka test hai, `exam_lab_section` BANE HUE
+# paper/plan ka test hai, aur ye do batate hain ki JO MAANGA GAYA THA usme se
+# kya-kya asli me naapa gaya. Alias ke saath import kiya gaya hai kyunki dono
+# module me function ka naam ek jaisa (`section_lines`/`limits`) hai — bina
+# alias ek doosre ko chup-chaap dhak deta aur galat ledger chhap jaata.
+from .exammodel import (MAX_AUDIT_LIMIT_LINES
+                        as EXAM_CONTRACT_MAX_AUDIT_LIMIT_LINES)
+from .exammodel import limits as exam_contract_limits
+from .exammodel import section_lines as exam_contract_lines
+from .trademodel import (MAX_AUDIT_LIMIT_LINES
+                         as TRADE_CONTRACT_MAX_AUDIT_LIMIT_LINES)
+from .trademodel import limits as trade_contract_limits
+from .trademodel import section_lines as trade_contract_lines
+from .rejects import reject_limits, reject_section, unmeasured_section
 from .models import EvidencePack
 from .requested import prompt_block as requested_prompt_block
 from .run_status import split_messages
+from .specialist_domains import prompt_block as specialist_prompt_block
 
-# §16 ka order — headings mein number NAHI hai, kyunki user ko `## Seedha jawab`
-# hi dikhna chahiye. Index hi order hai.
+# §12 (2026-08-22) — headings ab DO baat kehti hain: pehle contract ka canonical
+# naam, phir "—" ke baad wahi baat aasaan Hinglish mein. Isse do purani dikkatein
+# ek saath khatam hoti hain: (a) `sections poore hain?` wala contract check
+# canonical naam dhoondhta tha aur hamesha fail hota tha, (b) user ko English
+# jargon-only heading samajh nahi aati thi. Index sirf section ki pehchan hai —
+# chhapne ka kram `EMIT_ORDER` tay karta hai (§12 ka mandatory order).
 SECTION_TITLES = [
-    "Seedha jawab",                          # 0
-    "Research se kya pata chala?",           # 1
-    "Ye kyun hota hai?",                     # 2
-    "Evidence kya kehta hai?",               # 3
-    "Iske against kya mila?",                # 4
-    "Humari Hypotheses",                     # 5
-    "Hypothesis ko kaise test karenge?",     # 6
-    "Kya abhi unknown hai?",                 # 7
-    "Final conclusion",                      # 8
-    "Sources",                               # 9
-    "Research quality / technical audit",    # 10
+    display_heading("direct_answer"),                     # 0
+    display_heading("established_knowledge"),             # 1
+    "Ye kyun hota hai?",                                  # 2 (extra, §12 ke bahar)
+    display_heading("supporting_evidence"),               # 3
+    display_heading("counterevidence"),                   # 4
+    ANSWER_LAB_HEADING,                                   # 5 (§12: bilkul yahi shabd)
+    "Hypothesis ko kaise test karenge?",                  # 6 (extra, LAB ke andar ki baat)
+    display_heading("unknowns"),                          # 7
+    display_heading("conclusion"),                        # 8
+    display_heading("sources"),                           # 9
+    display_heading("audit"),                             # 10
 ]
+# §12 — Calculations ki heading bhi wahi jagah se aati hai, aur ye section HAMESHA
+# chhapta hai (na bane to WAJAH ke saath).
+CALC_HEADING = display_heading("calculations")
+
+# §12 ka mandatory order: ... counterevidence → Calculations → Unknowns →
+# conclusion → APP ORIGINAL RESEARCH LAB → Audit and limits → Sources.
+# Pehle app ki apni hypotheses (5) evidence ke BEECH mein chhapti thi aur Sources
+# audit se pehle aata tha — dono §12 se ulte the.
+EMIT_ORDER: Tuple[int, ...] = (0, 1, 2, 3, 4, 7, 8, 5, 6, 10, 9)
+
 
 # Poore system ke haath mein: model ka version inhe replace nahi karega.
 SYSTEM_OWNED = {5, 9, 10}
@@ -91,7 +146,8 @@ _TITLE_HINTS: List[tuple] = [
     ("counter-evidence", 4), ("counter evidence", 4), ("khilaf", 4),
     ("conflicting evidence", 4), ("contradict", 4), ("weakness", 4),
 
-    ("humari hypothes", 5), ("new hypothes", 5), ("nayi hypothes", 5),
+    ("humari hypothes", 5), ("app original research lab", 5),
+    ("original research lab", 5), ("new hypothes", 5), ("nayi hypothes", 5),
     ("hypothes", 5),
 
     ("kya pata chala", 1), ("research se kya", 1), ("established fact", 1),
@@ -153,6 +209,19 @@ _WHY_DISAGREE = {
 }
 
 
+# #178e — contract ledger ki line-list se `###` block. `exammodel.section_lines`
+# aur `trademodel.section_lines` khud apna heading pehli line me dete hain, aur
+# farmaish us lane ki na ho (ya text hi na bana ho) to KHAALI list dete hain —
+# isliye yahan koi apna heading nahi lagaya jaata aur khaali list par khaali
+# string wapas jaati hai. Nateeja: song/science run me ye block chhapta hi
+# nahi, aur "contract naapa gaya" ka jhootha ishaara kabhi nahi banta.
+def _contract_block(lines: Optional[List[str]]) -> str:
+    rows = [str(line) for line in (lines or [])]
+    if not rows:
+        return ""
+    return "\n".join(rows).strip()
+
+
 class FinalSynthesizer:
     def __init__(self):
         self.citations = CitationEngine()
@@ -162,7 +231,8 @@ class FinalSynthesizer:
 
     # ── synthesis prompt — "teacher ki tarah samjhao" ────────────────────────
     def prompt(self, question: str, analysis: str, critique: str, hypothesis_text: str,
-               pack: EvidencePack, plan: Dict, memory_note: str = "") -> str:
+               pack: EvidencePack, plan: Dict, memory_note: str = "",
+               evidence_first_block: str = "") -> str:
         critique_block = (f"\nCRITIC KE INTERNAL FINDINGS:\n{critique[:2500]}\n"
                           if critique else "")
         hypothesis_block = (f"\nGENERATED HYPOTHESES (status: UNTESTED):\n"
@@ -171,6 +241,8 @@ class FinalSynthesizer:
         plan = plan or {}
         fields = ", ".join(plan.get("relevant_fields", [])[:4]) or "relevant areas"
         extras = requested_prompt_block(plan.get("requests"))
+        specialist_rules = specialist_prompt_block(plan)
+        evidence_first_prompt = (evidence_first_block or "").strip()
 
         return f"""Tum ek bahut acche teacher ho. Tumhara kaam research ka result
 aam bhasha mein aise samjhana hai ki padhne wale ko poori baat samajh aa jaye.
@@ -184,9 +256,13 @@ karo, inse samjho aur apne shabdon mein samjhao):
 SOURCES (sirf inhi IDs se cite karo):
 {pack.to_prompt_block(max_chars_per_source=500)}
 
+{evidence_first_prompt}
+
 {CITATION_INSTRUCTION}
 
 {LABEL_RULE_PROMPT}
+
+{specialist_rules}
 
 {style_block(question, SECTION_TITLES)}
 
@@ -319,6 +395,32 @@ Ab jawab likho:"""
             ids = ", ".join(c.get("sources", []))
             head = c.get("summary", "").strip() or "Do sources aapas mein alag baat kehte hain"
             body = [f"**{head}**" + (f" ({ids})" if ids else "")]
+            # §11 — takraav ka structured hissa: kis baat par, kaun kya keh raha
+            # hai, aur saboot ka tukda kahan se aaya. Bina in teen cheezon ke
+            # "takraav" likhna hi pichhli report ki galti thi (wahan sirf saal
+            # alag the aur usi ko contradiction bata diya gaya tha).
+            if c.get("normalized_proposition"):
+                body.append(f"_Kis baat par:_ {c['normalized_proposition']}")
+            if c.get("source_a_claim") and c.get("source_b_claim"):
+                sids = list(c.get("sources") or ["A", "B"])
+                a_id = sids[0] if sids else "A"
+                b_id = sids[1] if len(sids) > 1 else "B"
+                body.append(f"- {a_id} kehta hai: {c['source_a_claim']}")
+                body.append(f"- {b_id} kehta hai: {c['source_b_claim']}")
+            refs = [str(r) for r in (c.get("evidence_span_refs") or []) if str(r).strip()]
+            if refs:
+                body.append(f"_Saboot kahan se:_ {', '.join(refs)}")
+            # §11 — method ki line DONO haalat mein chhapti hai. Pehle khaali
+            # `method_difference` par line hi gayab ho jaati thi, jisse padhne
+            # wale ko lagta tha ki method compare ho chuka hai aur farq nahi
+            # mila. Ab "compare nahi ho paaya" bhi saaf likha jaata hai.
+            if c.get("method_difference"):
+                body.append(f"_Method ka farq:_ {c['method_difference']}")
+            elif c.get("method_comparison_why"):
+                body.append(f"_Method ka farq:_ {c['method_comparison_why']}")
+            for note in (c.get("context_notes") or [])[:2]:
+                if str(note).strip():
+                    body.append(f"_Context:_ {note}")
             if c.get("detail"):
                 body.append(str(c["detail"]))
             why = _WHY_DISAGREE.get(str(c.get("type", "")).upper())
@@ -376,7 +478,28 @@ Ab jawab likho:"""
             statement = (h.get("statement") or "").strip()
             simple = (h.get("simple") or "").strip()
             title = self._short_title(statement or simple)
-            body: List[str] = [f"### Hypothesis {i} — {title}"]
+            hid = str(h.get("hypothesis_id") or "").strip()
+            head = f"### Hypothesis {i} — {title}"
+            if hid:
+                # §13 — har hypothesis ka apna stable ID, taaki baad ke run mein
+                # bhi usi hypothesis ki baat ho sake.
+                head = f"### {hid} — {title}"
+            body: List[str] = [head]
+            # #117 — jo hypothesis reject hui, uska nishaan card ke sabse UPAR.
+            # Card mitaya nahi jaata (record rehna chahiye), par padhne wale ko
+            # pehli line me hi pata chalna chahiye ki ise aage nahi badhaya ja
+            # raha, aur KIS NAAP par. Poori tafseel `###` reject block me hai.
+            if h.get("rejected"):
+                reason = str(h.get("reject_reason") or "").strip()
+                body.append(f"> ❌ **REJECT — aage nahi badhaya:** {reason}")
+                if h.get("reject_reopen_if"):
+                    body.append(f"> Wapas kab aa sakti hai: {h['reject_reopen_if']}")
+            # §13/§2 — sabse pehle ye saaf ho jaana chahiye ki ye APP ka apna
+            # idea hai, kisi source ka claim nahi. Pichhli report mein ye baat
+            # neeche dabi rehti thi, isliye log ise "research finding" samajh
+            # lete the.
+            if h.get("source_claim_disclaimer"):
+                body.append(f"> {h['source_claim_disclaimer']}")
             if simple:
                 body.append(f"**Simple words mein:** {simple}")
                 if statement and statement.lower() != simple.lower():
@@ -388,6 +511,21 @@ Ab jawab likho:"""
             if h.get("reasoning"):
                 body.append("**Ye idea kahan se aaya:** "
                             + self._join_prose(h["reasoning"]))
+            # §13 — provenance: kaunse facts par tika hai, aur kahan knowledge
+            # gap tha. Iske bina "ye idea kahan se aaya" ek dawa bhar hai.
+            prov = h.get("provenance") if isinstance(h.get("provenance"), dict) else {}
+            facts = [str(f) for f in (prov.get("facts_used") or []) if str(f).strip()]
+            if facts:
+                body.append("**Kaunse sources ke facts se bana:** "
+                            + ", ".join(facts[:8]))
+            if str(prov.get("gap") or "").strip():
+                body.append("**Kis jagah knowledge gap tha:** "
+                            + self._join_prose(str(prov["gap"])))
+            if str(h.get("mechanism") or "").strip():
+                # §13 — mechanism: "kaise hoga" ka jawab. Sirf "ho sakta hai"
+                # likhna hypothesis nahi, guess hai.
+                body.append("**Ye kaam kaise karega (mechanism):** "
+                            + self._join_prose(str(h["mechanism"])))
             body.append("**Is idea ko support karne wali research:** "
                         + self._evidence_prose(
                             h.get("supporting_evidence"), pack,
@@ -418,6 +556,17 @@ Ab jawab likho:"""
             if experiment and experiment not in (h.get("how_to_test") or ""):
                 body.append("**Zaroori experiment / simulation:** "
                             + self._join_prose(experiment))
+            # §16 — experiment ki ek line chhaap dene se plan CHALAYA JA SAKNE
+            # WALA lagta tha, jabki spec ke kai hisse (dataset, metric, hadd,
+            # replication) likhe hi nahi gaye hote. Ledger door alag section
+            # mein tha, isliye padhne wale tak baat pahunchti nahi thi. Ab kaunsa
+            # hissa missing hai, wahi card par saaf likha jaata hai.
+            gaps = [str(x).strip() for x in
+                    (h.get("experiment_spec_missing_human") or []) if str(x).strip()]
+            if gaps:
+                body.append("**Is plan mein kya likha hi nahi gaya (isliye ise "
+                            "ready-to-run plan na maanein):** "
+                            + "; ".join(gaps[:11]))
             falsify = str(h.get("falsification_test") or "").strip()
             if falsify:
                 body.append("**Kaunsa result ise galat sabit kar dega:** "
@@ -426,18 +575,99 @@ Ab jawab likho:"""
                 body.append("**Agar ye sahi hua:** " + self._join_prose(h["if_true"]))
             if h.get("if_false"):
                 body.append("**Agar ye galat hua:** " + self._join_prose(h["if_false"]))
+            # §14/§15 — novelty ka faisla app ka deterministic label hai, model
+            # ka shabd nahi. Model ki apni "novelty" line neeche context ke liye
+            # rehti hai, par pehle whitelist wala status dikhta hai.
+            nov_status = str(h.get("novelty_status") or "").strip()
+            if nov_status:
+                line = f"**Novelty status:** {nov_status}"
+                if str(h.get("novelty_why") or "").strip():
+                    line += f" — {h['novelty_why']}"
+                body.append(line)
+            prior = [p for p in (h.get("closest_prior_work") or [])
+                     if isinstance(p, dict)]
+            if prior:
+                bits = []
+                for p in prior[:3]:
+                    ref = str(p.get("source_id") or "").strip() or "source"
+                    same = str(p.get("same") or "").strip()
+                    diff = str(p.get("difference") or "").strip()
+                    piece = f"{ref}"
+                    if same:
+                        piece += f" — milta hua hissa: {same}"
+                    if diff:
+                        piece += f"; farak: {diff}"
+                    bits.append(piece)
+                body.append("**Isse sabse milti-julti purani research:** "
+                            + " | ".join(bits))
+            elif nov_status:
+                body.append("**Isse sabse milti-julti purani research:** retrieved "
+                            "sources mein koi close match nahi mila — iska matlab "
+                            "\"duniya mein pehli\" nahi, sirf itna ki humne jo "
+                            "sources padhe unme nahi tha.")
+            nsearch = h.get("novelty_search") if isinstance(
+                h.get("novelty_search"), dict) else {}
+            if nsearch:
+                if nsearch.get("performed") is True:
+                    dbs = ", ".join(str(d) for d in (nsearch.get("databases") or [])) \
+                        or "record nahi hui"
+                    body.append(f"**Prior-art search:** hui — databases: {dbs}.")
+                else:
+                    body.append("**Prior-art search:** is run mein prior-art "
+                                "search nahi chali, isliye novelty verified nahi "
+                                "hai (sirf 'pata nahi' hai).")
             if h.get("novelty"):
-                body.append(f"**Kitna naya hai:** {h['novelty']}")
-            if h.get("confidence_reasoning_based"):
+                body.append(f"**Model ne novelty par kya kaha:** {h['novelty']}")
+            band = str(h.get("confidence_band") or "").strip()
+            conf = h.get("confidence") if isinstance(h.get("confidence"), dict) else {}
+            if band:
+                # §18 — confidence BAND, number nahi. Percentage ke peeche koi
+                # calculation nahi hoti, isliye wo jhoothi precision hai.
+                line = f"**Kitna bharosa (band, percentage nahi):** {band}"
+                reasons_txt = [str(r) for r in (conf.get("reasons") or [])
+                               if str(r).strip()]
+                if reasons_txt:
+                    line += " — wajah: " + "; ".join(reasons_txt[:4])
+                body.append(line)
+                if str(conf.get("model_said") or "").strip():
+                    body.append("_(Model ne khud "
+                                f"\"{conf['model_said']}\" kaha tha — wo uska "
+                                "andaza hai, isliye upar app ka apna band diya "
+                                "gaya hai.)_")
+            elif h.get("confidence_reasoning_based"):
                 body.append(f"**Kitna bharosa (sirf reasoning par, proof nahi):** "
                             f"{h['confidence_reasoning_based']}")
+            exp_struct = h.get("experiment_structured") if isinstance(
+                h.get("experiment_structured"), dict) else {}
+            exp_missing = [str(m) for m in (exp_struct.get("missing") or [])
+                           if str(m).strip()]
+            if exp_missing:
+                # §16 — adhoore test plan ko falsification test kehna hi pichhli
+                # badi galti thi. Ab kami ka naam liya jaata hai.
+                body.append("⚠️ **Test plan mein ye hisse nahi aaye:** "
+                            + ", ".join(exp_missing)
+                            + ". Isliye ise poora falsification test nahi maana "
+                              "ja sakta.")
             missing = [str(m) for m in (h.get("missing_fields") or []) if str(m).strip()]
             if missing:
                 body.append("⚠️ **Is hypothesis mein ye cheezein nahi aayi:** "
                             + ", ".join(missing)
                             + ". Yaani ise poori tarah testable nahi maana ja sakta.")
-            body.append(f"**Current status: {h.get('status', 'UNTESTED HYPOTHESIS')}** — "
-                        f"abhi real-world test nahi hua.")
+            if h.get("safety_sensitive") is True:
+                body.append("⚠️ **Safety-sensitive:** ye hypothesis medical/"
+                            "chemical/biological ya safety se judi hai — bina "
+                            "expert review aur risk assessment iske aage koi "
+                            "kadam nahi lena chahiye.")
+            # §16 — do alag baatein ek hi jagah: ye cheez kya hai (untested
+            # hypothesis) aur uska validation kahan tak pahuncha (plan bhi hai
+            # ya nahi). Pehle dono ko mila diya jaata tha.
+            status_line = (f"**Current status: "
+                           f"{h.get('status') or 'UNTESTED HYPOTHESIS'}** — "
+                           f"abhi real-world test nahi hua.")
+            if str(h.get("validation_status") or "").strip():
+                status_line += f" Validation: {h['validation_status']}."
+            body.append(status_line)
+
             blocks.append("\n\n".join(body))
         if asked and len(hypotheses) < asked:
             blocks.append(f"⚠️ Aapne {asked} maangi thi, {len(hypotheses)} ban paayi — "
@@ -494,8 +724,6 @@ Ab jawab likho:"""
             return pred.strip()
         if not isinstance(pred, dict):
             return ""
-        if pred.get("text"):
-            return str(pred["text"]).strip()
         bits: List[str] = []
         variables = [str(v).strip() for v in (pred.get("variables") or []) if str(v).strip()]
         if variables:
@@ -507,6 +735,14 @@ Ab jawab likho:"""
         if pred.get("falsification_condition"):
             bits.append("Kaunsa result isse galat sabit kar dega: "
                         f"{pred['falsification_condition']}.")
+        # Structured hissa poora bana ho to wahi behtar hai (§16 ke chaar naam
+        # saaf-saaf). Warna asli text hi imaandaar jawab hai. Dhyaan: dict mein
+        # ab `text` HAMESHA hota hai (structured ke saath bhi), isliye pehle
+        # `text` dekh lena structured prose ko dabaa deta tha.
+        if pred.get("structured") and bits:
+            return " ".join(bits)
+        if pred.get("text"):
+            return str(pred["text"]).strip()
         return " ".join(bits)
 
     # ── §16 item 9: final conclusion ─────────────────────────────────────────
@@ -733,12 +969,11 @@ Ab jawab likho:"""
         return "\n".join(lines)
 
     # ── §13 + §14: sources ki imaandaar list ─────────────────────────────────
-    _ACCESS_WORDS = {
-        "full_text": "FULL-TEXT VERIFIED — poora text padha gaya",
-        "abstract": "ABSTRACT REVIEWED — sirf abstract (summary) padha gaya",
-        "snippet": "SNIPPET ONLY — sirf ek chhota hissa mila",
-        "metadata": "METADATA ONLY — sirf title/details mile, content nahi",
-    }
+    # §9 (2026-08-21): "FULL-TEXT VERIFIED" label HATA diya gaya hai. Wo ek hi
+    # shabd mein do baatein keh raha tha — "text mil gaya" aur "claim verify ho
+    # gaya" — aur pichhle run mein abstract-only source par bhi chhap gaya tha.
+    # Ab access depth ka poora vocabulary models.ACCESS_DEPTH_LABELS mein ek hi
+    # jagah hai, aur verification uska hissa nahi hai.
     _KIND_WORDS = {
         "paper": "research paper",
         "web": "web page",
@@ -778,7 +1013,7 @@ Ab jawab likho:"""
                              + took[:220] + ("…" if len(took) > 220 else ""))
             else:
                 lines.append("- Isse kya liya gaya: kuch nahi — content mila hi nahi.")
-            lines.append(f"- Kitna padha gaya: {self._ACCESS_WORDS.get(s.reading_level(), s.reading_level())}.")
+            lines.append(f"- Kitna padha gaya: {s.access_depth_note()}.")
             rel = float(getattr(s, "relevance_score", 0.0) or 0.0)
             rel_word = ("sawal se seedha juda hua" if rel >= 0.6 else
                         "thoda sa juda hua" if rel >= 0.3 else
@@ -921,6 +1156,122 @@ Ab jawab likho:"""
             lines.append(f"**Maths/physics sanity check:** {physics['note']}")
         return "\n".join(lines).strip()
 
+    # ── §17: calculation ka poora record, user ke saamne ─────────────────────
+    #
+    # Kyun: dark-matter run mein "numeric sanity check passed" chhapa tha par
+    # jawab mein na formula tha, na inputs, na units. Ab ulta niyam hai — jo
+    # hisaab dikhaya jaayega uska formula, input, unit, assumption aur nateeja
+    # saamne hoga, aur teen check ALAG-ALAG dikhenge (unit theek likhe? dobara
+    # jodne par wahi jawab? koi number humne khud gadha?). Jo check na chal
+    # paaya uske liye "pata nahi" likhte hain, "pass" nahi.
+    _CALC_WORDS = {
+        True: "haan", False: "nahi", None: "check nahi ho paaya",
+    }
+
+    def _calculation_section(self, calculations: Optional[List[Dict]]) -> str:
+        if not calculations:
+            return ""
+        lines: List[str] = []
+        for i, calc in enumerate(calculations, start=1):
+            if not isinstance(calc, dict):
+                continue
+            lines.append(f"### Calculation {i}")
+            formula = str(calc.get("formula") or "").strip()
+            lines.append(f"**Formula:** `{formula}`" if formula
+                         else "**Formula:** likha hi nahi gaya tha — isliye ise "
+                              "verified hisaab nahi maana ja sakta.")
+            inputs = calc.get("inputs") or {}
+            units = calc.get("units") or {}
+            if inputs:
+                pretty = ", ".join(
+                    f"{name} = {value:g} {str(units.get(name) or '').strip()}".strip()
+                    for name, value in list(inputs.items())[:8])
+                lines.append(f"**Inputs (units ke saath):** {pretty}")
+            else:
+                lines.append("**Inputs:** kaunsa number kahan se aaya, ye likha "
+                             "nahi gaya tha.")
+            assumptions = [str(a).strip() for a in (calc.get("assumptions") or [])
+                           if str(a).strip()]
+            if assumptions:
+                lines.append("**Kya maan kar chale (assumptions):**")
+                lines.extend(f"- {a}" for a in assumptions[:4])
+            else:
+                lines.append("**Assumptions:** koi assumption likha nahi gaya — "
+                             "yaani ye hisaab kis haalat mein sach hai, wo saaf "
+                             "nahi hai.")
+            result = str(calc.get("result") or "").strip()
+            unit_of_result = str((units or {}).get("result") or "").strip()
+            if result:
+                line = f"**Result:** {result}"
+                if not unit_of_result:
+                    line += " _(nateeje ka unit nahi likha gaya)_"
+                lines.append(line)
+            else:
+                lines.append("**Result:** koi nateeja saaf likha nahi gaya.")
+            uncertainty = str(calc.get("uncertainty") or "").strip()
+            lines.append(f"**Uncertainty:** {uncertainty}" if uncertainty
+                         else "**Uncertainty:** nahi di gayi — isliye ye number "
+                              "'exact' nahi samajhna.")
+            recomputed = str(calc.get("recomputed") or "").strip()
+            checks = [
+                ("Unit theek likhe hain?", calc.get("unit_check_passed"), ""),
+                ("Dobara jodne par wahi jawab aata hai?",
+                 calc.get("recalculation_passed"),
+                 f" (humara recompute: {recomputed})" if recomputed else ""),
+                ("Physical limit / conversion check theek?",
+                 calc.get("sanity_check_passed"), ""),
+            ]
+            lines.append("**Alag-alag check:**")
+            for label, value, extra in checks:
+                lines.append(f"- {label} **{self._CALC_WORDS.get(value)}**{extra}")
+            invented = calc.get("invented_input")
+            if invented is True:
+                lines.append("- ⚠️ Kam se kam ek input aisa hai jo question ya "
+                             "sources mein nahi mila — wo model ka apna anumaan "
+                             "hai, verified data nahi.")
+            elif invented is False:
+                lines.append("- Saare inputs question ya sources se aaye hain "
+                             "(koi number khud se nahi gadha gaya).")
+            else:
+                lines.append("- Inputs kahan se aaye, ye check nahi ho paaya.")
+            notes = [str(n).strip() for n in (calc.get("notes") or [])
+                     if str(n).strip()]
+            if notes:
+                lines.append("**Kami / wajah:** " + "; ".join(notes[:3]) + ".")
+            lines.append("")
+        return "\n".join(lines).strip()
+
+    @staticmethod
+    def _no_calculation_note(pack: Optional[EvidencePack] = None,
+                             ledger: Optional[Dict] = None,
+                             requests: Optional[Dict] = None) -> str:
+        """§12 — hisaab na bane to bhi section rehta hai, WAJAH ke saath.
+
+        Pehle `_calculation_section` khaali string deta tha aur poori section
+        gayab ho jaati thi. Gayab section apne aap mein ek jhooth hai: user ko
+        pata hi nahi chalta ki hisaab hua tha aur fail ho gaya, ya hisaab ki
+        zaroorat hi nahi thi. Teen wajah alag-alag likhi jaati hain
+        (`answer_order.NO_CALC_REASONS`), kyunki teenon ka matlab alag hai.
+        """
+        asked = any(
+            isinstance(item, dict) and item.get("key") == "calculations"
+            for item in ((ledger or {}).get("items") or [])
+        )
+        if not asked:
+            asked = bool((requests or {}).get("wants_math_model"))
+        reasoning_ok = True
+        try:
+            reasoning_ok = bool(pack.reasoning_complete)
+        except Exception:                        # noqa: BLE001
+            reasoning_ok = True
+        if asked and not reasoning_ok:
+            key = "no_reasoning"
+        elif asked:
+            key = "no_inputs"
+        else:
+            key = "not_asked"
+        return f"_Koi calculation is jawab mein nahi hai._ {NO_CALC_REASONS[key]}"
+
     # ── coverage: "kitna kaam asli mein hua" ─────────────────────────────────
     @staticmethod
     def _reading_line(coverage: Dict) -> str:
@@ -1016,6 +1367,63 @@ Ab jawab likho:"""
         for extra in (self._reading_line(coverage), self._quality_line(coverage, pack)):
             if extra:
                 lines.append(extra)
+        assurance = coverage.get("research_assurance") or {}
+        if assurance.get("active"):
+            percent = assurance.get("research_process_coverage_percent", 0)
+            target = assurance.get("target_percent", 0)
+            state = ("target poora hua" if assurance.get("target_met")
+                     else "target poora nahi hua")
+            lines.append(
+                f"- MARATHON research-process coverage: {percent}% (target "
+                f"{target}%; {state}). Ye answer ki truth probability, trading "
+                f"profitability ya hypothesis success probability nahi hai."
+            )
+            saturation = assurance.get("saturation") or {}
+            if saturation.get("reason"):
+                lines.append(f"- Bounded saturation: {saturation['reason']}.")
+            gaps = assurance.get("gaps") or []
+            if gaps:
+                lines.append("- Process gaps: " + ", ".join(str(x) for x in gaps) + ".")
+        # §5 — "kitne mile" ke baad hi "kaunsa saboot mila hi nahi". Ye lines
+        # `evidence_axes.coverage_note()` se aati hain; axes naape na gaye hon to
+        # ye block chhapta hi nahi (khaali heading/jhoothi tasalli se bachne ke liye).
+        axis_note = ((coverage.get("evidence_axes") or {}).get("note") or "").strip()
+        if axis_note:
+            lines.append("")
+            lines.append("**Saboot ke raaste (evidence axes):**")
+            for row in axis_note.splitlines():
+                row = row.strip()
+                if not row:
+                    continue
+                if row.startswith("•"):
+                    # "•" markdown bullet nahi hai — aisi line pichhli line ke
+                    # saath chipak jaati hai. Nested "-" hi theek se render hota hai.
+                    lines.append(f"  - {row.lstrip('• ').strip()}")
+                else:
+                    lines.append(f"- {row}")
+        # §6 — "kitne mile" se zyada zaroori: unmein se kitne sach mein sawaal ki
+        # baat test karte hain. Ye block sirf tab chhapta hai jab relevance gate
+        # asli mein chala ho (`prop` khaali = gate chala hi nahi), warna 0 likhna
+        # jhooth hota — pichhli report mein yahi confusion tha: 18 source "mile"
+        # likha tha aur unmein calibration/exoplanet papers bhi gine ja rahe the.
+        prop = coverage.get("proposition_test") or {}
+        if prop:
+            lines.append("")
+            lines.append("**Sources sawaal ko test karte hain ya nahi (relevance gate):**")
+            lines.append(f"- Test karte hain: {prop.get('tests_proposition', 0)} | "
+                         f"nahi karte: {prop.get('does_not_test', 0)} | "
+                         f"faisla nahi ho saka: {prop.get('undecided', 0)}.")
+            lines.append("- Aakhri ginti ka matlab 'theek hai' nahi hai — utna "
+                         "metadata hi mila tha ki faisla ho paata.")
+            failed = prop.get("failed_dimensions") or {}
+            if failed:
+                worst = sorted(failed.items(), key=lambda kv: -int(kv[1] or 0))[:4]
+                lines.append("- Kis cheez par fail hue: "
+                             + ", ".join(f"{k}: {v}" for k, v in worst) + ".")
+            codes = coverage.get("relevance_reject_codes") or {}
+            if codes:
+                lines.append("- Kis wajah se hataye gaye: "
+                             + ", ".join(f"{k}: {v}" for k, v in codes.items()) + ".")
         return "\n".join(lines)
 
     # ── "aapne jo maanga tha" ka honest hisaab ───────────────────────────────
@@ -1121,7 +1529,16 @@ Ab jawab likho:"""
                        technical_details: Optional[List[str]] = None,
                        api_accounting: Optional[Dict] = None,
                        claim_checks: Optional[Dict] = None,
-                       missing_sections: Optional[List[str]] = None) -> str:
+                       missing_sections: Optional[List[str]] = None,
+                       lab_report: Optional[Dict] = None,
+                       reject_report: Optional[Dict] = None,
+                       craft_report: Optional[Dict] = None,
+                       media_report: Optional[Dict] = None,
+                       listener_report: Optional[Dict] = None,
+                       music_report: Optional[Dict] = None,
+                       exam_lab_report: Optional[Dict] = None,
+                       exam_contract_report: Optional[Dict] = None,
+                       trade_contract_report: Optional[Dict] = None) -> str:
         blocks: List[str] = []
         numbers = self._numbers_check(verification)
         if numbers:
@@ -1237,6 +1654,113 @@ Ab jawab likho:"""
         tail: List[str] = [f"- {l}" for l in limits[:4]]
         if note:
             tail.append(f"- {note}")
+        # #116 — LAB ki seema NAAPI hui hai: kitne test pass/fail hue aur kaunsa
+        # test data ke bina chala hi nahi. Ye line general disclaimer nahi hai,
+        # isliye ye us run ke asli nateeje se banti hai.
+        # Chhat #155e me `lab.MAX_AUDIT_LIMIT_LINES` se aane lagi: INSAAN par
+        # naapi jaane wali seema list me sabse aakhir me judti hai, aur purani
+        # `[:4]` par theek wahi line kat jaati thi.
+        for lab_line in lab_limits(lab_report)[:LAB_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {lab_line}")
+        # #117 — reject ki ginti bhi audit me. "Kitni hataayi, kis wajah se,
+        # kitni bina naap ke nikli" — teesri line hi wo bug pakadti hai jisme
+        # koi hypothesis chup-chaap gir jaaye.
+        for reject_line in reject_limits(reject_report)[:4]:
+            tail.append(f"- {reject_line}")
+        # #121 — CRAFT ki seema bhi NAAPI hui hai: kya-kya naapa gaya, kya naapa
+        # hi nahi ja saka, aur revision chali ya nahi. Iske bina audit me
+        # creative kaam par ek generic line lagti thi jo aadhi galat hai.
+        for craft_line in craft_limits(craft_report)[:5]:
+            tail.append(f"- {craft_line}")
+        # #133 — media ki seema: frame/scene padha nahi gaya, aawaz suni nahi
+        # gayi, transcript me captions/STT ki galtiyan reh sakti hain, aur user
+        # ki copy se VERIFIED nahi hota. Ye line sirf tab aati hai jab media
+        # sach me padha gaya ho — warna har report me bekaar chipakti.
+        # Chhat 4 se 5 ki gayi (#133b): padhne waali 4 seemaon ke baad ek AUR
+        # alag seema aati hai — "kuch media sirf dhoondha gaya, padha nahi".
+        # 4 par rakhne se wahi nayi line kat jaati aur audit chup ho jaata.
+        for media_line in media_limits(media_report)[:5]:
+            tail.append(f"- {media_line}")
+        # #134 — sunne wale ki seema. Ye craft/media ki seema se ALAG hai aur
+        # unme ghol di nahi ja sakti: wahan sawaal "hunar theek padha kya" tha,
+        # yahan "kisi asli insaan par test hua kya" — jawab hamesha NAHI hai.
+        # Chhat listener_study se aati hai (MAX_AUDIT_LIMIT_LINES): 4 line hamesha
+        # (test nahi hua / audience naapi nahi gayi / research dusre sample par
+        # thi / cue-list adhoori) + 4 haalat wali (ek bhi cited baat nahi mili,
+        # kaun se bhaav chhoot gaye, kitni vaada karne wali line hataayi gayi,
+        # sirf snippet padha gaya). Yahan chhoti ginti likhne ka matlab hai ek
+        # naapi hui seema chup-chaap kat jaayegi aur audit jhootha ho jaayega —
+        # isliye ginti wahi module deta hai jo lines banata hai.
+        # Lane maangi hi na gayi ho (gaane ki farmaish nahi thi) to yahan se
+        # kuch nahi aata — bekaar chipki hui seema padhna band kara deti hai.
+        for listener_line in listener_limits(
+                listener_report)[:LISTENER_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {listener_line}")
+        # #140 — MUSIC STUDY ki apni naapi hui seema (kitni cited music-research
+        # padhi gayi, kaunse khaane khaali reh gaye, kitne number sirf source ke
+        # kahe hue the, aur ye ki koi dhun na bani na suni na bajaakar test hui).
+        # Ye listener/craft ki ginti me nahi ghulti — warna "chaar khaane likh
+        # diye" aur "unke peeche padha hua kuch hai" ek dikhne lagte, jo jhooth
+        # hai. Ceiling module se aati hai (`MAX_AUDIT_LIMIT_LINES`), yahan haath
+        # se likhi hui ginti nahi: nayi seema-line jud jaaye to purani kat kar
+        # audit chup-chaap jhootha ho jaata.
+        for music_line in music_limits(
+                music_report)[:MUSIC_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {music_line}")
+        # #141 — SONG LAB ki seema. Ye craft ki seema se alag hai: wahan "kya
+        # naapa gaya" tha, yahan "khud ke test ka matlab kitna hai" — aur jawab
+        # har haalat me ye rehta hai ki TESTED_PASS achha gaana hone ka saboot
+        # nahi, hataayi gayi line "kharaab" hone ka saboot nahi, aur bhaav ka
+        # test shabd se hua hai dil se nahi. Ceiling module se aati hai, haath se
+        # likhi ginti se nahi — warna nayi seema-line chup-chaap kat jaayegi.
+        for songlab_line in songlab_limits(
+                craft_report)[:SONGLAB_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {songlab_line}")
+        # #149 — BHAAV KI SHABDAWALI ki seema. Ye alag se jaati hai kyunki iska
+        # jhooth alag kism ka hai: "app ne naye bhaav-shabd seekh liye" sun kar
+        # lagta hai ab bhaav ki poori samajh aa gayi. Sach ye hai ki shabd sirf
+        # utne hain jitna padha gaya, sirf gloss ke dhaanche se aaye hain, do
+        # alag source ke bina naap me lagte hi nahi, aur seekha hua shabd kisi
+        # likhi hui LINE KO HATA nahi sakta. Ceiling module se aati hai — haath
+        # se likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
+        for mood_line in mood_limits(craft_report)[:MOOD_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {mood_line}")
+        # #171e — EXAM LAB ki seema. Ye LAB ki seema (`lab_limits`) me jaan-boojh
+        # kar nahi ghulti: wahan HYPOTHESIS naapi jaati hai, yahan BANA HUA
+        # paper/plan. Ek hi ginti me daalne se "app ne apna paper khud naapa" aur
+        # "app ki hypothesis test hui" ek dikhne lagte, aur padhne wala samajhta
+        # ki paper kisi science-test se paas hua hai. Sabse bada jhooth jo yahan
+        # se rukta hai wo hai "LAB pass ho gaya = ye asli exam jaisa paper hai".
+        # Ceiling module se aati hai (`EXAM_MAX_AUDIT_LIMIT_LINES`) — haath se
+        # likhi ginti se nahi, warna nayi seema-line chup-chaap kat jaayegi.
+        for exam_line in exam_lab_limits(
+                exam_lab_report)[:EXAM_MAX_AUDIT_LIMIT_LINES]:
+            tail.append(f"- {exam_line}")
+        # #178e — FARMAISH ke contract ki seema. Ye teen aur ginti me jaan-boojh
+        # kar nahi ghulti: `lab_limits` HYPOTHESIS ke test ki seema hai,
+        # `exam_lab_limits` BANE HUE paper/plan ke test ki seema hai, aur ye do
+        # batati hain ki JO MAANGA GAYA THA uska naap kahan tak ja hi nahi
+        # sakta (app exam ki authority nahi hai, paper sirf practice ka hai,
+        # backtest bhavishya ka vaada nahi, ye nivesh ki salah nahi). Ek hi
+        # list me daalne se "app ne apna test paas kar liya" aur "farmaish ka
+        # ye hissa naapa hi nahi ja saka" ek jaise dikhne lagte — sabse bada
+        # jhooth jo yahan se rukta hai. Chhat dono module se aati hai (exam ka
+        # contract 10, trade ka 8) — haath se likhi ginti se nahi, warna nayi
+        # seema-line chup-chaap kat kar audit jhootha ho jaata. Farmaish us
+        # lane ki na ho to `not_asked` record aata hai — usme `checks` hi nahi
+        # hota, aur tab ye seema chhapti hi nahi (warna gaane ke jawab me exam
+        # ki paanch seema chipak jaati, jo padhne wale ko bewakoof banata hai).
+        # Dhyaan: in dono module ka `limits()` khud gate NAHI karta (bina report
+        # bhi pakki line deta hai) — isliye gate yahan lagta hai.
+        if (exam_contract_report or {}).get("checks"):
+            for exam_contract_line in exam_contract_limits(
+                    exam_contract_report)[:EXAM_CONTRACT_MAX_AUDIT_LIMIT_LINES]:
+                tail.append(f"- {exam_contract_line}")
+        if (trade_contract_report or {}).get("checks"):
+            for trade_contract_line in trade_contract_limits(
+                    trade_contract_report
+            )[:TRADE_CONTRACT_MAX_AUDIT_LIMIT_LINES]:
+                tail.append(f"- {trade_contract_line}")
         # Ye teen line HAMESHA jaati hain. Purane version mein bhi thi, aur inhe
         # hataana seedha jhooth ban jaata: system ki asli seema yahi hai.
         tail += [
@@ -1422,6 +1946,46 @@ Ab jawab likho:"""
                 found[key] = body
         return found, "\n\n".join(leftover_parts).strip()
 
+    def canonical_heading_view(self, text: str) -> str:
+        """
+        Model ke text ko canonical headings ke saath dobara likho — SIRF
+        claim verification ke liye. Ye view user ko kabhi nahi dikhta.
+
+        Kyun zaroori hai: koi claim "critical" hai ya nahi, ye us section se
+        tay hota hai jisme wo likhi hai (seedha jawab / final conclusion).
+        Model apni marzi ki heading likhta hai (`### Fact — ...`), isliye RAW
+        model text par verification chalane se har critical claim non-critical
+        ban jaati thi — live dark-matter run mein `critical_claims: 0` aaya,
+        jabki wahi text final answer par 1 critical deta hai. Usse §8 ke
+        evidence spans khaali reh jaate the aur `critical_claim_spans_complete`
+        "pata nahi" par atak jaata tha.
+
+        Assembled (final) answer par verification chalana bhi theek nahi hota:
+        usme audit block ki apni lines bhi claim ban kar ginne lagti hain, aur
+        jawab ke andar do alag ginti aa jaati.
+
+        Content ek shabd bhi nahi badalta — sirf heading ka naam canonical hota
+        hai, aur bina heading wala leftover text sabse pehle (section = khaali,
+        yaani "critical nahi") rakha jaata hai.
+        """
+        raw = text or ""
+        try:
+            found, leftover = self.split_model_sections(raw)
+        except Exception:                                    # noqa: BLE001
+            return raw
+        if not found:
+            return raw
+        parts: List[str] = []
+        if leftover.strip():
+            parts.append(leftover.strip())
+        for key in sorted(k for k in found if isinstance(k, int)):
+            title = (SECTION_TITLES[key] if 0 <= key < len(SECTION_TITLES)
+                     else str(key))
+            parts.append(f"## {title}\n{found[key]}".rstrip())
+        for key in [k for k in found if not isinstance(k, int)]:
+            parts.append(f"## {key}\n{found[key]}".rstrip())
+        return "\n\n".join(p for p in parts if p.strip())
+
     # ── final report ─────────────────────────────────────────────────────────
     _MISSING = "_(Reasoning model ne ye section nahi diya.)_"
     # §10 — sirf explainer/boilerplate wali section ko "bhari hui" nahi maanenge.
@@ -1444,7 +2008,17 @@ Ab jawab likho:"""
                  technical_details: Optional[List[str]] = None,
                  api_accounting: Optional[Dict] = None,
                  claim_checks: Optional[Dict] = None,
-                 hypothesis_plan: Optional[Dict] = None) -> str:
+                 hypothesis_plan: Optional[Dict] = None,
+                 calculations: Optional[List[Dict]] = None,
+                 lab_report: Optional[Dict] = None,
+                 reject_report: Optional[Dict] = None,
+                 craft_report: Optional[Dict] = None,
+                 media_report: Optional[Dict] = None,
+                 listener_report: Optional[Dict] = None,
+                 music_report: Optional[Dict] = None,
+                 exam_lab_report: Optional[Dict] = None,
+                 exam_contract_report: Optional[Dict] = None,
+                 trade_contract_report: Optional[Dict] = None) -> str:
         """
         Poori report banao — INSAAN PEHLE, TECHNICAL BAAD MEIN.
 
@@ -1486,6 +2060,126 @@ Ab jawab likho:"""
                                                        reasons, pack,
                                                        hypothesis_plan)
                 parts.append(engine_text)
+                # #116 — LAB stage ka apna nateeja usi section ke andar, ek
+                # `###` block me. Ye model ka text nahi hai: ye app ne KHUD
+                # chalaye hue test ka record hai, aur iske bina "hypothesis
+                # UNTESTED" hi dikhta reh jaata tha.
+                lab_text = lab_report_section(lab_report)
+                if lab_text:
+                    parts.append(lab_text)
+                # #117 — reject-list usi section me: kaunsi hypothesis aage nahi
+                # badhi, aur KIS NAAP par. Pehle drop chup-chaap hota tha.
+                reject_text = reject_section(reject_report)
+                if reject_text:
+                    parts.append(reject_text)
+                # #155e — aur reject-list ke TURANT baad ek ALAG block: wo
+                # hypotheses jo naapi hi nahi ja sakti thin (jinka naap asli
+                # insaan ya uske body-signal par hota hai). Ye reject-list ke
+                # andar jaan-boojh kar NAHI daali gayi — "hataayi gayi" aur
+                # "yahan naapi nahi ja sakti" do bilkul alag baatein hain, aur
+                # dono ko ek list me daalna hi jhooth hota. Ye hypotheses jawab
+                # me apni jagah par bani rehti hain; yahan sirf ye likha hai ki
+                # unke saath koi PASS/FAIL kyun nahi lagaya gaya.
+                unmeasured_text = unmeasured_section(reject_report)
+                if unmeasured_text:
+                    parts.append(unmeasured_text)
+                # #121 — CRAFT: agar is run me kuch BANAYA gaya tha (gaana/
+                # kavita/letter...), to us draft ka naapa hua record bhi yahin
+                # `###` block me aata hai. Ye "acha bana hai" nahi kehta —
+                # sirf dhaancha (matra/tuk/hook/dohraav) ka hisaab dikhata hai,
+                # aur jo naapa hi nahi ja sakta wo naam se likh deta hai.
+                craft_text = craft_section(craft_report)
+                if craft_text:
+                    parts.append(craft_text)
+                # #141 — aur uske TURANT baad SONG LAB: app ne khud us gaane ko
+                # chaar alag naap se test kiya, kaunsi line kis naapi hui wajah
+                # se hataayi (ya kyun NAHI hataayi ja saki), aur hataane ke baad
+                # poore draft ki naap dobara chali. Ye craft ke dhaanche wale
+                # naap ki jagah nahi leta — craft "kya bana" batata hai, SONG LAB
+                # "usko khud test karke kya nikla" batata hai. Gaane ke alawa
+                # kisi farmaish par yahan kuch chhapta hi nahi.
+                songlab_text = songlab_section(craft_report)
+                if songlab_text:
+                    parts.append(songlab_text)
+                # #133 — MEDIA: user ke video/audio ke likhit transcript me se
+                # kya padha gaya, har line ke saath samay/locator. Ye craft ke
+                # block ki jagah nahi leta — wo kitaab/paper se aata hai, ye
+                # media se. Media na padha ho to yahan kuch chhapta hi nahi.
+                # #133b se ek aur haalat aayi: media sirf DHOONDHA gaya ho (uska
+                # transcript mila hi na ho) to bhi block chhapta hai, par saaf
+                # likha hota hai ki wo dekha/suna nahi gaya.
+                media_text = media_section(media_report)
+                if media_text:
+                    parts.append(media_text)
+                # #134 — SUNNE WALE ka hissa: bhaav kaise kaam karta hai, log
+                # kyun judte hain, yaad/dohraav/sanskriti ka role — sirf wahi
+                # baat jo padhi gayi research me mili, har line ke saath
+                # [source_id]. Ye craft/media block ki jagah nahi leta aur unki
+                # ginti me nahi ghulta (warna "hunar padha" aur "dil samjha" ek
+                # dikhne lagte, jo jhooth hai). Ye block "log aisa mehsoos
+                # karenge" ka vaada nahi karta — vaada karne wali line to yahan
+                # se hata di jaati hai aur uski ginti audit me chhapti hai.
+                # Gaane ki farmaish na ho to yahan kuch chhapta hi nahi.
+                listener_text = listener_section(listener_report)
+                if listener_text:
+                    parts.append(listener_text)
+                # #140 — aur uske SAATH music direction ke peeche padhi hui
+                # research: kaunsi chaal/scale/vaadya/aawaz/arrangement kis
+                # bhaav ke saath jodi jaati hai, har baat apne [source_id] ke
+                # saath. Ye songcraft ke "chaar khaane likhe gaye" naap ki jagah
+                # nahi leta aur listener/craft ki ginti me nahi ghulta. Isme
+                # source ka BPM/key sirf SOURCE-REPORTED likha jaata hai — app
+                # khud koi number tay nahi karta, aur dhun banti hi nahi.
+                music_text = music_section(music_report)
+                if music_text:
+                    parts.append(music_text)
+                # #149 — BHAAV KI SHABDAWALI: mood ke kaunse naye shabd PADHI
+                # HUI source se seekhe gaye (har shabd ke saath source id), aur
+                # kitni jodiyaan kis naapi hui wajah se chhod di gayi. Ye
+                # listener/music block ki jagah nahi leta: wo "bhaav kaise kaam
+                # karta hai" batate hain, ye sirf "kaunsa shabd kis bhaav ka
+                # ishaara hai" batata hai. Do saaf sach yahin likhe jaate hain —
+                # shabd mil jaana feeling ka saboot nahi, aur seekha hua shabd
+                # kisi likhi hui line ko HATA nahi sakta. Kuch seekha na gaya ho
+                # to yahan kuch chhapta hi nahi.
+                mood_text = mood_section(craft_report)
+                if mood_text:
+                    parts.append(mood_text)
+                # #171e — EXAM LAB: agar is run me paper/plan banaya gaya tha to
+                # app ne usko KHUD naapa (syllabus coverage, difficulty ka mix,
+                # ek jaise sawaal, ginti wale sawaal ka chalna, plan ka time
+                # budget). Ye LAB block ki jagah nahi leta — wo hypothesis ka
+                # test hai, ye BANE HUE paper/plan ka. Aur ye "asli exam jaisa
+                # hai" kabhi nahi kehta: har verdict ke saath likha hota hai ki
+                # paper practice ke liye hai aur difficulty ka naap proxy hai.
+                # Exam/padhai ki farmaish na ho to yahan kuch chhapta hi nahi.
+                exam_lab_text = exam_lab_section(exam_lab_report)
+                if exam_lab_text:
+                    parts.append(exam_lab_text)
+                # #178e — FARMAISH ka contract ledger. Ye upar ke dono LAB block
+                # se ALAG cheez hai aur unki jagah nahi le sakta:
+                #   * `lab_report_section` = app ki HYPOTHESIS ka test,
+                #   * `exam_lab_section`   = BANE HUE paper/plan ka test,
+                #   * ye do              = JO MAANGA GAYA THA usme se kya-kya
+                #                          asli me likha aur naapa gaya.
+                # Teeno ko ek jagah ghol dene se "app ne khud test paas kar
+                # liya" aur "farmaish ka aadha hissa naapa hi nahi gaya" ek
+                # jaise dikhne lagte — isliye heading, shabd aur ginti alag
+                # rakhi gayi hain (heading module ke andar se aati hai, yahan
+                # se nahi). Dono ledger khud band ho jaate hain: exam ki
+                # farmaish na ho to `exammodel.gate` `not_asked` deta hai aur
+                # `section_lines` khaali list — matlab gaane ya science ke
+                # jawab me yahan se ek shabd bhi nahi chhapta. Isse ulta bhi
+                # sach hai: exam/trading maanga gaya ho to buri khabar (NOT
+                # MET / naapa nahi gaya) SABSE PEHLE chhapti hai.
+                exam_contract_text = _contract_block(
+                    exam_contract_lines(exam_contract_report))
+                if exam_contract_text:
+                    parts.append(exam_contract_text)
+                trade_contract_text = _contract_block(
+                    trade_contract_lines(trade_contract_report))
+                if trade_contract_text:
+                    parts.append(trade_contract_text)
             elif index == 9:
                 engine_text = self._sources_section(pack, honesty)
                 parts.append(engine_text)
@@ -1499,7 +2193,16 @@ Ab jawab likho:"""
                     technical_details=technical_details,
                     api_accounting=api_accounting,
                     claim_checks=claim_checks,
-                    missing_sections=missing_sections)
+                    missing_sections=missing_sections,
+                    lab_report=lab_report,
+                    reject_report=reject_report,
+                    craft_report=craft_report,
+                    media_report=media_report,
+                    listener_report=listener_report,
+                    music_report=music_report,
+                    exam_lab_report=exam_lab_report,
+                    exam_contract_report=exam_contract_report,
+                    trade_contract_report=trade_contract_report)
                 parts.append(engine_text)
             else:
                 if index == 1:
@@ -1536,20 +2239,50 @@ Ab jawab likho:"""
         # CHUP-CHAAP GAYAB ho jaata — aur "content kabhi delete nahi hota" is
         # project ka pakka niyam hai. Isliye anchor wo section hai jo SACH MEIN
         # chhap raha hai (uske aas-paas ka sabse kareebi).
-        printed = sorted(bodies)
+        printed = [i for i in EMIT_ORDER if i in bodies]
         first = printed[0] if printed else 0
-        extras_after = max([i for i in printed if i <= 2], default=first)
-        leftover_after = max([i for i in printed if i <= 8], default=extras_after)
+        slot = {index: place for place, index in enumerate(EMIT_ORDER)}
+
+        def _last_printed(candidates) -> int:
+            available = [i for i in printed if i in candidates]
+            return max(available, key=lambda i: slot[i]) if available else first
+
+        extras_after = _last_printed({0, 1, 2})
+        # Leftover text main answer ke hisse mein rehna chahiye — LAB (5) ke baad
+        # nahi, warna model ka text app ki apni soch jaisa dikhne lagta hai.
+        leftover_after = _last_printed({0, 1, 2, 3, 4, 7, 8})
+        # §17 + §12 — calculation block counter-evidence ke BAAD aur Unknowns se
+        # PEHLE, ek fixed jagah par. Wajah: hisaab evidence ka hissa hai, app ki
+        # apni soch ka nahi. Aur ye section KABHI gayab nahi hota (neeche dekho).
+        calc_block = self._calculation_section(calculations)
+        if not str(calc_block).strip():
+            calc_block = self._no_calculation_note(pack, ledger, requests)
+        calc_done = False
 
         out: List[str] = []
-        for index, title in enumerate(SECTION_TITLES):
+        for index in EMIT_ORDER:
+            # §12 — Calculations ki jagah fixed hai aur ye HAMESHA chhapta hai.
+            # Pehle hisaab na banne par poora section gayab ho jaata tha, aur
+            # gayab section se user ko pata hi nahi chalta tha ki hisaab hua tha
+            # ya nahi — wahi chup-chaap gayab hona pichhli baar jhooth ban gaya.
+            if index == 7 and not calc_done:
+                out.append(f"## {CALC_HEADING}")
+                out.append(calc_block)
+                calc_done = True
             if index not in bodies:
                 continue
+            title = SECTION_TITLES[index]
             out.append(f"## {title}")
             if index == 0:
                 banner = self._status_banner(pack, ledger, status, missing_sections)
                 if banner:
                     out.append(banner)
+            # §12/§13 — APP ORIGINAL RESEARCH LAB ke sar par warning, section ke
+            # content se PEHLE. Ye hissa report ka sabse galat-samajha jaane wala
+            # hissa tha: app ki hypotheses established evidence jaisi padhi ja
+            # rahi thin.
+            if index == 5:
+                out.append(LAB_WARNING)
             out.extend(bodies[index])
 
             # Explicitly maangi hui extra sections — "Ye kyun hota hai?" ke turant
@@ -1568,6 +2301,10 @@ Ab jawab likho:"""
             if index == leftover_after and leftover:
                 out.append("## Extra notes (model se, canonical sections ke bahar)")
                 out.append(leftover)
+
+        if not calc_done:                      # defensive: EMIT_ORDER badal jaaye
+            out.append(f"## {CALC_HEADING}")
+            out.append(calc_block)
 
         # Caller (orchestrator) ko bhi chahiye — API/UI mein `missing_sections`
         # structured roop mein jaata hai, taaki frontend ko text parse na karna pade.
@@ -1602,9 +2339,8 @@ Ab jawab likho:"""
                 continue
             head = f"**[{source.source_id}] {source.title or source.url}**"
             lines.append(f"{head}  \n{text[:300]}{'…' if len(text) > 300 else ''}  \n"
-                         f"_{self._ACCESS_WORDS.get(source.reading_level(), source.reading_level())}_")
+                         f"_{source.access_depth_note()}_")
         lines.append("")
         lines.append("Inhe jodkar koi conclusion humne nahi nikala — wo kaam reasoning "
                      "pass ka tha, jo is baar poora nahi hua.")
         return "\n\n".join(lines)
-

@@ -31,6 +31,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import gemini_reasoning                  # noqa: E402
+from research_engine.answer_order import (LAB_HEADING,        # noqa: E402
+                                          display_heading)
+from research_engine.consensus_gate import evaluate as consensus_evaluate  # noqa: E402
+from research_engine.consensus_gate import opposition_in_queries  # noqa: E402
+from research_engine.models import EvidencePack                # noqa: E402
 from research_engine.models import SourceRecord, SourceType    # noqa: E402
 from research_engine.orchestrator import DeepResearchEngine    # noqa: E402
 
@@ -473,10 +478,19 @@ def test_top_source_is_a_superconductivity_paper():
 
 def _source_blocks(answer: str) -> list:
     """Report ke 'Sources' section ke blocks — (url, 'kitna padha' wali line)."""
-    start = _heading_pos(answer, "## Sources")
-    end = _heading_pos(answer, "## Research quality / technical audit")
+    # §12 (2026-08-22) — Sources ab AAKHRI section hai (pehle uske baad audit
+    # aata tha). Isliye slice ka end audit nahi, report ka ant hai; heading ke
+    # naam bhi `answer_order` se aate hain taaki wording badalne par ye helper
+    # chup-chaap khaali list na de.
+    start = _heading_pos(answer, f"## {display_heading('sources')}")
+    if start < 0:
+        return []
+    tail = answer[start:]
+    dev = tail.find("### Technical details")
+    if dev > 0:
+        tail = tail[:dev]
     out = []
-    for block in answer[start:end].split("**[S")[1:]:
+    for block in tail.split("**[S")[1:]:
         lines = block.splitlines()
         url = next((l.strip() for l in lines if l.strip().startswith("http")), "")
         read = next((l for l in lines if "Kitna padha gaya" in l), "")
@@ -494,12 +508,20 @@ def test_read_levels_are_honest():
     claimed = set()
     for url, read in blocks:
         check(f"access depth likha hua hai: {url[:44]}", bool(read), url)
-        if "FULL-TEXT VERIFIED" in read:
+        # §9 (2026-08-22): "FULL-TEXT VERIFIED" label band ho gaya — wo ek label
+        # do baaton ko mila deta tha ("text mila" + "claim verify hua"). Ab poora
+        # text milne par label "FULL TEXT ACCESSED" hota hai, aur verification ek
+        # alag field hai (claim_verification). Benchmark ka intent wahi hai:
+        # full-text ka dava sirf unhi URLs par ho jinka text sach mein mila.
+        if "FULL TEXT ACCESSED" in read:
             claimed.add(url)
         else:
             check(f"full-text ke bajaye asli depth likhi hai: {url[:44]}",
-                  any(word in read for word in ("SNIPPET ONLY", "ABSTRACT REVIEWED",
+                  any(word in read for word in ("SNIPPET ONLY", "ABSTRACT ONLY",
+                                                "RELEVANT SECTIONS REVIEWED",
                                                 "METADATA ONLY")), read)
+        check(f"purana jhootha label wapas nahi aaya: {url[:44]}",
+              "FULL-TEXT VERIFIED" not in read, read)
     eq("full-text ka dava bilkul unhi URLs par hai jinka text mila",
        claimed, {u for u, _ in blocks} & FULL_TEXT_URLS)
     levels = result["coverage"]["read_levels"]
@@ -556,22 +578,48 @@ def test_status_is_honest_both_ways():
 # ── 6. consensus gate ───────────────────────────────────────────────────────
 def test_consensus_needs_both_sides():
     print("\n6. consensus — sirf support-side evidence se sehmati nahi banti")
-    # QUICK mode: ek hi round chalta hai, aur us round mein criticism wali query
-    # nahi jaati — yaani opposition side dekha hi nahi gaya. Aisi haalat mein
-    # "sab sehmat hain" likhna wahi bug tha jo live run mein aaya tha.
+    # §5/§10 (2026-08-22): pehle is test ka premise tha "QUICK mode mein
+    # criticism-side query jaati hi nahi, isliye gate consensus refuse karta
+    # hai". Wo engine ki KAMI thi — counter-search mode par nirbhar nahi honi
+    # chahiye. Ab evidence_axes ka `replication`/`counter_evidence` axis QUICK
+    # mode mein bhi apni query bhejta hai, isliye:
+    #   • pipeline se ye check hota hai ki counter-side search SACH mein chali,
+    #   • aur gate ka purana refusal ab seedha unit level par check hota hai
+    #     (opposition_searched=False par consensus allowed nahi).
     result, disc, _ = _run(SUPPORT_ONLY, mode="QUICK")
     answer = result["answer"]
-    queries = " ".join(q for _, qs in disc.calls for q in qs).lower()
-    check("is run mein sach mein ek bhi criticism-side query nahi chali",
-          "criticism" not in queries and "contradictory" not in queries,
-          queries[:200])
-    check("isliye report saaf kehti hai: consensus evaluate nahi kiya ja saka",
-          "Consensus evaluate nahi kiya ja saka" in answer, answer[-1500:])
-    check("aur wajah bhi likhi hai — sirf support-side search hui",
-          "Sirf support-side search hui" in answer, answer[-1500:])
+    queries = [q for _, qs in disc.calls for q in qs]
+    check("QUICK mode mein bhi counter-side (replication/retraction) query chali",
+          opposition_in_queries(queries), " | ".join(queries[-3:])[:200])
+    axes = ((result.get("coverage") or {}).get("evidence_axes") or {}).get("axes") or []
+    # Axis id domain ke hisaab se badalta hai: generic list mein
+    # `counter_evidence`/`replication` hain, superconductivity ki curated list
+    # mein `replication_sc`. Isliye id ko substring se dhoondte hain, warna test
+    # sirf naam ki wajah se fail hota hai jabki search sach mein chali thi.
+    counter_rows = [a for a in axes
+                    if any(word in str(a.get("axis_id") or "")
+                           for word in ("counter", "replication"))]
+    check("counter/replication axis ka coverage record bhi maujood hai",
+          bool(counter_rows), str([a.get("axis_id") for a in axes])[:200])
+    check("us axis par query chali hui likhi hai (ittefaq nahi)",
+          any(r.get("searched") is True for r in counter_rows),
+          str([(r.get("axis_id"), r.get("searched")) for r in counter_rows]))
     check("koi jhoothi 'sab sehmat hain' line nahi",
           "sab sehmat hain" not in answer.lower()
           or "kehna galat hoga" in answer, answer[-1500:])
+
+    # Purana guarantee, sahi jagah par: counter-search hui hi na ho to gate
+    # consensus allow nahi karta — ye baat pipeline ke mood par nahi tiki.
+    gate = consensus_evaluate(EvidencePack(sources=[]), contradictions=[],
+                              contradiction_analysis_done=True,
+                              reasoning_complete=True,
+                              opposition_searched=False, queries=[])
+    # `passed`/`unmet_reasons` @property hain, method nahi.
+    check("gate: counter-search ke bina consensus allowed nahi", not gate.passed,
+          gate.note()[:200])
+    check("gate ki wajah bhi wahi hai", any("support-side" in r
+                                            for r in gate.unmet_reasons),
+          str(gate.unmet_reasons)[:200])
 
     # Doosri taraf: poore MAXIMUM run mein round 2/3 mein criticism query jaati
     # hai, isliye gate khulta hai — par tab bhi seemit bhasha ke saath.
@@ -661,7 +709,7 @@ def test_three_full_hypotheses_when_evidence_is_strong():
               "asli validation lab/field test se hi hoga"
               in str(h.get("disclaimer") or ""), str(h.get("disclaimer")))
     check("report mein bhi hypothesis section bhara hua hai",
-          "## Humari Hypotheses" in result["answer"]
+          f"## {LAB_HEADING}" in result["answer"]
           and "UNTESTED HYPOTHESIS" in result["answer"])
 
     # LLM band: jhoothi hypothesis banane se behtar hai saaf kehna, aur uski
@@ -703,17 +751,25 @@ def _order(answer: str, *headings: str) -> bool:
 
 
 def test_structure_human_first_audit_last():
-    print("\n9. structure — insaan pehle, sources aur audit sabse aakhir")
+    print("\n9. structure — insaan pehle, audit aur Sources sabse aakhir")
     ok, _, _ = _run(ALL_ROUNDS)
     answer = ok["answer"]
     check("jawab seedha 'Seedha jawab' se shuru hota hai",
-          answer.lstrip().startswith("## Seedha jawab"), answer[:80])
-    check("kram: insaani sections → Sources → audit",
-          _order(answer, "## Seedha jawab", "## Research se kya pata chala?",
-                 "## Evidence kya kehta hai?", "## Final conclusion",
-                 "## Sources", "## Research quality / technical audit"),
+          answer.lstrip().startswith(f"## {display_heading('direct_answer')}"),
+          answer[:80])
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§12, 2026-08-22): pehle kram
+    # "… → Sources → audit" maanga jaata tha. §12 ka mandatory order ulta hai:
+    # aakhir mein pehle audit, PHIR Sources. Heading ke naam bhi ab
+    # `answer_order` se aate hain (dual heading ke baad literal match tootta).
+    check("kram: insaani sections → audit → Sources",
+          _order(answer, f"## {display_heading('direct_answer')}",
+                 f"## {display_heading('established_knowledge')}",
+                 f"## {display_heading('supporting_evidence')}",
+                 f"## {display_heading('conclusion')}",
+                 f"## {display_heading('audit')}",
+                 f"## {display_heading('sources')}"),
           "kram galat hai")
-    human = answer[:_heading_pos(answer, "## Sources")]
+    human = answer[:_heading_pos(answer, f"## {display_heading('audit')}")]
     for jargon in _AUDIT_JARGON:
         check(f"audit ki bhasha upar nahi ghusi: {jargon[:28]}",
               jargon not in human)
@@ -721,10 +777,24 @@ def test_structure_human_first_audit_last():
           "### Technical details" not in answer)
 
     dead, _, _ = _run(ALL_ROUNDS, mood="dead")
-    check("kharaab run mein bhi wahi kram, technical block sabse aakhir",
-          _order(dead["answer"], "## Seedha jawab", "## Final conclusion",
-                 "## Sources", "## Research quality / technical audit",
-                 "### Technical details"), "kram galat hai")
+    # §12 (2026-08-22) — developer-only block audit ke ANDAR aakhri hissa hai,
+    # aur poori report ka aakhri SECTION `## Sources` hai. Pehle ye check
+    # "… Sources → audit → Technical details" maangta tha; §12 ke baad audit
+    # Sources se pehle aata hai, isliye raw/technical cheezein bhi Sources se
+    # pehle hi rehti hain — user ka jawab niche raw dump par khatam nahi hota.
+    check("kharaab run mein bhi wahi kram, technical block audit ke andar aakhir mein",
+          _order(dead["answer"], f"## {display_heading('direct_answer')}",
+                 f"## {display_heading('conclusion')}",
+                 f"## {display_heading('audit')}",
+                 "### Technical details",
+                 f"## {display_heading('sources')}"), "kram galat hai")
+    check("aur Sources hi report ka aakhri section hai",
+          _heading_pos(dead["answer"], f"## {display_heading('sources')}")
+          == max(_heading_pos(dead["answer"], f"## {display_heading(k)}")
+                 for k in ("direct_answer", "established_knowledge",
+                           "supporting_evidence", "counterevidence",
+                           "calculations", "unknowns", "conclusion",
+                           "audit", "sources")), "Sources aakhir mein nahi hai")
     tail = dead["answer"].split("### Technical details")[1]
     check("aur raw 429 sirf usi aakhri block mein hai",
           "ResourceExhausted" in tail

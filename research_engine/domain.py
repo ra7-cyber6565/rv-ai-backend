@@ -22,6 +22,7 @@ koi network, koi nayi dependency. Free tier par chalna hai.
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Dict, List, Optional, Sequence, Set, Tuple
@@ -42,33 +43,165 @@ def stem(word: str) -> str:
     return w
 
 
-_WORD_RE = re.compile(r"[a-z0-9ऀ-ॿ][a-z0-9\-ऀ-ॿ]*")
+# ── tokenisation across scripts ──────────────────────────────────────────────
+#
+# PEHLE: `_WORD_RE = [a-z0-9ऀ-ॿ]...` — sirf English + Devanagari. Naapa gaya
+# nateeja: Bangla/Tamil/Telugu/Russian/Arabic/Chinese text par `tokens()` khaali
+# list deta tha, isliye `semantic.similarity()` 0.0 aata tha aur aisa source
+# relevance floor kabhi cross nahi kar sakta tha — chahe wo bilkul sahi ho.
+# Accented Latin bhi toot jaata tha: "méditation" → ['m', 'ditation'], yaani
+# English "meditation" se match hi nahi hota.
+#
+# AB: (1) baaki bade scripts word-character maane jaate hain, (2) Latin ke accent
+# fold ho jaate hain (é→e) — par SIRF Latin ke, kyunki Devanagari ki matra
+# (दि = द + ि) hataana shabd hi tod deta hai, (3) CJK ka koi space nahi hota
+# isliye har CJK character apna token banta hai, aur semantic.bigrams() usse
+# khud character-bigram bana leta hai.
+_LETTER_RANGES = (
+    "a-z0-9"
+    "ऀ-ॿ"      # devanagari
+    "ঀ-৿"      # bengali / assamese
+    "਀-੿"      # gurmukhi
+    "઀-૿"      # gujarati
+    "଀-୿"      # odia
+    "஀-௿"      # tamil
+    "ఀ-౿"      # telugu
+    "ಀ-೿"      # kannada
+    "ഀ-ൿ"      # malayalam
+    "඀-෿"      # sinhala
+    "Ѐ-ӿ"      # cyrillic
+    "Ͱ-Ͽ"      # greek
+    "֐-׿"      # hebrew
+    "؀-ۿ"      # arabic
+    "฀-๿"      # thai
+)
+_CJK_RANGES = (
+    "぀-ヿ"      # hiragana / katakana
+    "㐀-䶿"      # cjk ext a
+    "一-鿿"      # cjk unified
+    "가-힯"      # hangul
+)
+
+_WORD_RE = re.compile(
+    f"[{_CJK_RANGES}]|[{_LETTER_RANGES}][{_LETTER_RANGES}\\-]*"
+)
+
+
+def fold_accents(text: str) -> str:
+    """Latin accent hatao (é→e), baaki scripts ke combining marks chhodo.
+
+    Devanagari/Tamil/Arabic mein combining mark shabd ka hissa hai — usko
+    hataana matlab shabd tod dena. Isliye fold sirf tab hota hai jab base
+    character ASCII Latin ho.
+    """
+    raw = str(text or "")
+    if raw.isascii():
+        return raw
+    out: List[str] = []
+    base_is_latin = False
+    for ch in unicodedata.normalize("NFKD", raw):
+        if unicodedata.combining(ch):
+            if base_is_latin:
+                continue
+            out.append(ch)
+            continue
+        base_is_latin = "a" <= ch.lower() <= "z"
+        out.append(ch)
+    return unicodedata.normalize("NFC", "".join(out))
 
 
 def tokens(text: str) -> List[str]:
-    return _WORD_RE.findall((text or "").lower())
+    return _WORD_RE.findall(fold_accents(text).lower())
 
 
-def stems(text: str) -> Set[str]:
+class StemBag(set):
+    """Stem-set + un stems ka KRAM (sequence).
+
+    Kyun zaroori hai (naapa gaya 2026-08-24): `phrase_hit` sirf set-membership
+    dekhta tha, yaani multi-word anchor ke shabd text me KAHIN BHI ho to hit
+    maan liya jaata tha. Chhote title/snippet par ye theek chalta hai (60 token
+    ke andar do shabd asal me paas-paas hi hote hain), par lambe text par ye
+    provably jhooth bolta hai: intel ke 1617-token wale sawaal me
+    "theories of language" aur "causal model" alag-alag jagah the, aur cs_ml ka
+    anchor "language model" HIT ho gaya — usi ek jhoothe hit se poora sawaal
+    "computer science / machine learning" (strict) ban gaya aur 15 me se 13
+    sahi sources HARD REJECT ho gaye.
+
+    Isliye `stems()` ab set ke saath token-kram bhi laata hai, aur `phrase_hit`
+    lambe text par paas-paas hone ki shart lagata hai. Chhote text par purana
+    behaviour bilkul waisa hi rehta hai (regression 0), aur jo caller apna
+    saada `set` deta hai uska raasta bhi nahi badalta.
+    """
+
+    __slots__ = ("seq",)
+
+    def __init__(self, values: Sequence[str] = (), seq: Sequence[str] = ()):
+        super().__init__(values)
+        self.seq: Tuple[str, ...] = tuple(seq)
+
+
+# Itne token tak set-membership aur paas-paas hona practically ek hi baat hai;
+# is se bade text par hi proximity ki shart lagti hai. Ye chhat hi purane
+# measured benchmarks (superconductivity 156, cross-domain 649) ko hilne se
+# rokti hai — unke sawaal aur sources isse chhote hain.
+_PROXIMITY_MIN_TOKENS = 80
+# Do shabd ke anchor ke liye ±5 token ki dhheel — "temperature at which the
+# critical transition" jaisa asli likhawat pakda rahe, par 900 token door ka
+# ittefaq na chale.
+_PROXIMITY_SLACK = 3
+
+
+def stems(text: str) -> "StemBag":
     out: Set[str] = set()
+    seq: List[str] = []
     for tok in tokens(text):
-        out.add(stem(tok))
+        root = stem(tok)
+        out.add(root)
+        seq.append(root)
         if "-" in tok:                      # "room-temperature" → room, temperature
             for part in tok.split("-"):
                 if len(part) > 2:
-                    out.add(stem(part))
-    return out
+                    piece = stem(part)
+                    out.add(piece)
+                    seq.append(piece)
+    return StemBag(out, seq)
+
+
+def _parts_near(parts: Sequence[str], seq: Sequence[str]) -> bool:
+    """Kya `parts` ke saare stem ek chhoti window ke andar aate hain?"""
+    window = len(parts) + _PROXIMITY_SLACK
+    where: Dict[str, List[int]] = {}
+    for index, root in enumerate(seq):
+        if root in parts and len(where.setdefault(root, [])) < 64:
+            where[root].append(index)
+    if len(where) < len(set(parts)):
+        return False
+    pivot = min(where, key=lambda p: len(where[p]))
+    for index in where[pivot]:
+        low, high = index - window, index + window
+        if all(any(low <= pos <= high for pos in where[part])
+               for part in where):
+            return True
+    return False
 
 
 def phrase_hit(phrase: str, bag: Set[str]) -> bool:
     """
     Multi-word anchor ('critical temperature') tab hit hai jab uske SAARE
-    shabd source mein hon. Single word ke liye seedha lookup.
+    shabd source mein hon — aur lambe text mein PAAS-PAAS bhi hon (`StemBag`).
+    Single word ke liye seedha lookup.
     """
     parts = [stem(p) for p in phrase.split() if p]
     if not parts:
         return False
-    return all(p in bag for p in parts)
+    if not all(p in bag for p in parts):
+        return False
+    if len(set(parts)) < 2:
+        return True
+    seq = getattr(bag, "seq", ())
+    if len(seq) <= _PROXIMITY_MIN_TOKENS:
+        return True                          # chhota text — purana behaviour
+    return _parts_near(parts, seq)
 
 
 def count_hits(needles: Sequence[str], bag: Set[str]) -> int:
@@ -442,6 +575,20 @@ _SPACE_BRANCHES = (
     Branch("instrument", "instruments / missions",
            ("mission", "spacecraft", "detector", "calibration", "payload"),
            "space mission instrument calibration payload"),
+    # 2026-08-22 (§24 dark-matter acceptance): `space` profile poori tarah
+    # planetary/observational tha. Cosmology ka ek bhi raasta nahi tha, isliye
+    # dark-matter ke sawaal par Bullet Cluster ka lensing paper, CMB ka paper
+    # aur review chapter — teenon "is field ka anchor nahi mila" keh kar HARD
+    # REJECT ho rahe the, jabki ek exoplanet transit paper (planet/orbit/
+    # photometry anchors ke saath) pack mein aaram se baith jaata tha. Yaani
+    # field theek tha par vocabulary galat, aur nateeja live failure #1 hi tha:
+    # kaam ke sources bahar, kaam ke na hone waale andar.
+    Branch("cosmology", "cosmology / dark matter & energy",
+           ("dark matter", "dark energy", "cosmic microwave background",
+            "lensing", "rotation curve", "halo", "galaxy cluster",
+            "structure formation", "nucleosynthesis", "relic density"),
+           "dark matter evidence rotation curve gravitational lensing "
+           "cosmic microwave background"),
 )
 
 _ENG_BRANCHES = (
@@ -635,16 +782,34 @@ PROFILES: Tuple[DomainProfile, ...] = (
                   # paper ko koi field claim hi nahi karta tha).
                   "volatility", "option pricing", "asset", "portfolio",
                   "stock market", "interest rate", "bond yield", "financial",
-                  "derivative pricing", "black scholes"),
+                  "derivative pricing", "black scholes",
+                  # 2026-08-27 (#118): trading/quant vocabulary. Iske bina
+                  # "trading model banao" wala sawaal `generic` gir jaata tha,
+                  # yaani na econ data lane khulta tha na market series lane.
+                  # Ye ROUTING vocabulary hai — kya sach hai wo evidence tay
+                  # karti hai, ye list nahi.
+                  "trading", "backtest", "back test", "sharpe", "drawdown",
+                  "moving average", "candlestick", "equity curve", "hedge",
+                  "futures", "commodity", "forex", "exchange rate", "nifty",
+                  "sensex", "nasdaq", "index fund", "mutual fund", "sip",
+                  "cpi", "wpi", "repo rate", "yield curve", "recession"),
         anchors=("gdp", "inflation", "price", "pricing", "market", "growth",
                  "income", "employment", "unemployment", "wage",
                  "minimum wage", "elasticity", "labour", "labor", "firm",
                  "poverty", "inequality", "tax", "subsidy", "investment",
                  "trade", "difference in differences", "cost", "volatility",
-                 "asset", "portfolio", "interest rate", "option"),
+                 "asset", "portfolio", "interest rate", "option",
+                 # trading side ke anchor — scoring ko in par bhi tikna chahiye
+                 "trading", "backtest", "returns", "sharpe", "drawdown",
+                 "exchange rate", "index", "yield"),
         branches=_ECON_BRANCHES,
         connectors=("openalex", "crossref", "semantic_scholar") + ECON_DATA + BOOKS,
-        avoid_connectors=("arxiv", "pubmed", "who_gho"),
+        # arXiv is baar HATAYA NAHI gaya list se sirf shauk ke liye: quantitative
+        # finance ka poora q-fin section arXiv par hi rehta hai (aur wahi jagah
+        # hai jahan backtest/volatility ke asli paper milte hain). Purana rule
+        # "econ me arxiv band" ek naap ke saath galat tha: "trading model" ke
+        # sawaal par sabse kaam ke preprint hi chhant jaate the.
+        avoid_connectors=("pubmed", "who_gho"),
         strict=True,
         shared_anchors=("price", "market", "growth", "cost", "firm", "trade",
                         "wage", "investment"),
@@ -665,14 +830,30 @@ PROFILES: Tuple[DomainProfile, ...] = (
         key="space",
         label="astronomy / space science",
         triggers=("galaxy", "planet", "telescope", "orbit", "cosmology",
-                  "spacecraft", "exoplanet", "black hole", "supernova"),
+                  "spacecraft", "exoplanet", "black hole", "supernova",
+                  # cosmology ka subject bhi trigger hai — sirf multi-word
+                  # phrase, taaki "cluster"/"halo" jaise aam shabd doosre
+                  # field ke sawaal ko yahan na kheench lein.
+                  "dark matter", "dark energy", "gravitational lensing",
+                  "rotation curve", "cosmic microwave background"),
         anchors=("galaxy", "star", "planet", "orbit", "telescope", "redshift",
-                 "cosmic", "spectrum", "luminosity", "mission"),
+                 "cosmic", "spectrum", "luminosity", "mission",
+                 # cosmology / dark-matter vocabulary
+                 "dark matter", "dark energy", "lensing", "halo",
+                 "rotation curve", "cosmic microwave background",
+                 "galaxy cluster", "baryon", "kpc", "mpc", "nucleosynthesis"),
         branches=_SPACE_BRANCHES,
         connectors=("arxiv", "openalex", "semantic_scholar", "crossref") + BOOKS,
         avoid_connectors=("who_gho", "pubmed", "world_bank"),
         strict=True,
-        shared_anchors=("mission", "spectrum"),
+        # "dark matter" ko SHARED rakha gaya hai: ye phrase doosre field bhi
+        # metaphor ki tarah use karte hain ("the dark matter of the genome",
+        # "dark matter of the internet"). Isliye akele is phrase par space ka
+        # source nahi maana jaata — rule 2 (sirf shared anchor + rival field ki
+        # poori vocabulary) us jaal ko wahin reject kar deta hai, aur asli
+        # cosmology paper ke paas lensing/halo/kpc/CMB jaise apne anchor hote
+        # hain.
+        shared_anchors=("mission", "spectrum", "dark matter", "halo"),
     ),
     # ── 2026-08-21: do naye profiles. Cross-domain benchmark mein engineering
     # aur archaeology ke sawaal `generic` par gir rahe the (confidence 0,

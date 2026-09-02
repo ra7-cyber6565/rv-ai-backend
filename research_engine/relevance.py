@@ -13,6 +13,8 @@ Ye sab free/offline hai — koi API call nahi.
 """
 from __future__ import annotations
 
+import dataclasses
+import re
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
@@ -20,7 +22,10 @@ from .dedup import DeduplicationEngine
 from .models import SourceRecord, SourceType
 from .quality_signals import STRONG_METHODOLOGY, WEAK_METHODOLOGY, enrich_record
 from .query_builder import topic_terms
+from .query_builder import is_generic_word as _is_generic_word
 from . import domain as domain_mod
+from . import evidence_axes as axes_mod
+from . import facets as facets_mod
 from . import semantic
 from .source_kind import classify as classify_kind
 
@@ -79,6 +84,149 @@ def _hits(terms: List[str], text: str) -> int:
     return sum(1 for t in terms if _stem(t) in low)
 
 
+# Sawaal ka shabd aur source ka shabd ek hi cheez ke do roop hote hain:
+# "hermeticism" vs "hermetic", "neuroplasticity" vs "neuroplastic",
+# "investigation" vs "investigated". Substring match ek taraf chalta hai
+# (chhota shabd bade text me), isliye lambe term ka SUFFIX kaat kar uski jad
+# nikaali jaati hai. Jad kam se kam 6 akshar ki rakhi gayi hai taaki
+# "information" se "inform" jaisa dhilaa match na bane, aur ye SIRF facet
+# matching me use hoti hai — purana global lexical/semantic scoring bilkul
+# waisa hi rehta hai, isliye purane benchmark hil nahi sakte.
+_ROOT_SUFFIXES = ("ically", "ations", "ation", "ities", "ical", "ism", "ist",
+                  "ity", "ness", "ance", "ence", "ment", "tion", "sion",
+                  "ing", "ers", "er", "ed", "al", "ic")
+_ROOT_MIN = 6
+
+
+def _root(term: str) -> str:
+    low = (term or "").lower()
+    if len(low) < _ROOT_MIN + 2:
+        return ""
+    for suffix in _ROOT_SUFFIXES:
+        if low.endswith(suffix) and len(low) - len(suffix) >= _ROOT_MIN:
+            return low[: len(low) - len(suffix)]
+    return ""
+
+
+# ── §6 (2026-08-22): "topic ke aas-paas" vs "sawaal ko test karta hai" ──────
+#
+# Live dark-matter run ki jad: relevance ek hi number tha. 0.43 average par 18
+# sources aaye, aur report ne unhe "evidence" maan liya — jabki unme se kai
+# sirf usi field ke the, sawaal ki BAAT unme kahin nahi thi (TESS/Swift/WISE
+# ke instrument papers). Ek number se ye farak nahi dikh sakta, isliye ab har
+# source par das alag dimension par check hota hai aur pura record bachta hai.
+#
+# Har dimension teen haalat mein ho sakta hai — ye tri-state jaan-boojh kar hai:
+#   True  = check chala aur mila
+#   False = check chala aur NAHI mila
+#   None  = check chalaya hi nahi ja sakta (jaise snippet hi nahi hai)
+# "Snippet nahi tha" ko "sawaal ko test nahi karta" likhna wahi jhooth hai jise
+# ye module rokta hai.
+PROP_DIMENSIONS = (
+    "entities", "mechanism", "observable", "population", "method",
+    "required_axis", "abstract_conclusion", "title", "domain",
+)
+PROP_DIMENSION_WHY = {
+    "entities": "sawaal ne jin cheezon ka naam liya, wo is source mein hain ya nahi",
+    "mechanism": "'kaise/kyun hota hai' ki baat hai ya sirf nateeja likha hai",
+    "observable": "koi naapi hui raashi (number + unit) maujood hai ya nahi",
+    "population": "kis par study hui — patients/samples/galaxies/sheher",
+    "method": "kaam ka tareeka (trial, cohort, simulation, survey) likha hai ya nahi",
+    "required_axis": "saboot ke kis raaste par ye source kaam karta hai",
+    "abstract_conclusion": "abstract/snippet mein asli nateeja likha hai ya sirf shirshak",
+    "title": "shirshak khud sawaal ke topic ki baat karta hai ya nahi",
+    "domain": "field ka faisla — ye source usi field ka hai jiska sawaal hai",
+}
+
+# §6 ki list mein DAS cheezein hain. Upar ke nau alag-alag naapi jaati hain;
+# daswi ("whether source actually tests the requested proposition") un nau se
+# banti hai par usko ek ALAG faisla ke roop mein rakha gaya hai — `tests_
+# proposition`. Isliye niche wali checklist poore das naam deti hai: audit aur
+# report isi se ginti karte hain, taaki "nau dekhe, das likha" jaisa farak
+# kabhi na dikhe. Daswi ko dimensions ki `passed/failed` list mein NAHI mila
+# rahe — wo derived hai, aur derived cheez ko naya saboot ginna do baar ginna
+# hota hai.
+PROP_VERDICT_CHECK = "tests_proposition"
+PROP_CHECKLIST = PROP_DIMENSIONS + (PROP_VERDICT_CHECK,)
+PROP_CHECK_WHY = dict(PROP_DIMENSION_WHY)
+PROP_CHECK_WHY[PROP_VERDICT_CHECK] = (
+    "aakhri faisla — ye source sawaal ki BAAT (proposition) sach mein test "
+    "karta hai ya sirf usi topic ke aas-paas ka document hai")
+
+# Structured reject codes — report/audit inhi codes se ginti karta hai, free-text
+# se nahi (free-text har baar badal jaata hai aur count karna namumkin ho jaata).
+REJECT_DOMAIN_MISMATCH = "DOMAIN_MISMATCH"
+REJECT_LONE_KEYWORD = "LONE_KEYWORD"
+REJECT_NO_PROPOSITION = "NO_PROPOSITION_TEST"
+# §24 (2026-08-22) — dark-matter acceptance run se nikle do naye code.
+REJECT_SUBJECT_MISSING = "SUBJECT_MISSING"
+REJECT_NO_DATA_WEB = "NO_DATA_WEB"
+REJECT_CODES = (REJECT_DOMAIN_MISMATCH, REJECT_LONE_KEYWORD,
+                REJECT_NO_PROPOSITION, REJECT_SUBJECT_MISSING,
+                REJECT_NO_DATA_WEB)
+REJECT_CODE_WHY = {
+    REJECT_DOMAIN_MISMATCH: "source kisi doosre field ka hai (domain.py ka faisla)",
+    REJECT_LONE_KEYWORD: "poore sawaal me se sirf ek generic shabd match hua, "
+                         "koi sub-topic nahi",
+    REJECT_NO_PROPOSITION: "field to sahi hai, par ye source sawaal ki baat "
+                           "test nahi karta (koi entity/nateeja/naap nahi)",
+    REJECT_SUBJECT_MISSING: "field to sahi hai par sawaal ka ASLI subject is "
+                            "source mein kahin nahi hai, aur ye sawaal ki baat "
+                            "test bhi nahi karta",
+    REJECT_NO_DATA_WEB: "non-peer-reviewed web page, koi naap/number nahi, aur "
+                        "sawaal ki baat bhi test nahi karta — ye evidence nahi hai",
+}
+
+_MECHANISM_WORDS = (
+    "mechanism", "because", "due to", "driven by", "caused by", "causal",
+    "pathway", "explain", "explanation", "why ", "underlying", "mediat",
+    "responsible for", "leads to", "gives rise", "origin of", "theoretical",
+    "model predicts", "arises from",
+)
+_POPULATION_WORDS = (
+    "patient", "participant", "subject", "cohort", "sample", "specimen",
+    "respondent", "household", "firm", "student", "volunteer", "n =", "n=",
+    "galaxi", "galaxy", "cluster", "star", "cities", "city", "district",
+    "population", "dataset of", "survey of", "cases", "animals", "mice",
+    "cell line", "wafer", "batch", "site", "region",
+)
+_METHOD_WORDS = (
+    "randomi", "double blind", "placebo", "cohort", "case-control",
+    "cross-sectional", "longitudinal", "meta-analysis", "systematic review",
+    "simulation", "monte carlo", "finite element", "regression", "instrumental "
+    "variable", "difference-in-differences", "ab initio", "density functional",
+    "four-probe", "four probe", "spectroscopy", "diffraction", "microscopy",
+    "interview", "ethnograph", "excavation", "radiocarbon", "benchmark",
+    "ablation", "protocol", "methodology", "we measure", "we simulate",
+    "experiment", "trial", "observation campaign", "telescope", "assay",
+)
+_CONCLUSION_WORDS = (
+    "we find", "we show", "we report", "we observe", "we conclude", "results show",
+    "results indicate", "findings", "conclusion", "conclude", "suggests",
+    "suggest that", "demonstrate", "evidence for", "evidence that", "no effect",
+    "null result", "significant", "not significant", "consistent with",
+    "inconsistent with", "rules out", "constrain", "increase", "decrease",
+    "reduction", "improvement", "correlat", "associat",
+)
+# Number + unit / percentage / scientific notation — "koi naap hui cheez".
+_MEASURE_RE = re.compile(
+    r"(?<![a-z0-9])\d+(?:[.,]\d+)?\s?"
+    r"(?:%|percent|k\b|kelvin|°c|celsius|gpa|mpa|tesla|gauss|ev\b|kev|mev|gev|tev|"
+    r"nm\b|µm|um\b|mm\b|cm\b|km\b|kg\b|mg\b|ml\b|litre|liter|hz\b|khz|mhz|ghz|"
+    r"years?\b|months?\b|days?\b|hours?\b|kwh|mwh|gw\b|mw\b|kw\b|wh/kg|mah|"
+    r"m/s|km/s|kpc|mpc|gyr|myr|msun|m_sun|sigma|σ|fold|times|x\b)",
+    re.IGNORECASE)
+_STAT_RE = re.compile(
+    r"(p\s?[<=>]\s?0?\.\d+|95\s?%\s?ci|confidence interval|odds ratio|"
+    r"hazard ratio|relative risk|r\^?2\s?=|std\.? dev|standard deviation|"
+    r"\d+\s?±\s?\d+|\be\s?[-+]\s?\d+\b)", re.IGNORECASE)
+
+
+def _any_in(words: Tuple[str, ...], text: str) -> List[str]:
+    low = text or ""
+    return [w for w in words if w in low]
+
+
 class RelevanceEngine:
     def __init__(self, dedup: Optional[DeduplicationEngine] = None):
         self.dedup = dedup or DeduplicationEngine()
@@ -86,6 +234,49 @@ class RelevanceEngine:
         self.last_filter: Dict = {}
         self._topic_cache: Dict[str, List[str]] = {}
         self._domain_cache: Dict[str, object] = {}
+        # sawaal ke hisse (facets) — bounded cache, poori tarah deterministic
+        self._facet_cache: Dict[str, Tuple] = {}
+        # Cross-lingual scoring anchor (2026-08-23). Khaali = purana behaviour.
+        self.scoring_anchor: str = ""
+
+    # ── cross-lingual scoring anchor ─────────────────────────────────────────
+    #
+    # Naapa hua bug: `rank()` ko RAW user question milta hai
+    # (orchestrator.py se), aur poori scoring `semantic.similarity()` →
+    # `domain.tokens()` par chalti hai, yaani literal token overlap. Isliye
+    # Hinglish/Hindi sawaal par perfect English paper ka score gir jaata tha —
+    # naapa gaya: 'dimag tej kaise kare' par teen bilkul sahi English papers me
+    # se pehle ka score 0.0 aur ek chhoot gaya, jabki English phrasing par
+    # teeno 0.19–0.79 par rehte hain.
+    #
+    # Fix: sirf SCORING ke liye sawaal me lens/glossary se nikli English
+    # vocabulary jod dete hain (`research_engine.lenses.scoring_query`).
+    # Do baatein jaan-boojh kar aisi hain:
+    #   1. User ka asli sawaal kabhi replace nahi hota — sirf uske saath jodte
+    #      hain, taaki jo shabd usne khud likhe wo bhi count hote rahein.
+    #   2. Anchor khaali ho (pure English sawaal, ya lens ne kuch na diya) to
+    #      expanded query == original query, yaani ye change provably NO-OP hai.
+    #      Isi wajah se purane English benchmarks hil nahi sakte.
+    def set_scoring_anchor(self, anchor: str) -> None:
+        clean = re.sub(r"\s+", " ", str(anchor or "")).strip()[:240]
+        if clean == self.scoring_anchor:
+            return
+        self.scoring_anchor = clean
+        self._topic_cache.clear()
+        self._domain_cache.clear()
+        self._facet_cache.clear()
+
+    def expanded_query(self, query: str) -> str:
+        """Scoring ke liye query + English anchor. Anchor bina = bilkul same."""
+        raw = query or ""
+        anchor = self.scoring_anchor
+        if not anchor:
+            return raw
+        if not raw.strip():
+            return anchor
+        if anchor.casefold() in raw.casefold():
+            return raw
+        return f"{raw} {anchor}"
 
     # ── topic terms (query_builder se, ek hi jagah se) ───────────────────────
     def topic_of(self, query: str) -> List[str]:
@@ -96,6 +287,7 @@ class RelevanceEngine:
         dhoondein aur relevance kisi aur list se naapein, to jo mila usko "sahi
         hai" kehne ka koi aadhar nahi bachta.
         """
+        query = self.expanded_query(query)
         key = (query or "")[:600]
         cached = self._topic_cache.get(key)
         if cached is None:
@@ -112,6 +304,7 @@ class RelevanceEngine:
     _WIDE_TERMS = 40
 
     def wide_topic_of(self, query: str) -> List[str]:
+        query = self.expanded_query(query)
         key = "w:" + (query or "")[:600]
         cached = self._topic_cache.get(key)
         if cached is None:
@@ -120,6 +313,141 @@ class RelevanceEngine:
                 self._topic_cache.clear()
             self._topic_cache[key] = cached
         return cached
+
+    # ── §F3 facet scoring: "ek source poore sawaal ka jawab nahi hota" ────────
+    #
+    # Naapa hua defect (2026-08-24, intel ke 1617-token Grand-Unified sawaal):
+    # `topic_of()` poore sawaal se top-8 shabd nikaalta hai, aur us sawaal ke
+    # top-8 nikle — model, consciousness, reality, theories, behaviour, human,
+    # life, attention. Yaani sirf DHAANCHA; ek bhi shabd aisa nahi jo kisi hisse
+    # ko alag karta ho (dopamine, individuation, Nash, entropy, freemasonry,
+    # remote viewing, decoherence, hedonic). Nateeja: 15 me se 11 bilkul sahi
+    # sources ka relevance 0.000.
+    #
+    # Asli baat: aisa sawaal 15-20 alag research sawaalon ka jhund hai. Dopamine
+    # ka paper poore jhund se match nahi karega — wo EK hisse ka gehra jawab
+    # hai. Isliye score do tarah se naapa jaata hai aur BEHTAR wala liya jaata
+    # hai: (a) poora sawaal (purana tarika, bilkul waisa hi), (b) sawaal ka
+    # sabse achha match karta HISSA (facets.py, deterministic, zero Gemini).
+    #
+    # Inflation na ho isliye teen pehre:
+    #   1. facets sirf lambe (60+ token) multi-hisse sawaal par bante hain —
+    #      chhote sawaal par `facets.build()` khaali deta hai, yaani ye poora
+    #      raasta provably NO-OP hai aur purane benchmarks hil nahi sakte.
+    #   2. ek facet GINA hi nahi jaata jab tak uske KAM SE KAM DO ALAG shabd
+    #      source me na milein (AND-of-two-signals) — aur wo do shabd "gate ke
+    #      layak" hone chahiye: poora shabd mila ho (root-guess nahi) aur aam
+    #      shabd na ho. Naapa gaya kyun: gearbox-vibration ka paper f15 se
+    #      ['based', 'interpretation', 'vibration'] par match ho kar 0.355 pa
+    #      gaya tha — jisme 'based' aam shabd hai aur 'interpretation' sirf
+    #      snippet ke boilerplate ("should not be interpreted") se root-guess
+    #      par mila tha. Ek hi asli shabd ('vibration') bacha, aur wo aam shabd
+    #      hai jo bilkul alag field me bhi aata hai.
+    #      Chhoot sirf ek jagah: agar facet ka koi STRONG shabd (sirf usi hisse
+    #      ka, 11+ akshar, concept-jaisa — "hermeticism", "neuroplasticity")
+    #      poora mil jaaye, to wo akela hi kaafi hai; aisa shabd ittefaq se
+    #      kisi doosre field ke source me nahi aata.
+    #   3. facet score par discount lagta hai — hissa poore sawaal ke barabar
+    #      nahi maana jaata.
+    # Aur ye lift kisi HARD REJECT ke baad nahi lagti: jo source domain gate,
+    # subject gate ya no-data gate se gir gaya, wo gira hi rehta hai.
+    _FACET_MIN_TERMS = 2
+    _FACET_DENOM = 4
+    _FACET_DISCOUNT = 0.90
+    _FACET_PHRASE_BONUS = 0.10
+
+    def facets_of(self, query: str) -> Tuple:
+        key = "fc:" + (query or "")[:600]
+        cached = self._facet_cache.get(key)
+        if cached is None:
+            cached = facets_mod.build(self.expanded_query(query))
+            if len(self._facet_cache) > 16:
+                self._facet_cache.clear()
+            self._facet_cache[key] = cached
+        return cached
+
+    @staticmethod
+    def _facet_terms_found(terms: Tuple[str, ...], text: str) -> List[str]:
+        low = (text or "").lower()
+        if not low:
+            return []
+        out: List[str] = []
+        for term in terms:
+            if _stem(term) in low:
+                out.append(term)
+                continue
+            root = _root(term)
+            if root and root in low:
+                out.append(term)
+        return out
+
+    @staticmethod
+    def _facet_exact_found(terms: Tuple[str, ...], text: str) -> List[str]:
+        """Sirf wo shabd jo POORE mile — `_root()` ka andaaza nahi.
+
+        Root-guess match ("interpretation" ← "interpreted") padhne me madad
+        karta hai, par wo saboot ke layak nahi: wahi guess research snippet ke
+        aam boilerplate se lag jaata hai.
+        """
+        low = (text or "").lower()
+        if not low:
+            return []
+        return [t for t in terms if _stem(t) in low]
+
+    def _facet_gate_ok(self, facet, exact_all: List[str]) -> bool:
+        """Kya ye hissa is source par 'mila' kehne layak hai?"""
+        solid = [t for t in exact_all
+                 if not _is_generic_word(t) and not facets_mod.is_discourse_word(t)]
+        if len(solid) >= self._FACET_MIN_TERMS:
+            return True
+        strong = set(getattr(facet, "strong", ()) or ())
+        return any(t in strong for t in exact_all)
+
+    def facet_match(self, s: SourceRecord, query: str,
+                    title: str = "", body: str = "") -> Dict:
+        """Sabse achha match karta hissa — {score, key, label, terms, ...}."""
+        pack = self.facets_of(query)
+        if not pack:
+            return {}
+        title = title or (s.title or "")
+        body = body or (s.snippet or "")
+        best: Dict = {}
+        for facet in pack:
+            in_title = self._facet_terms_found(facet.terms, title)
+            in_body = self._facet_terms_found(facet.terms, body)
+            found = {t for t in in_title} | {t for t in in_body}
+            if not found:
+                continue
+            title_exact = self._facet_exact_found(facet.terms, title)
+            exact_all = sorted(set(title_exact)
+                               | set(self._facet_exact_found(facet.terms, body)))
+            # Pehra 2: do alag SAAF shabd, ya title me ek STRONG shabd.
+            if not self._facet_gate_ok(facet, exact_all):
+                continue
+            denom = max(self._FACET_MIN_TERMS,
+                        min(len(facet.terms), self._FACET_DENOM))
+            lexical = min(1.0, (min(len(in_title) / denom, 1.0) * 0.65)
+                          + (min(len(in_body) / denom, 1.0) * 0.35))
+            focus = facet.query(limit=6)
+            sem = min(1.0, (semantic.similarity(focus, title) * 0.6)
+                      + (semantic.similarity(focus, body) * 0.4))
+            score = (lexical * 0.55) + (sem * 0.45)
+            low_all = f"{title} {body}".lower()
+            phrase_hit = next((p for p in facet.phrases
+                               if len(p.split()) >= 2 and p.lower() in low_all), "")
+            if phrase_hit:
+                score = min(1.0, score + self._FACET_PHRASE_BONUS)
+            score = round(min(max(score, 0.0), 1.0), 4)
+            if score > best.get("score", 0.0):
+                best = {"score": score, "key": facet.key, "label": facet.label,
+                        "terms": sorted(found), "matched_terms": len(found),
+                        "phrase": phrase_hit, "lexical": round(lexical, 4),
+                        "semantic": round(sem, 4), "weight": facet.weight}
+        if not best:
+            return {"score": 0.0, "key": "", "label": "", "terms": [],
+                    "matched_terms": 0, "facet_count": len(pack)}
+        best["facet_count"] = len(pack)
+        return best
 
     # ── quality (Spec Section 7) ──────────────────────────────────────────────
     def score_quality(self, s: SourceRecord) -> float:
@@ -216,11 +544,40 @@ class RelevanceEngine:
     _STRICT_FLOOR = 0.22
 
     def plan_of(self, query: str):
-        """Sawaal ka domain plan (cached) — §2/§3/§4 sab isi se poochte hain."""
-        key = (query or "")[:600]
+        """
+        Sawaal ka domain plan (cached) — §2/§3/§4 sab isi se poochte hain.
+
+        Field ka faisla INSAAN ke sawaal se hota hai, app ke banaye anchor se
+        nahi — wahi niyam jo `axes_of` par hai. Naapa hua rissav (2026-08-25):
+        anchor me doosre field ki vocabulary aa jaaye to `detect(expanded)` poora
+        field badal deta tha. Dark-matter sawaal + superconductivity wala anchor
+        par ek asli rotation-curve paper `DOMAIN_MISMATCH` par **0.7224 se 0.0**
+        gir gaya, aur superconductivity ka paper 0.5362 par bach gaya. Yaani app
+        ke apne shabd asli evidence ko bahar phenk sakte the.
+
+        Anchor sirf JOD sakta hai: agar RAW sawaal ka koi field profile match hi
+        na ho (Hindi/Devanagari sawaal) aur anchor ke saath match ho jaaye, tab
+        anchored plan liya jaata hai — #81 ka cross-lingual faayda bacha rehta
+        hai.
+
+        Us rescue me bhi plan ka `question` INSAAN ka sawaal hi rehta hai (sirf
+        field profile/focus anchor se aata hai). Wajah naapi hui hai:
+        `DomainPlan.question` aage `search_intents()` (unknown field par seedha
+        search query), `subject_anchors()` aur `anchor_phrase()` chalata hai —
+        anchored text rakhne se app ke apne contract shabd asli search query ban
+        jaate the (live `all:"har hypothesis"` / `all:"source-reported"` wali
+        family).
+        """
+        raw = query or ""
+        expanded = self.expanded_query(raw)
+        key = (expanded or "")[:600]
         plan = self._domain_cache.get(key)
         if plan is None:
-            plan = domain_mod.detect(query)
+            plan = domain_mod.detect(raw)
+            if expanded != raw and not plan.is_known:
+                anchored = domain_mod.detect(expanded)
+                if anchored.is_known:
+                    plan = dataclasses.replace(anchored, question=raw)
             if len(self._domain_cache) > 16:
                 self._domain_cache.clear()
             self._domain_cache[key] = plan
@@ -237,7 +594,177 @@ class RelevanceEngine:
         bits = list(terms)
         for b in plan.focus_branches()[:3]:
             bits.extend(b.terms[:2])
-        return " ".join(bits) if bits else (query or "")[:200]
+        return " ".join(bits) if bits else (self.expanded_query(query) or "")[:200]
+
+    def axes_of(self, query: str):
+        """
+        Sawaal ke evidence axes (cached) — §6 ka `required_axis` isse aata hai.
+
+        Axis chunaav INSAAN ke sawaal se hota hai, app ke banaye anchor se nahi.
+        Naapa hua rissav (2026-08-25, dark-matter acceptance benchmark): lens
+        anchor us prompt ki instruction-poonchh se bana tha ("har hypothesis
+        observations calculation limitations counterevidence falsification
+        confidence"). Wo anchor sawaal ke saath jud kar ek EXTRA facet bana deta
+        tha (3 -> 4), aur 4-facet par upar wali parat curated 17 dark-matter
+        axes ki jagah keyword-facet axes rakh deti hai. Nateeja: exoplanet ka
+        TESS paper `required_axis` "facet_f2 (calculation)" par ok ho gaya,
+        proposition verdict False se True hua, SUBJECT_MISSING ka hard reject
+        chala hi nahi, aur wo paper 0.000 se **0.438** par pack me ghus gaya
+        (uncited 2 -> 3). Yaani app ke apne shabd research target ban gaye.
+
+        Anchor ka asli kaam (cross-lingual scoring) bacha rehta hai: agar RAW
+        sawaal par koi field-set hi nahi milta aur anchor ke saath milta hai
+        (Hindi/Devanagari sawaal, English curated trigger), to anchor wali list
+        hi use hoti hai. Yaani anchor sirf JOD sakta hai, curated axes ki jagah
+        le nahi sakta.
+        """
+        raw = query or ""
+        expanded = self.expanded_query(raw)
+        key = "a:" + expanded[:600]
+        got = self._domain_cache.get(key)
+        if got is None:
+            got = tuple(axes_mod.axes_for(raw))
+            if expanded != raw:
+                raw_set, _ = axes_mod.axis_set_for(raw)
+                anchored_set, _ = axes_mod.axis_set_for(expanded)
+                if raw_set == "generic" and anchored_set != "generic":
+                    got = tuple(axes_mod.axes_for(expanded))
+            if len(self._domain_cache) > 24:
+                self._domain_cache.clear()
+            self._domain_cache[key] = got
+        return got
+
+    def entities_of(self, query: str) -> List[str]:
+        """Sawaal ne jin cheezon ka NAAM liya (Bullet Cluster, LIGO, LK-99…)."""
+        expanded = self.expanded_query(query)
+        key = "e:" + (expanded or "")[:600]
+        got = self._topic_cache.get(key)
+        if got is None:
+            named = [e.lower() for e in axes_mod.named_entities(expanded, limit=8)]
+            got = named or self.topic_of(query)[:4]
+            self._topic_cache[key] = got
+        return got
+
+    def proposition_check(self, s: SourceRecord, query: str,
+                          verdict=None, plan=None) -> Dict:
+        """
+        §6 — "ye source sawaal ki BAAT test karta hai?" ka structured jawab.
+
+        Return dict: har dimension ke against True/False/None (tri-state), plus
+        `tests_proposition` (wahi tri-state) aur `why` (insaani wajah). Score
+        nahi badalta — ye alag record hai, taaki "kitna match hua" aur "kya ye
+        sawaal ko test karta hai" do alag sawaal alag rahein.
+        """
+        plan = plan if plan is not None else self.plan_of(query)
+        verdict = verdict if verdict is not None else plan.assess(
+            s.title or "", s.snippet or "", f"{s.venue} {s.publisher}")
+        title = (s.title or "").lower()
+        body = (s.snippet or "")
+        low_body = body.lower()
+        both = f"{title} {low_body}"
+        has_body = len(body.strip()) >= 80        # itne se kam = metadata jaisa
+
+        checks: Dict[str, Dict] = {}
+
+        def put(name: str, ok, found=None, note: str = "") -> None:
+            checks[name] = {"ok": ok, "why_checked": PROP_DIMENSION_WHY[name],
+                            "found": list(found or [])[:5], "note": note}
+
+        # 1. entities — sawaal ke naam liye hue cheezein
+        ents = self.entities_of(query)
+        ent_found = [e for e in ents if _stem(e) in both] if ents else []
+        put("entities", (bool(ent_found) if ents else None), ent_found,
+            "" if ents else "sawaal se koi naam-wali cheez nahi nikli")
+
+        # 2-5. mechanism / observable / population / method — sirf tab jab padhne
+        # ko kuch ho. Khaali snippet par "nahi mila" likhna metadata ki kami ko
+        # source ki kami bana deta hai.
+        if has_body:
+            mech = _any_in(_MECHANISM_WORDS, both)
+            put("mechanism", bool(mech), mech)
+            measures = _MEASURE_RE.findall(body) or _STAT_RE.findall(body)
+            put("observable", bool(measures), [str(m)[:24] for m in measures])
+            pop = _any_in(_POPULATION_WORDS, both)
+            put("population", bool(pop), pop)
+            meth = _any_in(_METHOD_WORDS, both)
+            if not meth and (s.methodology or "").strip():
+                meth = [str(s.methodology)[:40]]
+            put("method", bool(meth), meth)
+            concl = _any_in(_CONCLUSION_WORDS, low_body)
+            put("abstract_conclusion", bool(concl), concl)
+        else:
+            for name in ("mechanism", "observable", "population", "method",
+                         "abstract_conclusion"):
+                put(name, None, [], "snippet/abstract itna hi chhota tha ki "
+                                    "is baare mein kuch keh nahi sakte")
+
+        # 6. required_axis — saboot ke kis raaste par ye kaam karta hai
+        axes = self.axes_of(query)
+        axis_id, axis_hits = axes_mod.axis_of(s, axes) if axes else ("", 0)
+        put("required_axis", (bool(axis_id) if axes else None),
+            [axis_id] if axis_id else [],
+            f"{axis_hits} term mile" if axis_id else
+            ("kisi bhi zaroori raaste ke terms nahi mile" if axes else
+             "axis list hi nahi bani"))
+
+        # 7. title — shirshak khud topic ki baat karta hai?
+        wide = self.wide_topic_of(query)
+        title_hits = _hits(wide, title) if wide else 0
+        put("title", (title_hits >= 2 if wide else None),
+            [w for w in wide if _stem(w) in title][:5],
+            f"{title_hits} shabd shirshak mein")
+
+        # 8. domain
+        if not plan.is_known:
+            put("domain", None, [], "is sawaal ka koi field profile match nahi hua")
+        else:
+            put("domain", (not verdict.rejected and verdict.anchor_hits >= 1),
+                verdict.anchor_terms[:5],
+                verdict.reason or f"{verdict.anchor_hits} anchor mile")
+
+        # ── faisla ──────────────────────────────────────────────────────────
+        # Rule jaan-boojh kar KANJOOS hai: `False` sirf tab jab saaf saboot ho
+        # ki source sawaal ki baat nahi kar raha. Warna `None` — kyunki galat
+        # `False` ek sahi source ko chupchaap pack se bahar kar dega.
+        why = ""
+        if checks["domain"]["ok"] is False:
+            tests = False
+            why = "field hi doosra hai — sawaal ki baat yahan test nahi hoti"
+        elif not has_body and title_hits <= 1:
+            tests = None
+            why = ("sirf metadata mila (na abstract, na shirshak mein topic) — "
+                   "isliye ye faisla nahi ho saka")
+        elif (checks["entities"]["ok"] is False
+                and checks["required_axis"]["ok"] is False):
+            tests = False
+            why = ("sawaal ki naam-wali cheezein bhi nahi hain aur saboot ke kisi "
+                   "zaroori raaste par bhi ye kaam nahi karta")
+        elif has_body and not any(checks[d]["ok"] for d in
+                                 ("observable", "abstract_conclusion", "method",
+                                  "mechanism")):
+            tests = False
+            why = ("abstract mein na koi naap, na nateeja, na tareeka — ye "
+                   "sawaal ko test karta hua document nahi lagta")
+        elif (checks["entities"]["ok"] or checks["required_axis"]["ok"]) and \
+                any(checks[d]["ok"] for d in ("observable", "abstract_conclusion",
+                                              "method", "mechanism")):
+            tests = True
+            why = "sawaal ki cheez par kaam karta hai aur nateeja/naap bhi deta hai"
+        else:
+            tests = None
+            why = "poora faisla lene ke liye kaafi jankari nahi mili"
+
+        unknown = [d for d in PROP_DIMENSIONS if checks[d]["ok"] is None]
+        return {
+            "dimensions": checks,
+            "passed": [d for d in PROP_DIMENSIONS if checks[d]["ok"] is True],
+            "failed": [d for d in PROP_DIMENSIONS if checks[d]["ok"] is False],
+            "unknown": unknown,
+            "checked": [d for d in PROP_DIMENSIONS if d not in unknown],
+            "axis_id": axis_id,
+            "tests_proposition": tests,
+            "why": why,
+        }
 
     def score_relevance(self, s: SourceRecord, query: str) -> float:
         """
@@ -263,7 +790,17 @@ class RelevanceEngine:
         # user ka apna document kabhi reject nahi hota — usne khud diya hai
         if verdict.rejected and s.source_type != SourceType.DOCUMENT:
             s.rejected_reason = verdict.reason
-            s.relevance_parts = {"hard_rejected": True, "reason": verdict.reason}
+            s.relevance_parts = {
+                "hard_rejected": True, "reason": verdict.reason,
+                "reject_code": REJECT_DOMAIN_MISMATCH,
+                "reject_dimension": "domain",
+                "rejections": [{"code": REJECT_DOMAIN_MISMATCH,
+                                "dimension": "domain",
+                                "why": REJECT_CODE_WHY[REJECT_DOMAIN_MISMATCH],
+                                "detail": verdict.reason}],
+                "tests_proposition": False,
+                "domain": plan.key,
+            }
             return 0.0
         s.rejected_reason = ""
 
@@ -309,7 +846,16 @@ class RelevanceEngine:
                     "ka koi sub-topic nahi — shabd ka matlab hi alag lag raha hai")
                 s.relevance_parts = {"hard_rejected": True,
                                      "reason": s.rejected_reason,
-                                     "lone_keyword": True}
+                                     "lone_keyword": True,
+                                     "reject_code": REJECT_LONE_KEYWORD,
+                                     "reject_dimension": "entities",
+                                     "rejections": [
+                                         {"code": REJECT_LONE_KEYWORD,
+                                          "dimension": "entities",
+                                          "why": REJECT_CODE_WHY[REJECT_LONE_KEYWORD],
+                                          "detail": s.rejected_reason}],
+                                     "tests_proposition": False,
+                                     "domain": plan.key}
                 return 0.0
 
         # 1. lexical (purana behaviour — generic sawaalon ke liye zaroori)
@@ -358,11 +904,138 @@ class RelevanceEngine:
             score *= 0.75
 
         score = round(min(max(score, 0.0), 1.0), 4)
+        # §6: score ke SAATH structured proposition-test ka record. Ye score ko
+        # nahi badalta — do alag sawaal alag rehte hain: "kitna match hua" aur
+        # "ye source sawaal ki baat test karta hai kya". Aage ka pipeline
+        # (quality_producers.directly_relevant_ids, evidence_axes.coverage)
+        # sirf saaf `False` par source ko "directly relevant" ginti se hataata
+        # hai; `None` ko nahi.
+        prop = self.proposition_check(s, query, verdict=verdict, plan=plan)
+
+        # ── §24 (2026-08-22): dark-matter run se nikle do naye hard rejection ──
+        #
+        # Dono rule KAM SE KAM do alag signal ki AND-shart hain (rule A mein
+        # teen). Ek akela signal kaafi nahi rakha gaya, kyunki reject karna ek
+        # bada faisla hai — ek jaayaz source chupchaap girna, ek kachre ke
+        # ghusne se zyada mehenga hai.
+        def _hard_reject(code: str, dimension: str, detail: str) -> float:
+            s.rejected_reason = detail
+            s.relevance_parts = {
+                "hard_rejected": True, "reason": detail,
+                "reject_code": code, "reject_dimension": dimension,
+                "rejections": [{"code": code, "dimension": dimension,
+                                "why": REJECT_CODE_WHY[code],
+                                "detail": detail}],
+                "tests_proposition": False,
+                "proposition_why": prop["why"],
+                "checks": prop["dimensions"],
+                "checks_failed": prop["failed"],
+                "checks_unknown": prop["unknown"],
+                "axis_id": prop["axis_id"],
+                "domain": plan.key,
+                "final": 0.0,
+            }
+            return 0.0
+
+        both_low = f"{title} {body}".lower()
+        subj = plan.subject_anchors() if plan.is_known else ()
+
+        # A. SUBJECT_MISSING — "field to sahi hai, par sawaal ka subject gayab hai"
+        #
+        # Live run ka jaal: dark-matter ke sawaal par "TESS transit photometry of
+        # a warm Neptune" aur "Photometric calibration residuals of the survey
+        # CCD pipeline" pack mein aa gaye. Domain 'space' hi hai, anchor bhi mil
+        # jaate hain (survey, photometry, orbit) — isliye domain gate se ye nahi
+        # rukte. Farak sirf ek jagah hai: sawaal ne KHUD jo cheezein naam lekar
+        # poochhi ("galaxy", "dark matter", "gravitational lensing"), unme se ek
+        # bhi in papers mein nahi hai, aur proposition-test bhi saaf False hai.
+        #
+        # Do shart isliye: Planck ka CMB paper aur dataset ka proposition-test
+        # bhi False/None hota hai, par unme subject anchor MAUJOOD hai — wo is
+        # raaste se nahi girte. Aur >=2 subject anchor ki shart isliye ki jab
+        # sawaal ne apni field ki vocabulary mein bahut kam bola ho, tab is rule
+        # ka koi haq nahi banta.
+        #
+        # Teesri shart (focus branch) pehle rule ne EK JAAYAZ source maar diya
+        # tha, isliye lagayi gayi: archaeology ke sawaal par "Trade contraction
+        # with Mesopotamia and Harappan urban decline" aur speleothem ka monsoon
+        # proxy record — dono sahi paper hain, par unme "indus valley" shabd
+        # nahi hai (synonym "Harappan", ya supporting proxy evidence). Farak: us
+        # sawaal se koi focus sub-topic hi nahi nikla tha, isliye ab rule wahan
+        # chalta hi nahi. Dark-matter sawaal se 'cosmology' focus nikla tha aur
+        # dono jaal (exoplanet, CCD calibration) usme se ek bhi branch par kaam
+        # nahi karte — asli saatों sources karte hain.
+        if (plan.strict and s.source_type != SourceType.DOCUMENT
+                and len(subj) >= 2 and prop["tests_proposition"] is False
+                and plan.focus_branches() and verdict.focus_branch_hits == 0
+                and not any(_stem(t) in both_low for t in subj)):
+            return _hard_reject(
+                REJECT_SUBJECT_MISSING, "entities",
+                "sawaal ka asli subject (%s) is source mein kahin nahi hai, aur "
+                "ye sawaal ki baat test bhi nahi karta — same field hona kaafi "
+                "nahi hai" % ", ".join(subj[:3]))
+
+        # B. NO_DATA_WEB — non-peer-reviewed web page jisme ek naap bhi nahi
+        #
+        # Live run ka jaal: "My blog theory: dark matter is just gravity behaving
+        # differently" cite ho gaya tha. Ye subject anchor test PASS kar jaata
+        # hai (usme "galaxy" aur "dark matter" dono likha hai) — isliye rule A
+        # se nahi rukta. Rukta hai yahan: peer-review nahi, web page hai, poore
+        # title+snippet mein ek bhi naap/statistic nahi, aur proposition-test ne
+        # HAAN nahi kaha. Sarkari report, dataset ya standard page in shartein
+        # paar kar leta hai kyunki usme number hote hain.
+        #
+        # `is not True` (pehle `is False` tha) — 2026-08-25 ka naapa hua rissav:
+        # jab axis list keyword-match wale facet axes se bharti hai, to
+        # `required_axis` ok ho jaata hai aur tri-state verdict False se **None**
+        # ("poora faisla lene ke liye kaafi jankari nahi mili") ho jaata hai.
+        # Purani shart sirf False dekhti thi, isliye "A blog opinion:
+        # consciousness is just neuroplasticity vibes" (koi number nahi,
+        # peer-review nahi) 0.0 se **0.3122** par zinda ho gaya aur average
+        # relevance mein ginne laga. Ab niyam ka matlab wahi hai jo likha hai:
+        # bina naap wale non-peer-reviewed web page ko sirf SAAF "HAAN, ye
+        # sawaal ki baat test karta hai" bacha sakta hai — "pata nahi" nahi.
+        if (s.source_type == SourceType.WEB and s.peer_reviewed is not True
+                and prop["tests_proposition"] is not True
+                and not _MEASURE_RE.search(both_low)
+                and not _STAT_RE.search(both_low)):
+            return _hard_reject(
+                REJECT_NO_DATA_WEB, "observable",
+                "peer-review ke bina web page hai, poore title+abstract mein ek "
+                "bhi naap ya statistic nahi, aur sawaal ki baat bhi test nahi "
+                "karta — ye evidence nahi, raay hai")
+
+        # ── §F3: poora sawaal vs sawaal ka ek HISSA — behtar wala liya jaata hai
+        # Yahan (saare hard reject ke BAAD) jaan-boojh kar hai: gira hua source
+        # facet se zinda nahi hota, sirf bacha hua source apne asli hisse ka
+        # poora credit paata hai.
+        facet = self.facet_match(s, query, title, body)
+        facet_lift = 0.0
+        if facet.get("score", 0.0) > 0.0:
+            facet_lift = round(min(1.0, facet["score"] * self._FACET_DISCOUNT), 4)
+            if facet_lift > score:
+                score = facet_lift
+
         s.relevance_parts = {
             "lexical": round(lexical, 4), "semantic": round(sem, 4),
             "anchor": round(anchor, 4), "branch": round(branch, 4),
             "kind": kind or "unknown", "final": score,
             "domain": plan.key,
+            "facet": (facet or None),
+            "facet_lift": facet_lift,
+            "tests_proposition": prop["tests_proposition"],
+            "proposition_why": prop["why"],
+            "checks": prop["dimensions"],
+            "checks_passed": prop["passed"],
+            "checks_failed": prop["failed"],
+            "checks_unknown": prop["unknown"],
+            "axis_id": prop["axis_id"],
+            "hard_rejected": False,
+            "rejections": ([{"code": REJECT_NO_PROPOSITION,
+                             "dimension": (prop["failed"] or ["proposition"])[0],
+                             "why": REJECT_CODE_WHY[REJECT_NO_PROPOSITION],
+                             "detail": prop["why"]}]
+                           if prop["tests_proposition"] is False else []),
         }
         return score
 
@@ -408,6 +1081,10 @@ class RelevanceEngine:
         "N off-topic hate" sach-much likha ja sake — chupchaap na ho.
         """
         unique = self.dedup.deduplicate(sources)
+        # Patent family collapse ka hisaab dedup ke ANDAR hota hai, isliye uski
+        # ginti alag se yahan likhi jaati hai — warna "3 patents mile" aur
+        # "1 patent bacha" ke beech ka farak report mein gayab ho jaata.
+        patent_families = self.dedup.patent_family_report(sources)
         terms = self.topic_of(query)
         plan = self.plan_of(query)
 
@@ -496,6 +1173,12 @@ class RelevanceEngine:
             # lagane ke bajaye wo yahan se seedha padhta hai.
             "deduplicated": True,
             "duplicates_removed": max(0, len(sources) - len(unique)),
+            # Patent-specific: ek invention ke US/EP/WO members kitne mile aur
+            # kitne ek record mein sameta gaye (0/0 = pack mein patent nahi tha).
+            "patent_sources_found": patent_families["patent_sources"],
+            "patent_families": patent_families["families"],
+            "patent_family_duplicates_removed": patent_families["collapsed"],
+            "patent_family_unknown": patent_families["unknown_family"],
             "kept": len(final),
             "dropped_offtopic": len(offtopic) + len(borderline_dropped),
             "dropped_zero_overlap": len(offtopic),
@@ -522,8 +1205,57 @@ class RelevanceEngine:
             "branch_coverage": sorted({
                 b for s in final for b in (s.domain_verdict.get("branches") or [])
             }),
+            # §6 ka structured hisaab. `_prop_report` teen ginti alag rakhta hai —
+            # "sawaal ko test karta hai", "nahi karta", aur "pata nahi chala" —
+            # kyunki teesri ginti ko doosri mein milaana hi jhooth hai.
+            "proposition": self._prop_report(final),
+            "reject_codes": self._reject_codes(unique),
         }
         return final
+
+    @staticmethod
+    def _prop_report(sources: List[SourceRecord]) -> Dict:
+        """Pack mein kitne sources sach mein sawaal ki baat test karte hain."""
+        yes = no = unknown = 0
+        dim_fail: Dict[str, int] = {}
+        for s in sources:
+            parts = s.relevance_parts or {}
+            flag = parts.get("tests_proposition")
+            if flag is True:
+                yes += 1
+            elif flag is False:
+                no += 1
+            else:
+                unknown += 1
+            for dim in parts.get("checks_failed") or []:
+                dim_fail[dim] = dim_fail.get(dim, 0) + 1
+        return {
+            "dimensions": list(PROP_DIMENSIONS),
+            # Poori §6 checklist (nau dimension + daswa aakhri faisla) — report
+            # isi se "kitni cheezein dekhi gayi" likhti hai.
+            "checklist": list(PROP_CHECKLIST),
+            "checklist_why": dict(PROP_CHECK_WHY),
+            "tests_proposition": yes,
+            "does_not_test": no,
+            "undecided": unknown,
+            "failed_dimensions": dict(sorted(dim_fail.items(),
+                                             key=lambda kv: -kv[1])),
+            "note": f"{yes} source sawaal ki baat sach mein test karte hain; "
+                    f"{no} nahi karte; {unknown} par faisla nahi ho saka "
+                    f"(metadata kam tha) — ye teesri ginti 'theek hai' nahi hai.",
+        }
+
+    @staticmethod
+    def _reject_codes(sources: List[SourceRecord]) -> Dict:
+        """Kis code se kitne sources hate — free-text nahi, ginne layak codes."""
+        out: Dict[str, int] = {code: 0 for code in REJECT_CODES}
+        for s in sources:
+            parts = s.relevance_parts or {}
+            for row in parts.get("rejections") or []:
+                code = str(row.get("code") or "")
+                if code:
+                    out[code] = out.get(code, 0) + 1
+        return {"counts": out, "why": dict(REJECT_CODE_WHY)}
 
     @staticmethod
     def _split_by_relevance(

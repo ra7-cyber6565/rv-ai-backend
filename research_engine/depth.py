@@ -1,7 +1,7 @@
 """
 Research Depth Modes — Spec Section 13
 
-QUICK / DEEP / MAXIMUM / CUSTOM.
+QUICK / DEEP / MAXIMUM / MARATHON / CUSTOM.
 
 IMPORTANT (Spec Section 13): "Maximum" ka matlab unlimited internet NAHI hai.
 Gemini free tier ~20 requests/din hai, isliye har mode ka call budget yahan
@@ -23,6 +23,16 @@ class DepthConfig:
     use_papers: bool = True
     use_books: bool = False
     use_datasets: bool = True       # Spec §2 + §11 — public datasets / raw data
+    # Patents (₹0 patent batch) — SIRF invention/prior-art wale sawaalon par
+    # chalta hai, aur wo faisla planner ka `patent_intent()` karta hai. Ye flag
+    # uske UPAR ka switch hai: QUICK mein patent search ka koi matlab nahi
+    # (QUICK ka wada "turant jawab" hai, aur patent APIs slow + fair-use limited
+    # hain).
+    #
+    # CUSTOM mode mein bhi explicit on/off kiya ja sakta hai. Request schemas aur
+    # BOOL_FIELDS ek hi naam expose karte hain, isliye documented switch aur
+    # runtime config alag nahi ho sakte.
+    use_patents: bool = True
     use_red_team: bool = True
     chars_per_source: int = 1200
     # Spec Section 3/4 — kitne top sources ka LEGALLY-FREE full text download
@@ -39,6 +49,17 @@ class DepthConfig:
     # jo connector isme poora na ho, wo honestly "deadline" reason ke saath
     # report hota hai — chup-chaap "0 results" nahi banta.
     discovery_seconds: int = 90
+    # MARATHON ka maksad jaldi rukna nahi hai. Normal modes credible evidence
+    # aur saare mandatory axes milte hi early-stop kar sakte hain; MARATHON
+    # har configured round chalata hai taaki source-derived authors, works,
+    # counter-evidence aur cross-domain lenses ko agle rounds mein follow kiya
+    # ja sake. Ye phir bhi bounded hai — "jitna time lage" ka matlab unlimited
+    # network/API nahi.
+    require_all_rounds: bool = False
+    # Ye TRUTH ya real-world success probability nahi. Sirf measured research
+    # process (rounds, axis-search, full text, independence, red-team, claim
+    # checks) ka target hai. 0 = is preset par scalar target expose mat karo.
+    research_process_target_percent: int = 0
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -47,6 +68,7 @@ class DepthConfig:
 QUICK = DepthConfig(
     name="QUICK", gemini_calls=1, max_sources=5, max_per_connector=2,
     max_rounds=1, use_papers=False, use_books=False, use_datasets=False,
+    use_patents=False,
     use_red_team=False,
     chars_per_source=800, max_fulltext=1, discovery_seconds=45,
 )
@@ -54,6 +76,7 @@ QUICK = DepthConfig(
 DEEP = DepthConfig(
     name="DEEP", gemini_calls=2, max_sources=10, max_per_connector=3,
     max_rounds=2, use_papers=True, use_books=False, use_datasets=True,
+    use_patents=True,
     use_red_team=True,
     chars_per_source=1200, max_fulltext=3, discovery_seconds=90,
 )
@@ -61,11 +84,29 @@ DEEP = DepthConfig(
 MAXIMUM = DepthConfig(
     name="MAXIMUM", gemini_calls=3, max_sources=18, max_per_connector=4,
     max_rounds=3, use_papers=True, use_books=True, use_datasets=True,
+    use_patents=True,
     use_red_team=True,
     chars_per_source=1500, max_fulltext=6, discovery_seconds=150,
 )
 
-_PRESETS = {"QUICK": QUICK, "DEEP": DEEP, "MAXIMUM": MAXIMUM}
+MARATHON = DepthConfig(
+    # Durable background-only specialist preset. It may use deeper *fixed*
+    # retrieval rails than arbitrary CUSTOM input, while remaining bounded and
+    # capability-protected. Four model calls still respect the zero-cost
+    # policy/fallback router.
+    name="MARATHON", gemini_calls=4, max_sources=40, max_per_connector=6,
+    max_rounds=5, use_papers=True, use_books=True, use_datasets=True,
+    use_patents=True, use_red_team=True, chars_per_source=2200,
+    max_fulltext=16, discovery_seconds=360, require_all_rounds=True,
+    research_process_target_percent=90,
+)
+
+_PRESETS = {
+    "QUICK": QUICK,
+    "DEEP": DEEP,
+    "MAXIMUM": MAXIMUM,
+    "MARATHON": MARATHON,
+}
 
 # Safety rails — CUSTOM mode mein user in limits se aage nahi ja sakta
 _LIMITS = {
@@ -90,7 +131,9 @@ def _clamp(field: str, value: int) -> int:
 # CUSTOM mode mein user kaun-kaun se numbers bhej sakta hai — API isi list se
 # apna request model aur /depth-modes ka disclosure banata hai. Hand-typed copy
 # rakhne par doc aur asli clamp alag ho jaate the, yaani disclosure jhooth.
-BOOL_FIELDS = ("use_papers", "use_books", "use_datasets", "use_red_team")
+BOOL_FIELDS = (
+    "use_papers", "use_books", "use_datasets", "use_patents", "use_red_team",
+)
 
 
 def depth_limits() -> Dict[str, tuple]:

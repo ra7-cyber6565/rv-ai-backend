@@ -49,6 +49,25 @@ def quota(provider: str) -> ProviderResult:
     )
 
 
+def test_offline_suite_must_not_have_a_live_gemini_primary():
+    """Order-independence guard (2026-08-23).
+
+    Upar ke `os.environ.pop` sirf IMPORT ke waqt chalte hain. pytest poori suite
+    ek hi process me chalata hai, isliye baad me chalne wala koi bhi test
+    (jaise `tests/test_boot_preflight.py` ka asli `load_dotenv()`) `.env` ki
+    `GEMINI_API_KEY` + `GEMINI_ZERO_COST_CONFIRMED=true` wapas daal sakta hai.
+    Tab `ResilientReasoning` pehle ASLI Gemini primary call maarta hai aur is
+    file ke circuit-breaker test ka hisaab (calls/attempts) bigad jaata hai -
+    saath hi ek offline test chupke se network par chala jaata hai. Ye test us
+    haalat ko seedha naam deta hai, taaki wajah dhoondhni na pade.
+    """
+    assert not ResilientReasoning._gemini_allowed(), (
+        "process env me live Gemini credential maujood hai (naam: GEMINI_API_KEY / "
+        "GEMINI_ZERO_COST_CONFIRMED) - koi dusra test env leak kar raha hai; "
+        "offline test ko primary provider live nahi milna chahiye"
+    )
+
+
 def test_registry_cooldown_expires_and_allows_probe_again(monkeypatch):
     now = [1000.0]
     monkeypatch.setenv("PROVIDER_HEALTH_RATE_LIMIT_SECONDS", "10")

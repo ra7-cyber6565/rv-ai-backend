@@ -11,7 +11,8 @@ from pathlib import Path
 import pytest
 from fastapi import HTTPException
 
-from api import agent_routes, job_routes, routes, session_routes
+from api import (agent_routes, exam_routes, job_routes, reading_routes, routes,
+                 session_routes)
 from utils import project_guard
 
 
@@ -158,6 +159,60 @@ def test_ask_guard_runs_before_research_manager(monkeypatch):
         asyncio.run(routes.ask(request, "wrong"))
     assert exc.value.status_code == 404
     assert called["research"] == 0
+
+
+def test_exam_analysis_guard_runs_before_forecast_engine(monkeypatch):
+    called = {"analysis": 0}
+
+    class SpyEngine:
+        def analyze(self, **_kwargs):
+            called["analysis"] += 1
+            return {}
+
+    def deny(*_args):
+        raise HTTPException(status_code=404, detail="Project session nahi mila")
+
+    monkeypatch.setattr(exam_routes, "require_project_access", deny)
+    monkeypatch.setattr(exam_routes, "ExamIntelligenceEngine", lambda: SpyEngine())
+    request = exam_routes.ExamIntelligenceRequest(
+        exam_name="RPF SI",
+        project_id=_VALID_PROJECT,
+        as_of="2030-01-01",
+        syllabus=[{
+            "topic_id": "T1", "subject": "Math", "chapter": "Number",
+            "topic": "Percentage",
+        }],
+        papers=[{
+            "paper_id": "P1", "held_on": "2028-01-01",
+            "questions": [{
+                "question_id": "Q1", "text": "Percentage question",
+                "topic_ids": ["T1"],
+            }],
+        }],
+    )
+    with pytest.raises(HTTPException) as exc:
+        exam_routes.analyze_exam(request, "wrong")
+    assert exc.value.status_code == 404
+    assert called["analysis"] == 0
+
+
+def test_reading_resume_guard_runs_before_storage_or_pdf_processing(monkeypatch):
+    called = {"manager": 0}
+
+    def deny(*_args):
+        raise HTTPException(status_code=404, detail="Project session nahi mila")
+
+    def manager():
+        called["manager"] += 1
+        raise AssertionError("manager must not be built before project authorization")
+
+    monkeypatch.setattr(reading_routes, "require_project_access", deny)
+    monkeypatch.setattr(reading_routes, "_manager", manager)
+    request = reading_routes.ResumeReadingRequest(project_id=_VALID_PROJECT)
+    with pytest.raises(HTTPException) as exc:
+        reading_routes.resume_reading_session("read_" + "x" * 32, request, "wrong")
+    assert exc.value.status_code == 404
+    assert called["manager"] == 0
 
 
 def test_all_project_scoped_rag_routes_contain_guard_before_processing():

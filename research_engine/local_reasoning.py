@@ -28,10 +28,31 @@ nahi rehta — sab section bharte hain, aur wajah saaf likhi hoti hai.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
+from .answer_order import display_heading
 from .explain_style import detect_language
 from .models import EvidencePack, SourceRecord
+
+if TYPE_CHECKING:
+    from .evidence_drafting import EvidenceDraftManifest
+
+# §12 (2026-08-22) — heading ka source ek hi jagah hai: `answer_order`. Pehle
+# yahan purani Hinglish heading ("Research se kya pata chala?") hard-coded thi.
+# Do list alag-alag hone ki wajah se quota-fallback ka jawab canonical section
+# naam se match hi nahi karta tha, aur "kaunse hisse nahi ban paaye" list mein
+# jhooth chala jaata tha. `display_heading()` se ab dono jagah ek hi shabd hai.
+# Index 2 aur uske jaise "extra" section §12 ki 10-section list ka hissa nahi
+# hain, isliye unke naam yahin literal rehte hain.
+_BLOCK_TITLES: Tuple[str, ...] = (
+    display_heading("direct_answer"),            # synthesizer index 0
+    display_heading("established_knowledge"),    # 1
+    "Ye kyun hota hai?",                         # 2 (extra)
+    display_heading("supporting_evidence"),      # 3
+    display_heading("counterevidence"),          # 4
+    display_heading("unknowns"),                 # 7
+    display_heading("conclusion"),               # 8
+)
 
 # read level -> imaandaar label + insaani lafz
 _LEVEL_WORD = {
@@ -217,12 +238,54 @@ def _title_of(source: SourceRecord) -> str:
     return _clean(source.title or source.url or source.source_id, 110)
 
 
+def _preselected_findings(
+    manifest: Optional["EvidenceDraftManifest"],
+    pack: EvidencePack,
+    terms: Sequence[str],
+    limit: int = 2,
+) -> List[Tuple[SourceRecord, str]]:
+    """Critical offline prose may use only preselected strong exact passages.
+
+    The normal model sees the evidence-first prompt block.  The deterministic
+    quota fallback has no prompt, so it must receive the same private manifest
+    object explicitly; otherwise it drafts from broad display snippets and the
+    later P0-B audit correctly rejects its claims.  This helper mirrors that
+    boundary without treating eligibility as proof: claim-specific C and
+    same-source A-E still run after drafting.
+    """
+    rows: List[Tuple[SourceRecord, str]] = []
+    used: set[str] = set()
+    for span in list(getattr(manifest, "strong_eligible_spans", None) or []):
+        sid = str(getattr(span, "source_id", "") or "")
+        if not sid or sid in used:
+            continue
+        source = pack.by_id(sid)
+        if source is None:
+            continue
+        text = str(getattr(span, "passage", "") or "")
+        # Reuse the same deterministic sentence scorer on an ephemeral record;
+        # no source metadata or evidence text is mutated.
+        probe = SourceRecord(snippet=text)
+        sent = _best_sentence(probe, terms)
+        if not sent:
+            continue
+        rows.append((source, sent))
+        used.add(sid)
+        if len(rows) >= max(1, int(limit)):
+            break
+    return rows
+
+
 # ── section 0: Seedha jawab ──────────────────────────────────────────────────
-def _direct(question: str, pack: EvidencePack, lang: str) -> str:
+def _direct(question: str, pack: EvidencePack, lang: str,
+            evidence_manifest: Optional["EvidenceDraftManifest"] = None) -> str:
     terms = _terms(question)
     lines: List[str] = []
-    for source in _ordered(pack)[:2]:
-        sent = _best_sentence(source, terms)
+    grounded = _preselected_findings(evidence_manifest, pack, terms, limit=2)
+    candidates = grounded or [
+        (source, _best_sentence(source, terms)) for source in _ordered(pack)[:2]
+    ]
+    for source, sent in candidates:
         if sent:
             lines.append(f"{sent} [{source.source_id}] {_label(source)}")
     if not lines:
@@ -403,12 +466,18 @@ def _unknown(question: str, pack: EvidencePack, plan: Optional[Dict],
 
 
 # ── section 8: Final conclusion ─────────────────────────────────────────────
-def _conclusion(question: str, pack: EvidencePack, lang: str) -> str:
+def _conclusion(question: str, pack: EvidencePack, lang: str,
+                evidence_manifest: Optional["EvidenceDraftManifest"] = None) -> str:
     total = len(pack.sources)
     if not total:
         return _t(lang, "no_sources")
-    top = _ordered(pack)[0]
-    sent = _best_sentence(top, _terms(question))
+    preselected = _preselected_findings(
+        evidence_manifest, pack, _terms(question), limit=1)
+    if preselected:
+        top, sent = preselected[0]
+    else:
+        top = _ordered(pack)[0]
+        sent = _best_sentence(top, _terms(question))
     lines = [f"{_t(lang, 'conclusion_lead')} {sent} [{top.source_id}] "
              f"{_label(top)}" if sent else _t(lang, "conclusion_lead")]
     lines.append("")
@@ -430,7 +499,8 @@ def _conclusion(question: str, pack: EvidencePack, lang: str) -> str:
 # ── public ──────────────────────────────────────────────────────────────────
 def compose(question: str, pack: EvidencePack, plan: Optional[Dict] = None,
             contradictions: Optional[List[Dict]] = None,
-            language: str = "") -> str:
+            language: str = "",
+            evidence_manifest: Optional["EvidenceDraftManifest"] = None) -> str:
     """
     Poora model-shaped jawab, bina kisi API call ke.
 
@@ -441,16 +511,17 @@ def compose(question: str, pack: EvidencePack, plan: Optional[Dict] = None,
     """
     lang = language or detect_language(question)
     pack = pack or EvidencePack(question=question)
-    blocks = [
-        ("Seedha jawab", _direct(question, pack, lang)),
-        ("Research se kya pata chala?", _findings(question, pack, lang)),
-        ("Ye kyun hota hai?", _mechanism(question, pack, lang)),
-        ("Evidence kya kehta hai?", _evidence(pack, lang)),
-        ("Iske against kya mila?", _against(question, pack, lang, contradictions)),
-        ("Kya abhi unknown hai?", _unknown(question, pack, plan, lang)),
-        ("Final conclusion", _conclusion(question, pack, lang)),
-    ]
-    return "\n\n".join(f"## {title}\n{body}".rstrip() for title, body in blocks)
+    bodies = (
+        _direct(question, pack, lang, evidence_manifest),
+        _findings(question, pack, lang),
+        _mechanism(question, pack, lang),
+        _evidence(pack, lang),
+        _against(question, pack, lang, contradictions),
+        _unknown(question, pack, plan, lang),
+        _conclusion(question, pack, lang, evidence_manifest),
+    )
+    return "\n\n".join(f"## {title}\n{body}".rstrip()
+                       for title, body in zip(_BLOCK_TITLES, bodies))
 
 
 # ── QUICK mode ka backup (chat.py isse use karta hai) ───────────────────────

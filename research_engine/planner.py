@@ -13,13 +13,33 @@ Poora module rule-based aur FREE hai — ek bhi Gemini call nahi.
 from __future__ import annotations
 
 import re
-from typing import Dict, List, Optional
+from typing import Callable, Dict, List, Optional
 
+from . import classics as classics_mod
+from . import concept_ledger as ledger_mod
+from . import craft as craft_mod
+from . import exammodel
+from .connectors.classic_connector import langs_for_question as classic_langs
 from .depth import DepthConfig
 from .domain import detect as domain_detect
+from . import facets as facets_mod
+from . import lenses as lens_mod
+from . import listener_study
+from . import music_study
 from .local_language import normalize
+from .market_data import market_intent
+from .patents import patent_intent
 from .query_builder import is_instruction_prompt, search_query, topic_terms
+from . import query_hygiene
 from .requested import parse_requests
+from . import songcraft
+from . import trademodel
+from .specialist_domains import (
+    build_specialist_plan,
+    phrase_hit,
+    specialist_classification,
+    specialist_queries,
+)
 
 # Query ki upper limit. OpenAlex ne live test mein HTTP 400 diya tha kyunki
 # poora 2000-character prompt URL parameter mein chala gaya tha.
@@ -72,6 +92,11 @@ FIELD_MAP: Dict[str, List[str]] = {
     "prediction": ["Statistics", "Data Science", "Forecasting"],
     "philosophical": ["Philosophy", "Ethics", "Psychology", "Neuroscience"],
     "creative": ["Design", "Engineering", "Materials Science"],
+    # #171c: exam/padhai ki farmaish ka apna field-set. Ye QUESTION_TYPES me
+    # NAHI hai, isliye ye khud se kabhi detect nahi hota — sirf exam lane khulne
+    # par jodha jaata hai (purane sawaalon ka bartaav bilkul waisa hi rehta).
+    "educational": ["Education", "Cognitive Psychology",
+                    "Assessment and Measurement", "Curriculum Studies"],
     "unresolved_research": ["Research Methodology", "Domain-specific literature"],
     "factual": ["General Knowledge"],
 }
@@ -92,6 +117,83 @@ _BOOK_HINTS = ("book", "kitab", "kitaab", "granth", "mahagranth", "shastra", "ve
 
 
 class ResearchPlanner:
+    # Patent providers ki list connector layer ke paas hai (kaunsa provider key
+    # ke bina chal sakta hai, ye wahi jaanta hai). Import LAZY hai aur object ek
+    # baar banta hai: planner ka wada "rule-based aur sasta" hai, aur connectors
+    # package import karna network ya key kuch nahi maangta — par har call par
+    # naya object banana bekaar hai.
+    _PATENT_FACADE = None
+    # Market/economic series providers ki list bhi connector layer ke paas hai
+    # (kaunsa provider bina key chal sakta hai). Wahi lazy, wahi ek-baar pattern.
+    _MARKET_FACADE = None
+
+    # ── open lens selection (2026-08-23) ─────────────────────────────────────
+    #
+    # `specialist_domains.detect_profiles()` ek CLOSED keyword list hai. Naapa
+    # gaya: intel ke 12 example sawaalon me se 10 par `specialist=False,
+    # domain=generic` — "psycho-cybernetics", "default mode network", "naval
+    # ravikant", "ramanujan", "einstein", "picasso" aur "ved puran rishi muni"
+    # tak. List me 500 shabd jodne se deewar khisakti hai, hatti nahi.
+    #
+    # Isliye planner ab har sawaal par lens plan banata hai (research_engine/
+    # lenses.py): "is sawaal par kaun se discipline / framework / thinker /
+    # source-family lagti hai". Deterministic raasta HAMESHA chalta hai (₹0,
+    # koi network nahi). `lens_generate` set ho to ek bounded model call bhi
+    # hoti hai; fail/quota par chup-chaap deterministic par gir jaata hai.
+    #
+    # Lens list EVIDENCE NAHI hai — sirf search plan aur scoring vocabulary.
+    lens_generate: Optional[Callable[..., str]] = None
+
+    def lens_plan(self, question: str, base_query: str = "") -> Dict:
+        """Cached lens plan. Ek sawaal par model call ek hi baar hoti hai."""
+        key = (question or "")[:600]
+        cached = getattr(self, "_lens_cache", None)
+        if cached and cached[0] == key:
+            return cached[1]
+        plan = lens_mod.build_lens_plan(
+            question, base_query or self.clean_query(question),
+            generate=self.lens_generate,
+            allow_model=self.lens_generate is not None,
+        )
+        self._lens_cache = (key, plan)
+        return plan
+
+    def absorb_corpus_lenses(self, question: str, records) -> Dict:
+        """Round ke baad: mile hue sources se naye lens seekho (₹0, model-free).
+
+        Ye "padhte-padhte seekhna" hai — jo author/venue/dohraye gaye phrase
+        ASLI sources me mile, wo agle round ki queries me chale jaate hain.
+        Scoring anchor JAAN-BOOJHKAR nahi badalta (ek run ke beech scoring
+        badalne se round-1 aur round-2 ke score tulnaayog nahi rehte), isliye
+        `plan()` ka `lens_scoring_query` jaisa tha waisa hi rehta hai.
+        """
+        key = (question or "")[:600]
+        cached = getattr(self, "_lens_cache", None)
+        base = cached[1] if (cached and cached[0] == key) else self.lens_plan(question)
+        try:
+            extra = lens_mod.lenses_from_sources(records, question=question)
+            merged = lens_mod.merge_corpus_lenses(base, extra)
+        except Exception:
+            return base  # lens ek sudhaar hai, zaroorat nahi
+        self._lens_cache = (key, merged)
+        return merged
+
+    @property
+    def _patent_providers(self):
+        cls = type(self)
+        if cls._PATENT_FACADE is None:
+            from .connectors import PatentDiscoveryConnector  # noqa: PLC0415
+            cls._PATENT_FACADE = PatentDiscoveryConnector()
+        return cls._PATENT_FACADE
+
+    @property
+    def _market_providers(self):
+        cls = type(self)
+        if cls._MARKET_FACADE is None:
+            from .connectors import MarketConnector  # noqa: PLC0415
+            cls._MARKET_FACADE = MarketConnector()
+        return cls._MARKET_FACADE
+
     # ── 1 + 2. classify + fields ──────────────────────────────────────────────
     def classify(self, question: str) -> Dict:
         # Pehle local shorthand khol lo — warna "reserch" ya "smjao" kisi keyword
@@ -101,15 +203,114 @@ class ResearchPlanner:
         fields: List[str] = []
 
         for qtype, keywords in QUESTION_TYPES.items():
-            if any(kw in q for kw in keywords):
+            # Exact phrase boundary matters here.  The old substring rule made
+            # ``physics`` match inside ``metaphysics`` and ``science`` match
+            # ``occult sciences``.  That silently routed philosophical/history
+            # questions through hard-science connectors and evidence rules.
+            if any(phrase_hit(q, kw) for kw in keywords):
                 detected.append(qtype)
                 for f in FIELD_MAP.get(qtype, []):
                     if f not in fields:
                         fields.append(f)
 
+        specialist = specialist_classification(question)
+        for qtype in specialist.get("question_types", []):
+            if qtype not in detected:
+                detected.append(qtype)
+        for field in specialist.get("relevant_fields", []):
+            if field not in fields:
+                fields.append(field)
+
+        # Strict domain profiles know important scientific topics that the old
+        # flat keyword list never named (for example superconductivity).  The
+        # previous substring bug accidentally classified such questions as
+        # technical because ``ai`` appeared inside an unrelated word.  Once
+        # substring matching was correctly removed, that accidental route also
+        # disappeared.  Restore it explicitly from the real domain detector.
+        dplan = domain_detect(question)
+        domain_type = {
+            "superconductivity": "scientific",
+            "materials_physics": "scientific",
+            "medicine_health": "medical",
+            "biology_genetics": "scientific",
+            "cs_ml": "technical",
+            "energy_climate": "scientific",
+            "economics": "financial",
+            "chemistry": "scientific",
+            "space": "scientific",
+            "engineering": "technical",
+            "archaeology_history": "historical",
+        }.get(dplan.key)
+        if domain_type and domain_type not in detected:
+            detected.append(domain_type)
+            for field in FIELD_MAP.get(domain_type, []):
+                if field not in fields:
+                    fields.append(field)
+
         if not detected:
             detected = ["factual"]
             fields = list(FIELD_MAP["factual"])
+
+        # ── #150c LANE ISOLATION: "banao" creative rachna nahi hai ────────────
+        # QUESTION_TYPES["creative"] me "banao"/"create"/"design" jaise shabd
+        # hain. Wo shabd sirf itna batate hain ki user kuch BANWANA chahta hai —
+        # ye nahi ki bani hui cheez ek creative rachna (gaana/kahani/kavita)
+        # hogi. "US100 aur XAUUSD ka scalping model banao" me bhi "banao" hai,
+        # aur usi ek shabd se aaj Design + Materials Science field aur ek
+        # creative sub-question trading ke jawab me ghus jaate the. intel ki
+        # shart: "sab mix mt kr dena — model mangu to gaane waali cheeje work
+        # krti dikhe to answer khraab ho jaaye".
+        #
+        # Faisla khud se nahi liya jaata, un do module se aata hai jo pehle se
+        # ye naapte hain:
+        #   craft.detect(q)["is_request"] → asli creative form maanga gaya
+        #   trademodel.is_request(q)      → trading model ki farmaish
+        # Sirf trading ki farmaish par "creative" type hataayi jaati hai; baaki
+        # har sawaal ka bartaav bilkul waisa hi rehta hai jaisa pehle tha.
+        build_cue = "creative" in detected
+        craft_ask = bool((craft_mod.detect(question) or {}).get("is_request"))
+        trade_ask = bool(trademodel.is_request(question))
+        if build_cue and trade_ask and not craft_ask:
+            detected = [qtype for qtype in detected if qtype != "creative"]
+            fields = [f for f in fields
+                      if f not in FIELD_MAP["creative"]
+                      or any(f in FIELD_MAP.get(other, [])
+                             for other in detected)]
+            if not detected:
+                detected = ["factual"]
+                fields = fields or list(FIELD_MAP["factual"])
+        # ── #171c LANE ISOLATION: exam/padhai bhi creative rachna nahi hai ──
+        # Wahi #150c ki bimari doosri jagah: "RPF SI ka paper banao" aur "class
+        # 10 maths ka syllabus cover karne ka plan banao" me bhi "banao" hai,
+        # aur usi ek shabd se Design/Materials Science field aur ek creative
+        # sub-question exam ke jawab me ghus jaate the. Faisla yahan bhi khud se
+        # nahi liya jaata — `exammodel.is_request()` se aata hai, jo do signal
+        # (exam/padhai ki cheez + banane/seekhne ki maang) par khulta hai.
+        # `craft_ask` ki chhoot barqaraar: agar user ne asal me koi rachna maangi
+        # (jaise "exam par kavita likho") to creative type nahi hataayi jaati.
+        exam_ask = bool(exammodel.is_request(question))
+        if build_cue and exam_ask and not craft_ask:
+            detected = [qtype for qtype in detected if qtype != "creative"]
+            fields = [f for f in fields
+                      if f not in FIELD_MAP["creative"]
+                      or any(f in FIELD_MAP.get(other, [])
+                             for other in detected)]
+            if not detected:
+                detected = ["factual"]
+                fields = fields or list(FIELD_MAP["factual"])
+        # Exam/padhai maangi gayi hai to uske apne field aane chahiye.
+        if exam_ask and "educational" not in detected:
+            detected.append("educational")
+            for f in FIELD_MAP["educational"]:
+                if f not in fields:
+                    fields.append(f)
+        # Trading model maanga gaya hai to uske apne field (Finance/Economics)
+        # aane chahiye — Design/Materials Science nahi.
+        if trade_ask and "financial" not in detected:
+            detected.append("financial")
+            for f in FIELD_MAP["financial"]:
+                if f not in fields:
+                    fields.append(f)
 
         primary = detected[:3]
         if len(detected) >= 3:
@@ -118,14 +319,29 @@ class ResearchPlanner:
         return {
             "question_types": primary,
             "all_detected_types": detected,
-            "relevant_fields": fields[:6],
+            "relevant_fields": fields[:10] if specialist.get("active") else fields[:6],
             "is_scientific": any(t in detected for t in
                                  ("scientific", "medical", "mathematical", "technical")),
             "is_medical": "medical" in detected,
             "is_multidisciplinary": len(detected) >= 3,
-            "needs_books": any(h in q for h in _BOOK_HINTS) or "historical" in detected,
-            "is_creative": "creative" in detected,
+            "needs_books": (any(phrase_hit(q, h) for h in _BOOK_HINTS)
+                            or "historical" in detected
+                            or bool(specialist.get("needs_books"))),
+            "is_creative": craft_ask or "creative" in detected,
+            # Purani keyword-hit gum nahi hoti — "user kuch banwana chahta hai"
+            # ka signal yahan alag se milta hai. `is_creative` ka matlab ab
+            # "creative rachna maangi gayi", aur ye do baatein ek nahi hain.
+            "wants_construction": build_cue or craft_ask,
+            # #171c: exam lane ka faisla ek hi jagah se milta hai, taaki aage ke
+            # stage (source_discovery, LAB) apni doosri copy na banayein.
+            "is_exam_ask": exam_ask,
+            "exam_reason": exammodel.request_reason(question),
             "is_unresolved": "unresolved_research" in detected,
+            "specialist_active": bool(specialist.get("active")),
+            "specialist_profile_keys": list(specialist.get("profile_keys", [])),
+            "specialist_expected_lanes": list(specialist.get("expected_lanes", [])),
+            "specialist_empirical_data_useful": bool(
+                specialist.get("empirical_data_useful")),
         }
 
     # ── 3. sub-questions (free, rule-based) ───────────────────────────────────
@@ -150,6 +366,11 @@ class ResearchPlanner:
             subs.append(f"{core} — clinical evidence, risks aur contraindications kya hain?")
         if cls.get("is_unresolved") or cls.get("is_creative"):
             subs.append(f"{core} — kya abhi tak unknown hai aur kaun sa test isse settle karega?")
+        if cls.get("specialist_active"):
+            subs.append(
+                f"{core} — primary text/official document kya kehta hai, aur "
+                "independent evidence asal mein kya establish karta hai?"
+            )
         subs.append(f"{core} — kaun sa evidence is baat ke KHILAF jaata hai?")
         return subs[:6]
 
@@ -173,6 +394,15 @@ class ResearchPlanner:
            hai"): iska purana filler-strip raasta pehle se theek kaam karta hai,
            isliye use CHHEDA NAHI GAYA. Naya scoring chhote sawaal par lagane ki
            koi zaroorat nahi thi, aur risk tha ki asli shabd ud jaaye.
+
+        #112 (2026-08-26): dono raaston ke BAAD ek gate lagta hai. Naapa hua
+        defect — "ache se dhyaan se kaam kro ok jldi kro or abb kaam suru kro
+        ... superconductivity ..." par ye function `"kaam ache dhyaan jaldi abb
+        suru adwance"` deta tha: ek bhi topic shabd nahi. Aur yahi string har
+        axis query ka base banti thi (orchestrator ka `axis_base`), isliye ek
+        galti poore round me phailti thi. Ab: junk shabd hatte hain, aur agar
+        phir bhi koi topic shabd na bache to topic-scoring wala raasta liya
+        jaata hai. Query kabhi khaali nahi hoti.
         """
         if is_instruction_prompt(question):
             topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
@@ -184,6 +414,9 @@ class ResearchPlanner:
             q = q.replace(" " + phrase + " ", " ")
         tokens = [t for t in re.findall(r"[\w\-']+", q) if t not in _FILLER_WORDS]
         cleaned = " ".join(tokens).strip()
+        # #112 — junk + bache hue function shabd hatao, par query ko khaali mat
+        # karo (tidy_query khud ye shart dekhta hai).
+        cleaned = query_hygiene.tidy_query(cleaned)
         # Kabhi khaali query mat bhejo — warna search 0 results dega
         if len(cleaned) < 3:
             cleaned = (question or "").strip()
@@ -192,6 +425,12 @@ class ResearchPlanner:
             topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
             cleaned = topic if len(topic) >= 3 else \
                 cleaned[:_MAX_QUERY_CHARS].rsplit(" ", 1)[0]
+        # #112 ka gate: is base par poora round chalta hai, isliye ek topic
+        # shabd hona ANIVARY hai. Na ho to topic-scoring wala raasta lo.
+        if query_hygiene.is_junk_query(cleaned):
+            topic = search_query(question, max_chars=_MAX_QUERY_CHARS)
+            if len(topic) >= 3 and not query_hygiene.is_junk_query(topic):
+                return topic
         return cleaned
 
     def topic_terms(self, question: str, limit: int = 8) -> List[str]:
@@ -200,6 +439,53 @@ class ResearchPlanner:
         (Wrapper hai taaki baaki code ko query_builder import na karna pade.)
         """
         return topic_terms(question, limit=limit)
+
+    # Ek bade sawaal ke kitne hisse EK round me dhoondhe jaayein. Ye seema
+    # zaroori hai: 23 facet ka matlab 23 query nahi ho sakta (provider budget
+    # aur ₹0 shart). Isliye har round apne hisse leta hai aur agla round agle
+    # hisse — MARATHON ke 4 round me ~16 hisse cover ho jaate hain.
+    FACET_QUERIES_PER_ROUND = 4
+    # Depth ke hisaab se chhat — QUICK par fan-out nahi hona chahiye (wahan
+    # jawab turant chahiye), gehre mode me poore sawaal ko cover karna hai.
+    _FACET_ROUND_BUDGET = {"QUICK": 1, "STANDARD": 2, "DEEP": 3,
+                           "MAXIMUM": 4, "MARATHON": 4}
+
+    def facet_round_budget(self, cls: Optional[Dict] = None) -> int:
+        """Is round me kitni facet queries — depth se, warna default."""
+        depth = ((cls or {}).get("depth") or {})
+        name = str(depth.get("name") or "").strip().upper()
+        return self._FACET_ROUND_BUDGET.get(name, self.FACET_QUERIES_PER_ROUND)
+
+    def facet_search_queries(self, question: str, round_no: int = 1,
+                             limit: int = 0) -> List[str]:
+        """Bade sawaal ke HAR HISSE ki apni query — round ke hisaab se ghoomti.
+
+        Naapa hua kaaran: 1600-token sawaal ek topic nahi, 15-20 alag research
+        sawaal hai. Ek blended query ("model consciousness reality human") us
+        jhund ke kisi bhi hisse ko theek se nahi dhoondhti — measured: 15 sahi
+        sources me se 11 ka relevance 0.000. Ab har hisse ki apni query jaati
+        hai, aur wo query `facets.py` ke andar hi nishedh-line/placeholder se
+        saaf ho chuki hoti hai ("CIA investigated X CIA proved X." jaisa kachra
+        query nahi banta).
+
+        Chhote sawaal par `facets.build()` khaali hota hai (MIN_QUESTION_TOKENS),
+        isliye ye method wahan bilkul NO-OP hai — purana behaviour jaisa ka
+        waisa.
+        """
+        per_round = max(1, int(limit or self.FACET_QUERIES_PER_ROUND))
+        try:
+            queries = facets_mod.facet_queries(question or "",
+                                               limit=facets_mod.MAX_FACETS,
+                                               terms=5)
+        except Exception:
+            return []
+        if not queries:
+            return []
+        start = (max(1, int(round_no or 1)) - 1) * per_round
+        if start >= len(queries):
+            # Facet khatam — dobara shuru se (round 5+ par bhi kuch to jaaye).
+            start = start % len(queries)
+        return queries[start:start + per_round]
 
     def search_queries(self, question: str, cls: Optional[Dict] = None,
                        round_no: int = 1) -> List[str]:
@@ -217,10 +503,63 @@ class ResearchPlanner:
         hydride superconductivity", ...). Round 2/3 ke liye branch-wise queries
         rotate hoti hain, aur ye sab DETERMINISTIC hai: reasoning model band ho
         to bhi discovery refine hoti rehti hai.
+
+        Iske UPAR ek parat: agar sawaal khud bahut bada hai (kai hisson wala),
+        to base queries ke BAAD us round ke facet queries bhi jaati hain. Purani
+        queries apni usi jagah par rehti hain — isliye chhote sawaal par ye
+        badlaav no-op hai aur naapa gaya benchmark behaviour nahi badalta.
         """
+        base_qs = self._base_search_queries(question, cls=cls, round_no=round_no)
+        facet_qs = self.facet_search_queries(
+            question, round_no=round_no, limit=self.facet_round_budget(cls))
+        if not facet_qs:
+            return base_qs
+        out: List[str] = []
+        seen = set()
+        for query in [*base_qs, *facet_qs]:
+            key = (query or "").strip().lower()
+            if query and key not in seen:
+                seen.add(key)
+                out.append(query)
+        return out
+
+    def _base_search_queries(self, question: str, cls: Optional[Dict] = None,
+                             round_no: int = 1) -> List[str]:
+        """Pehle jo `search_queries` thi, wahi — bilkul waisi hi (4 ki chhat)."""
         cls = cls or self.classify(question)
         base = self.clean_query(question)
+        specialist_qs = specialist_queries(question, base, round_no=round_no, limit=4)
+        if specialist_qs:
+            return specialist_qs
         plan = domain_detect(question)
+
+        # #150d — trading model ki farmaish par curated macro-econ intent bekaar
+        # hai. `domain.detect` is sawaal ka field `economics` nikalta hai, isliye
+        # round 1 me "minimum wage employment effect labour market gdp" jaisi
+        # query chali jaati thi — scalping model ke liye iska koi mol nahi. Ab un
+        # slots par institutional-first trade queries jaati hain (exchange/
+        # regulator ka document pehle). Base query apni jagah PEHLE number par hi
+        # rehti hai, aur non-trading sawaal par ye list khaali hoti hai — yaani
+        # wahan ye badlaav no-op hai.
+        trade_lead: List[str] = []
+        if trademodel.is_request(question):
+            trade_lead = list(trademodel.lead_queries(
+                trademodel.ask_of(question), limit=3))
+
+        # #171d — exam/padhai ki farmaish par bhi wahi baat. "RPF SI ka paper
+        # banao" par `domain.detect` ka curated intent set kaam ka nahi hai, aur
+        # "math basic se strong karun" par to bilkul nahi: uska jawab board ka
+        # apna syllabus aur padhai ki research deti hai. Un slots par ab
+        # official-first exam queries jaati hain.
+        #
+        # Do baatein jaan-boojh kar: (a) base query apni jagah PEHLE number par
+        # hi rehti hai, aur (b) trading ask par ye list khaali rehti hai
+        # (`not trade_lead`), taaki trading ka naapa hua kram 1 bit na badle.
+        # Non-exam sawaal par bhi khaali — yaani wahan ye badlaav no-op hai.
+        exam_lead: List[str] = []
+        if not trade_lead and exammodel.is_request(question):
+            exam_lead = list(exammodel.lead_queries(
+                exammodel.ask_of(question), limit=3))
 
         # §11 — round 2 se opposition side bhi dhoondhna ZAROORI hai. Pehle
         # (known domain wale path par) sirf support-side branch queries jaati
@@ -237,7 +576,8 @@ class ResearchPlanner:
                 # na plan hoti thi na report hoti thi. Ab intent-wise chalti
                 # hai: focus intents pehle, aur base query kabhi nahi girti.
                 intents = plan.search_intents(base, limit=3)
-                qs = [base] + [i["query"] for i in intents]
+                qs = [base] + (trade_lead or exam_lead
+                              or [i["query"] for i in intents])
             else:
                 qs = ([base]
                       + plan.fallback_queries(base, round_no=round_no, limit=2)
@@ -251,7 +591,24 @@ class ResearchPlanner:
             if out:
                 return out[:4]
 
+        # ── generic sawaal: yahin closed list ki deewar dikhti thi ────────────
+        # Domain profile match nahi hua aur specialist list me bhi kuch nahi —
+        # pehle poore round 1 me SIRF `[base]` jaata tha, yaani "psycho-
+        # cybernetics self image" jaise sawaal ke liye ek hi andhi query. Ab
+        # lens plan se concept/framework/thinker wali queries bhi jaati hain.
+        # Lens kuch na de (pure English generic sawaal) to list bilkul pehle
+        # jaisi rehti hai — yaani ye change us case me no-op hai.
+        lens = self.lens_plan(question, base)
+        lens_qs = [q for q in lens_mod.lens_queries(lens, base, round_no=round_no,
+                                                   limit=4)
+                   if (q or "").strip().lower() != (base or "").strip().lower()]
+
         if round_no <= 1:
+            # Trade queries lens se PEHLE — patla trading ask ("ek scalping setup
+            # banao 5M chart par") ka domain profile generic nikalta hai, aur us
+            # haalat me bhi institutional document sabse pehle jaana chahiye.
+            if trade_lead or exam_lead or lens_qs:
+                return [base, *trade_lead, *exam_lead, *lens_qs][:4]
             return [base]
 
         queries = []
@@ -268,7 +625,17 @@ class ResearchPlanner:
                 queries.append(f"{base} {fields[1]}")
             queries.append(f"{base} criticism limitations")
             queries.append(f"{base} contradictory findings")
-        return [q for q in queries if q][:4]
+        # Lens queries round 2+ me bhi jodte hain, par HAMESHA purani queries ke
+        # BAAD — taaki jo behaviour benchmark me naapa gaya tha wo pehle jaisa
+        # hi pehle number par rahe, aur lens sirf khaali jagah bhare.
+        merged: List[str] = []
+        seen_q = set()
+        for q in [*queries, *lens_qs]:
+            key = (q or "").strip().lower()
+            if q and key not in seen_q:
+                seen_q.add(key)
+                merged.append(q)
+        return merged[:4]
 
     # ── 5. connector plan ─────────────────────────────────────────────────────
     def connector_plan(self, cls: Dict, config: DepthConfig,
@@ -283,6 +650,27 @@ class ResearchPlanner:
         kar diya. Ab domain profile decide karta hai kaun chalega — aur jo band
         hua wo report mein wajah ke saath likha jaata hai (chupchaap nahi).
         """
+        high_depth = config.name in {"MAXIMUM", "MARATHON"}
+        specialist = build_specialist_plan(
+            question or cls.get("question") or "",
+            self.clean_query(question or cls.get("question") or ""),
+        )
+
+        # Classic/mool-text lane ka faisla SABSE PEHLE hota hai, kyunki wo
+        # `books` tier ko bhi prabhavit karta hai (neeche). Poora detection
+        # deterministic hai — `classics.py` mein tradition marker + generic
+        # text-shabd ka reasoning, koi Gemini call nahi.
+        #
+        # Iske upar ek parat aur hai: `concept_ledger` un naamon ko yaad rakhta
+        # hai jo app ne KHUD pehle pehchane the (kriti/vyakti). Isliye "muqaddimah
+        # me nyay ka niyam" jaisa bina-cue sawaal bhi lane khol leta hai, bina
+        # kisi hand-typed book list ke. Ledger sirf JODTA hai — lane band karne
+        # ya base plan ki query girane ka koi raasta uske paas nahi, aur uska
+        # output kabhi evidence nahi ginta (`verified` hamesha False).
+        lane = ledger_mod.lane_plan(question or cls.get("question") or "",
+                                    limit=4)
+        wants_primary_text = bool(lane.get("wants_primary_text"))
+
         papers: List[str] = []
         if config.use_papers:
             papers = ["openalex", "crossref"]
@@ -290,13 +678,21 @@ class ResearchPlanner:
                 papers.append("pubmed")
             if cls.get("is_scientific"):
                 papers += ["arxiv", "doaj"]
-            if config.name == "MAXIMUM":
+            if high_depth:
                 papers.append("semantic_scholar")
 
         books: List[str] = []
-        if config.use_books or cls.get("needs_books"):
+        # `wants_primary_text` bhi book tier kholta hai. Wajah: mool text ka
+        # doosra asli raasta book catalogue hai — archive.org ka `_djvu.txt`
+        # sach mein full text deta hai aur open_library edition/saal batata hai,
+        # jispar `classics.copyright_stance()` ka faisla tikta hai. Aur ye signal
+        # `_BOOK_HINTS` keyword list se ZYADA bharosemand hai: "talmud aur torah
+        # me nyay ka niyam" par koi book-keyword hit nahi hota, phir bhi sawaal
+        # seedha granth ka mool paath maang raha hai. List par nirbhar rehna
+        # wahi galti thi jo lens layer mein pakdi gayi thi.
+        if config.use_books or cls.get("needs_books") or wants_primary_text:
             books = ["internet_archive", "open_library"]
-            if config.name == "MAXIMUM":
+            if high_depth:
                 books.append("google_books")
 
         # Datasets (Spec §2 + §11) — raw data jispar claims tikte hain. Har sawal
@@ -315,8 +711,22 @@ class ResearchPlanner:
                 datasets.append("world_bank")
             if "technical" in types:
                 datasets.append("huggingface")
-            if config.name == "MAXIMUM":
+            if high_depth:
                 datasets += ["world_bank", "huggingface", "data_gov_in"]
+
+        # Interpretive/history/tradition questions do not become better merely
+        # by adding unrelated generic datasets.  Empirical mind/frequency
+        # questions keep the data tier; other specialist profiles disable it.
+        if specialist.get("active"):
+            profile_keys = set(specialist.get("profile_keys", []))
+            if "mind_cognition" in profile_keys:
+                datasets = [name for name in datasets
+                            if name in {"zenodo", "data_gov", "who_gho"}]
+            elif "frequency_claims" in profile_keys and cls.get("is_scientific"):
+                datasets = [name for name in datasets
+                            if name in {"zenodo", "data_gov"}]
+            else:
+                datasets = []
 
         dplan = domain_detect(question or cls.get("question") or "")
         intents = dplan.search_intents(self.clean_query(question or ""), limit=8)
@@ -325,17 +735,343 @@ class ResearchPlanner:
         datasets, drop_d = dplan.route(sorted(set(datasets)), "datasets")
         dropped = drop_p + drop_b + drop_d
 
+        # Patents (₹0 patent batch, point 3) — routing ka poora faisla
+        # `patents.patent_intent()` ka hai, aur wo DETERMINISTIC hai (koi LLM
+        # nahi). Rule saaf hai: "Har generic question par patent connector
+        # wastefully call mat karna." Isliye patent tier tabhi bharta hai jab
+        #   (a) depth mode patents allow karta ho (QUICK nahi), AUR
+        #   (b) sawaal mein patent/prior-art ki baat seedhe ho, ya wo
+        #       invention-jaisa (technical cheez + banane/novelty ka iraada) ho.
+        # Jab patent search NAHI hoti, tab bhi wajah plan mein likhi jaati hai —
+        # taaki report mein "patent dekha hi nahi, aur ye kyun" saaf rahe.
+        patents: List[str] = []
+        intent = patent_intent(question or cls.get("question") or "")
+        patent_reason = intent.get("reason", "")
+        if not getattr(config, "use_patents", True):
+            patent_reason = (f"{config.name} mode mein patent search band hai "
+                             f"(patent APIs slow + fair-use limited hain)")
+        elif intent.get("wanted"):
+            # Key-gated provider ko list mein daalna hi nahi jab key nahi hai:
+            # wo har round "no_key" log karta, jo shor hai. Key ho to wo apne
+            # aap plan mein aa jaata hai.
+            patents = self._patent_providers.available_names()
+            if not patents:
+                patent_reason = ("patent search chahiye thi par koi patent "
+                                 "provider available nahi hai")
+
         # arXiv ko is field mein prathmikta chahiye to use sabse aage laao —
         # discovery ka wall-clock budget pehle sabse kaam ke connector par lage.
         prefer = list(dplan.profile.connectors)
         if prefer:
             papers.sort(key=lambda n: (prefer.index(n) if n in prefer else 99, n))
 
+        # ── classic / mool-text lane (task #84) ─────────────────────────────
+        # Do alag cheezein, dono deterministic (`classics.py`, koi Gemini call
+        # nahi):
+        #   classics        = public-domain granth/lekhan ka MOOL TEXT jo asli
+        #                     mein padha ja sakta hai (Wikisource official API).
+        #   summary_queries = copyright wali book ko ignore NAHI karna — uski
+        #                     summary/vyakhya/review aur lekhak ka apna free
+        #                     likha hua dhoondhna. Text nahi padha, ye report
+        #                     mein saaf likha jaata hai.
+        # Lane detection kisi granth/lekhak ki LIST se nahi hoti (tradition
+        # marker + generic text-shabd se hoti hai), isliye jo naam intel ne kabhi
+        # bataya hi nahi wo bhi isi raaste se aata hai. Galat andaaze ki keemat
+        # sirf 0-result queries hai — lens layer ka wahi rule.
+        classics_names: List[str] = []
+        classic_queries: List[str] = []
+        summary_queries: List[str] = []
+        classics_reason = "sawaal mein kisi mool text/granth ka ishara nahi mila"
+        if wants_primary_text:
+            # Depth is lane ko BAND nahi karti, sirf CHHOTI karti hai. Pehle gate
+            # `use_books or needs_books` tha, aur wo do tarah se jhoot bolta tha:
+            # QUICK mode mein keyword hit hone par lane chal jaati thi, jabki DEEP
+            # mein "talmud/torah" jaise saaf public-domain granth par band rehti
+            # thi. Ab paimana wahi hai jo asli chhat hai — `max_fulltext`: mool
+            # text lane ka maksad PADHNA hai, aur jitna padh hi nahi sakte utne
+            # candidate maangna sirf discovery budget kharch karna hai.
+            text_budget = 1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1 else 2
+            classic_queries = list(lane.get("classic_queries", []))[:text_budget]
+            summary_queries = list(lane.get("summary_queries", []))[:text_budget]
+            classics_names = ["wikisource" if code == "en"
+                              else f"wikisource_{code}"
+                              for code in classic_langs(
+                                  question or cls.get("question") or "")]
+            classics_reason = (f"mool text lane chali (Wikisource official API, "
+                               f"{len(classic_queries)} query) + copyright wali "
+                               f"book ke liye summary lane "
+                               f"({len(summary_queries)} query)")
+
+        # ── market/economic TIME SERIES lane (#118) ─────────────────────────
+        # Faisla `market_data.market_intent()` ka hai aur wo DETERMINISTIC hai
+        # (koi Gemini call nahi). Do signal chahiye — market ki baat AUR
+        # time-series/aage ka sawaal — kyunki "gold ka price kya hai" par
+        # provider ki poori series maangna sirf quota kharch hai.
+        #
+        # Ye lane KNOWLEDGE nahi kholti: yahan se sirf period→value aata hai,
+        # jispar LAB apna walk-forward test chalata hai. Aur wo test purane
+        # data par hota hai — isliye plan mein hi `not_financial_advice` line
+        # saath chalti hai, taaki report bante waqt wo bhoolna mushkil ho.
+        markets: List[str] = []
+        # #150d — trading model ki farmaish ka faisla EK jagah se aata hai
+        # (`trademodel.is_request`), aur wahi faisla do kaam karta hai: (a) market
+        # series lane ka doosra signal ban jaata hai, aur (b) neeche trade-study
+        # tier kholta hai. Do jagah do list banana hi purani galti thi.
+        trade_text = question or cls.get("question") or ""
+        trade_ask = bool(trademodel.is_request(trade_text))
+        m_intent = market_intent(trade_text, domain_key=dplan.key,
+                                 trade_ask=trade_ask)
+        market_reason = m_intent.get("reason", "")
+        if not getattr(config, "use_datasets", True):
+            market_reason = (f"{config.name} mode mein data lane band hai, "
+                             f"isliye market series bhi nahi maangi gayi")
+        elif m_intent.get("wanted"):
+            markets = self._market_providers.available_names()
+            if not markets:
+                market_reason = ("market series chahiye thi par koi provider "
+                                 "available nahi hai (keyless bhi nahi)")
+
+        # ── gaana/likhawat ka CRAFT-STUDY lane (#129) ───────────────────────
+        # Do signal chahiye (market lane ka wahi niyam):
+        #   1. farmaish banane ki ho (craft.detect → is_request), AUR
+        #   2. wo gaane wali form ho (song), warna nibandh par bhi music ki
+        #      kitaabein dhoondhna sirf budget kharch hai.
+        #
+        # Ye lane KOI GYAAN NAHI kholti: sirf query deti hai. Style ka asli
+        # taqaza tab hi naapa jaata hai jab kisi PADHI HUI source me number
+        # mila ho (songcraft ka `style_fit_structure` isi par tika hai).
+        # `is_lyrics_hunt` guard yahin bhi lagta hai — kisi maujooda gaane ke
+        # bol dhoondhna is lane ka kaam NAHI hai (copyright).
+        craft_queries: List[str] = []
+        craft_reason = "farmaish gaane jaisi nahi lagi, isliye craft-study band"
+        craft_ask: Dict = {}
+        style_ask = None
+        song_text = question or cls.get("question") or ""
+        try:
+            detection = craft_mod.detect(song_text)
+            is_song = (bool(detection.get("is_request"))
+                       and str(detection.get("form") or "")
+                       == songcraft.SONG_FORM)
+        except Exception:
+            detection, is_song = {}, False
+            craft_reason = "craft detect andar se toot gaya — lane nahi chali"
+        if is_song and songcraft.is_lyrics_hunt(song_text):
+            craft_reason = ("gaane ke BOL maange ja rahe the — wo is lane se "
+                            "nahi aate (copyright), sirf craft padha jaata hai")
+        elif is_song:
+            ask = songcraft.style_of(song_text)
+            craft_ask = ask.to_dict()
+            style_ask = ask
+            # Depth lane band nahi karti, chhoti karti hai — padhna hi maksad
+            # hai, aur jitna padh nahi sakte utni query maangna bekaar hai.
+            budget = 2 if int(getattr(config, "max_fulltext", 3) or 1) <= 1 else \
+                songcraft.MAX_STUDY_QUERIES
+            craft_queries = list(songcraft.study_queries(ask))[:budget]
+            craft_reason = (f"gaane ki farmaish mili — craft-study lane chali "
+                            f"({len(craft_queries)} query; style/bhasha ki maang "
+                            f"padhi gayi, gyaan nahi maana gaya)")
+
+        # ── sunne wale ki samajh ka LISTENER-STUDY lane (#134b) ─────────────
+        # Craft lane ke SAATH chalti hai, uski jagah nahi: uska budget alag hai
+        # (`MAX_LISTENER_QUERIES`) taaki craft ki naapi hui coverage se ek bhi
+        # slot na chhine. Yahan bhi koi gyaan nahi khulta — ye sirf query hai,
+        # aur `listener_evidence_read` isliye kabhi True nahi hota.
+        listener_queries: List[Dict] = []
+        listener_reason = ("farmaish gaane jaisi nahi lagi, isliye "
+                           "listener-study band")
+        if not is_song:
+            pass
+        elif songcraft.is_lyrics_hunt(song_text):
+            listener_reason = ("gaane ke BOL maange ja rahe the — us haalat me "
+                               "sunne wale ki research bhi nahi maangi jaati")
+        else:
+            l_budget = (1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else listener_study.MAX_LISTENER_QUERIES)
+            listener_queries = list(listener_study.study_queries(
+                style_ask, limit=l_budget))
+            listener_reason = (
+                f"gaane ki farmaish mili — sunne wale ke bhaav/vyavhaar ki "
+                f"research dhoondhne ke liye {len(listener_queries)} query "
+                f"bani (kisi insaan par koi test nahi hua)")
+
+        # ── sur/taal/saaz ka MUSIC-STUDY lane (#140c) ───────────────────────
+        # Craft aur listener ke SAATH chalti hai, kisi ki jagah nahi: iska
+        # budget alag hai (`MAX_MUSIC_QUERIES`) taaki craft ki 6 aur listener ki
+        # 3 slot me se ek bhi na chhine. Yahan bhi koi gyaan nahi khulta — ye
+        # sirf query hai. Isliye `music_evidence_read` kabhi True nahi hota, aur
+        # `audio_generated`/`heard` naam se hi bata dete hain ki na koi dhun
+        # bani, na kuch suna gaya.
+        music_queries: List[Dict] = []
+        music_reason = ("farmaish gaane jaisi nahi lagi, isliye music-study "
+                        "band")
+        if not is_song:
+            pass
+        elif songcraft.is_lyrics_hunt(song_text):
+            music_reason = ("gaane ke BOL maange ja rahe the — us haalat me "
+                            "music direction ki research bhi nahi maangi jaati")
+        else:
+            m_budget = (1 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else music_study.MAX_MUSIC_QUERIES)
+            music_queries = list(music_study.study_queries(
+                style_ask, limit=m_budget))
+            music_reason = (
+                f"gaane ki farmaish mili — kaunsa sur/taal/saaz kis bhaav ke "
+                f"saath, iski research dhoondhne ke liye {len(music_queries)} "
+                f"query bani (koi dhun nahi bani, kuch suna nahi gaya)")
+
+        # ── trading model ka TRADE-STUDY lane (#150d) ───────────────────────
+        # Craft/listener/music ke SAATH ka wahi dhaancha, par ek zaroori farak:
+        # ye lane un teenon se aazad hai. Gaane ka lane band ho tab bhi ye chalta
+        # hai, aur ye chale to gaane ka lane band NAHI hota (dono maange gaye ho
+        # to dono chalte hain) — intel ki shart yahi thi: "sab mix mt kr dena".
+        #
+        # Yahan KOI GYAAN NAHI khulta: ye sirf query hai. Isliye
+        # `trade_evidence_read` kabhi True nahi hota, aur `live_tested`/
+        # `broker_connected`/`order_book_read` naam se hi bata dete hain ki na
+        # koi trade chala, na kisi broker se baat hui, na order book padhi gayi.
+        trade_queries: List[Dict] = []
+        trade_ask_dict: Dict = {}
+        trade_reason = trademodel.request_reason(trade_text)
+        if trade_ask:
+            # Depth lane band nahi karti, chhoti karti hai — wahi niyam.
+            t_budget = (3 if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else trademodel.MAX_STUDY_QUERIES)
+            t_ask = trademodel.ask_of(trade_text)
+            trade_ask_dict = t_ask.to_dict()
+            trade_queries = list(trademodel.lane_queries(t_ask, limit=t_budget))
+            if trade_queries:
+                # Reason lane ki ASLI ginti se banta hai, likhe hue daawe se
+                # nahi. Pehle yahan har haalat me "exchange/regulator ka
+                # document pehle" likha jaata tha — jabki instrument ka naam na
+                # aane par ek bhi venue query banti hi nahi. Wahi naam-vs-kaam
+                # ka farak is project me mana hai.
+                counted = [(lane, sum(1 for row in trade_queries
+                                      if row.get("lane") == lane))
+                           for lane in trademodel.STUDY_LANES]
+                got = dict(counted)
+                detail = ", ".join(f"{lane}:{n}" for lane, n in counted if n)
+                if got.get(trademodel.LANE_WEB):
+                    parts = ["exchange/regulator ka apna document sabse pehle"]
+                else:
+                    parts = ["koi jaana-pehchana instrument naam se nahi aaya, "
+                             "isliye is baar kisi exchange/regulator ka "
+                             "document nahi maanga gaya"]
+                if got.get(trademodel.LANE_PAPERS):
+                    parts.append("microstructure/liquidity/validation ke asli "
+                                 "paper")
+                if got.get(trademodel.LANE_BOOKS):
+                    parts.append("aur jis concept ka naam aaya uska empirical "
+                                 "test — naam se use sach nahi maana gaya")
+                trade_reason = (
+                    f"trading model ki farmaish mili — trade-study lane chali "
+                    f"({len(trade_queries)} query; {detail}); "
+                    + "; ".join(parts))
+            else:
+                # Farmaish mili par ek bhi query nahi bani — ye baat CHHUPTI
+                # nahi. Pehle yahi haalat me bhi "lane chali (0 query)" likha
+                # jaata tha, jo kaam aur kahaani ka farak tha: wahi jhoot is
+                # project me mana hai.
+                trade_reason = (
+                    "trading model ki farmaish mili par trade-study lane ki ek "
+                    "bhi query nahi bani — na koi jaana-pehchana instrument "
+                    "naam se aaya, na koi naam wala concept, na koi sakhti "
+                    "maangi gayi; isliye lane khaali hai (0 query) aur trading "
+                    "ka koi alag source padha nahi gaya")
+
+        # ── exam/padhai ka EXAM-STUDY lane (#171d) ───────────────────────────
+        # Trade-study wala hi dhaancha, aur wahi zaroori farak: ye lane baaki
+        # sabse AAZAD hai. Gaane ka lane band ho ya trading ka chal raha ho —
+        # is lane ka faisla sirf `exammodel.is_request()` se aata hai, jo DO
+        # signal par khulta hai (exam/subject ki cheez + banane ya seekhne ki
+        # maang). Isliye "hindi me gaana banao" par ye lane khulti hi nahi, aur
+        # yahi intel ki shart thi: "sab mix mt kr dena".
+        #
+        # Yahan KOI GYAAN NAHI khulta: ye sirf query hai. Isliye
+        # `exam_evidence_read` kabhi True nahi hota, aur chhah jhande naam se hi
+        # seema batate hain — app kisi board/commission ka hissa nahi, banaya
+        # hua paper sirf practice ka hai, answer key app ki apni banayi hui hai,
+        # "yahi question aayega" ka koi waada nahi, kitne number aayenge ka bhi
+        # nahi, aur koi leak/paid question bank chhua nahi gaya.
+        exam_text = question or cls.get("question") or ""
+        exam_ask = bool(exammodel.is_request(exam_text))
+        exam_queries: List[Dict] = []
+        exam_ask_dict: Dict = {}
+        exam_reason = exammodel.request_reason(exam_text)
+        if exam_ask:
+            # Depth lane band nahi karti, chhoti karti hai — wahi niyam.
+            e_budget = (exammodel.QUICK_STUDY_QUERIES
+                        if int(getattr(config, "max_fulltext", 3) or 1) <= 1
+                        else exammodel.MAX_STUDY_QUERIES)
+            e_ask = exammodel.ask_of(exam_text)
+            exam_ask_dict = e_ask.to_dict()
+            exam_queries = list(exammodel.lane_queries(e_ask, limit=e_budget))
+            if exam_queries:
+                # Reason lane ki ASLI ginti se banta hai, likhe hue daawe se
+                # nahi — trade lane par yahi galti pakdi gayi thi. Exam ka naam
+                # aur subject dono na aayein to official lane ki ek bhi query
+                # banti hi nahi, aur us haalat me "official document pehle"
+                # likhna naam-vs-kaam ka wahi farak hota.
+                counted = [(lane, sum(1 for row in exam_queries
+                                      if row.get("lane") == lane))
+                           for lane in exammodel.STUDY_LANES]
+                got = dict(counted)
+                detail = ", ".join(f"{lane}:{n}" for lane, n in counted if n)
+                if got.get(exammodel.LANE_OFFICIAL):
+                    parts = ["board/commission ka apna syllabus/notification "
+                             "sabse pehle"]
+                else:
+                    parts = ["na exam ka naam aaya na koi subject/level, isliye "
+                             "is baar kisi board/commission ka document nahi "
+                             "maanga gaya"]
+                if got.get(exammodel.LANE_TEXTBOOK):
+                    parts.append("topic ka asli daayra padhne wali kitaab se")
+                if got.get(exammodel.LANE_PEDAGOGY):
+                    parts.append("aur 'kaise padhein' ka jawab research se — "
+                                 "kisi ki raay se nahi")
+                if got.get(exammodel.LANE_PRACTICE):
+                    parts.append("purane paper se sirf DHAANCHA padha jaata hai, "
+                                 "uske question nahi")
+                exam_reason = (
+                    f"exam/padhai ki farmaish mili — exam-study lane chali "
+                    f"({len(exam_queries)} query; {detail}); "
+                    + "; ".join(parts))
+            else:
+                # Farmaish mili par ek bhi query nahi bani — ye baat CHHUPTI
+                # nahi (trade lane ka wahi niyam).
+                exam_reason = (
+                    "exam/padhai ki farmaish mili par exam-study lane ki ek bhi "
+                    "query nahi bani — na exam ka naam aaya, na koi subject, na "
+                    "koi class/level; isliye lane khaali hai (0 query) aur "
+                    "padhai ka koi alag source padha nahi gaya")
+
         return {
             "web": True,
             "papers": papers,
             "books": books,
             "datasets": datasets,
+            # patents alag tier hai — patent legal document hai, science proof nahi
+            "patents": patents,
+            "patent_intent": {"wanted": bool(patents),
+                              "kind": intent.get("kind", ""),
+                              "signals": list(intent.get("signals", [])),
+                              "reason": patent_reason},
+            # market/economic series bhi ALAG tier hai — catalogue se backtest
+            # nahi chalta, aur backtest ka result financial advice nahi hai
+            "markets": markets,
+            "market_intent": {"wanted": bool(markets),
+                              "market_signal": bool(m_intent.get("market_signal")),
+                              "series_ask": bool(m_intent.get("series_ask")),
+                              # user ne khud series maangi (series_ask) aur
+                              # "model banane ke liye series chahiye"
+                              # (model_ask) do ALAG baatein hain — disclosure me
+                              # bhi alag rehni chahiye, warna audit me lagta hai
+                              # user ne data maanga tha jabki maanga nahi tha
+                              "model_ask": bool(m_intent.get("model_ask")),
+                              "domain_economics": bool(
+                                  m_intent.get("domain_economics")),
+                              "reason": market_reason,
+                              "not_financial_advice":
+                                  m_intent.get("not_financial_advice", "")},
             # §3 ka disclosure — kaun band hua aur kyun
             "domain": dplan.key,
             "domain_label": dplan.profile.label,
@@ -350,11 +1086,157 @@ class ResearchPlanner:
             "useful_source_types": list(dplan.profile.source_types),
             "skipped_connectors": sorted(set(dropped)),
             "routing_note": dplan.routing_note(dropped),
+            # Specialist/archival/book queries remain separate from ordinary
+            # web/paper queries so their evidence lanes can be audited.
+            "specialist_profile_keys": list(specialist.get("profile_keys", [])),
+            "specialist_expected_lanes": list(specialist.get("expected_lanes", [])),
+            "official_archive_queries": list(
+                specialist.get("official_archive_queries", [])),
+            "book_queries": list(specialist.get("book_queries", [])),
+            "legal_access_only": bool(specialist.get("legal_access_only", True)),
+            # Classic/mool-text lane — search PLAN hai, evidence nahi. Isliye
+            # `verified` yahan bhi False rehta hai: naam lena padhna nahi hai.
+            "classics": classics_names,
+            "classic_queries": classic_queries,
+            "summary_queries": summary_queries,
+            "classic_lane": {"wants_primary_text": bool(lane.get("wants_primary_text")),
+                             "works": list(lane.get("works", [])),
+                             "people": list(lane.get("people", [])),
+                             "traditions": list(lane.get("traditions", [])),
+                             "reasons": list(lane.get("reasons", [])),
+                             "method": lane.get("method", ""),
+                             "model_used": bool(lane.get("model_used")),
+                             "verified": False,
+                             "evidence_status": lane.get("evidence_status", ""),
+                             "note": classics_reason,
+                             # Ledger ki parat alag dikhti hai, taaki report me
+                             # saaf rahe ki lane KISNE kholi: sawaal ke apne cue
+                             # ne, ya pehle yaad kiya hua naam (jo evidence nahi).
+                             "ledger_opened_lane": bool(lane.get("ledger_opened_lane")),
+                             "ledger": dict(lane.get("ledger") or {})},
+            # Gaane ka CRAFT-STUDY lane (#129) — ye bhi search PLAN hai,
+            # evidence nahi. Isliye `style_conventions_read` yahan kabhi True
+            # nahi hota: query banana padhna nahi hai.
+            "craft_study": craft_queries,
+            "craft_study_lane": {"wanted": bool(craft_queries),
+                                 "is_song_request": bool(is_song),
+                                 "lyrics_hunt_blocked": True,
+                                 "ask": craft_ask,
+                                 "style_conventions_read": False,
+                                 "audio_generated": songcraft.AUDIO_GENERATED,
+                                 "gemini_calls": 0,
+                                 "reason": craft_reason},
+            # Sunne wale ki samajh ka lane (#134b) — craft se ALAG ginti, alag
+            # label. `listener_evidence_read` yahan kabhi True nahi hota (query
+            # banana padhna nahi hai), aur teen jhande naam se hi seema batate
+            # hain: kisi insaan par test nahi hua, koi audience naapi nahi gayi,
+            # kisi ka dil padha nahi gaya.
+            "listener_study": listener_queries,
+            "listener_study_lane": {
+                "wanted": bool(listener_queries),
+                "is_song_request": bool(is_song),
+                "query_count": len(listener_queries),
+                "lanes": [str(row.get("lane") or "") for row in listener_queries],
+                "reasons": [str(row.get("why") or "") for row in listener_queries],
+                "lyrics_hunt_blocked": True,
+                "listener_evidence_read": False,
+                "listener_tested": listener_study.LISTENER_TESTED,
+                "audience_measured": listener_study.AUDIENCE_MEASURED,
+                "mind_read": listener_study.MIND_READ,
+                "gemini_calls": listener_study.GEMINI_CALLS,
+                "reason": listener_reason},
+            # Music direction ka lane (#140c) — craft/listener se ALAG ginti,
+            # alag label. `music_evidence_read` yahan kabhi True nahi hota, aur
+            # chaar jhande naam se hi seema batate hain: koi audio nahi bani,
+            # koi dhun nahi bani, kuch suna nahi gaya, kisi ne bajaakar dekha
+            # nahi. Ye songcraft ke `music_direction_present` ki JAGAH nahi hai.
+            "music_study": music_queries,
+            "music_study_lane": {
+                "wanted": bool(music_queries),
+                "is_song_request": bool(is_song),
+                "query_count": len(music_queries),
+                "lanes": [str(row.get("lane") or "") for row in music_queries],
+                "reasons": [str(row.get("why") or "") for row in music_queries],
+                "lyrics_hunt_blocked": True,
+                "music_evidence_read": False,
+                "audio_generated": music_study.AUDIO_GENERATED,
+                "tune_made": music_study.TUNE_MADE,
+                "heard": music_study.HEARD,
+                "play_tested": music_study.PLAY_TESTED,
+                "replaces_music_direction_present": False,
+                "gemini_calls": music_study.GEMINI_CALLS,
+                "reason": music_reason},
+            # Trading model ka trade-study lane (#150d) — gaane ke teen lane se
+            # ALAG ginti, alag label (`trade_study_<lane>`). Ye bhi search PLAN
+            # hai, evidence nahi: `trade_evidence_read` yahan kabhi True nahi
+            # hota. Chaar jhande naam se hi seema batate hain — koi live/demo
+            # trade nahi chala, kisi broker se connection nahi, order book nahi
+            # padhi, tick data nahi padha. Aur `financial_advice` False hai.
+            "trade_study": trade_queries,
+            "trade_study_lane": {
+                "wanted": bool(trade_queries),
+                "is_trade_request": bool(trade_ask),
+                "query_count": len(trade_queries),
+                "lanes": [str(row.get("lane") or "") for row in trade_queries],
+                "reasons": [str(row.get("why") or "") for row in trade_queries],
+                # Ye jhanda BEHAVIOUR se banta hai: sach me pehli query
+                # exchange/regulator ki hai ya nahi. Hardcoded True likhna us
+                # ask par jhoot hota jahan instrument ka naam hi nahi aaya.
+                "institutional_first": bool(
+                    trade_queries and trade_queries[0].get("lane")
+                    == trademodel.LANE_WEB),
+                "ask": trade_ask_dict,
+                "trade_evidence_read": False,
+                "live_tested": trademodel.LIVE_TESTED,
+                "broker_connected": trademodel.BROKER_CONNECTED,
+                "order_book_read": trademodel.ORDER_BOOK_READ,
+                "tick_data_read": trademodel.TICK_DATA_READ,
+                "concepts_earn_their_place": trademodel.CONCEPTS_EARN_THEIR_PLACE,
+                "backtest_is_not_future": trademodel.BACKTEST_IS_NOT_FUTURE,
+                "financial_advice": trademodel.FINANCIAL_ADVICE,
+                "not_financial_advice": trademodel.NOT_ADVICE_NOTE,
+                "gemini_calls": trademodel.GEMINI_CALLS,
+                "network_used": trademodel.NETWORK_USED,
+                "reason": trade_reason},
+            # Exam/padhai ka EXAM-STUDY lane (#171d) — gaane ke teen lane aur
+            # trading ke lane se ALAG ginti, alag label (`exam_study_<lane>`).
+            # Ye bhi search PLAN hai, evidence nahi: `exam_evidence_read` yahan
+            # kabhi True nahi hota. Chhah jhande naam se hi seema batate hain,
+            # aur `not_official_note` wahi line hai jo jawab me bhi jaati hai.
+            "exam_study": exam_queries,
+            "exam_study_lane": {
+                "wanted": bool(exam_queries),
+                "is_exam_request": bool(exam_ask),
+                "query_count": len(exam_queries),
+                "lanes": [str(row.get("lane") or "") for row in exam_queries],
+                "reasons": [str(row.get("why") or "") for row in exam_queries],
+                # Ye jhanda BEHAVIOUR se banta hai: sach me pehli query board/
+                # commission ke apne document ki hai ya nahi. Hardcoded True
+                # likhna us ask par jhoot hota jahan exam ka naam hi nahi aaya.
+                "official_first": bool(
+                    exam_queries and exam_queries[0].get("lane")
+                    == exammodel.LANE_OFFICIAL),
+                "ask": exam_ask_dict,
+                "exam_evidence_read": False,
+                "paper_is_practice_only": exammodel.PAPER_IS_PRACTICE_ONLY,
+                "is_exam_authority": exammodel.IS_EXAM_AUTHORITY,
+                "answer_key_is_app_made": exammodel.ANSWER_KEY_IS_APP_MADE,
+                "question_prediction_promised":
+                    exammodel.QUESTION_PREDICTION_PROMISED,
+                "score_promised": exammodel.SCORE_PROMISED,
+                "leaked_paper_used": exammodel.LEAKED_PAPER_USED,
+                "not_official_note": exammodel.NOT_OFFICIAL_NOTE,
+                "gemini_calls": exammodel.GEMINI_CALLS,
+                "network_used": exammodel.NETWORK_USED,
+                "reason": exam_reason},
         }
 
     # ── poora plan ────────────────────────────────────────────────────────────
     def plan(self, question: str, config: DepthConfig) -> Dict:
         cls = self.classify(question)
+        base_query = self.clean_query(question)
+        specialist = build_specialist_plan(question, base_query)
+        lens = self.lens_plan(question, base_query)
         return {
             **cls,
             "topic_terms": self.topic_terms(question),
@@ -362,6 +1244,12 @@ class ResearchPlanner:
             "queries": self.search_queries(question, cls, round_no=1),
             "connectors": self.connector_plan(cls, config, question),
             "depth": config.to_dict(),
+            "specialist": specialist,
+            # Open lens plan — closed keyword list ke bahar ka raasta. Ye search
+            # plan hai, evidence NAHI (`verified: False`). Scoring anchor isi se
+            # banta hai, aur wahi cross-lingual relevance ka fix hai.
+            "lens": lens,
+            "lens_scoring_query": lens_mod.scoring_query(lens),
             # Prompt mein user ne jo CHEEZEIN saaf-saaf maangi hain (3 hypotheses,
             # mathematical model, second-order chain, red-team) — wo yahin plan ke
             # andar aa jaati hain, taaki prompt banane wale aur report banane wale

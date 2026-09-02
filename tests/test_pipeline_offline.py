@@ -33,7 +33,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import gemini_reasoning  # noqa: E402
-from research_engine.models import SourceRecord, SourceType  # noqa: E402
+from research_engine.models import Passage, SourceRecord, SourceType  # noqa: E402
 from research_engine.orchestrator import DeepResearchEngine  # noqa: E402
 
 QUESTION = ("intermittent fasting type 2 diabetes par kya asar daalta hai, "
@@ -62,6 +62,30 @@ ON_TOPIC = [
      "Review of hypoglycaemia events reported during intermittent fasting "
      "protocols among diabetes patients on insulin.",
      False, ""),
+    # §5 (2026-08-22) — ye teen source isliye jode gaye ki "healthy run" ka
+    # matlab sirf "peer-reviewed source mil gaye" nahi hai. Top label ke liye
+    # saboot ke zaroori raaste bhi bhare hone chahiye: mechanism, swatantra
+    # replication aur counter-side. Pehle fixture in teenon par khaali tha aur
+    # phir bhi ✅ VERIFIED maang raha tha — wahi dark-matter wali galti thi.
+    ("Mechanism and pathway of improved insulin sensitivity during "
+     "intermittent fasting",
+     "https://openalex.org/W1001",
+     "Mechanistic study explaining the pathway by which intermittent fasting "
+     "improves insulin sensitivity in type 2 diabetes.",
+     True, "10.1/if-mechanism"),
+    ("Independent replication of a time-restricted eating trial in type 2 "
+     "diabetes: multi-centre confirmation",
+     "https://pubmed.ncbi.nlm.nih.gov/34444444/",
+     "Multi-centre independent replication reproduced the HbA1c reduction "
+     "reported for intermittent fasting in type 2 diabetes.",
+     True, "10.1/if-replication"),
+    ("Null result and limitations: intermittent fasting showed no effect on "
+     "HbA1c in a 12-month diabetes trial",
+     "https://doaj.org/article/null-if",
+     "This trial reported a null result with no effect of intermittent fasting "
+     "on HbA1c; the authors discuss limitations and criticism of earlier "
+     "diabetes studies.",
+     True, "10.1/if-null"),
 ]
 
 # Bilkul wahi kachra jo pichhle live test mein energy ke sawaal par aa gaya tha
@@ -130,10 +154,29 @@ def _fake_reader(read_ok: bool):
     """
     def enrich(pack, max_sources=3, budget_chars=2400):
         entries = []
-        for s in pack.sources[:max_sources]:
+        for index, s in enumerate(pack.sources[:max_sources], 1):
             if read_ok:
+                # Mirror ContentFetcher.enrich's production contract: a
+                # full-text upgrade replaces stale passages and freezes exact
+                # locator + capture-time depth. Merely flipping SourceRecord's
+                # mutable read_level would let its display snippet borrow a
+                # false full-text badge and is intentionally rejected by P0-A.
+                full_text = ((s.snippet or s.title) + " ") * 4
                 s.full_text_chars = 5000
                 s.read_level = "full_text"
+                s.locator = f"Fixture section {index}"
+                pack.passages[:] = [
+                    passage for passage in pack.passages
+                    if passage.source_id != s.source_id
+                ]
+                pack.passages.append(Passage(
+                    source_id=s.source_id,
+                    text=full_text,
+                    locator=s.locator,
+                    provenance="full_text_fixture",
+                    read_level_at_capture="full_text",
+                ))
+                s.snippet = full_text[:budget_chars]
                 entries.append({"source_id": s.source_id, "ok": True,
                                 "chars": 5000, "reason": "", "title": s.title})
             else:
@@ -158,8 +201,10 @@ class _FakeGemini:
     hi karta hai).
     """
 
-    def __init__(self, fail_after: int = 99):
+    def __init__(self, fail_after: int = 99, recovered_raw_error: bool = False):
         self.fail_after = fail_after
+        self.recovered_raw_error = recovered_raw_error
+        self.raw_error_recorded = False
         self.prompts = []
 
     def __call__(self, brain, prompt, label=""):
@@ -168,6 +213,15 @@ class _FakeGemini:
                 f"call budget ({brain.budget}) khatam — '{label}' skip hua")
         brain.calls_used += 1
         self.prompts.append((label, prompt))
+        if self.recovered_raw_error and not self.raw_error_recorded:
+            # Production shape: an earlier free model attempt failed, then a
+            # later candidate completed the same logical pass. The raw provider
+            # body remains in developer accounting but must not enter a COMPLETE
+            # run's answer/warnings.
+            brain.errors.append(
+                "analysis failed: ResourceExhausted: 429 grpc_status quota_id "
+                "GenerateRequestsPerDayPerProjectPerModel-FreeTier")
+            self.raw_error_recorded = True
         if brain.calls_used > self.fail_after:
             brain.errors.append(
                 f"{label} failed: ResourceExhausted: 429 quota exceeded")
@@ -208,8 +262,10 @@ class _FakeGemini:
                 "## Source Relevance Check\nSources sawaal se match karte hain.\n")
 
 
-def _run(records, read_ok: bool, fail_after: int = 99, mode: str = "MAXIMUM"):
-    fake = _FakeGemini(fail_after=fail_after)
+def _run(records, read_ok: bool, fail_after: int = 99, mode: str = "MAXIMUM",
+         recovered_raw_error: bool = False):
+    fake = _FakeGemini(fail_after=fail_after,
+                       recovered_raw_error=recovered_raw_error)
     original = gemini_reasoning.GeminiReasoning.generate
     gemini_reasoning.GeminiReasoning.generate = \
         lambda self, prompt, label="": fake(self, prompt, label)
@@ -226,14 +282,29 @@ def _run(records, read_ok: bool, fail_after: int = 99, mode: str = "MAXIMUM"):
 
 # ── A. healthy run ───────────────────────────────────────────────────────────
 def test_healthy_run_reaches_top_label():
+    """
+    EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§5, 2026-08-22).
+
+    Pehle ye test 4 source ke saath ✅ VERIFIED maangta tha, jabki mechanism,
+    swatantra replication aur counter-side — teen zaroori evidence axes — khaali
+    the. §5 ka naya taala aisi haalat mein top label nahi deta. Isliye fixture
+    mein wo teen source jode gaye hain (koi feature hata nahi) aur pass ki ginti
+    "3/3" se "4/4" ho gayi: behtar evidence par hypothesis pass bhi genuinely
+    plan hota hai. Asli shart wahi hai — jitne pass plan hue, sab chale.
+    """
     result, fake = _run(_records(ON_TOPIC), read_ok=True)
     level = result["evidence_level"]
     assert _is_top_label(level), level
     assert "MIXED" not in level, level
     cov = result["coverage"]
     assert cov["full_text_sources_read"] >= 1, cov
-    assert cov["reasoning_passes"] == "3/3", cov["reasoning_passes"]
+    done, planned = cov["reasoning_passes"].split("/")
+    assert done == planned, cov["reasoning_passes"]
+    assert int(planned) >= 3, cov["reasoning_passes"]
     assert cov["offtopic_dropped"] == 0, cov
+    # §5 — top label mila hai, to zaroori evidence raaste bhi bhare hone chahiye
+    axes = result["coverage"]["evidence_axes"]["summary"]
+    assert axes["mandatory_missing"] == 0, axes
 
 
 def test_pipeline_returns_structured_advanced_discovery_without_extra_model_call():
@@ -251,21 +322,25 @@ def test_pipeline_returns_structured_advanced_discovery_without_extra_model_call
 
 def test_healthy_run_answer_has_real_sections():
     """
-    §16 ka naya structure. (Pehle ye test purane numbered headings —
-    "1. Seedha Jawab", "9. Verification Status" — dhoondta tha. Wo structure
-    intel ke naye instruction se badal gaya hai: ab pehla section `## Seedha
-    jawab` hai aur technical sab kuch aakhir mein. Feature kuch nahi hata,
-    sirf test ki expectation naye structure par le aayi gayi hai.)
+    §12 ka structure (2026-08-22 ko update hua).
+
+    Pehle ye test purane numbered headings ("1. Seedha Jawab") dhoondta tha,
+    phir Hinglish-only headings ("## Research se kya pata chala?"). Ab headings
+    dual hain — pehle contract ka canonical naam, phir "—" ke baad wahi baat
+    Hinglish mein — aur aakhir ke do section ka kram §12 ke hisaab se palta hai:
+    pehle "Audit and limits", uske baad "Sources" sabse aakhir. Feature kuch
+    nahi hata; sirf naam aur kram naye contract par aa gaye hain.
     """
     result, _ = _run(_records(ON_TOPIC), read_ok=True)
     answer = result["answer"]
-    for heading in ("## Seedha jawab", "## Research se kya pata chala?",
-                    "## Final conclusion", "## Sources",
-                    "## Research quality / technical audit"):
+    for heading in ("## Seedha jawab", "## Established knowledge",
+                    "## Calculations", "## Evidence-based conclusion",
+                    "## APP ORIGINAL RESEARCH LAB", "## Audit and limits",
+                    "## Sources"):
         assert heading in answer, f"section gum: {heading}"
-    # insaan pehle, technical baad mein — audit sabse aakhir mein hona chahiye
+    # insaan pehle, technical baad mein — Sources sabse aakhir, audit usse pehle
     assert answer.lstrip().startswith("## Seedha jawab"), answer[:80]
-    assert answer.find("## Research quality / technical audit") > answer.find("## Sources")
+    assert answer.find("## Sources") > answer.find("## Audit and limits") > 0
     assert "[S1]" in answer
 
 
@@ -379,6 +454,22 @@ def test_healthy_run_status_is_complete():
                                            result["status_reason"])
     assert not result["missing_passes"], result["missing_passes"]
     assert "RESEARCH INCOMPLETE" not in result["answer"], "jhoothi warning lagi"
+
+
+def test_complete_recovered_run_keeps_raw_failure_private_but_auditable():
+    """Live regression: fallback success must not publish the failed model body."""
+    result, _ = _run(
+        _records(ON_TOPIC), read_ok=True, recovered_raw_error=True)
+    assert result["status"] == "COMPLETE", result["status"]
+    public = (result.get("answer", "") + " "
+              + " ".join(result.get("warnings") or [])).lower()
+    for raw in ("resourceexhausted", "grpc_status", "quota_id",
+                "generaterequestsperday"):
+        assert raw not in public, f"recovered COMPLETE public output leaked {raw}"
+    # Developer audit is retained outside the public answer. A recovered failure
+    # is not erased merely to make the release gate green.
+    structured = " ".join(result.get("technical_details") or []).lower()
+    assert "resourceexhausted" in structured and "quota_id" in structured
 
 
 def test_quick_mode_does_not_get_fake_incomplete_reasoning():

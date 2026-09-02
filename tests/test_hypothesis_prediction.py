@@ -27,7 +27,8 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine.hypothesis import (  # noqa: E402
-    STATUS, Hypothesis, HypothesisEngine, PredictionStructure,
+    STATUS, ExperimentStructure, Hypothesis, HypothesisEngine,
+    PredictionStructure,
 )
 
 ENGINE = HypothesisEngine()
@@ -213,7 +214,64 @@ def test_status_is_never_a_fact():
 def test_hypothesis_dataclass_defaults_are_safe():
     h = Hypothesis()
     assert h.prediction is None
-    assert h.to_dict()["prediction"] == {"text": "", "structured": False}
+    # §16 ke chaaron naam khaali hypothesis mein bhi maujood rehte hain (khaali
+    # values ke saath), aur `structured` saaf False rehta hai — yaani "ye
+    # structured prediction nahi hai" jhooth nahi bolta.
+    assert h.to_dict()["prediction"] == {
+        "variables": [], "expected_outcome": "", "measurement_method": "",
+        "falsification_condition": "", "text": "", "structured": False}
+    assert h.to_dict()["experiment_spec"] is None
+
+
+def test_missing_spec_parts_are_named_in_plain_language():
+    """
+    §16 — adhoora plan "ready to run" nahi lagna chahiye.
+
+    Card par experiment ki ek line chhap jaati thi ("20 unit ka pre-registered
+    comparison…") jabki spec ke 11 mein se 7 hisse khaali the. Ledger door dusre
+    section mein tha, isliye padhne wale tak baat pahunchti nahi thi. Ab missing
+    hisse insaani naamon mein card par likhe jaate hain.
+    """
+    empty = Hypothesis().to_dict()
+    gaps = empty["experiment_spec_missing_human"]
+    assert len(gaps) == len(ExperimentStructure.SPEC_KEYS)
+    # spec ke raw naam padhne wale ke liye bekaar hain — wo yahan nahi aane chahiye
+    assert not [g for g in gaps if "_" in g], gaps
+
+    exp = ExperimentStructure(
+        experiment_type="observation", setup="archival re-analysis",
+        system_or_sample="SDSS dwarf galaxy sample", sample_size="40 galaxies",
+        measured_quantity="rotation curve slope",
+        expected_signal="slope 15% flatter than baseline",
+        null_result="slope within baseline error bars")
+    missing = exp.spec_missing()
+    labels = exp.spec_missing_labels()
+    assert len(labels) == len(missing)
+    assert labels == [ExperimentStructure.SPEC_LABELS[k] for k in missing]
+    # jo hisse sach mein bhare hain, unka naam missing list mein nahi hona chahiye
+    assert "dataset_or_sample" not in missing, missing
+    assert ExperimentStructure.SPEC_LABELS["statistical_metric"] in labels
+    # har spec key ka ek insaani naam maujood hai (naya key jodne par ye tootega)
+    assert set(ExperimentStructure.SPEC_LABELS) == set(
+        ExperimentStructure.SPEC_KEYS)
+
+
+def test_report_says_which_plan_parts_are_missing():
+    from research_engine.synthesizer_claude import FinalSynthesizer
+
+    h = ENGINE.parse(LABELLED)[0]
+    card = h.to_dict()
+    assert card["experiment_spec_missing_human"], card["experiment_spec_missing"]
+    text = FinalSynthesizer()._hypothesis_section([card])
+    assert "likha hi nahi gaya" in text, text[-1200:]
+    assert "ready-to-run plan na maanein" in text, text[-1200:]
+    for label in card["experiment_spec_missing_human"][:3]:
+        assert label in text, label
+
+    # aur jab plan ka koi hissa missing nahi hai, ye line chhapni hi nahi chahiye
+    full = dict(card)
+    full["experiment_spec_missing_human"] = []
+    assert "likha hi nahi gaya" not in FinalSynthesizer()._hypothesis_section([full])
 
 
 if __name__ == "__main__":

@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 
 from .models import Claim, ClaimType, EvidencePack, SourceRecord, label_to_claim_type
 
@@ -35,6 +35,62 @@ _LABEL_RE = re.compile(
 )
 # Ye labels bina source ke nahi hone chahiye
 _MUST_BE_GROUNDED = {ClaimType.FACT, ClaimType.EVIDENCE}
+
+# A model often wraps one labelled claim across two or three Markdown lines.
+# Citation/verification code must treat that as one bounded block, but must not
+# borrow a citation from the next bullet/section.  Keep these boundaries
+# deliberately structural and deterministic (no model/API call).
+_LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+|\d{1,3}[.)]\s+)")
+_HEADING_RE = re.compile(r"^\s*#{1,6}\s+")
+_PLAIN_SOURCE_HEADING_RE = re.compile(
+    r"^\s*(?:sources?|references?|bibliography|citations?)\s*:?\s*$",
+    re.IGNORECASE,
+)
+_FENCE_RE = re.compile(r"^\s*(?:```|~~~)")
+
+
+def labelled_claim_spans(
+    text: str,
+    max_continuation_lines: int = 5,
+) -> List[Tuple[int, int, str]]:
+    """Return ``(start, end, block)`` for each bounded labelled claim.
+
+    ``start`` is inclusive and ``end`` exclusive in ``text.splitlines()``.
+    A citation on a short continuation line belongs to the claim.  A blank
+    line, heading, code fence, new label, or new Markdown list item ends it, so
+    one claim can never steal a later bullet's citation.  The continuation cap
+    also prevents malformed model output from swallowing the rest of an answer.
+    """
+    lines = (text or "").splitlines()
+    cap = max(0, int(max_continuation_lines))
+    spans: List[Tuple[int, int, str]] = []
+    index = 0
+    while index < len(lines):
+        if not _LABEL_RE.search(lines[index]):
+            index += 1
+            continue
+
+        start = index
+        end = start + 1
+        continuation_count = 0
+        while end < len(lines) and continuation_count < cap:
+            candidate = lines[end]
+            stripped = candidate.strip()
+            if (
+                not stripped
+                or _LABEL_RE.search(candidate)
+                or _LIST_ITEM_RE.match(candidate)
+                or _HEADING_RE.match(candidate)
+                or _PLAIN_SOURCE_HEADING_RE.match(candidate)
+                or _FENCE_RE.match(candidate)
+            ):
+                break
+            end += 1
+            continuation_count += 1
+
+        spans.append((start, end, "\n".join(lines[start:end]).strip()))
+        index = end
+    return spans
 
 
 @dataclass
@@ -119,23 +175,25 @@ class CitationEngine:
     # ── 4. Ungrounded claims dhoondo ─────────────────────────────────────────
     def find_ungrounded_claims(self, text: str, max_items: int = 12) -> List[str]:
         """
-        Wo lines jinhe FACT/EVIDENCE label kiya gaya hai lekin koi [S#] nahi diya.
+        Wo bounded claim blocks jinhe FACT/EVIDENCE label kiya gaya hai lekin
+        koi [S#] nahi diya.
         Yahi source-honesty ka structural check hai.
         """
         out: List[str] = []
-        for raw_line in (text or "").splitlines():
-            line = raw_line.strip()
-            if not line or len(line) < 25:
+        for _, _, block in labelled_claim_spans(text):
+            if len(block) < 25:
                 continue
-            labels = _LABEL_RE.findall(line)
+            labels = _LABEL_RE.findall(block)
             if not labels:
                 continue
             types = {label_to_claim_type(lbl) for lbl in labels}
             if not (types & _MUST_BE_GROUNDED):
                 continue
-            if self.extract_ids(line) or _NO_SOURCE_RE.search(line):
+            if self.extract_ids(block) or _NO_SOURCE_RE.search(block):
                 continue
-            clean = re.sub(r"^[#\s\-\*\d\.]+", "", line)
+            clean = _LABEL_RE.sub("", block)
+            clean = re.sub(r"^[#\s\-\*\d\.]+", "", clean)
+            clean = " ".join(clean.split())
             out.append(clean[:220])
             if len(out) >= max_items:
                 break
@@ -145,19 +203,19 @@ class CitationEngine:
     def extract_claims(self, text: str, pack: Optional[EvidencePack] = None) -> List[Claim]:
         claims: List[Claim] = []
         valid = set(pack.valid_ids) if pack else None
-        for raw_line in (text or "").splitlines():
-            line = raw_line.strip()
-            if len(line) < 25:
+        for _, _, block in labelled_claim_spans(text):
+            if len(block) < 25:
                 continue
-            labels = _LABEL_RE.findall(line)
+            labels = _LABEL_RE.findall(block)
             if not labels:
                 continue
             ctype = label_to_claim_type(labels[0])
-            ids = self.extract_ids(line)
+            ids = self.extract_ids(block)
             if valid is not None:
                 ids = [i for i in ids if i in valid]
-            body = _LABEL_RE.sub("", line)
+            body = _LABEL_RE.sub("", block)
             body = re.sub(r"^[#\s\-\*\d\.]+", "", body).strip()
+            body = " ".join(body.split())
             claims.append(Claim(text=body[:400], claim_type=ctype, source_ids=ids))
         return claims
 
@@ -343,7 +401,8 @@ CITATION_INSTRUCTION = """CITATION RULES (inhe follow karna zaroori hai):
 CITATION KO PADHNE LAYAK RAKHO:
 - Ek line mein 1-2 se zyada [S#] mat thoso. Poora URL, DOI ya lamba ID kabhi
   answer ke andar mat likho — sirf [S1] jaisa chhota ID.
-- Har vaakya ke peeche citation ki zaroorat nahi. Ek paragraph ka mool claim
-  cite kar do; detail source section mein pehle se hai.
+- Har vaakya ke peeche citation ki zaroorat nahi. Har labelled claim/bullet ke
+  mool factual dave ko usi bounded block mein cite karo; ho sake to usi line par.
+  Agle bullet ya door ke paragraph ki citation pichhle claim ko support nahi karegi.
 - Jahan explanation chal rahi hai (example, "simple words mein" wala hissa),
   wahan citation se vaakya todo mat."""

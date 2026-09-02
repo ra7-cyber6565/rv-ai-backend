@@ -1,5 +1,15 @@
-"""Offline tests for raw ASGI request-body caps."""
-from __future__ import annotations
+"""Offline tests for raw ASGI request-body caps.
+
+`from __future__ import annotations` yahan JAAN-BOOJH KAR nahi hai (2026-08-23):
+    Us import se saare annotation string ban jaate hain. Neeche
+    `test_fastapi_integration_rejects_before_json_handler` ke andar `Request`
+    function-local import hai, isliye FastAPI/pydantic string "Request" ko
+    module ke globals me dhoondhta hai - wahan wo nahi milta aur test
+    `PydanticUndefinedAnnotation: name 'Request' is not defined` de kar girta
+    hai (product code bilkul theek hota hai). Bina future-import annotation
+    def-time par asli class ban jaata hai. `int | None` Python 3.10+ par
+    native chalta hai aur repo 3.11/3.12 use karta hai, isliye kuch khota nahi.
+"""
 
 import asyncio
 from pathlib import Path
@@ -150,6 +160,26 @@ def test_fastapi_integration_rejects_before_json_handler():
     assert response.status_code == 413
     assert called["value"] is False
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_local_class_annotations_stay_eager_for_fastapi_resolution():
+    """Guard: file ke top par future-import wapas aaya to ye test red hoga.
+
+    FastAPI function-local `Request` annotation ko sirf tab resolve kar paata
+    hai jab annotation def-time par asli object bane. Lazy (string) annotation
+    ke saath wahi `PydanticUndefinedAnnotation` wapas aa jaayega.
+    """
+    class _LocalMarker:
+        pass
+
+    def probe(value: _LocalMarker) -> None:  # noqa: ARG001
+        return None
+
+    annotation = probe.__annotations__["value"]
+    assert annotation is _LocalMarker, (
+        "annotation lazy string ban gaya (%r) - tests/test_body_limit.py se "
+        "`from __future__ import annotations` hataya hi rehna chahiye" % (annotation,)
+    )
 
 
 def test_main_wires_raw_body_limit_outermost_before_route_parsing():

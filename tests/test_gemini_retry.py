@@ -19,11 +19,11 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from research_engine import gemini_model, gemini_reasoning  # noqa: E402
 from research_engine.gemini_reasoning import (  # noqa: E402
-    GeminiReasoning, QuotaExhausted, _classify,
+    GeminiReasoning, QuotaExhausted, _classify, _compact_prompt,
 )
 from research_engine.model_errors import (  # noqa: E402
-    AUTH, DAILY_QUOTA, MODEL_NOT_FOUND, RATE_LIMIT, SERVER, UNKNOWN,
-    classify_text,
+    AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, MODEL_NOT_FOUND,
+    RATE_LIMIT, REQUEST_TIMEOUT, SERVER, UNKNOWN, classify_text,
 )
 
 # Test ko sona nahi hai — backoff 0 kar dete hain (asli value production ki hai).
@@ -42,9 +42,11 @@ class _FakeModel:
         self.name = name
         self.script = list(script)
         self.calls = 0
+        self.prompts = []
 
-    def generate_content(self, prompt):          # noqa: ARG002
+    def generate_content(self, prompt):
         self.calls += 1
+        self.prompts.append(prompt)
         item = self.script.pop(0) if self.script else "OK late"
         if isinstance(item, Exception):
             raise item
@@ -102,6 +104,21 @@ def test_error_kinds_are_distinguished():
     assert _classify(_daily()) == DAILY_QUOTA
     assert _classify(RuntimeError("503 Service Unavailable")) == SERVER
     assert _classify(RuntimeError("404 models/x is not found")) == MODEL_NOT_FOUND
+    assert _classify(RuntimeError(
+        "InvalidArgument: input token count exceeds the maximum context length"
+    )) == INPUT_TOO_LARGE
+    assert _classify(RuntimeError(
+        "InvalidArgument: 400 Request contains an invalid argument"
+    )) == INVALID_REQUEST
+    assert _classify(RuntimeError(
+        "DeadlineExceeded: 504 Deadline Exceeded"
+    )) == REQUEST_TIMEOUT
+    assert _classify(RuntimeError(
+        "InvalidArgument: system instructions are not supported for model gemma"
+    )) == INVALID_REQUEST
+    assert _classify(RuntimeError(
+        "PermissionDenied: 403 User location is not supported for API use"
+    )) == INVALID_REQUEST
     assert _classify(RuntimeError("PermissionDenied: 403 permission denied")) == AUTH
     assert _classify(RuntimeError("ValueError: kuch aur")) == UNKNOWN
 
@@ -153,6 +170,117 @@ def test_model_not_found_does_not_retry_same_model():
     assert brain.fakes["model-a"].calls == 1, brain.fakes["model-a"].calls
 
 
+def _large_evidence_prompt() -> str:
+    block_a = (
+        "[S1] SOURCE DESCRIPTOR (quoted data):\nDATA> Paper A\n"
+        "Title: DATA> A\nRead: DATA> full_text\nExcerpt: DATA> " + ("a" * 7000)
+    )
+    block_b = (
+        "[S2] SOURCE DESCRIPTOR (quoted data):\nDATA> Paper B\n"
+        "Title: DATA> B\nRead: DATA> abstract\nExcerpt: DATA> " + ("b" * 7000)
+    )
+    return (
+        "SAWAL: preserve this question\nUNTRUSTED SOURCE DATA — EVIDENCE ONLY.\n"
+        "BEGIN_UNTRUSTED_SOURCES\n\n" + block_a + "\n\n" + block_b
+        + "\n\nEND_UNTRUSTED_SOURCES\nFINAL RULES MUST SURVIVE"
+    )
+
+
+def test_input_limit_compacts_once_and_recovers_same_working_model():
+    too_large = RuntimeError(
+        "InvalidArgument: 400 input token count exceeds maximum context length"
+    )
+    brain = _brain({"model-a": [too_large, "compact jawab"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "compact jawab"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 2
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    for required in (
+        "SAWAL: preserve this question", "[S1]", "[S2]",
+        "END_UNTRUSTED_SOURCES", "FINAL RULES MUST SURVIVE",
+    ):
+        assert required in fake.prompts[1], (required, fake.prompts[1])
+    assert brain.prompt_compactions == 1
+    assert brain.same_model_retries == 1
+    assert brain.blocked == {}, "working model ko dead/block nahi karna"
+    assert not gemini_model.is_dead("model-a")
+    acc = brain.api_accounting()
+    assert acc["prompt_compactions"] == 1
+    assert acc["prompt_attempts"][0]["compacted"] is False
+    assert acc["prompt_attempts"][1]["compacted"] is True
+    assert INPUT_TOO_LARGE in acc["failure_kinds"]
+    assert brain.failure_kind() == "", "successful compact retry public failure nahi"
+
+
+def test_large_server_error_compacts_before_retrying_same_model():
+    server = RuntimeError("503 Service Unavailable")
+    brain = _brain({"model-a": [server, "server recovery jawab"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "server recovery jawab"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 2
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    assert brain.prompt_compactions == 1
+    assert brain.same_model_retries == 1
+    assert SERVER in brain.api_accounting()["failure_kinds"]
+    assert brain.failure_kind() == ""
+
+
+def test_deadline_compacts_then_gets_one_bounded_timeout_recovery():
+    timeout = RuntimeError("DeadlineExceeded: 504 Deadline Exceeded")
+    brain = _brain({"model-a": [timeout, timeout, "timeout recovery jawab"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "timeout recovery jawab"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 3
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    assert fake.prompts[2] == fake.prompts[1]
+    assert brain.prompt_compactions == 1
+    assert brain.timeout_extensions == 1
+    assert brain.same_model_retries == 2
+    attempts = brain.api_accounting()["prompt_attempts"]
+    assert attempts[0]["compacted"] is False
+    assert attempts[1]["compacted"] is True
+    assert attempts[2]["timeout_seconds"] >= attempts[1]["timeout_seconds"]
+    assert REQUEST_TIMEOUT in brain.api_accounting()["failure_kinds"]
+    assert brain.failure_kind() == ""
+
+
+def test_large_generic_invalid_argument_gets_one_bounded_compact_retry():
+    invalid = RuntimeError("InvalidArgument: 400 Request contains an invalid argument")
+    brain = _brain({"model-a": [invalid, "large request recovered"]})
+    original = _large_evidence_prompt()
+
+    assert brain.generate(original, "analysis") == "large request recovered"
+    fake = brain.fakes["model-a"]
+    assert fake.calls == 2
+    assert len(fake.prompts[1]) < len(fake.prompts[0])
+    assert brain.prompt_compactions == 1
+    assert brain.same_model_retries == 1
+    assert INVALID_REQUEST in brain.api_accounting()["failure_kinds"]
+    assert brain.failure_kind() == ""
+
+
+def test_generic_invalid_argument_is_not_mislabeled_or_retried_blindly():
+    invalid = RuntimeError("InvalidArgument: 400 Request contains an invalid argument")
+    brain = _brain({"model-a": [invalid, "same model must not retry"],
+                    "model-b": ["fallback jawab"]})
+    assert brain.generate("prompt", "analysis") == "fallback jawab"
+    assert brain.fakes["model-a"].calls == 1
+    assert brain.blocked == {}
+    assert not gemini_model.is_dead("model-a")
+    assert INVALID_REQUEST in brain.api_accounting()["failure_kinds"]
+
+
+def test_compactor_does_not_touch_a_prompt_that_is_already_under_target():
+    prompt = "SAWAL: short\nFINAL RULES"
+    assert _compact_prompt(prompt, max_chars=8000) == prompt
+
+
 def test_empty_response_counts_as_failure():
     brain = _brain({"model-a": ["   ", "ab jawab aaya"]})
     assert brain.generate("prompt", "analysis") == "ab jawab aaya"
@@ -170,6 +298,25 @@ def test_everything_fails_returns_empty_but_records_safe_reason():
     assert "rate_limit" in joined
     for raw in ("429", "ResourceExhausted", "quota exceeded"):
         assert raw not in joined
+
+
+def test_fallback_404_cannot_mask_unknown_primary_failure():
+    primary = RuntimeError("primary provider returned an unclassified response")
+    missing = RuntimeError("404 models/model-b is not found")
+    brain = _brain({
+        "model-a": [primary, primary, primary],
+        "model-b": [missing],
+    })
+    assert brain.generate("prompt", "analysis") == ""
+    assert brain.failure_kind() == UNKNOWN
+    assert brain.ledger.primary_kind() == UNKNOWN
+    assert brain.ledger.worst_kind() == MODEL_NOT_FOUND
+    acc = brain.api_accounting()
+    assert acc["primary_failure_kind"] == UNKNOWN
+    assert [row["kind"] for row in acc["failure_events"]] == [
+        UNKNOWN, UNKNOWN, UNKNOWN, MODEL_NOT_FOUND,
+    ]
+    assert all("detail" not in row for row in acc["failure_events"])
 
 
 def test_budget_exhausted_raises_quota_exhausted():
@@ -204,7 +351,10 @@ def test_daily_quota_is_not_retried_uselessly():
         f"daily quota par sirf 1 attempt honi chahiye, hui {brain.fakes['model-a'].calls}"
     assert brain.attempts == 2, brain.attempts
     assert brain.blocked.get("model-a") == DAILY_QUOTA, brain.blocked
-    assert brain.failure_kind() == DAILY_QUOTA
+    # The failed attempt remains auditable, but a later model produced the
+    # requested output, so the completed logical pass is not a public failure.
+    assert brain.failure_kind() == ""
+    assert DAILY_QUOTA in brain.api_accounting()["failure_kinds"]
 
 
 def test_blocked_model_is_skipped_in_later_passes():
@@ -237,6 +387,62 @@ def test_deprecated_model_is_marked_dead_and_skipped():
     assert brain.generate("p", "synthesis") == "phir chala"
     assert brain.fakes["model-a"].calls == 1, brain.fakes["model-a"].calls
     gemini_model.forget_dead()
+
+
+def test_candidates_prefer_listed_same_family_peer_before_other_family():
+    gemini_model.forget_dead()
+    gemini_model._cache = "gemma-4-26b-a4b-it"
+    gemini_model._seen = [
+        "gemini-2.5-flash", "gemma-4-26b-a4b-it", "gemma-4-31b-it",
+    ]
+
+    class _NoNetworkGenai:
+        @staticmethod
+        def list_models():
+            raise AssertionError("cached candidate order must not make network call")
+
+    order = gemini_model.candidates(_NoNetworkGenai)
+    assert order[:2] == ["gemma-4-26b-a4b-it", "gemma-4-31b-it"], order
+    gemini_model._cache = None
+    gemini_model._seen = []
+
+
+def test_candidates_put_listed_stable_flash_lite_before_pro_and_preview():
+    """The bounded live cycle must reach an efficient listed fallback.
+
+    Google does not promise a resilience-friendly list order.  A Pro/preview
+    entry that happens to be listed earlier must not consume the final bounded
+    attempt while stable Flash-Lite models are available for generateContent.
+    """
+    gemini_model.forget_dead()
+    gemini_model._cache = "gemma-4-26b-a4b-it"
+    gemini_model._seen = [
+        "gemini-2.5-flash",
+        "gemini-2.5-pro",
+        "gemma-4-26b-a4b-it",
+        "gemma-4-31b-it",
+        "gemini-3-flash-preview",
+        "gemini-3.1-pro-preview",
+        "gemini-3.1-flash-lite",
+        "gemini-3.5-flash-lite",
+    ]
+
+    class _NoNetworkGenai:
+        @staticmethod
+        def list_models():
+            raise AssertionError("cached candidate order must not make network call")
+
+    order = gemini_model.candidates(_NoNetworkGenai)
+    assert order[:4] == [
+        "gemma-4-26b-a4b-it",
+        "gemma-4-31b-it",
+        "gemini-3.5-flash-lite",
+        "gemini-3.1-flash-lite",
+    ], order
+    assert order.index("gemini-2.5-pro") > order.index("gemini-3.1-flash-lite")
+    assert order.index("gemini-3-flash-preview") > order.index("gemini-3.1-flash-lite")
+    gemini_model._cache = None
+    gemini_model._seen = []
 
 
 def test_dead_model_never_returned_by_candidates():

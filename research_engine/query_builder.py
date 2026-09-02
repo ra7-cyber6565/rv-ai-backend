@@ -44,6 +44,10 @@ import unicodedata
 from typing import Dict, List, Optional, Tuple
 
 from .local_language import normalize
+# #112 — junk/meta shabd ki EK list. Ye import ek hi taraf hai: query_hygiene
+# apni zaroorat par query_builder ko function ke ANDAR import karta hai, isliye
+# circular import nahi banta.
+from .query_hygiene import JUNK as _JUNK_WORDS
 
 # ── tokenizer (Devanagari-safe) ──────────────────────────────────────────────
 # Matra/nukta/virama Unicode mein "combining mark" (Mn/Mc) hain aur Python ka
@@ -93,6 +97,11 @@ _STOP = {
     "dena", "lena", "sakta", "sakti", "sakte", "bina", "andar", "bahar",
     "hua", "hui", "hue", "huye", "karu", "karun", "kru", "kam", "kum",
     "chahta", "chahti", "chahte", "wala", "waali", "wali", "nahin", "nhi",
+    # #112 — ye Hinglish function shabd bhi query mein chale jaate the
+    # ("... dawe har strong", "... psychology ho"), kisi bhi sawaal mein topic
+    # nahi hote
+    "har", "hr", "harek", "dono", "teeno", "wagera", "vagera", "etc",
+    "ho", "hone", "hoke", "hokar",
     # Devanagari function words
     "क्या", "है", "हैं", "था", "थी", "थे", "का", "के", "की", "को", "में", "पर",
     "से", "और", "या", "यह", "वह", "ये", "वे", "इस", "उस", "जो", "तो", "ही",
@@ -201,6 +210,14 @@ _ALWAYS_META = {
     "इंटरनेट", "उपलब्ध", "संबंधित", "प्रासंगिक", "कहती", "कहता", "कहते",
     "बताती", "बताता", "बताते", "डालता", "डालती", "पड़ता", "पड़ती",
 }
+_META |= _ALWAYS_META
+
+# #112 — "kaam ache dhyaan jldi abb suru adwance" jaise shabd bhi kisi sawaal me
+# topic nahi hote. Wo list `query_hygiene.JUNK` me rehti hai (wahi list search
+# query ka gate bhi chalati hai), aur yahan usi ko `_ALWAYS_META` me jodte hain
+# — taaki topic ginti, relevance guard aur query, teeno ek hi paribhasha par
+# chalein. Do alag-alag list rakhna hi purani galti thi.
+_ALWAYS_META |= set(_JUNK_WORDS)
 _META |= _ALWAYS_META
 
 # Bahut aam, bahut generic shabd. Inhe poora hataana galat hoga (kabhi topic ka
@@ -331,6 +348,17 @@ _PLURAL_SAFE = {"species", "series", "analysis", "basis", "physics", "news",
                 "process", "access", "class", "less", "cross", "loss"}
 
 
+def is_generic_word(word: str) -> bool:
+    """Kya ye shabd itna aam hai ki iska match akela saboot nahi maana jaaye?
+
+    Yahi `_GENERIC` set hai jise query_builder aadha wazan deta hai. Doosre
+    module (relevance ka facet gate) isi ek hi paribhasha par chalein, warna
+    "generic shabd" ki do alag-alag list ban jaati hain.
+    """
+    low = str(word or "").strip().casefold()
+    return bool(low) and low in _GENERIC
+
+
 def _canon(term: str) -> str:
     """
     Ek shabd ka ANDAR ka roop (grouping key): Devanagari -> English, plural ->
@@ -365,11 +393,19 @@ def _tokens(text: str) -> List[str]:
     """
     Content tokens. Sirf-ank wale token (jaise "100" — "100 वर्षों में") chhod
     dete hain: wo topic nahi batate aur search query mein jagah kha jaate hain.
+
+    #112 — sirf `isdigit()` kaafi nahi tha: "3-4" ("3-4 hypothesis banao") isse
+    bach jaata tha aur topic list mein ghus jaata tha. Ab shart ye hai ki token
+    mein kam se kam ek AKSHAR ho. Isse "covid-19", "u-235", "gpt-4" jaise asli
+    naam bache rehte hain (unme akshar hai), aur "3-4", "1,000", "2026" jaise
+    ginti-token bahar ho jaate hain.
     """
     out: List[str] = []
     for m in _TERM_RE.finditer(text or ""):
         token = m.group(0).strip("-'/").lower()
         if len(token) < 3 or token.isdigit():
+            continue
+        if not any(ch.isalpha() for ch in token):
             continue
         out.append(token)
     return out

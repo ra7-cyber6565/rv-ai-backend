@@ -49,10 +49,11 @@ This includes ChromaDB, sentence-transformer/Hugging Face/Torch model caches, te
 
 ## Run locally
 
-```bat
-cd C:\Users\intel\Music\infinity-research-ai-main\infinity-research-ai-main\backend
-venv\Scripts\activate
-python -m uvicorn main:app --reload
+Repository ke backend folder se relative launcher chalao; isme kisi ek user ka
+hard-coded `C:\Users\...` path nahi hai:
+
+```powershell
+.\START_BACKEND.bat
 ```
 
 Check:
@@ -61,7 +62,9 @@ Check:
 http://127.0.0.1:8000/health
 ```
 
-The health response includes `zero_cost_only` and storage status. Confirm that the reported storage root is the intended D: location before large uploads or model downloads.
+The public health response includes `zero_cost_only` and aggregate storage
+readiness/capacity. Security ke liye absolute private filesystem path public
+response mein nahi aata. Local console mein launcher ka selected root check karo.
 
 ## Cloud deployment
 
@@ -126,17 +129,37 @@ Check live-test prerequisites without making a live call:
 RUN_LIVE_ZERO_COST_GATE.bat
 ```
 
+Android Studio ke PowerShell terminal mein recommended command (D: root ko
+explicitly validate karta hai):
+
+```powershell
+.\RUN_LIVE_ZERO_COST_GATE.ps1 -DataRoot "D:\InfinityResearchAI"
+```
+
 Only after the configured provider/account has been confirmed zero-cost, run:
 
 ```bat
 RUN_LIVE_ZERO_COST_GATE.bat --execute
 ```
 
+PowerShell equivalent:
+
+```powershell
+.\RUN_LIVE_ZERO_COST_GATE.ps1 -Execute -DataRoot "D:\InfinityResearchAI"
+```
+
+Provider key command line par mat likho. Real key sirf Git-ignored private
+`.env`/backend secret store mein rakho. PowerShell wrapper sirf non-secret data
+root aur optional non-secret receipt path arguments forward karta hai.
+
 The live gate requires an explicit `INFINITY_DATA_ROOT`, a currently usable
-confirmed/free model layer, on-topic/full-text evidence, valid citations,
+confirmed/free model layer, a writable absolute runtime root outside the Git
+repository, configured minimum free disk space, on-topic/full-text evidence, valid citations,
 claim verification, three testable hypotheses, the advanced discovery
 assessment, and sanitized public output. Its JSON receipt contains no answer,
-source text, URL, prompt or credential.
+source text, URL, prompt or credential. Provider/research execution crash hone
+par bhi raw exception public console/receipt mein nahi jaati; a sanitized failure
+receipt likhi jaati hai.
 
 The API's structured research result now also includes a `discovery` field with
 problem decomposition, evidence graph, conservative novelty screening,
@@ -144,3 +167,13 @@ hypothesis ranking, falsification/virtual-experiment plans, calibrated
 pre-validation confidence, weakest-link analysis, a bounded next-query loop,
 domain requirements and a conservative reality/TRL ladder. These are research
 prioritisation aids—not proof, clinical advice or real-world success odds.
+
+After deployment, run the zero-model remote smoke before any live research call:
+
+```powershell
+python .\scripts\run_deployed_readonly_smoke.py --execute --base-url "https://YOUR-HOST"
+```
+
+This checks public health/privacy, security headers and project capability
+isolation without spending model quota. See `docs/RELEASE_SIGNOFF_CHECKLIST.md`
+for the same-SHA offline, live, deployment and governance sign-off sequence.

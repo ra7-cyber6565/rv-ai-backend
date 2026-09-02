@@ -91,6 +91,17 @@ _MAX_SLEEP_SECONDS = 8.0
 # selected by connector code and must stay on this exact-host allowlist.  This
 # makes the shared helper fail closed if a future connector accidentally passes
 # through a user/source-controlled URL.
+# Wikipedia langlinks = bhasha ka pul (`research_engine/lang_bridge.py`). Kisi
+# shabd ka doosri bhasha wala naam Wikipedia ke apne langlinks me PEHLE SE likha
+# hai, isliye hamein koi glossary hath se nahi likhni padti. Allowlist wildcard
+# nahi leti, isliye sirf wahi bhashaayein jinki script `lang_bridge` pehchanta
+# hai (+ wo Indian bhashaayein jo Devanagari/Bengali script share karti hain).
+_BRIDGE_WIKI_LANGS: Tuple[str, ...] = (
+    "en", "hi", "bn", "pa", "gu", "or", "ta", "te", "kn", "ml", "si",
+    "ar", "he", "el", "ru", "th", "ja", "ko", "zh",
+    "mr", "sa", "ne", "as", "fa", "ur", "uk",
+)
+
 DISCOVERY_ALLOWED_HOSTS = frozenset({
     "api.crossref.org",
     "api.data.gov.in",
@@ -109,7 +120,45 @@ DISCOVERY_ALLOWED_HOSTS = frozenset({
     "openlibrary.org",
     "www.googleapis.com",
     "zenodo.org",
-})
+    # Market/economic TIME SERIES providers (#118) — sabhi official public API.
+    # Ye `datasets` lane ke catalogue hosts se alag hain: yahan se period→value
+    # aata hai, jispar LAB ka walk-forward test chalta hai. Keyless do
+    # (world bank, ECB) + key-gated do (FRED, Alpha Vantage) — key na ho to
+    # connector chalta hi nahi, isliye host hone se bhi koi call nahi jaati.
+    "api.worldbank.org",
+    "data-api.ecb.europa.eu",
+    "api.stlouisfed.org",
+    "www.alphavantage.co",
+    # Wikisource — public-domain mool text lane ka official MediaWiki action API.
+    # Har bhasha ka apna exact host hai (allowlist wildcard nahi leti), isliye
+    # sirf wahi hosts jo `classic_connector._KNOWN_LANGS` me hain.
+    "en.wikisource.org",
+    "sa.wikisource.org",
+    "hi.wikisource.org",
+    "mr.wikisource.org",
+    "bn.wikisource.org",
+    "ta.wikisource.org",
+    "te.wikisource.org",
+    "kn.wikisource.org",
+    "gu.wikisource.org",
+    "pa.wikisource.org",
+    "or.wikisource.org",
+    "ml.wikisource.org",
+    "as.wikisource.org",
+    "ne.wikisource.org",
+    "fa.wikisource.org",
+    "ar.wikisource.org",
+    "he.wikisource.org",
+    "el.wikisource.org",
+    "la.wikisource.org",
+    "de.wikisource.org",
+    "fr.wikisource.org",
+    "es.wikisource.org",
+    "it.wikisource.org",
+    "ru.wikisource.org",
+    "zh.wikisource.org",
+    "ja.wikisource.org",
+}) | frozenset(f"{lang}.wikipedia.org" for lang in _BRIDGE_WIKI_LANGS)
 
 
 def _max_response_bytes() -> int:

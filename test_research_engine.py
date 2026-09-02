@@ -657,10 +657,23 @@ def _check_synthesizer(pack, contradictions, consensus, verification, hypotheses
     positions = [(title, padded.find(f"\n## {title}\n")) for title in SECTION_TITLES]
     missing = [title for title, pos in positions if pos < 0]
     check("saare canonical sections final answer mein hain", not missing, str(missing))
-    found = [pos for _, pos in positions if pos >= 0]
-    check("sections §16 ke order mein hain", found == sorted(found),
-          str([(t, p) for t, p in positions]))
-    inference_zone = ordered[padded.find("\n## Research se kya pata chala?\n"):
+    # EXPECTATION JAAN-BOOJH KAR BADLI GAYI (§12, 2026-08-22): pehle yahan
+    # `found == sorted(found)` tha, yaani "chhapne ka kram = SECTION_TITLES ka
+    # index". §12 ne dono ko alag kar diya hai: index sirf section ki PEHCHAN
+    # hai aur chhapne ka mandatory kram `EMIT_ORDER` batata hai (app ki apni
+    # soch conclusion ke BAAD, aur audit Sources se PEHLE). Sakhti kam nahi
+    # hui — ab bhi poora kram check hota hai, bas sahi kram se.
+    from research_engine.synthesizer import EMIT_ORDER
+    by_index = dict(positions)
+    emitted = [(SECTION_TITLES[i], by_index[SECTION_TITLES[i]]) for i in EMIT_ORDER
+               if by_index.get(SECTION_TITLES[i], -1) >= 0]
+    order_found = [pos for _, pos in emitted]
+    check("sections §12 ke mandatory order mein hain", order_found == sorted(order_found),
+          str(emitted))
+    check("aakhir mein pehle audit, phir Sources (§12)",
+          by_index[SECTION_TITLES[10]] < by_index[SECTION_TITLES[9]],
+          f"audit={by_index[SECTION_TITLES[10]]} sources={by_index[SECTION_TITLES[9]]}")
+    inference_zone = ordered[padded.find(f"\n## {SECTION_TITLES[1]}\n"):
                              padded.find("\n## Ye kyun hota hai?\n")]
     check("Inferences ka apna sub-heading hai aur model ka inference wahin gaya",
           "### Inference" in inference_zone
@@ -668,16 +681,19 @@ def _check_synthesizer(pack, contradictions, consensus, verification, hypotheses
           "inferences section galat jagah hai")
     check("model ka jawab pehle section mein hi hai",
           0 <= ordered.find("Haan, bias real discrimination")
-          < padded.find("\n## Research se kya pata chala?\n"),
+          < padded.find(f"\n## {SECTION_TITLES[1]}\n"),
           "pehla section apni jagah nahi hai")
     check("heading se pehle likha text bhi bacha",
           "heading se pehle kuch likh diya" in ordered, "text kho gaya")
     check("model ki banayi Sources list system ki verified list ko replace nahi karti",
           "**[S1]" in ordered and "Isse kya liya gaya" in ordered,
           "system bibliography hat gayi")
-    against_zone = ordered[padded.find("\n## Iske against kya mila?\n"):
-                           padded.find("\n## Humari Hypotheses\n")]
-    check("hypothesis ke khilaf evidence 'Iske against kya mila?' mein hai",
+    # §12 — counterevidence ke baad ab Calculations/Unknowns/conclusion aate
+    # hain, aur app ki apni soch (LAB) unke BAAD. Zone ka end isliye LAB ki
+    # jagah agla canonical section hai.
+    against_zone = ordered[padded.find(f"\n## {SECTION_TITLES[4]}\n"):
+                           padded.find(f"\n## {SECTION_TITLES[7]}\n")]
+    check("hypothesis ke khilaf evidence counterevidence section mein hai",
           "Hypotheses ke khilaf" in against_zone or "khilaf" in against_zone,
           "against evidence galat section mein hai")
     check("anjaan heading delete nahi hui, extra notes mein gayi",
@@ -768,12 +784,17 @@ def _check_end_to_end():
         check("answer khaali nahi", len(result["answer"]) > 300,
               str(len(result["answer"])))
         # NOTE (2026-08-20): pehle "14. Coverage" / "12. Sources" dhoondte the.
-        # §16 ke baad wahi hissa "## Sources" aur "## Research quality /
-        # technical audit" ke naam se aata hai — content wahi hai.
+        # §16 ke baad wahi hissa "## Sources" aur audit ke naam se aata hai —
+        # content wahi hai.
+        # §12 (2026-08-22): audit heading ka wording badla ("Audit and limits —
+        # research quality aur technical audit"), isliye naam yahan hard-code
+        # nahi karte — `answer_order` se aata hai.
+        from research_engine.answer_order import display_heading as _dh
         check("audit (coverage) section aaya",
-              "## Research quality / technical audit" in result["answer"],
+              f"## {_dh('audit')}" in result["answer"],
               "missing")
-        check("Sources section aaya", "## Sources" in result["answer"], "missing")
+        check("Sources section aaya", f"## {_dh('sources')}" in result["answer"],
+              "missing")
         check("crash nahi hua", result["mode"] == "QUICK", result["mode"])
         # NOTE (2026-08-21, §8): pehle yahan sirf "Gemini" shabd dhoondha jaata
         # tha. Ab jab reasoning model nahi chalta to warning RV ki apni bhasha

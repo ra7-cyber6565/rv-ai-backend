@@ -59,6 +59,25 @@ def _fail(name: str, model: str, kind: str = "quota", block: bool = True):
     )
 
 
+def test_offline_suite_must_not_have_a_live_gemini_primary():
+    """Order-independence guard (2026-08-23).
+
+    File ke top ke `os.environ.pop` sirf IMPORT ke waqt chalte hain. pytest
+    saari files ek hi process me chalata hai, to baad me chalne wala koi test
+    (jaise `tests/test_boot_preflight.py` ka asli `load_dotenv()`) `.env` se
+    `GEMINI_API_KEY` + `GEMINI_ZERO_COST_CONFIRMED=true` wapas laa sakta hai.
+    Tab `ResilientReasoning.generate()` fallback se pehle ASLI Gemini call
+    maarta hai: `calls_used` / `actual_http_attempts` / `provider_attempts` sab
+    badal jaate hain aur neeche ke quota+accounting test bina wajah red hote
+    hain (2026-08-23 par yahi 4 failures the). Ye test wajah ko naam deta hai.
+    """
+    assert not ResilientReasoning._gemini_allowed(), (
+        "process env me live Gemini credential maujood hai (naam: GEMINI_API_KEY / "
+        "GEMINI_ZERO_COST_CONFIRMED) - koi dusra test env leak kar raha hai; "
+        "in offline test ko primary provider live nahi milna chahiye"
+    )
+
+
 def test_package_exports_accounting_integrated_resilient_subclass():
     # Package export is the small accounting-integration subclass layered over
     # this base provider router. This preserves old provider behaviour while

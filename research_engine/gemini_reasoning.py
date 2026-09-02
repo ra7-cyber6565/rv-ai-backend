@@ -21,7 +21,10 @@ from .citation import CITATION_INSTRUCTION
 from .claim_labels import LABEL_RULE_PROMPT
 from .explain_style import style_block
 from .key_pool import KeyPool
-from .model_errors import AUTH, DAILY_QUOTA, FailureLedger
+from .model_errors import (
+    AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, REQUEST_TIMEOUT,
+    SERVER, FailureLedger,
+)
 from .model_errors import classify as classify_error
 from .models import EvidencePack
 
@@ -52,6 +55,113 @@ _ROLE_HONESTY = (
 _BACKOFF_SECONDS = (1.5, 4.0)      # ek pass ke andar max ~6s rukte hain
 _MAX_SLEEP_SECONDS = 6.0           # server 21s maange to bhi itna hi rukte hain
 _MAX_MODELS = 4                    # pehla + teen fallback (quota per model hota hai)
+
+_SOURCE_BEGIN = "BEGIN_UNTRUSTED_SOURCES"
+_SOURCE_END = "END_UNTRUSTED_SOURCES"
+
+
+def _compact_retry_min_chars() -> int:
+    """Generic InvalidArgument par compact retry sirf genuinely large prompt ko."""
+    try:
+        value = int(os.getenv("GEMINI_COMPACT_RETRY_MIN_CHARS", "") or 12000)
+    except (TypeError, ValueError):
+        value = 12000
+    return max(4000, min(value, 60000))
+
+
+def _timeout_recovery_seconds() -> int:
+    """Configured primary ke compact timeout recovery ki bounded waqt-seema."""
+    try:
+        value = int(os.getenv("GEMINI_TIMEOUT_RECOVERY_SECONDS", "") or 180)
+    except (TypeError, ValueError):
+        value = 180
+    return max(30, min(value, 600))
+
+
+def _compact_prompt_limit() -> int:
+    """Provider-size recovery ke liye safe prompt target (content nahi, sirf limit)."""
+    try:
+        value = int(os.getenv("GEMINI_COMPACT_PROMPT_CHARS", "") or 24000)
+    except (TypeError, ValueError):
+        value = 24000
+    return max(8000, min(value, 120000))
+
+
+def _clip_compact(value: str, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text
+    return text[:max(0, limit - 1)].rstrip() + "…"
+
+
+def _compact_source_block(block: str, budget: int) -> str:
+    """Citation identity/read depth bachao; bulky metadata/excerpt ko bound karo."""
+    lines = [line.strip() for line in str(block or "").splitlines() if line.strip()]
+    if not lines:
+        return ""
+    budget = max(320, int(budget))
+    head_rows: List[str] = []
+    for line in lines[:2]:
+        if line not in head_rows:
+            head_rows.append(line)
+    for prefix in ("Title:", "Author(s):", "Publisher:", "Venue:", "Read:"):
+        row = next((line for line in lines if line.startswith(prefix)), "")
+        if row and row not in head_rows:
+            head_rows.append(row)
+
+    excerpt_index = next(
+        (index for index, line in enumerate(lines) if line.startswith("Excerpt:")),
+        -1,
+    )
+    excerpt = " ".join(lines[excerpt_index:]) if excerpt_index >= 0 else ""
+    head_budget = max(220, min(int(budget * 0.45), budget - 120))
+    head = _clip_compact("\n".join(head_rows), head_budget)
+    evidence_budget = max(100, budget - len(head) - 1)
+    evidence = _clip_compact(excerpt, evidence_budget) if excerpt else ""
+    return head + (("\n" + evidence) if evidence else "")
+
+
+def _compact_prompt(prompt: str, max_chars: Optional[int] = None) -> str:
+    """Only an input/context-limit failure may call this deterministic fallback.
+
+    The full evidence pack remains stored in the engine. Only the provider-bound
+    copy is reduced, while every source ID, the question, source boundary and
+    post-source reasoning/citation rules are retained.
+    """
+    original = str(prompt or "")
+    if not original:
+        return original
+    configured = max_chars if max_chars is not None else _compact_prompt_limit()
+    configured = max(8000, min(int(configured), 120000))
+    target = min(configured, max(8000, int(len(original) * 0.60)))
+    begin_at = original.find(_SOURCE_BEGIN)
+    end_at = original.find(_SOURCE_END, begin_at + len(_SOURCE_BEGIN))
+    if begin_at < 0 or end_at < 0:
+        # Non-evidence prompts are rare here. Preserve both the question-side
+        # instructions and the requested output rules rather than cutting one.
+        if len(original) <= target:
+            return original
+        marker = "\n\n[PROVIDER-BOUND PROMPT COMPACTED AFTER INPUT-LIMIT ERROR]\n\n"
+        left = max(1000, (target - len(marker)) // 2)
+        right = max(1000, target - len(marker) - left)
+        return original[:left].rstrip() + marker + original[-right:].lstrip()
+
+    prefix = original[:begin_at + len(_SOURCE_BEGIN)]
+    body = original[begin_at + len(_SOURCE_BEGIN):end_at]
+    suffix = original[end_at:]
+    blocks = [part.strip() for part in body.split("\n\n") if part.strip()]
+    fixed = len(prefix) + len(suffix) + 4
+    body_budget = max(2000, target - fixed)
+    per_source = max(320, body_budget // max(1, len(blocks)))
+    compacted_blocks = [
+        _compact_source_block(block, per_source) for block in blocks
+    ]
+    compacted = prefix + "\n\n" + "\n\n".join(
+        block for block in compacted_blocks if block
+    ) + "\n\n" + suffix
+    if len(compacted) >= len(original):
+        return original
+    return compacted
 
 # ── §8 backup FREE keys (2026-08-21 ki demand) ───────────────────────────────
 # intel: "gimini ko call krte h to quta khatam ho jaata h ... iska quta khatam ho
@@ -93,6 +203,11 @@ class GeminiReasoning:
         self.models_tried: List[str] = []
         self.switched_models = 0             # doosre model par kitni baar gaye
         self.same_model_retries = 0          # WAHI model, dobara (asli retry)
+        # Provider-bound prompt content kabhi audit mein nahi jaata — sirf safe
+        # size metadata, taaki live request-limit failures diagnose ho saken.
+        self.prompt_compactions = 0
+        self.timeout_extensions = 0
+        self.prompt_attempt_log: List[Dict] = []
         # §7 — kaun kis wajah se gira, aur kaun is run mein band hai
         self.ledger = FailureLedger()
         self.blocked: Dict[str, str] = {}    # model -> kind (is run ke liye)
@@ -223,7 +338,9 @@ class GeminiReasoning:
 
     # ── §9/§25: user ko batane layak wajah (raw error NAHI) ──────────────────
     def failure_kind(self) -> str:
-        return self.ledger.worst_kind()
+        # A later fallback-model 404 must not hide why the configured primary
+        # model actually failed. Full-cycle kinds remain in API accounting.
+        return self.ledger.primary_kind() or self.ledger.worst_kind()
 
     def failure_reason(self) -> str:
         """Ek Hinglish line — kyun reasoning poori nahi hui."""
@@ -355,10 +472,30 @@ class GeminiReasoning:
                 # `same_model_retries` se bilkul alag hai: model badalna retry
                 # nahi hai.
                 self.switched_models += 1
+            request_prompt = prompt
+            compacted_for_model = False
+            timeout_extended = False
+            from .gemini_model import call_timeout as _call_timeout
+            request_timeout = _call_timeout()
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 self.attempts += 1
+                self.prompt_attempt_log.append({
+                    "label": tag,
+                    "model": name,
+                    "chars": len(request_prompt),
+                    "compacted": compacted_for_model,
+                    "timeout_seconds": request_timeout,
+                })
                 try:
-                    response = self._model.generate_content(prompt)
+                    # Bandhi hui waqt-seema ke saath. Latki hui call ab TRANSIENT
+                    # error ban kar wahi purana retry/backoff chalati hai — poori
+                    # HTTP request ko ghanton rok kar nahi rakhti (isi wajah se
+                    # website par aakhir mein "server se baat nahi ho paayi"
+                    # aata tha).
+                    from .gemini_model import generate as _generate
+                    response = _generate(
+                        self._model, request_prompt, timeout=request_timeout
+                    )
                     text = (getattr(response, "text", "") or "").strip()
                     if not text:
                         # khaali jawab bhi failure hai — chup-chaap "" lautana
@@ -379,6 +516,49 @@ class GeminiReasoning:
                         f"{tag} failed (model={name}, try={attempt + 1}, "
                         f"{v.kind}): {type(exc).__name__}: {exc}")
 
+                    large_provider_failure = (
+                        v.kind in {INVALID_REQUEST, REQUEST_TIMEOUT, SERVER}
+                        and len(request_prompt) >= _compact_retry_min_chars()
+                    )
+                    if v.kind == INPUT_TOO_LARGE or large_provider_failure:
+                        # Full evidence engine mein rehta hai. Provider ne large
+                        # request ko input error, deadline ya 5xx diya to usi
+                        # failed provider-copy ko source IDs/rules bachakar ek
+                        # baar compact karo; unchanged blind retries mat bhejo.
+                        if not compacted_for_model:
+                            compact_prompt = _compact_prompt(request_prompt)
+                            if len(compact_prompt) < len(request_prompt):
+                                request_prompt = compact_prompt
+                                compacted_for_model = True
+                                self.prompt_compactions += 1
+                                self.same_model_retries += 1
+                                self.notes.append(
+                                    f"{tag}: '{name}' ki large request "
+                                    f"({v.kind}) ke baad source IDs/rules bachakar "
+                                    "compact retry kiya")
+                                continue
+                        if v.kind in {INPUT_TOO_LARGE, INVALID_REQUEST}:
+                            # Compact copy bhi validation/input par reject hui:
+                            # unchanged retry ya permanent model death nahi.
+                            break
+
+                    if v.kind == REQUEST_TIMEOUT:
+                        # Compact primary prompt ko ek hi bounded longer chance.
+                        # Har fallback/model par lamba retry karke request ko
+                        # ghanton latkana mana hai.
+                        if (name == first_model and not timeout_extended
+                                and attempt < len(_BACKOFF_SECONDS)):
+                            request_timeout = max(
+                                request_timeout, _timeout_recovery_seconds()
+                            )
+                            timeout_extended = True
+                            self.timeout_extensions += 1
+                            self.same_model_retries += 1
+                            self.notes.append(
+                                f"{tag}: compact primary timeout ke baad "
+                                f"{request_timeout}s ka ek bounded recovery attempt")
+                            continue
+                        break
                     if v.stop_all:              # auth — is key par sab band
                         self.stopped = True
                         self.notes.append(f"{tag}: {v.human} — aage koshish rok di")
@@ -444,6 +624,8 @@ class GeminiReasoning:
             bits.append("0 actual API attempts (ek bhi network call nahi hui)")
         if self.same_model_retries:
             bits.append(f"{self.same_model_retries} same-model retry")
+        if self.timeout_extensions:
+            bits.append(f"{self.timeout_extensions} bounded timeout recovery")
         if self.switched_models:
             # Ye jaan-boojh kar "retry" nahi kehta: doosre model par jaana retry
             # nahi hai, aur pehle audit dono ko ek hi number mein mila deta tha.
@@ -518,7 +700,21 @@ class GeminiReasoning:
             "keys_note": self.keys.note(),
             "blocked_models": dict(self.blocked),
             "failure_kinds": self.ledger.kinds(),
+            "primary_failure_kind": self.ledger.primary_kind(),
+            "failure_events": [
+                {
+                    "model": str(row.get("model") or ""),
+                    "label": str(row.get("label") or ""),
+                    "kind": str(row.get("kind") or ""),
+                    "attempt": int(row.get("attempt") or 0),
+                }
+                for row in self.ledger.events[:20]
+                if isinstance(row, dict)
+            ],
             "failure_summary": self.ledger.summary(),
+            "prompt_compactions": self.prompt_compactions,
+            "timeout_extensions": self.timeout_extensions,
+            "prompt_attempts": [dict(row) for row in self.prompt_attempt_log[:40]],
             "stopped_early": self.stopped,
             "no_api_calls": self.attempts == 0,
             "counted_by": "engine ki apni ginti (Google billing dashboard se nahi)",
@@ -538,8 +734,32 @@ class GeminiReasoning:
         # aate hain — planner ne `requests` daala hoga. Na ho to ye khaali string
         # ban jaata hai, isliye purane callers bhi chalte rehte hain.
         from .requested import prompt_block
+        from .specialist_domains import prompt_block as specialist_prompt_block
+        from .lenses import reasoning_block as lens_reasoning_block
 
         extras = prompt_block(plan.get("requests") if isinstance(plan, dict) else None)
+        specialist_rules = specialist_prompt_block(plan if isinstance(plan, dict) else {})
+        # OPEN LENS (closed keyword list ke bahar). `specialist_domains` ki list
+        # band hai — `'game theory se faisla kaise lein'` par wo khaali deti hai,
+        # jabki `lenses.framework_phrases()` grammar se 'game theory' pakad leta
+        # hai. Pehle wo naam sirf search query aur relevance anchor tak jaata
+        # tha, reasoning prompt me ek shabd bhi nahi — isliye app us framework
+        # par sochta hi nahi tha. Ab jaata hai, par "search plan only, NOT
+        # evidence" tail ke saath. Khaali lens par ye "" rehta hai, isliye
+        # bina-lens wale sawaal ka prompt byte-identical rehta hai (purane
+        # benchmark provably no-op).
+        lens_text = lens_reasoning_block(
+            (plan.get("lens") if isinstance(plan, dict) else None) or {})
+        lens_rules = f"\n{lens_text}\n" if lens_text else ""
+        # PATENT RULE sirf tab jaata hai jab pack mein sach mein patent ho —
+        # warna har normal sawaal ke prompt mein bekaar tokens jaate.
+        patent_rules = ""
+        try:
+            if pack.patent_sources():
+                from .patents import PATENT_RULE_PROMPT
+                patent_rules = "\n" + PATENT_RULE_PROMPT
+        except Exception:          # pragma: no cover - purane pack objects
+            patent_rules = ""
         return f"""Tum ek Research Analyst ho. {_ROLE_HONESTY}
 
 SAWAL: {question}
@@ -555,6 +775,8 @@ RETRIEVED SOURCES (sirf inhi ka istemal karo):
 {CITATION_INSTRUCTION}
 
 {LABEL_RULE_PROMPT}
+{patent_rules}
+{specialist_rules}{lens_rules}
 
 {style}
 
