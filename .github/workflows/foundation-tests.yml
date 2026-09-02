@@ -73,9 +73,9 @@ jobs:
 
       # #40/#103 are production extensions, not optional demo files. Keep their
       # bridge/safety/maturity invariants visible as their own fast CI gate in
-      # addition to the complete pytest pass below. #103 includes an independent
-      # depth/relevance/source-quality readiness guard so snippets or weak current
-      # sources cannot fake DEBATE_MAP_READY.
+      # addition to the complete pytest pass below. #103 includes independent
+      # depth/relevance/source-quality readiness plus a strict distinction
+      # between underlying work identity and publisher/domain/provider origin.
       - name: Run advanced integration release gate
         run: |
           pytest -q \
@@ -83,6 +83,8 @@ jobs:
             tests/test_capability_maturity.py \
             tests/test_literature_debate.py \
             tests/test_literature_debate_guard.py \
+            tests/test_source_independence_guard.py \
+            tests/test_literature_debate_origin_semantics.py \
             tests/test_triple_implementation.py \
             tests/test_triple_task_adapter.py \
             tests/test_triple_verification_bridge.py \
