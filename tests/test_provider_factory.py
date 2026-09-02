@@ -50,11 +50,29 @@ def test_invalid_provider_status_never_reflects_arbitrary_env_value(monkeypatch)
     }
 
 
-def test_drive_status_does_not_expose_remote_secret_material(monkeypatch):
+def test_drive_encryption_is_required_by_default(monkeypatch):
+    monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
+    monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "plain")
+    monkeypatch.setenv("RCLONE_EXE", "rclone")
+    monkeypatch.delenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", raising=False)
+    monkeypatch.setattr("storage.provider_factory.shutil.which", lambda _: "/fake/rclone")
+    monkeypatch.setattr(
+        "storage.provider_factory.detect_rclone_remote_type",
+        lambda executable, remote: "drive",
+    )
+    status = provider_status()
+    assert status["encryption_required"] is True
+    assert status["encryption_verified"] is False
+    assert status["ready"] is False
+    assert status["reason"] == "encrypted_archive_required_but_rclone_crypt_not_verified"
+    assert "plain" not in repr(status)
+
+
+def test_plain_drive_requires_explicit_encryption_opt_out(monkeypatch):
     monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
     monkeypatch.setenv("GOOGLE_DRIVE_RCLONE_REMOTE", "drive")
     monkeypatch.setenv("RCLONE_EXE", "rclone")
-    monkeypatch.delenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", raising=False)
+    monkeypatch.setenv("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", "false")
     monkeypatch.setattr("storage.provider_factory.shutil.which", lambda _: "/fake/rclone")
     status = provider_status()
     assert status["provider"] == "google-drive-rclone"
