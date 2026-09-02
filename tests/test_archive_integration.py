@@ -1,4 +1,12 @@
 from pathlib import Path
+import os
+import subprocess
+
+import pytest
+
+from storage.google_drive_rclone import detect_rclone_remote_type
+from utils.archive_manifest import ArchiveManifest, sha256_file
+from utils.storage_quota import cleanup_verified_archives
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -49,21 +57,76 @@ def test_new_archive_upload_attempt_invalidates_old_verification_and_checksum():
     assert 'item["verification_method"] = ""' in window
 
 
-def test_destructive_cleanup_requires_checksum_and_holds_manifest_lock():
+def test_destructive_cleanup_requires_real_checksum_proof(monkeypatch, tmp_path):
+    """Size-only cloud verification must never authorize local deletion.
+
+    This deliberately exercises the public cleanup boundary instead of asserting
+    one variable name in its source. Refactors are allowed; weakening checksum
+    safety is not.
+    """
+    root = tmp_path / "runtime"
+    root.mkdir()
+    local = root / "result.json.gz"
+    local.write_bytes(b"research-result-v1")
+
+    manifest = ArchiveManifest(str(tmp_path / "manifest.json"))
+    item = manifest.register(
+        str(local), remote_path="research-results/result.json.gz", provider="fake-cloud"
+    )
+    archive_id = item["archive_id"]
+
+    monkeypatch.setattr("utils.storage_quota.configured_root", lambda: (str(root), True))
+
+    # Observing the right size proves existence only. It is intentionally too
+    # weak for destructive cleanup.
+    manifest.mark_verified(archive_id, remote_size=local.stat().st_size)
+    blocked = cleanup_verified_archives(
+        manifest, target_reclaim_bytes=local.stat().st_size
+    )
+    assert local.exists()
+    assert blocked["deleted_count"] == 0
+    assert any(row.get("reason") == "checksum_not_verified" for row in blocked["skipped"])
+
+    # The exact same record becomes deletable only after a matching SHA-256 is
+    # independently recorded by the provider boundary.
+    digest = sha256_file(str(local))
+    manifest.mark_verified(
+        archive_id,
+        remote_size=local.stat().st_size,
+        remote_sha256=digest,
+    )
+    cleaned = cleanup_verified_archives(
+        manifest, target_reclaim_bytes=len(b"research-result-v1")
+    )
+    assert not local.exists()
+    assert cleaned["deleted_count"] == 1
+    assert manifest.get(archive_id)["local_deleted"] is True
+
+
+def test_destructive_cleanup_holds_manifest_lock_across_check_remove_and_mark():
+    """Keep the TOCTOU critical section explicit at the destructive boundary."""
     cleanup = _read("utils/storage_quota.py")
-    assert 'item.get("checksum_verified")' in cleanup
-    assert 'reason = "checksum_not_verified"' in cleanup
-    assert "with manifest._lock" in cleanup
-    assert "manifest.safe_to_delete_local(archive_ref)" in cleanup
-    assert "os.remove(path)" in cleanup
-    assert "manifest.mark_local_deleted(archive_ref)" in cleanup
-    # The three destructive-boundary operations must occur inside the lock in
-    # this order so re-upload cannot invalidate verification between them.
     lock = cleanup.index("with manifest._lock")
     check = cleanup.index("manifest.safe_to_delete_local(archive_ref)", lock)
     remove = cleanup.index("os.remove(path)", check)
     mark = cleanup.index("manifest.mark_local_deleted(archive_ref)", remove)
     assert lock < check < remove < mark
+
+
+def test_rclone_remote_type_detection_uses_safe_local_metadata_command(monkeypatch):
+    """Verify the exact argv contract without depending on source formatting."""
+    detect_rclone_remote_type.cache_clear()
+    seen = []
+
+    def fake_run(cmd, **kwargs):
+        seen.append((list(cmd), dict(kwargs)))
+        return subprocess.CompletedProcess(cmd, 0, stdout="secure: crypt\n", stderr="")
+
+    monkeypatch.setattr("storage.google_drive_rclone.subprocess.run", fake_run)
+    assert detect_rclone_remote_type("/safe/rclone", "secure", 8) == "crypt"
+    assert seen and seen[0][0] == ["/safe/rclone", "listremotes", "--long"]
+    assert seen[0][1]["shell"] is False
+    assert seen[0][1]["stdin"] is subprocess.DEVNULL
 
 
 def test_google_drive_archive_can_fail_closed_on_encryption_and_sha256():
@@ -75,8 +138,7 @@ def test_google_drive_archive_can_fail_closed_on_encryption_and_sha256():
     assert "GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT" in provider
     assert '_bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)' in provider
     assert "detect_rclone_remote_type" in provider
-    assert '["listremotes", "--long"]' in provider
-    assert '["hashsum", "SHA256", target, "--download"]' in provider
+    assert '"hashsum", "SHA256", target, "--download"' in provider
     assert "Remote SHA-256 content verification unavailable" in provider
     assert '_bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)' in factory
     assert "encrypted_archive_required_but_rclone_crypt_not_verified" in factory
