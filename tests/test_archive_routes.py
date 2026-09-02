@@ -7,7 +7,7 @@ from api import archive_routes
 from utils.archive_manifest import ArchiveManifest
 
 
-def test_cleanup_endpoint_deletes_only_verified_and_hides_paths(tmp_path, monkeypatch):
+def test_cleanup_endpoint_deletes_only_checksum_verified_and_hides_paths(tmp_path, monkeypatch):
     root = tmp_path / "data"
     root.mkdir()
     monkeypatch.setenv("INFINITY_DATA_ROOT", str(root))
@@ -24,7 +24,11 @@ def test_cleanup_endpoint_deletes_only_verified_and_hides_paths(tmp_path, monkey
         provider="google-drive-rclone",
     )
     manifest.mark_upload_attempt(good["archive_id"])
-    manifest.mark_verified(good["archive_id"], remote_size=verified.stat().st_size)
+    manifest.mark_verified(
+        good["archive_id"],
+        remote_size=verified.stat().st_size,
+        remote_sha256=good["sha256"],
+    )
     manifest.register(
         str(unverified),
         remote_path="research-results/unverified.bin",
@@ -38,11 +42,35 @@ def test_cleanup_endpoint_deletes_only_verified_and_hides_paths(tmp_path, monkey
     assert result["reclaimed_bytes"] == len(b"verified bytes")
     assert not verified.exists()
     assert unverified.exists()
+    assert "matching remote SHA-256" in result["rule"]
     dumped = repr(result)
     assert str(verified) not in dumped
     assert str(unverified) not in dumped
     assert "verified.bin" not in dumped
     assert "unverified.bin" not in dumped
+
+
+def test_size_only_verified_record_is_reported_but_not_deleted(tmp_path, monkeypatch):
+    root = tmp_path / "data"
+    root.mkdir()
+    monkeypatch.setenv("INFINITY_DATA_ROOT", str(root))
+    local = root / "size-only.bin"
+    local.write_bytes(b"keep until checksum")
+    manifest = ArchiveManifest(str(root / "manifest.json"))
+    item = manifest.register(
+        str(local),
+        remote_path="research-results/size-only.bin",
+        provider="google-drive-rclone",
+    )
+    manifest.mark_upload_attempt(item["archive_id"])
+    manifest.mark_verified(item["archive_id"], remote_size=local.stat().st_size)
+    monkeypatch.setattr(archive_routes.archive_runtime, "manifest", manifest)
+
+    result = archive_routes.cleanup_archive(target_mb=1, _admin=None)
+    assert result["deleted_count"] == 0
+    assert result["skipped_by_reason"].get("checksum_not_verified") == 1
+    assert local.exists()
+    assert "size-only.bin" not in repr(result)
 
 
 def test_archive_operational_routes_are_all_admin_guarded_in_source():
