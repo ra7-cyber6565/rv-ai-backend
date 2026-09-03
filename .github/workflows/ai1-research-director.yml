@@ -1,0 +1,38 @@
+name: AI-1 Research Director Gate
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai1-research-director-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ai1-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout proposed code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install test runner
+        run: python -m pip install --upgrade pytest
+
+      - name: Compile AI-1 integration
+        run: |
+          python -m py_compile \
+            research_engine/ai1_research_director.py \
+            research_engine/agent_manager.py
+
+      - name: Run AI-1 fail-closed contract tests
+        run: pytest -q tests/test_ai1_research_director.py
