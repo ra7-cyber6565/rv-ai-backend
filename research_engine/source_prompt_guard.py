@@ -85,7 +85,6 @@ def _clip(value: object, limit: int) -> str:
 
 
 def _safe_source_id(value: object) -> str:
-    """Citation IDs are engine metadata; keep only the expected inert grammar."""
     raw = _clip(value, 40)
     inert = re.sub(r"[^A-Za-z0-9._-]", "", raw)
     return inert or "?"
@@ -97,7 +96,6 @@ def looks_instruction_like(value: object) -> bool:
 
 
 def quote_untrusted(value: object, *, limit: int) -> str:
-    """Render source data as visibly quoted lines; suspicious lines are marked."""
     text = _clip(value, limit)
     if not text:
         return ""
@@ -120,12 +118,10 @@ def _meta_line(label: str, value: object, *, limit: int) -> str:
 
 
 def render_source(source: SourceRecord, *, max_chars_per_source: int = 1200) -> str:
-    """Bounded, provenance-preserving, injection-aware source renderer."""
     sid = _safe_source_id(source.source_id)
     descriptor = quote_untrusted(source.citation_label(), limit=700) or "DATA> source"
     head = f"[{sid}] SOURCE DESCRIPTOR (quoted data):\n{descriptor}"
     meta: List[str] = []
-
     fields = (
         ("Title", source.title, 500),
         ("Author(s)", ", ".join(source.authors[:4]) if source.authors else "", 600),
@@ -138,20 +134,16 @@ def render_source(source: SourceRecord, *, max_chars_per_source: int = 1200) -> 
         row = _meta_line(name, value, limit=limit)
         if row:
             meta.append(row)
-
     meta.append(_meta_line("Read", source.reading_level(), limit=40))
     if source.read_note:
         meta.append(_meta_line("Read scope", source.read_note, limit=700))
-
     body = _meta_line("Excerpt", source.snippet, limit=max(80, int(max_chars_per_source)))
     if body:
         meta.append(body)
-
     return head + "\n" + "\n".join(row for row in meta if row)
 
 
 def guarded_prompt_block(pack: EvidencePack, max_chars_per_source: int = 1200) -> str:
-    """Replacement for EvidencePack.to_prompt_block with a strict data boundary."""
     if not pack.sources:
         return "(Koi source retrieve nahi hua.)"
     blocks = [render_source(source, max_chars_per_source=max_chars_per_source)
@@ -160,13 +152,7 @@ def guarded_prompt_block(pack: EvidencePack, max_chars_per_source: int = 1200) -
 
 
 def install() -> None:
-    """Install all source-boundary integration guards exactly once.
-
-    Latest main owns the broad scientific-capability wiring in ``__init__``.
-    ChatGPT-specific source-identity and additive advanced-discovery hardening are
-    bootstrapped here so they layer on top without replacing/removing main's
-    newer runtime capability installers.
-    """
+    """Install source-boundary guards without replacing main's maturity wiring."""
     current = getattr(EvidencePack, "to_prompt_block", None)
     if current is not guarded_prompt_block:
         EvidencePack.to_prompt_block = guarded_prompt_block  # type: ignore[assignment]
@@ -174,15 +160,15 @@ def install() -> None:
     from .local_reasoning_guard import install as install_local_reasoning_guard
     install_local_reasoning_guard()
 
-    from .source_independence_guard import install as install_source_independence_guard
-    install_source_independence_guard()
-
-    # ``__init__`` imports this guard before the orchestrator is lazily loaded.
-    # Patch the advanced-discovery module export at that boundary, preserving the
-    # current base engine while adding only the separately-audited extension.
-    from . import advanced_discovery as advanced_discovery_module
-    from .advanced_discovery_integrated import IntegratedScientificDiscoveryEngine
-    advanced_discovery_module.ScientificDiscoveryEngine = IntegratedScientificDiscoveryEngine
+    # Main now owns a newer formal #103 literature-debate implementation. Apply
+    # only the identity/dedup part of the older independence guard; do not monkey
+    # patch the superseded AutonomousLiteratureDebate class.
+    from . import source_independence_guard as independence
+    if getattr(SourceRecord, "_independence_semantics_version", "") != "2.2":
+        independence._install_source_properties()
+        independence._install_pack_property()
+        independence._install_dedup_semantics()
+        SourceRecord._independence_semantics_version = "2.2"  # type: ignore[attr-defined]
 
 
 __all__ = [
