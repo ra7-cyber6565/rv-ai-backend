@@ -1,15 +1,17 @@
 #!/usr/bin/env python3
-"""Verify that all release receipts prove the same exact clean Git revision.
+"""Verify that release receipts prove one exact, recent, clean Git revision.
 
-This verifier performs no network/model call. It reads the three bounded,
-non-secret receipts, validates that each receipt has the expected gate contract,
-checks its pass state and revision binding, then writes a compact manifest
-containing only hashes, booleans and the Git SHA.
+This verifier performs no network/model call. It reads three bounded non-secret
+receipts, validates each gate contract, checks pass state, freshness and exact
+revision binding, then writes a compact manifest containing only hashes,
+booleans and the Git SHA.
 
-The contract checks matter: a hand-written JSON object with a few convenient
-``passed=true`` fields must not be accepted as a real Foundation/live/deployed
-receipt. This is still not cryptographic signing; it is a fail-closed structural
-and exact-revision verifier for operator-controlled local receipt files.
+A hand-written JSON object with a few convenient ``passed=true`` fields must not
+be accepted as a real Foundation/live/deployed receipt. Likewise an old live or
+deployed receipt must not be replayed indefinitely after provider/deployment
+conditions may have changed. This is still not cryptographic signing; it is a
+fail-closed structural, freshness and exact-revision verifier for
+operator-controlled local receipt files.
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Optional
@@ -32,6 +35,13 @@ from utils.release_identity import normalize_git_revision, repository_identity
 
 
 MAX_RECEIPT_BYTES = 2_000_000
+# Exact code does not change between receipts, but live quota/provider and
+# deployment state can. Keep code proof reusable for a few days while requiring
+# operational proof to be recent.
+MAX_FOUNDATION_AGE_SECONDS = 7 * 24 * 60 * 60
+MAX_LIVE_AGE_SECONDS = 24 * 60 * 60
+MAX_DEPLOYED_AGE_SECONDS = 24 * 60 * 60
+MAX_FUTURE_SKEW_SECONDS = 5 * 60
 _DEPLOYED_GATE = "DEPLOYED_READONLY_ZERO_MODEL_SMOKE"
 _REQUIRED_DEPLOYED_CALLS = {
     "GET /health",
@@ -80,6 +90,39 @@ def _int_at_least(value: object, minimum: int) -> bool:
     return parsed >= int(minimum)
 
 
+def _epoch(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (number > 0):
+        return None
+    return number
+
+
+def _iso_epoch(value: object) -> float | None:
+    text = str(value or "").strip()
+    if not text or len(text) > 80:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    try:
+        return parsed.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _fresh(timestamp: float | None, *, now: float, max_age: int) -> bool:
+    if timestamp is None:
+        return False
+    age = float(now) - float(timestamp)
+    return -MAX_FUTURE_SKEW_SECONDS <= age <= int(max_age)
+
+
 def _live_contract_ok(live: Mapping[str, object]) -> bool:
     preflight = live.get("zero_cost_preflight")
     if not isinstance(preflight, Mapping):
@@ -110,10 +153,6 @@ def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
         any(item.startswith(prefix) for prefix in _ALLOWED_DEPLOYED_CALL_PREFIXES)
         for item in calls
     )
-    # The deployed gate is intentionally read-only/zero-model. The receipt must
-    # identify that exact gate and contain the real bounded call ledger emitted
-    # by the probe. This rejects a generic handcrafted success object and a
-    # receipt whose call ledger unexpectedly touched a model/research route.
     return bool(
         deployed.get("gate") == _DEPLOYED_GATE
         and required_present
@@ -127,12 +166,14 @@ def verify_release_bundle(
     deployed: Mapping[str, object],
     *,
     current_identity: Mapping[str, object],
+    now_epoch: float | None = None,
 ) -> dict:
     checks: list[dict[str, object]] = []
 
     def check(name: str, passed: object, detail: str) -> None:
         checks.append({"name": name, "passed": bool(passed), "detail": detail})
 
+    now = float(time.time() if now_epoch is None else now_epoch)
     foundation_revision = normalize_git_revision(foundation.get("code_revision"))
     live_revision = normalize_git_revision(live.get("code_revision"))
     deployed_expected = normalize_git_revision(deployed.get("expected_code_revision"))
@@ -145,6 +186,21 @@ def verify_release_bundle(
     )
     live_contract = _live_contract_ok(live)
     deployed_contract = _deployed_contract_ok(deployed)
+    foundation_fresh = _fresh(
+        _epoch(foundation.get("created_at_epoch")),
+        now=now,
+        max_age=MAX_FOUNDATION_AGE_SECONDS,
+    )
+    live_fresh = _fresh(
+        _epoch(live.get("created_at_epoch")),
+        now=now,
+        max_age=MAX_LIVE_AGE_SECONDS,
+    )
+    deployed_fresh = _fresh(
+        _iso_epoch(deployed.get("checked_at_utc")),
+        now=now,
+        max_age=MAX_DEPLOYED_AGE_SECONDS,
+    )
 
     check(
         "foundation_receipt_contract",
@@ -160,6 +216,21 @@ def verify_release_bundle(
         "deployed_receipt_contract",
         deployed_contract,
         "exact zero-model deployed gate with required safe call ledger",
+    )
+    check(
+        "foundation_receipt_fresh",
+        foundation_fresh,
+        "foundation proof is not older than 7 days and is not future-dated",
+    )
+    check(
+        "live_receipt_fresh",
+        live_fresh,
+        "live provider proof is not older than 24 hours and is not future-dated",
+    )
+    check(
+        "deployed_receipt_fresh",
+        deployed_fresh,
+        "deployed smoke is not older than 24 hours and is not future-dated",
     )
     check(
         "foundation_gate_passed",
@@ -210,7 +281,7 @@ def verify_release_bundle(
     passed = all(bool(row["passed"]) for row in checks)
     common_revision = foundation_revision if passed else ""
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "gate": "EXACT_REVISION_RELEASE_BUNDLE",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "passed": passed,
@@ -243,7 +314,7 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Verify Foundation/live/deployed receipts against one Git SHA.",
+        description="Verify recent Foundation/live/deployed receipts against one Git SHA.",
     )
     parser.add_argument("--foundation", required=True)
     parser.add_argument("--live", required=True)
