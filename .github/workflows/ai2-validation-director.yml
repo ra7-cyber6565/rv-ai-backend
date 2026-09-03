@@ -50,14 +50,13 @@ jobs:
             research_engine/validation_director.py \
             research_engine/agent_manager.py
 
-      - name: Run AI-2 fail-closed numeric and inference tests
+      - name: Run all AI-2 focused fail-closed validation tests
         shell: bash
         run: |
           set -o pipefail
           python -m pytest -q \
             tests/test_validation_director.py \
-            tests/test_ai2_inference.py \
-            tests/test_ai2_manager_integration.py \
+            tests/test_ai2_*.py \
             2>&1 | tee ai2-test-output.txt
 
       - name: Re-run AI-1 focused tests for coexistence regression
