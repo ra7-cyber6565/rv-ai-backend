@@ -44,4 +44,16 @@ jobs:
             research_engine/agent_manager.py
 
       - name: Run AI-1 fail-closed contract tests
-        run: pytest -q tests/test_ai1_research_director.py
+        shell: bash
+        run: |
+          set -o pipefail
+          pytest -q tests/test_ai1_research_director.py 2>&1 | tee ai1-test-output.txt
+
+      - name: Upload focused test diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai1-test-output-${{ github.run_id }}
+          path: ai1-test-output.txt
+          if-no-files-found: warn
+          retention-days: 1
