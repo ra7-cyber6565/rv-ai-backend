@@ -1,9 +1,15 @@
 #!/usr/bin/env python3
 """Verify that all release receipts prove the same exact clean Git revision.
 
-This verifier performs no network/model call.  It reads the three bounded,
-non-secret receipts, checks their gate-specific pass state and revision binding,
-then writes a compact manifest containing only hashes, booleans and the Git SHA.
+This verifier performs no network/model call. It reads the three bounded,
+non-secret receipts, validates that each receipt has the expected gate contract,
+checks its pass state and revision binding, then writes a compact manifest
+containing only hashes, booleans and the Git SHA.
+
+The contract checks matter: a hand-written JSON object with a few convenient
+``passed=true`` fields must not be accepted as a real Foundation/live/deployed
+receipt. This is still not cryptographic signing; it is a fail-closed structural
+and exact-revision verifier for operator-controlled local receipt files.
 """
 from __future__ import annotations
 
@@ -26,6 +32,7 @@ from utils.release_identity import normalize_git_revision, repository_identity
 
 
 MAX_RECEIPT_BYTES = 2_000_000
+_DEPLOYED_GATE = "DEPLOYED_READONLY_ZERO_MODEL_SMOKE"
 
 
 def _load_receipt(path: Path) -> tuple[dict, str]:
@@ -40,6 +47,42 @@ def _load_receipt(path: Path) -> tuple[dict, str]:
     if not isinstance(value, dict):
         raise ValueError("receipt JSON object hona chahiye")
     return value, hashlib.sha256(raw).hexdigest()
+
+
+def _schema_at_least(receipt: Mapping[str, object], minimum: int) -> bool:
+    try:
+        value = int(receipt.get("schema_version") or 0)
+    except (TypeError, ValueError):
+        return False
+    return value >= int(minimum)
+
+
+def _live_contract_ok(live: Mapping[str, object]) -> bool:
+    preflight = live.get("zero_cost_preflight")
+    if not isinstance(preflight, Mapping):
+        return False
+    return bool(
+        _schema_at_least(live, 2)
+        and preflight.get("ready") is True
+        and preflight.get("zero_cost_only") is True
+        and int(preflight.get("model_layers_usable_now") or 0) >= 1
+        and preflight.get("storage_validated") is True
+        and preflight.get("storage_ready") is True
+        and not (preflight.get("blockers") or [])
+    )
+
+
+def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
+    calls = deployed.get("calls")
+    if not isinstance(calls, list):
+        return False
+    # The deployed gate is intentionally read-only/zero-model. The receipt must
+    # identify that exact gate and contain only the bounded call ledger emitted by
+    # the probe, not a generic handcrafted success object.
+    return bool(
+        deployed.get("gate") == _DEPLOYED_GATE
+        and all(isinstance(item, str) and len(item) <= 300 for item in calls)
+    )
 
 
 def verify_release_bundle(
@@ -60,24 +103,49 @@ def verify_release_bundle(
     deployed_revision = normalize_git_revision(deployed.get("deployed_code_revision"))
     current_revision = normalize_git_revision(current_identity.get("revision"))
 
+    foundation_contract = bool(
+        _schema_at_least(foundation, 2)
+        and foundation.get("offline_zero_cost") is True
+    )
+    live_contract = _live_contract_ok(live)
+    deployed_contract = _deployed_contract_ok(deployed)
+
+    check(
+        "foundation_receipt_contract",
+        foundation_contract,
+        "schema>=2 and offline_zero_cost=true",
+    )
+    check(
+        "live_receipt_contract",
+        live_contract,
+        "schema>=2 plus ready confirmed-free model/storage preflight",
+    )
+    check(
+        "deployed_receipt_contract",
+        deployed_contract,
+        "exact zero-model deployed gate and bounded call ledger",
+    )
     check(
         "foundation_gate_passed",
-        foundation.get("passed") is True
+        foundation_contract
+        and foundation.get("passed") is True
         and foundation.get("code_identity_verified") is True
         and foundation.get("repository_clean") is True,
         "offline stages plus clean code identity",
     )
     check(
         "live_zero_cost_gate_passed",
-        live.get("passed") is True
+        live_contract
+        and live.get("passed") is True
         and live.get("repository_clean") is True
         and live.get("contains_answer_or_source_text") is False
         and live.get("contains_credentials") is False,
-        "live gate and receipt privacy contract",
+        "live gate, confirmed-free preflight and receipt privacy contract",
     )
     check(
         "deployed_zero_model_gate_passed",
-        deployed.get("complete") is True
+        deployed_contract
+        and deployed.get("complete") is True
         and deployed.get("zero_model_calls_by_construction") is True
         and deployed.get("capabilities_or_secrets_recorded") is False,
         "deployed smoke and capability privacy contract",
@@ -106,7 +174,7 @@ def verify_release_bundle(
     passed = all(bool(row["passed"]) for row in checks)
     common_revision = foundation_revision if passed else ""
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "gate": "EXACT_REVISION_RELEASE_BUNDLE",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "passed": passed,
@@ -178,4 +246,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
