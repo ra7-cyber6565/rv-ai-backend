@@ -3,22 +3,17 @@ DocumentProcessor — Spec Section 3/4/5 ka entry point (processing/)
 
 File aayi → sahi processor chuno → text + citation-ready chunks do.
 
-Supported:
-    .pdf                  PDFProcessor (+ OCRProcessor scanned pages ke liye)
-    .vtt .srt             TranscriptProcessor (timestamp citations)
-    .txt .md              plain text
-    .docx                 python-docx (agar installed ho)
-    .html .htm            tag-strip (bhaari parser ke bina)
-
-Har case mein return shape same rehta hai, taaki caller ko if-else na likhna pade.
-Fail hone par bhi shape same — "ok": False + reason.
+Har citation-ready chunk capture/transformation integrity metadata bhi carry kar
+sakta hai. Native text capture aur OCR capture alag rehte hain; OCR confidence
+ko source quality ya truth score mein merge nahi kiya jaata.
 """
 from __future__ import annotations
 
 import os
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List
 
+from ..extraction_integrity import native_text_integrity
 from .ocr_processor import OCRProcessor
 from .pdf_processor import PDFProcessor
 from .transcript_processor import TranscriptProcessor
@@ -39,29 +34,16 @@ class DocumentProcessor:
         self.transcript = TranscriptProcessor()
         self.ocr_max_pages = ocr_max_pages
 
-    # ── dispatch ─────────────────────────────────────────────────────────────
     def process(self, file_path: str, use_ocr: bool = True,
                 question: str = "", size_bytes: int = 0,
                 large: bool = False) -> Dict:
-        """
-        File → text + citation-ready chunks.
-
-        §12 ke naye (optional) arguments:
-          question   — badi PDF mein kaun se pages rakhne hain, ye isse tay hota
-                       hai. Khaali chhod do to purana behaviour (poora document).
-          size_bytes — file ka size (caller ke paas pehle se hota hai)
-          large      — caller zabardasti streaming path chun sakta hai
-        Purane callers ne ye kuch nahi bheja tha, aur unke liye kuch nahi badla.
-        """
         base = {"ok": False, "error": "", "text": "", "chunks": [], "notes": [],
                 "kind": "", "file": os.path.basename(file_path or "")}
-
         if not file_path or not os.path.exists(file_path):
             base["error"] = f"file nahi mili: {file_path}"
             return base
 
         extension = os.path.splitext(file_path)[1].lower()
-
         if extension == ".pdf":
             return self._process_pdf(file_path, use_ocr, base, question=question,
                                      size_bytes=size_bytes, large=large)
@@ -73,19 +55,24 @@ class DocumentProcessor:
             return self._process_docx(file_path, base)
         if extension in (".html", ".htm"):
             return self._process_html(file_path, base)
-
         base["error"] = (f"'{extension}' format supported nahi hai. Supported: "
                          f"pdf, vtt, srt, txt, md, docx, html")
         return base
 
-    # ── pdf ──────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _native_chunk(locator: str, text: str, header: str,
+                      *, engine: str = "native_text") -> Dict:
+        return {
+            "locator": locator,
+            "text": text,
+            "header": header,
+            "extraction_integrity": native_text_integrity(engine=engine),
+        }
+
     def _process_pdf(self, file_path: str, use_ocr: bool, base: Dict,
                      question: str = "", size_bytes: int = 0,
                      large: bool = False) -> Dict:
         base["kind"] = "pdf"
-
-        # §12: byte-size par file skip karna band. Badi file ka matlab ab
-        # "streaming page-by-page padho" hai, "chhod do" nahi.
         if not size_bytes:
             try:
                 size_bytes = os.path.getsize(file_path)
@@ -100,15 +87,17 @@ class DocumentProcessor:
 
         result = self.pdf.extract(file_path)
         base["notes"].append(self.pdf.coverage_note(result))
-
         if not result["extracted"]:
             base["error"] = result["error"] or "PDF se text nahi nikla"
             return base
 
         text_parts = [result["text"]] if result["text"] else []
         chunks = [
-            {"locator": f"p.{page['page']}", "text": page["text"],
-             "header": f"[Source: {base['file']}, Page {page['page']}]"}
+            self._native_chunk(
+                f"p.{page['page']}", page["text"],
+                f"[Source: {base['file']}, Page {page['page']}]",
+                engine="pdf_native_text",
+            )
             for page in result["pages"] if page["text"] and not page["scanned"]
         ]
 
@@ -120,8 +109,14 @@ class DocumentProcessor:
             if ocr_result.get("text"):
                 text_parts.append(ocr_result["text"])
                 chunks += [
-                    {"locator": f"p.{page['page']} (OCR)", "text": page["text"],
-                     "header": f"[Source: {base['file']}, Page {page['page']}]"}
+                    {
+                        "locator": f"p.{page['page']} (OCR)",
+                        "text": page["text"],
+                        "header": f"[Source: {base['file']}, Page {page['page']}]",
+                        "extraction_integrity": dict(
+                            page.get("extraction_integrity") or {}
+                        ),
+                    }
                     for page in ocr_result["pages"] if page.get("text")
                 ]
         elif scanned:
@@ -135,17 +130,8 @@ class DocumentProcessor:
                              "scanned ho sakta hai aur OCR available nahi tha)")
         return base
 
-    # ── pdf, badi file ka streaming path (§12) ───────────────────────────────
     def _process_pdf_streaming(self, file_path: str, use_ocr: bool, base: Dict,
                                question: str = "", size_bytes: int = 0) -> Dict:
-        """
-        20 MB / 100 MB / 3000-page document — ab bhi usable.
-
-        Poora text ek string mein nahi banate. Pages stream hote hain, sawaal se
-        milte-julte pages chune jaate hain, aur report mein saaf likha jaata hai
-        ki kitne pages dekhe aur kaun rakhe gaye. Ye "poora document padh liya"
-        ka daawa nahi karta — spec ki honesty isi mein hai.
-        """
         base["kind"] = "pdf"
         base["streamed"] = True
         result = self.pdf.extract_relevant(file_path, question,
@@ -154,14 +140,15 @@ class DocumentProcessor:
         base["selection"] = result.get("selection", {})
         base["page_count"] = result.get("page_count", 0)
 
-        chunks = [{"locator": c["locator"], "text": c["text"],
-                   "header": c.get("header", "")}
-                  for c in (result.get("chunks") or []) if c.get("text")]
+        chunks = [
+            self._native_chunk(
+                c["locator"], c["text"], c.get("header", ""),
+                engine="pdf_streamed_native_text",
+            )
+            for c in (result.get("chunks") or []) if c.get("text")
+        ]
         text_parts = [result.get("text") or ""]
 
-        # Scanned pages: badi file par poora OCR budget se bahar hai. Isliye OCR
-        # sirf tab, jab text ki taraf se kuch bhi na mila ho — aur tab bhi sirf
-        # pehle kuch pages. Feature band nahi kiya, seemit kiya hai.
         scanned = result.get("scanned_pages") or []
         if scanned and use_ocr and not chunks:
             budget = min(self.ocr_max_pages, 5)
@@ -171,8 +158,14 @@ class DocumentProcessor:
             if ocr_result.get("text"):
                 text_parts.append(ocr_result["text"])
                 chunks += [
-                    {"locator": f"p.{page['page']} (OCR)", "text": page["text"],
-                     "header": f"[Source: {base['file']}, Page {page['page']}]"}
+                    {
+                        "locator": f"p.{page['page']} (OCR)",
+                        "text": page["text"],
+                        "header": f"[Source: {base['file']}, Page {page['page']}]",
+                        "extraction_integrity": dict(
+                            page.get("extraction_integrity") or {}
+                        ),
+                    }
                     for page in ocr_result["pages"] if page.get("text")
                 ]
         elif scanned and not use_ocr:
@@ -186,26 +179,29 @@ class DocumentProcessor:
                 "badi PDF ke chune hue pages se bhi padhne layak text nahi mila")
         return base
 
-    # ── transcript ───────────────────────────────────────────────────────────
     def _process_transcript(self, file_path: str, base: Dict) -> Dict:
         base["kind"] = "transcript"
         result = self.transcript.process_file(file_path)
+        chunks = []
+        for chunk in result.get("chunks", []) or []:
+            item = dict(chunk)
+            item.setdefault("extraction_integrity",
+                            native_text_integrity(engine="transcript_native_text"))
+            chunks.append(item)
         base["ok"] = result["ok"]
         base["error"] = result.get("error", "")
         base["text"] = result.get("text", "")
-        base["chunks"] = result.get("chunks", [])
+        base["chunks"] = chunks
         if result.get("duration_note"):
             base["notes"].append(result["duration_note"])
         return base
 
-    # ── plain text ───────────────────────────────────────────────────────────
     def _read(self, file_path: str) -> str:
         with open(file_path, "r", encoding="utf-8", errors="replace") as f:
             return f.read()
 
     def _chunk_plain(self, text: str, file_name: str,
                      chunk_chars: int = 1200) -> List[Dict]:
-        """Paragraph-boundary pe todo, taaki sentence beech se na kate."""
         paragraphs = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
         chunks: List[Dict] = []
         buffer: List[str] = []
@@ -215,11 +211,11 @@ class DocumentProcessor:
         def flush(idx: int):
             if not buffer:
                 return
-            chunks.append({
-                "locator": f"part {idx}",
-                "text": "\n\n".join(buffer),
-                "header": f"[Source: {file_name}, Part {idx}]",
-            })
+            chunks.append(self._native_chunk(
+                f"part {idx}", "\n\n".join(buffer),
+                f"[Source: {file_name}, Part {idx}]",
+                engine="plain_native_text",
+            ))
 
         for paragraph in paragraphs:
             if size + len(paragraph) > chunk_chars and buffer:
@@ -246,11 +242,10 @@ class DocumentProcessor:
             base["error"] = "file khaali hai"
         return base
 
-    # ── docx ─────────────────────────────────────────────────────────────────
     def _process_docx(self, file_path: str, base: Dict) -> Dict:
         base["kind"] = "docx"
         try:
-            import docx  # python-docx, optional
+            import docx
         except Exception as exc:
             base["error"] = f"python-docx nahi hai ({exc}) — pip install python-docx"
             return base
@@ -268,7 +263,6 @@ class DocumentProcessor:
             base["error"] = "docx mein text nahi mila"
         return base
 
-    # ── html ─────────────────────────────────────────────────────────────────
     def _process_html(self, file_path: str, base: Dict) -> Dict:
         base["kind"] = "html"
         try:
