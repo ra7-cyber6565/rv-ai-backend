@@ -33,6 +33,20 @@ from utils.release_identity import normalize_git_revision, repository_identity
 
 MAX_RECEIPT_BYTES = 2_000_000
 _DEPLOYED_GATE = "DEPLOYED_READONLY_ZERO_MODEL_SMOKE"
+_REQUIRED_DEPLOYED_CALLS = {
+    "GET /health",
+    "GET /api",
+    "GET /api/v1/processing-capabilities",
+    "POST /api/v1/session",
+}
+_ALLOWED_DEPLOYED_CALL_PREFIXES = (
+    "GET /health",
+    "GET /api",
+    "GET /api/v1/processing-capabilities",
+    "POST /api/v1/session",
+    "GET /api/v1/reading-sessions?",
+    "OPTIONS /api/v1/session",
+)
 
 
 def _load_receipt(path: Path) -> tuple[dict, str]:
@@ -57,31 +71,53 @@ def _schema_at_least(receipt: Mapping[str, object], minimum: int) -> bool:
     return value >= int(minimum)
 
 
+def _int_at_least(value: object, minimum: int) -> bool:
+    """Parse hostile receipt scalar fail-closed instead of raising."""
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return False
+    return parsed >= int(minimum)
+
+
 def _live_contract_ok(live: Mapping[str, object]) -> bool:
     preflight = live.get("zero_cost_preflight")
     if not isinstance(preflight, Mapping):
+        return False
+    blockers = preflight.get("blockers")
+    if not isinstance(blockers, list):
         return False
     return bool(
         _schema_at_least(live, 2)
         and preflight.get("ready") is True
         and preflight.get("zero_cost_only") is True
-        and int(preflight.get("model_layers_usable_now") or 0) >= 1
+        and _int_at_least(preflight.get("model_layers_usable_now"), 1)
         and preflight.get("storage_validated") is True
         and preflight.get("storage_ready") is True
-        and not (preflight.get("blockers") or [])
+        and not blockers
     )
 
 
 def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
     calls = deployed.get("calls")
-    if not isinstance(calls, list):
+    if not isinstance(calls, list) or not calls:
         return False
+    if not all(isinstance(item, str) and 1 <= len(item) <= 300 for item in calls):
+        return False
+    rows = set(calls)
+    required_present = _REQUIRED_DEPLOYED_CALLS.issubset(rows)
+    allowed_only = all(
+        any(item.startswith(prefix) for prefix in _ALLOWED_DEPLOYED_CALL_PREFIXES)
+        for item in calls
+    )
     # The deployed gate is intentionally read-only/zero-model. The receipt must
-    # identify that exact gate and contain only the bounded call ledger emitted by
-    # the probe, not a generic handcrafted success object.
+    # identify that exact gate and contain the real bounded call ledger emitted
+    # by the probe. This rejects a generic handcrafted success object and a
+    # receipt whose call ledger unexpectedly touched a model/research route.
     return bool(
         deployed.get("gate") == _DEPLOYED_GATE
-        and all(isinstance(item, str) and len(item) <= 300 for item in calls)
+        and required_present
+        and allowed_only
     )
 
 
@@ -123,7 +159,7 @@ def verify_release_bundle(
     check(
         "deployed_receipt_contract",
         deployed_contract,
-        "exact zero-model deployed gate and bounded call ledger",
+        "exact zero-model deployed gate with required safe call ledger",
     )
     check(
         "foundation_gate_passed",
