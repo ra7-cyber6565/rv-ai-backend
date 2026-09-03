@@ -1,4 +1,6 @@
-from research_engine.validation_contracts import INCONCLUSIVE, NOT_TESTED, REQUIRED_SECTIONS, RESULT_OBSERVED, TEST_PERFORMED
+from research_engine.validation_contracts import (
+    FAIL, INCONCLUSIVE, NOT_TESTED, PASS, REQUIRED_SECTIONS, RESULT_OBSERVED, TEST_PERFORMED,
+)
 from research_engine.validation_director import AI2ValidationDirector, attach_ai2_validation, validate_ai2_packet
 
 
@@ -24,6 +26,10 @@ def experiment(packet):
     return packet["sections"]["6. Exact Experiments / Backtests / Simulations Required"]["domain_hypothesis_experiments"][0]
 
 
+def trading(packet):
+    return packet["sections"]["6. Exact Experiments / Backtests / Simulations Required"]["trading_validation_standard"]
+
+
 def test_packet_has_exact_required_sections_and_integrity():
     p = AI2ValidationDirector().build_packet("Does Treatment X work?", result())
     assert p["title"] == "AI-2 VALIDATION PACKET"
@@ -35,8 +41,7 @@ def test_exact_experiment_contract_and_no_fake_results():
     e = experiment(AI2ValidationDirector().build_packet("Does Treatment X work?", result()))
     for field in ("Hypothesis", "Variables", "Dataset/sample", "Experimental setup", "Prediction", "Null hypothesis",
                   "Metric", "Baseline", "Confounders", "Falsification condition", "Replication method"): assert field in e
-    assert e["hypothesis_status"] == INCONCLUSIVE
-    assert e["result"] == NOT_TESTED
+    assert e["hypothesis_status"] == INCONCLUSIVE and e["result"] == NOT_TESTED
     assert e["statistical_validation"]["effect_size"] == NOT_TESTED
 
 
@@ -52,11 +57,11 @@ def test_observed_requires_provenance():
     assert e["test_state"] == TEST_PERFORMED and e["result"] == NOT_TESTED
 
 
-def test_provenanced_result_can_be_observed():
+def test_provenanced_narrative_result_is_observed_but_not_decisive():
     h = hypothesis(); h.update({"test_state": RESULT_OBSERVED, "observed_result": "Candidate beat baseline.",
                                 "result_provenance": {"test_id": "T1", "dataset_id": "locked"}})
     p = AI2ValidationDirector().build_packet("test", {"hypotheses": [h]}); e = experiment(p)
-    assert e["test_state"] == RESULT_OBSERVED and e["result"] == "Candidate beat baseline."
+    assert e["test_state"] == RESULT_OBSERVED and e["hypothesis_status"] == INCONCLUSIVE
     assert validate_ai2_packet(p)["valid"] is True
 
 
@@ -66,17 +71,86 @@ def test_upstream_pass_without_observed_result_is_downgraded():
     assert e["upstream_claimed_status"] == "PASS" and e["hypothesis_status"] == INCONCLUSIVE
 
 
-def test_trading_standard_complete_and_metrics_not_invented():
+def test_numeric_receipt_computes_effect_uncertainty_and_explicit_pass():
+    r = result()
+    r["validation_receipts"] = [{
+        "hypothesis_id": "H1",
+        "provenance": {"test_id": "T1", "dataset_id": "D1"},
+        "observations": {"candidate": [4, 5, 6, 7], "baseline": [1, 2, 3, 4]},
+        "confidence_level": 0.95, "bootstrap_iterations": 40, "permutation_iterations": 40,
+        "random_seed": 17,
+        "decision_rule": {"metric": "mean_difference", "operator": ">", "threshold": 0},
+    }]
+    p = AI2ValidationDirector().build_packet("Does Treatment X work?", r); e = experiment(p)
+    assert e["test_state"] == RESULT_OBSERVED and e["hypothesis_status"] == PASS
+    assert e["quantitative_result_analysis"]["metrics"]["mean_difference"] == 3.0
+    assert isinstance(e["statistical_validation"]["confidence_interval"], dict)
+    assert isinstance(e["statistical_validation"]["bootstrap"], dict)
+    assert isinstance(e["statistical_validation"]["permutation_test"], dict)
+    assert p["packet_integrity"]["valid"] is True
+
+
+def test_numeric_receipt_without_decision_rule_stays_inconclusive():
+    r = result(); r["validation_receipts"] = [{
+        "hypothesis_id": "H1", "provenance": {"test_id": "T2", "dataset_id": "D2"},
+        "observations": {"candidate": [3, 4, 5], "baseline": [1, 2, 3]},
+    }]
+    e = experiment(AI2ValidationDirector().build_packet("test", r))
+    assert e["test_state"] == RESULT_OBSERVED and e["hypothesis_status"] == INCONCLUSIVE
+    assert e["decision_basis"]["status"] == INCONCLUSIVE
+
+
+def test_numeric_receipt_without_provenance_cannot_be_observed():
+    r = result(); r["validation_receipts"] = [{
+        "hypothesis_id": "H1", "observations": {"candidate": [3, 4], "baseline": [1, 2]},
+        "decision_rule": {"metric": "mean_difference", "operator": ">", "threshold": 0},
+    }]
+    e = experiment(AI2ValidationDirector().build_packet("test", r))
+    assert e["test_state"] != RESULT_OBSERVED and e["result"] == NOT_TESTED
+
+
+def test_trading_standard_complete_and_claimed_metrics_not_invented():
     r = {"trade_contract": {"instrument": "MARKET CFD", "timeframe": "5m", "session": "session A",
                             "entry_rule": "locked", "stop_loss": "locked stop", "take_profit": "locked target",
                             "spread": "historical series required", "win_rate": .99, "profit_factor": 99},
          "hypotheses": [{"id": "H1", "statement": "Rule may have positive net expectancy."}]}
-    p = AI2ValidationDirector().build_packet("Backtest MARKET CFD 5m strategy", r)
-    t = p["sections"]["6. Exact Experiments / Backtests / Simulations Required"]["trading_validation_standard"]
+    t = trading(AI2ValidationDirector().build_packet("Backtest MARKET CFD 5m strategy", r))
     assert t["exact_instrument"] == "MARKET CFD" and t["timeframe"] == "5m" and t["entry"] == "locked"
     for m in ("win_rate", "expectancy", "profit_factor", "maximum_drawdown", "risk_of_ruin", "MAE", "MFE",
               "out_of_sample", "walk_forward", "monte_carlo", "parameter_stability", "regime_stability", "edge_decay"):
         assert t[m] == NOT_TESTED
+
+
+def test_trading_receipt_calculates_metrics_but_friction_gate_controls_decision():
+    base = {"trade_contract": {"instrument": "MARKET CFD", "timeframe": "5m"},
+            "hypotheses": [{"id": "H1", "statement": "Rule may have positive net expectancy."}],
+            "trade_result_receipt": {
+                "provenance": {"test_id": "BT1", "dataset_id": "OOS1"},
+                "trade_returns": [1.0, -0.5, 2.0, -1.0], "dataset_role": "untouched_test", "unit": "R",
+                "decision_rule": {"metric": "expectancy", "operator": ">", "threshold": 0},
+                "monte_carlo_iterations": 20, "random_seed": 3,
+                "walk_forward_folds": [[1.0, -0.5], [2.0, -1.0]],
+                "parameter_scenarios": {"near": [0.5, -0.1, 0.7]},
+                "regime_returns": {"A": [1.0, -0.5], "B": [2.0, -1.0]},
+                "temporal_returns": {"early": [1.0, 0.5], "late": [0.3, -0.1]},
+            }}
+    t = trading(AI2ValidationDirector().build_packet("Backtest MARKET CFD strategy", base))
+    assert t["sample_size"] == 4 and t["win_rate"] == 0.5 and t["expectancy"] == 0.375
+    assert t["observed_result_status"] == INCONCLUSIVE
+    assert isinstance(t["out_of_sample"], dict) and isinstance(t["walk_forward"], dict)
+    assert isinstance(t["monte_carlo"], dict) and isinstance(t["parameter_stability"], dict)
+
+    base["trade_result_receipt"]["returns_are_net_of_friction"] = True
+    t2 = trading(AI2ValidationDirector().build_packet("Backtest MARKET CFD strategy", base))
+    assert t2["observed_result_status"] == PASS and t2["result_decision"]["rule_source"] == "SUPPLIED_IN_RESULT_RECEIPT"
+
+
+def test_no_loss_trading_receipt_does_not_emit_infinity():
+    r = {"hypotheses": [{"id": "H1", "statement": "Rule may have edge."}],
+         "trade_result_receipt": {"provenance": {"test_id": "BT2", "dataset_id": "D"},
+                                  "trade_returns": [1, 2, 3], "returns_are_net_of_friction": True}}
+    t = trading(AI2ValidationDirector().build_packet("trading strategy", r))
+    assert t["profit_factor"] == NOT_TESTED
 
 
 def test_full_bias_robustness_friction_failure_coverage():
