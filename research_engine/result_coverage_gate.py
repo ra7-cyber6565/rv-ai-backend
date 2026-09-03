@@ -8,6 +8,11 @@ is audited immediately before it leaves the engine.
 Boundary: this gate checks delivery/coverage only.  It never upgrades evidence,
 truth, confidence, citations or hypothesis quality.  A missing requested section
 can only make the answer status worse (COMPLETE -> PARTIAL), never better.
+
+The installed ``to_dict`` boundary also appends the deterministic AI-2
+validation packet after all registered result enforcers have run.  That packet is
+plan/audit data only: without execution observations it remains TEST PROPOSED /
+INCONCLUSIVE and cannot upgrade the research result.
 """
 from __future__ import annotations
 
@@ -151,7 +156,31 @@ def install() -> None:
     original = cls.to_dict
 
     def guarded_to_dict(self):
-        return enforce(original(self))
+        # ``enforce`` is intentionally looked up dynamically: later wiring
+        # modules wrap result_coverage_gate.enforce and remain in the chain.
+        data = enforce(original(self))
+        try:
+            from .validation_director_wiring import apply_runtime_ai2_validation
+            data = apply_runtime_ai2_validation(data)
+        except Exception as exc:
+            # The validation audit must fail closed but must not destroy an
+            # otherwise useful research result.
+            coverage = dict(data.get("coverage") or {})
+            coverage["ai2_validation"] = {
+                "agent_id": "AI-2 / VALIDATION-DIRECTOR",
+                "status": "ASSESSMENT_ERROR",
+                "results": [],
+                "confidence": 0,
+                "runtime_wiring": {
+                    "ran": False,
+                    "real_world_experiment_executed": False,
+                    "truth_proven": False,
+                    "result_status_upgraded": False,
+                    "error": type(exc).__name__,
+                },
+            }
+            data["coverage"] = coverage
+        return data
 
     cls.to_dict = guarded_to_dict
     cls._structured_coverage_gate_installed = True

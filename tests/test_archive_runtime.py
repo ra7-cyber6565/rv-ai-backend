@@ -1,6 +1,7 @@
 """Offline tests for storage.archive_runtime crash/retention semantics."""
 from __future__ import annotations
 
+import hashlib
 import time
 
 from storage.archive_runtime import ArchiveRuntime
@@ -12,24 +13,37 @@ from utils.cloud_storage import RemoteObject
 class _FakeProvider:
     name = "fake-drive"
 
-    def __init__(self):
+    def __init__(self, *, include_checksum: bool = True):
         self.objects: dict[str, bytes] = {}
+        self.include_checksum = include_checksum
+
+    @staticmethod
+    def _digest(data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
 
     def upload_file(self, local_path: str, remote_path: str) -> RemoteObject:
         with open(local_path, "rb") as handle:
             data = handle.read()
         self.objects[remote_path] = data
-        return RemoteObject(path=remote_path, size=len(data))
+        return RemoteObject(
+            path=remote_path,
+            size=len(data),
+            sha256=self._digest(data) if self.include_checksum else None,
+        )
 
     def stat(self, remote_path: str) -> RemoteObject:
         data = self.objects[remote_path]
-        return RemoteObject(path=remote_path, size=len(data))
+        return RemoteObject(
+            path=remote_path,
+            size=len(data),
+            sha256=self._digest(data) if self.include_checksum else None,
+        )
 
 
-def _runtime(tmp_path, monkeypatch, *, ready: bool = True):
+def _runtime(tmp_path, monkeypatch, *, ready: bool = True, include_checksum: bool = True):
     monkeypatch.setenv("CLOUD_ARCHIVE_PROVIDER", "google-drive-rclone")
     monkeypatch.setenv("INFINITY_DATA_ROOT", str(tmp_path / "data"))
-    provider = _FakeProvider()
+    provider = _FakeProvider(include_checksum=include_checksum)
     manifest = ArchiveManifest(str(tmp_path / "manifest.json"))
     retry = ArchiveRetryQueue(str(tmp_path / "retry.json"))
     runtime = ArchiveRuntime(
@@ -76,6 +90,7 @@ def test_submit_records_intent_and_background_verifies_without_deleting_local(tm
     rows = manifest.items()
     assert len(rows) == 1
     assert rows[0]["verified"] is True
+    assert rows[0]["checksum_verified"] is True
     assert rows[0]["status"] == "verified"
     assert retry.summary()["pending"] == 0
     assert local.exists()  # archive never auto-deletes local bytes
@@ -141,6 +156,7 @@ def test_retry_timer_recovers_when_provider_becomes_ready_without_new_research(t
     else:
         raise AssertionError("automatic archive retry did not recover")
 
+    assert manifest.items()[0]["checksum_verified"] is True
     assert local.exists()
     runtime.close()
 
@@ -155,6 +171,26 @@ def test_verified_exact_destination_can_authorize_later_cleanup(tmp_path, monkey
 
     assert runtime.local_delete_allowed(str(local), remote) is True
     assert runtime.local_delete_allowed(str(local), "research-results/other.json.gz") is False
+    runtime.close()
+
+
+def test_size_only_archive_never_authorizes_local_cleanup(tmp_path, monkeypatch):
+    runtime, _provider, manifest, _retry = _runtime(
+        tmp_path, monkeypatch, include_checksum=False
+    )
+    local = tmp_path / "result.json.gz"
+    local.write_bytes(b"size-only")
+    remote = "research-results/size-only.json.gz"
+    runtime.submit_file(str(local), remote)
+    _wait(runtime)
+
+    rows = manifest.items()
+    assert len(rows) == 1
+    assert rows[0]["verified"] is True
+    assert rows[0]["checksum_verified"] is False
+    assert rows[0]["verification_method"] == "size-only"
+    assert runtime.local_delete_allowed(str(local), remote) is False
+    assert local.exists()
     runtime.close()
 
 

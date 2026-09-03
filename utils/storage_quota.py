@@ -2,7 +2,7 @@
 
 The goal is simple: D: is a fast working area, not an endlessly growing archive.
 This module never deletes arbitrary files. Cleanup is allowed only for files that
-ArchiveManifest has already marked VERIFIED in cloud storage.
+ArchiveManifest has marked VERIFIED *and* content-checksum verified in cloud.
 """
 from __future__ import annotations
 
@@ -120,13 +120,20 @@ def cleanup_verified_archives(
     *,
     target_reclaim_bytes: int,
 ) -> dict:
-    """Delete only cloud-VERIFIED local copies until target bytes are reclaimed.
+    """Delete only strongly cloud-verified local copies until target is reclaimed.
 
     Security rules:
     - file must still exist;
     - the exact provider/path-aware archive record must be verified;
+    - matching remote SHA-256 proof is mandatory; size-only verification is not
+      sufficient for destructive cleanup;
     - local path must be inside configured Infinity storage root;
-    - symlinks are never deleted through this cleanup path.
+    - symlinks are never deleted through this cleanup path;
+    - verification check + local remove + manifest deletion mark share one
+      re-entrant manifest transaction. The transaction includes a path-scoped
+      thread lock and a bounded OS file lock, so neither another thread nor a
+      separate backend process can invalidate verification in the check/delete
+      gap (TOCTOU guard).
     """
     root, _ = configured_root()
     reclaimed = 0
@@ -144,24 +151,41 @@ def cleanup_verified_archives(
             continue
         if item.get("local_deleted") is True:
             continue
-        if not manifest.safe_to_delete_local(archive_ref):
-            skipped.append({"path": path, "reason": "not_verified"})
-            continue
         if not _inside_root(path, root):
             skipped.append({"path": path, "reason": "outside_storage_root"})
             continue
-        if os.path.islink(path):
-            skipped.append({"path": path, "reason": "symlink"})
-            continue
-        if not os.path.isfile(path):
-            skipped.append({"path": path, "reason": "missing"})
-            continue
 
-        size = os.path.getsize(path)
-        os.remove(path)
-        manifest.mark_local_deleted(archive_ref)
-        reclaimed += size
-        deleted.append(path)
+        # The public manifest transaction is intentionally held across the final
+        # verification re-check, filesystem removal and deletion tombstone. Its
+        # process lock is re-entrant, so mark_local_deleted() below can safely
+        # reuse the exact same transaction boundary.
+        with manifest.transaction():
+            current = manifest.get(archive_ref) or {}
+            if current.get("local_deleted") is True:
+                continue
+            if not manifest.safe_to_delete_local(archive_ref):
+                if current.get("verified") is True and current.get("checksum_verified") is not True:
+                    reason = "checksum_not_verified"
+                else:
+                    reason = "not_verified"
+                skipped.append({"path": path, "reason": reason})
+                continue
+            current_path = str(current.get("local_path") or "")
+            if os.path.normcase(os.path.abspath(current_path)) != os.path.normcase(os.path.abspath(path)):
+                skipped.append({"path": path, "reason": "manifest_path_changed"})
+                continue
+            if os.path.islink(path):
+                skipped.append({"path": path, "reason": "symlink"})
+                continue
+            if not os.path.isfile(path):
+                skipped.append({"path": path, "reason": "missing"})
+                continue
+
+            size = os.path.getsize(path)
+            os.remove(path)
+            manifest.mark_local_deleted(archive_ref)
+            reclaimed += size
+            deleted.append(path)
 
     return {
         "target_reclaim_bytes": target,

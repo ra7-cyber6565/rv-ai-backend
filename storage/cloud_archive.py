@@ -72,9 +72,14 @@ class ArchiveService:
         """Upload + independently stat + verify; never auto-delete local data."""
         try:
             out = self._coordinator.archive(local_path, remote_path, delete_local=False)
+            row = self.manifest.get(str(out.get("archive_id") or "")) or {}
             return {
                 "ok": True,
                 "verified": bool(out.get("verified")),
+                "checksum_verified": bool(row.get("checksum_verified")),
+                "cleanup_safe": self.manifest.safe_to_delete_local(
+                    str(out.get("archive_id") or "")
+                ),
                 "local_retained": os.path.exists(local_path),
                 "archive_id": out.get("archive_id"),
                 "sha256": out.get("sha256"),
@@ -95,6 +100,8 @@ class ArchiveService:
             return {
                 "ok": False,
                 "verified": False,
+                "checksum_verified": False,
+                "cleanup_safe": False,
                 "local_retained": os.path.exists(local_path),
                 "archive_id": (candidate or {}).get("archive_id"),
                 "sha256": (candidate or {}).get("sha256"),
@@ -102,20 +109,27 @@ class ArchiveService:
             }
 
     def delete_local_if_verified(self, reference: str) -> bool:
-        """Delete only after exact manifest verification; then record deletion."""
-        item = self.manifest.get(reference)
-        if not item:
-            return False
-        archive_ref = str(item.get("archive_id") or reference)
-        if not self.manifest.safe_to_delete_local(archive_ref):
-            return False
-        local_path = str(item.get("local_path") or "")
-        if not local_path:
-            return False
-        if not os.path.exists(local_path):
-            return True
-        if os.path.islink(local_path) or not os.path.isfile(local_path):
-            return False
-        os.remove(local_path)
-        self.manifest.mark_local_deleted(archive_ref)
-        return not os.path.exists(local_path)
+        """Delete only after checksum verification, atomically against re-upload.
+
+        ArchiveManifest instances sharing a ledger also share the same RLock.
+        Holding it across the final verification check, filesystem removal and
+        deletion mark prevents a concurrent upload attempt from clearing/replacing
+        the remote verification in the gap between check and delete.
+        """
+        with self.manifest._lock:  # noqa: SLF001 - intentional safety lock
+            item = self.manifest.get(reference)
+            if not item:
+                return False
+            archive_ref = str(item.get("archive_id") or reference)
+            if not self.manifest.safe_to_delete_local(archive_ref):
+                return False
+            local_path = str(item.get("local_path") or "")
+            if not local_path:
+                return False
+            if not os.path.exists(local_path):
+                return True
+            if os.path.islink(local_path) or not os.path.isfile(local_path):
+                return False
+            os.remove(local_path)
+            self.manifest.mark_local_deleted(archive_ref)
+            return not os.path.exists(local_path)

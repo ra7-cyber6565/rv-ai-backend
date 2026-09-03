@@ -1,10 +1,16 @@
 """Offline tests for durable archive retry queue."""
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from utils.archive_retry import ArchiveRetryQueue
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def _file(tmp_path: Path, name: str = "data.bin", content: bytes = b"abc") -> str:
@@ -81,4 +87,47 @@ def test_parallel_enqueue_does_not_drop_retry_records(tmp_path):
     assert len(rows) == len(paths)
     assert {row["remote_path"] for row in rows} == {
         f"/archive/data-{i}.bin" for i in range(len(paths))
+    }
+
+
+def test_independent_process_enqueues_do_not_drop_retry_records(tmp_path):
+    """Separate Python workers must serialize queue RMW transactions."""
+    retry_path = str(tmp_path / "retry.json")
+    paths = [
+        Path(_file(tmp_path, name=f"proc-{i}.bin", content=f"proc-{i}".encode()))
+        for i in range(8)
+    ]
+    env = dict(os.environ)
+    inherited = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(ROOT) + (os.pathsep + inherited if inherited else "")
+
+    processes: list[subprocess.Popen[str]] = []
+    for index, path in enumerate(paths):
+        remote = f"/archive/proc-{index}.bin"
+        code = (
+            "from utils.archive_retry import ArchiveRetryQueue\n"
+            f"q=ArchiveRetryQueue({retry_path!r})\n"
+            f"q.enqueue(local_path={str(path)!r}, remote_path={remote!r}, provider='drive', now={100 + index})\n"
+        )
+        processes.append(subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=str(ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ))
+
+    failures = []
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=10)
+        if process.returncode != 0:
+            failures.append((process.returncode, stdout, stderr))
+    assert failures == []
+
+    rows = ArchiveRetryQueue(retry_path).items()
+    assert len(rows) == len(paths)
+    assert {row["remote_path"] for row in rows} == {
+        f"/archive/proc-{i}.bin" for i in range(len(paths))
     }

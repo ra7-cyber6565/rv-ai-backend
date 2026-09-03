@@ -1,14 +1,20 @@
 """Concurrency regression for the archive manifest.
 
-Two same-process research/archive threads writing the same JSON ledger must not
-silently overwrite one another's read/modify/write update.
+Parallel threads *and* independent backend processes writing the same JSON ledger
+must not silently overwrite one another's read/modify/write update.
 """
 from __future__ import annotations
 
+import os
+import subprocess
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from utils.archive_manifest import ArchiveManifest
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_concurrent_registers_preserve_all_records(tmp_path: Path):
@@ -62,3 +68,44 @@ def test_concurrent_status_updates_do_not_drop_other_record(tmp_path: Path):
     final = ArchiveManifest(manifest_path)
     assert final.get(left_item["sha256"])["status"] == "uploaded_unverified"
     assert final.get(right_item["sha256"])["status"] == "failed"
+
+
+def test_independent_process_registers_preserve_every_record(tmp_path: Path):
+    """Real subprocesses catch the lost-update bug an RLock cannot catch."""
+    manifest_path = str(tmp_path / "manifest.json")
+    paths = []
+    for index in range(8):
+        path = tmp_path / f"process-{index}.bin"
+        path.write_bytes(f"process-payload-{index}".encode())
+        paths.append(path)
+
+    env = dict(os.environ)
+    inherited = env.get("PYTHONPATH", "")
+    env["PYTHONPATH"] = str(ROOT) + (os.pathsep + inherited if inherited else "")
+    processes: list[subprocess.Popen[str]] = []
+    for path in paths:
+        code = (
+            "from utils.archive_manifest import ArchiveManifest\n"
+            f"m=ArchiveManifest({manifest_path!r})\n"
+            f"m.register({str(path)!r}, remote_path={'/archive/' + path.name!r}, provider='drive')\n"
+        )
+        processes.append(subprocess.Popen(
+            [sys.executable, "-c", code],
+            cwd=str(ROOT),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        ))
+
+    failures = []
+    for process in processes:
+        stdout, stderr = process.communicate(timeout=10)
+        if process.returncode != 0:
+            failures.append((process.returncode, stdout, stderr))
+    assert failures == []
+
+    saved = ArchiveManifest(manifest_path).items()
+    assert len(saved) == len(paths)
+    assert {Path(row["local_path"]).name for row in saved} == {path.name for path in paths}

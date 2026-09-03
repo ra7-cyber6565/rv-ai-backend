@@ -184,6 +184,15 @@ _install_epistemic_stress_wiring()
 from .economic_reality_wiring import install as _install_economic_reality_wiring
 _install_economic_reality_wiring()
 
+# AI-2 quantitative validation uses the integrated fail-closed facade at the
+# package boundary. The base module remains implementation-compatible, while
+# normal package consumers receive the stricter monotonic-downgrade director.
+from . import validation_director as _validation_director
+from .validation_director_integrated import (
+    IntegratedQuantitativeValidationDirector as _IntegratedQuantitativeValidationDirector,
+)
+_validation_director.QuantitativeValidationDirector = _IntegratedQuantitativeValidationDirector
+
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
     "SourceRecord", "SourceType", "label_to_claim_type",
@@ -198,6 +207,7 @@ __all__ = [
     "FinalSynthesizer", "GeminiReasoning", "Critic", "VectorSearch",
     "KnowledgeGraphAdapter", "DocumentProcessor", "PDFProcessor",
     "OCRProcessor", "TranscriptProcessor", "ContentFetcher",
+    "QuantitativeValidationDirector",
 ]
 
 _LAZY = {
@@ -230,6 +240,7 @@ _LAZY = {
     "DeepResearchEngine": ".orchestrator",
     "AgentManager": ".agent_manager",
     "manager": ".agent_manager",
+    "QuantitativeValidationDirector": ".validation_director_integrated",
 }
 
 

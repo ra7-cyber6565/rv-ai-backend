@@ -60,13 +60,17 @@ def _coordinator(root: str, provider: FakeProvider) -> tuple[ArchiveCoordinator,
 def test_verified_upload_can_delete_local():
     with tempfile.TemporaryDirectory() as root:
         local = _file(root)
-        coordinator, _, retry = _coordinator(root, FakeProvider())
+        coordinator, manifest, retry = _coordinator(root, FakeProvider())
         out = coordinator.archive(local, "/archive/paper.pdf", delete_local=True)
         assert out["verified"] is True
         assert out["archive_id"].startswith("a_")
         assert out["local_deleted"] is True
         assert not os.path.exists(local)
         assert retry.items() == []
+        row = manifest.get(out["archive_id"])
+        assert row is not None
+        assert row["checksum_verified"] is True
+        assert row["verification_method"] == "size+sha256"
 
 
 def test_upload_failure_keeps_local_file_and_queues_retry():
@@ -79,6 +83,7 @@ def test_upload_failure_keeps_local_file_and_queues_retry():
         record = manifest.items()[0]
         assert record["status"] == "failed"
         assert record["verified"] is False
+        assert record["checksum_verified"] is False
         # The start + failure update describe ONE network attempt, not two.
         assert record["attempts"] == 1
         queued = retry.items()
@@ -97,7 +102,9 @@ def test_previous_verified_state_is_cleared_before_provider_upload_runs():
         )
         manifest.mark_upload_attempt(original["archive_id"])
         manifest.mark_verified(
-            original["archive_id"], remote_size=os.path.getsize(local)
+            original["archive_id"],
+            remote_size=os.path.getsize(local),
+            remote_sha256=original["sha256"],
         )
         assert manifest.safe_to_delete_local(original["archive_id"]) is True
 
@@ -115,6 +122,7 @@ def test_previous_verified_state_is_cleared_before_provider_upload_runs():
         final = manifest.get(original["archive_id"])
         assert final is not None
         assert final["attempts"] == 2
+        assert final["checksum_verified"] is True
 
 
 def test_remote_verification_failure_keeps_local_file_and_queues_retry():
@@ -127,6 +135,7 @@ def test_remote_verification_failure_keeps_local_file_and_queues_retry():
         record = manifest.items()[0]
         assert record["status"] == "uploaded_unverified"
         assert record["verified"] is False
+        assert record["checksum_verified"] is False
         assert len(retry.items()) == 1
 
 

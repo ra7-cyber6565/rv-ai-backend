@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
-"""Verify that all release receipts prove the same exact clean Git revision.
+"""Verify that release receipts prove one exact, recent, clean Git revision.
 
-This verifier performs no network/model call.  It reads the three bounded,
-non-secret receipts, checks their gate-specific pass state and revision binding,
-then writes a compact manifest containing only hashes, booleans and the Git SHA.
+This verifier performs no network/model call. It reads three bounded non-secret
+receipts, validates each gate contract, checks pass state, freshness and exact
+revision binding, then writes a compact manifest containing only hashes,
+booleans and the Git SHA.
+
+A hand-written JSON object with a few convenient ``passed=true`` fields must not
+be accepted as a real Foundation/live/deployed receipt. Likewise an old live or
+deployed receipt must not be replayed indefinitely after provider/deployment
+conditions may have changed. This is still not cryptographic signing; it is a
+fail-closed structural, freshness and exact-revision verifier for
+operator-controlled local receipt files.
 """
 from __future__ import annotations
 
@@ -13,6 +21,7 @@ import json
 import os
 import sys
 import tempfile
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Mapping, Optional
@@ -26,6 +35,46 @@ from utils.release_identity import normalize_git_revision, repository_identity
 
 
 MAX_RECEIPT_BYTES = 2_000_000
+MAX_FOUNDATION_AGE_SECONDS = 7 * 24 * 60 * 60
+MAX_LIVE_AGE_SECONDS = 24 * 60 * 60
+MAX_DEPLOYED_AGE_SECONDS = 24 * 60 * 60
+MAX_FUTURE_SKEW_SECONDS = 5 * 60
+_DEPLOYED_GATE = "DEPLOYED_READONLY_ZERO_MODEL_SMOKE"
+_REQUIRED_DEPLOYED_CALLS = {
+    "GET /health",
+    "GET /api",
+    "GET /api/v1/processing-capabilities",
+    "POST /api/v1/session",
+}
+# run_deployed_readonly_smoke._call intentionally strips query strings before
+# putting a route into the receipt, so reading-sessions is an exact normalized
+# row here, not a `...?project_id=` prefix.
+_OPTIONAL_DEPLOYED_EXACT_CALLS = {
+    "GET /api/v1/reading-sessions",
+    "OPTIONS /api/v1/session",
+}
+_REQUIRED_DEPLOYED_CHECKS = {
+    "health_http",
+    "health_state",
+    "zero_cost_only",
+    "release_state_honest",
+    "deployed_revision_matches",
+    "health_public_payload_safe",
+    "api_http",
+    "session_route_advertised",
+    "processing_route_advertised",
+    "api_public_payload_safe",
+    "processing_http",
+    "processing_contract",
+    "processing_public_payload_safe",
+    "session_http",
+    "session_capability_shape",
+    "private_no_store_headers",
+    "missing_capability_rejected",
+    "empty_project_capability_accepted",
+    "private_list_no_store",
+    "no_model_or_research_route_called",
+}
 
 
 def _load_receipt(path: Path) -> tuple[dict, str]:
@@ -42,42 +91,183 @@ def _load_receipt(path: Path) -> tuple[dict, str]:
     return value, hashlib.sha256(raw).hexdigest()
 
 
+def _schema_at_least(receipt: Mapping[str, object], minimum: int) -> bool:
+    try:
+        value = int(receipt.get("schema_version") or 0)
+    except (TypeError, ValueError):
+        return False
+    return value >= int(minimum)
+
+
+def _int_at_least(value: object, minimum: int) -> bool:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return False
+    return parsed >= int(minimum)
+
+
+def _epoch(value: object) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if not (number > 0):
+        return None
+    return number
+
+
+def _iso_epoch(value: object) -> float | None:
+    text = str(value or "").strip()
+    if not text or len(text) > 80:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    try:
+        return parsed.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def _fresh(timestamp: float | None, *, now: float, max_age: int) -> bool:
+    if timestamp is None:
+        return False
+    age = float(now) - float(timestamp)
+    return -MAX_FUTURE_SKEW_SECONDS <= age <= int(max_age)
+
+
+def _live_contract_ok(live: Mapping[str, object]) -> bool:
+    preflight = live.get("zero_cost_preflight")
+    if not isinstance(preflight, Mapping):
+        return False
+    blockers = preflight.get("blockers")
+    if not isinstance(blockers, list):
+        return False
+    return bool(
+        _schema_at_least(live, 2)
+        and preflight.get("ready") is True
+        and preflight.get("zero_cost_only") is True
+        and _int_at_least(preflight.get("model_layers_usable_now"), 1)
+        and preflight.get("storage_validated") is True
+        and preflight.get("storage_ready") is True
+        and not blockers
+    )
+
+
+def _deployed_checks_ok(deployed: Mapping[str, object]) -> bool:
+    checks = deployed.get("checks")
+    if not isinstance(checks, list) or not checks or len(checks) > 100:
+        return False
+    seen: dict[str, bool] = {}
+    for row in checks:
+        if not isinstance(row, Mapping):
+            return False
+        name = str(row.get("name") or "").strip()
+        if not name or len(name) > 100 or name in seen:
+            return False
+        seen[name] = row.get("passed") is True
+    return _REQUIRED_DEPLOYED_CHECKS.issubset(seen) and all(
+        seen[name] for name in _REQUIRED_DEPLOYED_CHECKS
+    ) and all(seen.values())
+
+
+def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
+    calls = deployed.get("calls")
+    if not isinstance(calls, list) or not calls:
+        return False
+    if not all(isinstance(item, str) and 1 <= len(item) <= 300 for item in calls):
+        return False
+    rows = set(calls)
+    allowed_calls = _REQUIRED_DEPLOYED_CALLS | _OPTIONAL_DEPLOYED_EXACT_CALLS
+    required_present = _REQUIRED_DEPLOYED_CALLS.issubset(rows)
+    allowed_only = rows.issubset(allowed_calls)
+    return bool(
+        deployed.get("gate") == _DEPLOYED_GATE
+        and required_present
+        and allowed_only
+        and _deployed_checks_ok(deployed)
+    )
+
+
 def verify_release_bundle(
     foundation: Mapping[str, object],
     live: Mapping[str, object],
     deployed: Mapping[str, object],
     *,
     current_identity: Mapping[str, object],
+    now_epoch: float | None = None,
 ) -> dict:
     checks: list[dict[str, object]] = []
 
     def check(name: str, passed: object, detail: str) -> None:
         checks.append({"name": name, "passed": bool(passed), "detail": detail})
 
+    now = float(time.time() if now_epoch is None else now_epoch)
     foundation_revision = normalize_git_revision(foundation.get("code_revision"))
     live_revision = normalize_git_revision(live.get("code_revision"))
     deployed_expected = normalize_git_revision(deployed.get("expected_code_revision"))
     deployed_revision = normalize_git_revision(deployed.get("deployed_code_revision"))
     current_revision = normalize_git_revision(current_identity.get("revision"))
 
+    foundation_contract = bool(
+        _schema_at_least(foundation, 2)
+        and foundation.get("offline_zero_cost") is True
+    )
+    live_contract = _live_contract_ok(live)
+    deployed_contract = _deployed_contract_ok(deployed)
+    foundation_fresh = _fresh(
+        _epoch(foundation.get("created_at_epoch")),
+        now=now,
+        max_age=MAX_FOUNDATION_AGE_SECONDS,
+    )
+    live_fresh = _fresh(
+        _epoch(live.get("created_at_epoch")),
+        now=now,
+        max_age=MAX_LIVE_AGE_SECONDS,
+    )
+    deployed_fresh = _fresh(
+        _iso_epoch(deployed.get("checked_at_utc")),
+        now=now,
+        max_age=MAX_DEPLOYED_AGE_SECONDS,
+    )
+
+    check("foundation_receipt_contract", foundation_contract,
+          "schema>=2 and offline_zero_cost=true")
+    check("live_receipt_contract", live_contract,
+          "schema>=2 plus ready confirmed-free model/storage preflight")
+    check("deployed_receipt_contract", deployed_contract,
+          "exact zero-model gate, safe normalized calls and passed required checks")
+    check("foundation_receipt_fresh", foundation_fresh,
+          "foundation proof is not older than 7 days and is not future-dated")
+    check("live_receipt_fresh", live_fresh,
+          "live provider proof is not older than 24 hours and is not future-dated")
+    check("deployed_receipt_fresh", deployed_fresh,
+          "deployed smoke is not older than 24 hours and is not future-dated")
     check(
         "foundation_gate_passed",
-        foundation.get("passed") is True
+        foundation_contract
+        and foundation.get("passed") is True
         and foundation.get("code_identity_verified") is True
         and foundation.get("repository_clean") is True,
         "offline stages plus clean code identity",
     )
     check(
         "live_zero_cost_gate_passed",
-        live.get("passed") is True
+        live_contract
+        and live.get("passed") is True
         and live.get("repository_clean") is True
         and live.get("contains_answer_or_source_text") is False
         and live.get("contains_credentials") is False,
-        "live gate and receipt privacy contract",
+        "live gate, confirmed-free preflight and receipt privacy contract",
     )
     check(
         "deployed_zero_model_gate_passed",
-        deployed.get("complete") is True
+        deployed_contract
+        and deployed.get("complete") is True
         and deployed.get("zero_model_calls_by_construction") is True
         and deployed.get("capabilities_or_secrets_recorded") is False,
         "deployed smoke and capability privacy contract",
@@ -106,7 +296,7 @@ def verify_release_bundle(
     passed = all(bool(row["passed"]) for row in checks)
     common_revision = foundation_revision if passed else ""
     return {
-        "schema_version": 1,
+        "schema_version": 3,
         "gate": "EXACT_REVISION_RELEASE_BUNDLE",
         "created_at_utc": datetime.now(timezone.utc).isoformat(),
         "passed": passed,
@@ -139,7 +329,7 @@ def _write_manifest(path: Path, payload: Mapping[str, object]) -> None:
 
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Verify Foundation/live/deployed receipts against one Git SHA.",
+        description="Verify recent Foundation/live/deployed receipts against one Git SHA.",
     )
     parser.add_argument("--foundation", required=True)
     parser.add_argument("--live", required=True)
@@ -178,4 +368,3 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

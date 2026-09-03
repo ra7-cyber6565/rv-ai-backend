@@ -6,6 +6,9 @@ names fail closed; ``none`` is the safe default.
 
 TeraBox is intentionally absent until official API access and zero-cost terms are
 confirmed. Google Drive may be enabled through the open-source rclone adapter.
+When Drive archiving is enabled, rclone ``crypt`` is required by default unless
+the operator explicitly opts out. The application never implements or stores
+encryption keys itself.
 """
 from __future__ import annotations
 
@@ -14,7 +17,10 @@ import shutil
 from dataclasses import dataclass
 from typing import Any
 
-from storage.google_drive_rclone import RcloneGoogleDriveProvider
+from storage.google_drive_rclone import (
+    RcloneGoogleDriveProvider,
+    detect_rclone_remote_type,
+)
 
 
 _ALLOWED = {"none", "google-drive-rclone"}
@@ -25,6 +31,11 @@ class ProviderSelection:
     name: str
     enabled: bool
     reason: str = ""
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    raw = str(os.getenv(name, "true" if default else "false") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
 
 
 def configured_provider_name() -> str:
@@ -46,11 +57,16 @@ def configured_provider_name() -> str:
 
 
 def provider_status() -> dict[str, Any]:
-    """Return non-secret readiness information without forcing provider login.
+    """Return non-secret readiness information without provider network login.
 
     Invalid configuration is intentionally normalized. The raw environment value
     is useful in local logs/errors but must not be reflected by public /health or
     /api responses because environment values are not inherently non-secret.
+
+    Drive encryption is fail-closed by default: unless the operator explicitly
+    sets ``GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT=false``, readiness verifies the
+    selected rclone remote's backend type using local-only ``listremotes --long``.
+    OAuth/crypt secrets are never read or returned.
     """
     try:
         name = configured_provider_name()
@@ -72,18 +88,35 @@ def provider_status() -> dict[str, Any]:
 
     if name == "google-drive-rclone":
         remote = str(os.getenv("GOOGLE_DRIVE_RCLONE_REMOTE", "") or "").strip()
-        executable = str(os.getenv("RCLONE_EXE", "rclone") or "rclone").strip()
-        # Do not instantiate when merely asking status: that would fail if rclone
-        # is absent and makes health/status endpoints unnecessarily fragile.
-        available = bool(shutil.which(executable) or os.path.isfile(executable))
-        ready = bool(remote and available)
+        requested_executable = str(os.getenv("RCLONE_EXE", "rclone") or "rclone").strip()
+        resolved = shutil.which(requested_executable)
+        if not resolved and os.path.isfile(requested_executable):
+            resolved = os.path.abspath(requested_executable)
+        available = bool(resolved)
+        require_crypt = _bool_env("GOOGLE_DRIVE_ARCHIVE_REQUIRE_CRYPT", True)
+        crypt_verified = None
+        if require_crypt:
+            crypt_verified = bool(
+                remote
+                and resolved
+                and detect_rclone_remote_type(str(resolved), remote) == "crypt"
+            )
+        ready = bool(remote and available and (not require_crypt or crypt_verified is True))
+        if not remote or not available:
+            reason = "rclone install/authentication configuration incomplete"
+        elif require_crypt and crypt_verified is not True:
+            reason = "encrypted_archive_required_but_rclone_crypt_not_verified"
+        else:
+            reason = ""
         return {
             "provider": name,
             "enabled": True,
             "ready": ready,
             "remote_configured": bool(remote),
             "rclone_available": available,
-            "reason": "" if ready else "rclone install/authentication configuration incomplete",
+            "encryption_required": require_crypt,
+            "encryption_verified": crypt_verified,
+            "reason": reason,
         }
 
     return {"provider": name, "enabled": False, "ready": False, "reason": "unavailable"}

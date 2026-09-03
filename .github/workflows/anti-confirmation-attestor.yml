@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main]
   push:
-    branches: [main, chatgpt-max-maturity-wave1-20260827]
+    branches: [main, chatgpt-upload-safety, chatgpt-max-maturity-wave1-20260827]
   workflow_dispatch:
 
 permissions:

@@ -25,7 +25,7 @@ def test_file_is_not_deletable_before_remote_verification():
         assert manifest.safe_to_delete_local(item["archive_id"]) is False
 
 
-def test_matching_remote_size_allows_verified_state():
+def test_matching_remote_size_records_verification_but_does_not_allow_deletion_without_checksum():
     with tempfile.TemporaryDirectory() as root:
         local = os.path.join(root, "book.pdf")
         payload = b"abc" * 100
@@ -35,6 +35,34 @@ def test_matching_remote_size_allows_verified_state():
         item = manifest.register(local, remote_path="/books/book.pdf", provider="terabox")
         manifest.mark_upload_attempt(item["archive_id"])
         manifest.mark_verified(item["archive_id"], remote_size=len(payload))
+        record = manifest.get(item["archive_id"])
+        assert record is not None
+        assert record["verified"] is True
+        assert record["verification_method"] == "size-only"
+        assert record["checksum_verified"] is False
+        assert manifest.safe_to_delete_local(item["archive_id"]) is False
+        with pytest.raises(RuntimeError, match="checksum"):
+            manifest.mark_local_deleted(item["archive_id"])
+
+
+def test_matching_remote_sha256_allows_deletion():
+    with tempfile.TemporaryDirectory() as root:
+        local = os.path.join(root, "book.pdf")
+        payload = b"abc" * 100
+        with open(local, "wb") as handle:
+            handle.write(payload)
+        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        item = manifest.register(local, remote_path="/books/book.pdf", provider="drive")
+        manifest.mark_upload_attempt(item["archive_id"])
+        manifest.mark_verified(
+            item["archive_id"],
+            remote_size=len(payload),
+            remote_sha256=item["sha256"],
+        )
+        record = manifest.get(item["archive_id"])
+        assert record is not None
+        assert record["verification_method"] == "size+sha256"
+        assert record["checksum_verified"] is True
         assert manifest.safe_to_delete_local(item["archive_id"]) is True
 
 
@@ -46,7 +74,11 @@ def test_new_upload_attempt_clears_previous_verified_state_until_rechecked(tmp_p
         str(local), remote_path="/results/result.bin", provider="google-drive-rclone"
     )
     manifest.mark_upload_attempt(item["archive_id"])
-    manifest.mark_verified(item["archive_id"], remote_size=local.stat().st_size)
+    manifest.mark_verified(
+        item["archive_id"],
+        remote_size=local.stat().st_size,
+        remote_sha256=item["sha256"],
+    )
     assert manifest.safe_to_delete_local(item["archive_id"]) is True
 
     # A fresh upload can replace the remote object. The old verification must
@@ -56,6 +88,8 @@ def test_new_upload_attempt_clears_previous_verified_state_until_rechecked(tmp_p
     assert refreshed is not None
     assert refreshed["status"] == "uploaded_unverified"
     assert refreshed["verified"] is False
+    assert refreshed["checksum_verified"] is False
+    assert refreshed["verification_method"] == ""
     assert manifest.safe_to_delete_local(item["archive_id"]) is False
 
 
@@ -68,7 +102,24 @@ def test_wrong_remote_size_never_verifies():
         item = manifest.register(local, remote_path="/data/data.bin", provider="terabox")
         manifest.mark_upload_attempt(item["archive_id"])
         with pytest.raises(RuntimeError):
-            manifest.mark_verified(item["archive_id"], remote_size=4)
+            manifest.mark_verified(
+                item["archive_id"], remote_size=4, remote_sha256=item["sha256"]
+            )
+        assert manifest.safe_to_delete_local(item["archive_id"]) is False
+
+
+def test_wrong_remote_checksum_never_verifies():
+    with tempfile.TemporaryDirectory() as root:
+        local = os.path.join(root, "data.bin")
+        with open(local, "wb") as handle:
+            handle.write(b"12345")
+        manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
+        item = manifest.register(local, remote_path="/data/data.bin", provider="drive")
+        manifest.mark_upload_attempt(item["archive_id"])
+        with pytest.raises(RuntimeError, match="checksum"):
+            manifest.mark_verified(
+                item["archive_id"], remote_size=5, remote_sha256="0" * 64
+            )
         assert manifest.safe_to_delete_local(item["archive_id"]) is False
 
 
@@ -93,7 +144,11 @@ def test_same_content_can_have_drive_and_terabox_records_without_collision():
         assert len(manifest.items()) == 2
 
         manifest.mark_upload_attempt(drive["archive_id"])
-        manifest.mark_verified(drive["archive_id"], remote_size=len(b"same content"))
+        manifest.mark_verified(
+            drive["archive_id"],
+            remote_size=len(b"same content"),
+            remote_sha256=drive["sha256"],
+        )
         assert manifest.safe_to_delete_local(drive["archive_id"]) is True
         assert manifest.safe_to_delete_local(tera["archive_id"]) is False
         # Hash alone is ambiguous now and must fail closed rather than selecting
@@ -111,15 +166,18 @@ def test_reregister_same_destination_is_idempotent_and_preserves_verified_state(
         manifest = ArchiveManifest(os.path.join(root, "manifest.json"))
         first = manifest.register(local, remote_path="/paper.pdf", provider="drive")
         manifest.mark_upload_attempt(first["archive_id"])
-        manifest.mark_verified(first["archive_id"], remote_size=len(payload))
+        manifest.mark_verified(
+            first["archive_id"], remote_size=len(payload), remote_sha256=first["sha256"]
+        )
         second = manifest.register(local, remote_path="/paper.pdf", provider="drive")
         assert second["archive_id"] == first["archive_id"]
         assert second["verified"] is True
+        assert second["checksum_verified"] is True
         assert second["status"] == "verified"
         assert len(manifest.items()) == 1
 
 
-def test_legacy_v1_sha_keyed_manifest_migrates_in_memory_and_on_next_save(tmp_path):
+def test_legacy_v1_verified_row_without_checksum_proof_fails_closed_until_reverified(tmp_path):
     local = tmp_path / "legacy.bin"
     local.write_bytes(b"legacy")
     digest = sha256_file(str(local))
@@ -147,10 +205,22 @@ def test_legacy_v1_sha_keyed_manifest_migrates_in_memory_and_on_next_save(tmp_pa
     assert item is not None
     assert item["archive_id"].startswith("a_")
     assert item["verified"] is True
+    assert item["checksum_verified"] is False
+    assert manifest.safe_to_delete_local(item["archive_id"]) is False
+    with pytest.raises(RuntimeError, match="checksum"):
+        manifest.mark_local_deleted(item["archive_id"])
+
+    # A fresh explicit content-hash verification upgrades the record safely.
+    manifest.mark_verified(
+        item["archive_id"], remote_size=len(b"legacy"), remote_sha256=digest
+    )
     manifest.mark_local_deleted(item["archive_id"])
     stored = json.loads(path.read_text(encoding="utf-8"))
     assert stored["version"] == 2
-    assert list(stored["items"].keys()) == [item["archive_id"]]
+    saved = stored["items"][item["archive_id"]]
+    assert saved["checksum_verified"] is True
+    assert saved["verification_method"] == "size+sha256"
+    assert saved["local_deleted"] is True
 
 
 def test_checksum_is_stable():

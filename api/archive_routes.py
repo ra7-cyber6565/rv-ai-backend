@@ -6,9 +6,9 @@ unauthenticated caller from turning repeated status requests into disk-scan load
 Cheap provider readiness remains available through /health and /api.
 
 Cleanup is deliberately explicit and bounded. It delegates to the one canonical
-verified-archive cleanup function, which refuses unverified records, paths outside
-the configured Infinity root, and symlinks. The API returns aggregate counts only
-instead of leaking absolute local paths.
+verified-archive cleanup function, which refuses unverified or size-only records,
+paths outside the configured Infinity root, and symlinks. The API returns
+aggregate counts only instead of leaking absolute local paths.
 """
 from __future__ import annotations
 
@@ -44,11 +44,13 @@ def cleanup_archive(
     target_mb: int = Query(default=512, ge=1, le=4096),
     _admin: None = Depends(require_admin),
 ):
-    """Reclaim local bytes ONLY from exact cloud-VERIFIED archive records.
+    """Reclaim local bytes only from checksum-verified cloud archive records.
 
-    This is not a generic delete endpoint. The canonical cleanup layer checks
-    manifest verification, configured-root containment and symlink safety. No
-    filename/local path is reflected to the HTTP caller.
+    This is not a generic delete endpoint. The canonical cleanup layer requires
+    exact provider/path/content identity, matching remote SHA-256, configured-root
+    containment and symlink safety. A remote object whose size matches but whose
+    content checksum was not proved is retained locally. No filename/local path
+    is reflected to the HTTP caller.
     """
     result = cleanup_verified_archives(
         archive_runtime.manifest,
@@ -65,5 +67,8 @@ def cleanup_archive(
         "deleted_count": int(result.get("deleted_count", 0) or 0),
         "skipped_count": sum(reasons.values()),
         "skipped_by_reason": dict(sorted(reasons.items())),
-        "rule": "Only exact cloud-VERIFIED records inside configured storage root are eligible.",
+        "rule": (
+            "Only exact cloud-VERIFIED records with matching remote SHA-256, "
+            "inside configured storage root, are eligible."
+        ),
     }

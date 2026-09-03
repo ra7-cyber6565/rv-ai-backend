@@ -8,10 +8,17 @@ content identity.
 
 Safety:
 - uploaded != verified;
-- local deletion is allowed only for a specific VERIFIED archive record;
+- size-only remote verification may confirm that an object exists, but local
+  deletion additionally requires an independently matching remote SHA-256;
+- local deletion is allowed only for a specific VERIFIED + checksum-verified
+  archive record;
+- legacy records without explicit checksum proof fail closed for deletion until
+  they are re-verified;
 - legacy SHA-only references still work only when they identify exactly one
   record, so ambiguous multi-provider state fails closed;
-- same-process read/modify/write is protected by a path-scoped RLock.
+- same-process operations are protected by a path-scoped RLock;
+- every read/modify/write transaction also holds a bounded OS file lock, so two
+  backend processes cannot silently overwrite each other's manifest updates.
 """
 from __future__ import annotations
 
@@ -21,9 +28,11 @@ import os
 import tempfile
 import threading
 import time
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
+from utils.process_lock import bounded_process_file_lock
 from utils.storage_paths import ensure_layout
 
 
@@ -39,6 +48,14 @@ def _lock_for(path: str) -> threading.RLock:
             lock = threading.RLock()
             _PATH_LOCKS[key] = lock
         return lock
+
+
+def _lock_timeout_seconds() -> float:
+    try:
+        value = float(os.getenv("ARCHIVE_LEDGER_LOCK_TIMEOUT_SECONDS", "5"))
+    except (TypeError, ValueError):
+        value = 5.0
+    return max(0.25, min(60.0, value))
 
 
 def sha256_file(path: str, chunk_bytes: int = 1024 * 1024) -> str:
@@ -70,9 +87,33 @@ class ArchiveManifest:
         self.path = os.path.abspath(path or default_manifest_path())
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
         self._lock = _lock_for(self.path)
+        # Separate lock file: replacing manifest.json atomically must never
+        # replace the inode that carries the OS advisory lock.
+        self._process_lock_path = self.path + ".lock"
+
+    @contextmanager
+    def transaction(self) -> Iterator[None]:
+        """Hold one re-entrant thread + process transaction for this ledger.
+
+        Public because destructive cleanup must keep the final verification
+        re-check, local unlink and deletion tombstone inside the same transaction.
+        The bounded process helper is re-entrant for this thread/path, therefore
+        nested manifest mutators remain safe.
+        """
+        with self._lock:
+            with bounded_process_file_lock(
+                self._process_lock_path,
+                timeout_seconds=_lock_timeout_seconds(),
+            ):
+                yield
 
     def _normalize(self, data: dict[str, Any]) -> dict[str, Any]:
-        """Migrate legacy SHA-keyed manifests to provider/path-aware v2 in memory."""
+        """Migrate legacy SHA-keyed manifests to provider/path-aware v2 in memory.
+
+        Old manifests had only ``verified=True`` and did not record whether that
+        verification included a content checksum. Treat that missing fact as
+        unknown/False; otherwise an old size-only row could authorize deletion.
+        """
         items = data.get("items")
         if not isinstance(items, dict):
             raise ValueError("invalid archive manifest")
@@ -89,6 +130,8 @@ class ArchiveManifest:
             archive_id = str(item.get("archive_id") or _archive_id(provider, remote_path, digest))
             item["archive_id"] = archive_id
             item["sha256"] = digest
+            item["checksum_verified"] = item.get("checksum_verified") is True
+            item["verification_method"] = str(item.get("verification_method") or "")
             normalized[archive_id] = item
         return {"version": 2, "items": normalized}
 
@@ -163,11 +206,13 @@ class ArchiveManifest:
             "sha256": digest,
             "status": "pending",
             "verified": False,
+            "checksum_verified": False,
+            "verification_method": "",
             "attempts": 0,
             "last_error": "",
             "updated_at": now,
         }
-        with self._lock:
+        with self.transaction():
             data = self._load()
             existing = data["items"].get(archive_id)
             if existing:
@@ -193,7 +238,7 @@ class ArchiveManifest:
         replaced. If that same network call then fails, the second call with
         ``error=...`` changes state to failed without counting a second attempt.
         """
-        with self._lock:
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
@@ -207,48 +252,72 @@ class ArchiveManifest:
             item["status"] = "failed" if error else "uploaded_unverified"
             # A new upload can replace/alter the remote object. Even an archive
             # record that was verified previously must become unverified before
-            # bytes are sent and stay unverified until post-upload stat/hash
-            # validation succeeds.
+            # bytes are sent and stay unverified until post-upload validation.
             item["verified"] = False
+            item["checksum_verified"] = False
+            item["verification_method"] = ""
             item["last_error"] = str(error)[:1000]
             item["updated_at"] = int(time.time())
             self._save(data)
 
     def mark_verification_failed(self, reference: str, error: str) -> None:
         """Persist verification failure without counting a second upload attempt."""
-        with self._lock:
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
             item["status"] = "uploaded_unverified"
             item["verified"] = False
+            item["checksum_verified"] = False
+            item["verification_method"] = ""
             item["last_error"] = str(error)[:1000]
             item["updated_at"] = int(time.time())
             self._save(data)
 
     def mark_verified(self, reference: str, *, remote_size: int, remote_sha256: str | None = None) -> None:
-        with self._lock:
+        """Record remote verification strength without overstating deletion safety.
+
+        Matching size is enough to record that the remote object was observed,
+        but only a matching SHA-256 authorizes later local cleanup. This keeps
+        providers that lack content hashes usable while making data deletion
+        fail closed.
+        """
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
             if int(remote_size) != int(item["size"]):
                 raise RuntimeError("Remote size does not match local file; refusing verification")
-            if remote_sha256 and remote_sha256.lower() != str(item["sha256"]).lower():
-                raise RuntimeError("Remote checksum does not match local file; refusing verification")
+
+            checksum_verified = False
+            if remote_sha256:
+                remote_digest = str(remote_sha256).strip().lower()
+                if remote_digest != str(item["sha256"]).lower():
+                    raise RuntimeError("Remote checksum does not match local file; refusing verification")
+                checksum_verified = True
+
             item["status"] = "verified"
             item["verified"] = True
+            item["checksum_verified"] = checksum_verified
+            item["verification_method"] = "size+sha256" if checksum_verified else "size-only"
             item["last_error"] = ""
             item["updated_at"] = int(time.time())
             self._save(data)
 
     def mark_local_deleted(self, reference: str) -> None:
-        """Record that the verified local working copy was safely removed."""
-        with self._lock:
+        """Record that a strongly verified local working copy was safely removed."""
+        with self.transaction():
             data = self._load()
             key = self._resolve_key(data, reference)
             item = data["items"][key]
-            if item.get("status") != "verified" or item.get("verified") is not True:
-                raise RuntimeError("Unverified archive item cannot be marked locally deleted")
+            if not (
+                item.get("status") == "verified"
+                and item.get("verified") is True
+                and item.get("checksum_verified") is True
+            ):
+                raise RuntimeError(
+                    "Archive item needs matching remote checksum before local deletion"
+                )
             item["local_deleted"] = True
             item["local_deleted_at"] = int(time.time())
             item["updated_at"] = int(time.time())
@@ -262,7 +331,11 @@ class ArchiveManifest:
             except KeyError:
                 return False
             item = data["items"].get(key) or {}
-            return item.get("status") == "verified" and item.get("verified") is True
+            return (
+                item.get("status") == "verified"
+                and item.get("verified") is True
+                and item.get("checksum_verified") is True
+            )
 
     def get(self, reference: str) -> dict[str, Any] | None:
         with self._lock:
