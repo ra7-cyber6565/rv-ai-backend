@@ -35,9 +35,6 @@ from utils.release_identity import normalize_git_revision, repository_identity
 
 
 MAX_RECEIPT_BYTES = 2_000_000
-# Exact code does not change between receipts, but live quota/provider and
-# deployment state can. Keep code proof reusable for a few days while requiring
-# operational proof to be recent.
 MAX_FOUNDATION_AGE_SECONDS = 7 * 24 * 60 * 60
 MAX_LIVE_AGE_SECONDS = 24 * 60 * 60
 MAX_DEPLOYED_AGE_SECONDS = 24 * 60 * 60
@@ -49,11 +46,34 @@ _REQUIRED_DEPLOYED_CALLS = {
     "GET /api/v1/processing-capabilities",
     "POST /api/v1/session",
 }
-_OPTIONAL_DEPLOYED_CALL_PREFIXES = (
-    "GET /api/v1/reading-sessions?",
-)
+# run_deployed_readonly_smoke._call intentionally strips query strings before
+# putting a route into the receipt, so reading-sessions is an exact normalized
+# row here, not a `...?project_id=` prefix.
 _OPTIONAL_DEPLOYED_EXACT_CALLS = {
+    "GET /api/v1/reading-sessions",
     "OPTIONS /api/v1/session",
+}
+_REQUIRED_DEPLOYED_CHECKS = {
+    "health_http",
+    "health_state",
+    "zero_cost_only",
+    "release_state_honest",
+    "deployed_revision_matches",
+    "health_public_payload_safe",
+    "api_http",
+    "session_route_advertised",
+    "processing_route_advertised",
+    "api_public_payload_safe",
+    "processing_http",
+    "processing_contract",
+    "processing_public_payload_safe",
+    "session_http",
+    "session_capability_shape",
+    "private_no_store_headers",
+    "missing_capability_rejected",
+    "empty_project_capability_accepted",
+    "private_list_no_store",
+    "no_model_or_research_route_called",
 }
 
 
@@ -80,7 +100,6 @@ def _schema_at_least(receipt: Mapping[str, object], minimum: int) -> bool:
 
 
 def _int_at_least(value: object, minimum: int) -> bool:
-    """Parse hostile receipt scalar fail-closed instead of raising."""
     try:
         parsed = int(value)
     except (TypeError, ValueError):
@@ -139,15 +158,21 @@ def _live_contract_ok(live: Mapping[str, object]) -> bool:
     )
 
 
-def _deployed_call_allowed(item: str) -> bool:
-    """Allow only calls the read-only smoke is designed to make.
-
-    Do not use a broad prefix like ``GET /api``: that would also accept
-    ``GET /api/v1/...`` routes and make a forged/modified call ledger look safe.
-    """
-    if item in _REQUIRED_DEPLOYED_CALLS or item in _OPTIONAL_DEPLOYED_EXACT_CALLS:
-        return True
-    return any(item.startswith(prefix) for prefix in _OPTIONAL_DEPLOYED_CALL_PREFIXES)
+def _deployed_checks_ok(deployed: Mapping[str, object]) -> bool:
+    checks = deployed.get("checks")
+    if not isinstance(checks, list) or not checks or len(checks) > 100:
+        return False
+    seen: dict[str, bool] = {}
+    for row in checks:
+        if not isinstance(row, Mapping):
+            return False
+        name = str(row.get("name") or "").strip()
+        if not name or len(name) > 100 or name in seen:
+            return False
+        seen[name] = row.get("passed") is True
+    return _REQUIRED_DEPLOYED_CHECKS.issubset(seen) and all(
+        seen[name] for name in _REQUIRED_DEPLOYED_CHECKS
+    ) and all(seen.values())
 
 
 def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
@@ -157,12 +182,14 @@ def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
     if not all(isinstance(item, str) and 1 <= len(item) <= 300 for item in calls):
         return False
     rows = set(calls)
+    allowed_calls = _REQUIRED_DEPLOYED_CALLS | _OPTIONAL_DEPLOYED_EXACT_CALLS
     required_present = _REQUIRED_DEPLOYED_CALLS.issubset(rows)
-    allowed_only = all(_deployed_call_allowed(item) for item in calls)
+    allowed_only = rows.issubset(allowed_calls)
     return bool(
         deployed.get("gate") == _DEPLOYED_GATE
         and required_present
         and allowed_only
+        and _deployed_checks_ok(deployed)
     )
 
 
@@ -208,36 +235,18 @@ def verify_release_bundle(
         max_age=MAX_DEPLOYED_AGE_SECONDS,
     )
 
-    check(
-        "foundation_receipt_contract",
-        foundation_contract,
-        "schema>=2 and offline_zero_cost=true",
-    )
-    check(
-        "live_receipt_contract",
-        live_contract,
-        "schema>=2 plus ready confirmed-free model/storage preflight",
-    )
-    check(
-        "deployed_receipt_contract",
-        deployed_contract,
-        "exact zero-model deployed gate with required safe call ledger",
-    )
-    check(
-        "foundation_receipt_fresh",
-        foundation_fresh,
-        "foundation proof is not older than 7 days and is not future-dated",
-    )
-    check(
-        "live_receipt_fresh",
-        live_fresh,
-        "live provider proof is not older than 24 hours and is not future-dated",
-    )
-    check(
-        "deployed_receipt_fresh",
-        deployed_fresh,
-        "deployed smoke is not older than 24 hours and is not future-dated",
-    )
+    check("foundation_receipt_contract", foundation_contract,
+          "schema>=2 and offline_zero_cost=true")
+    check("live_receipt_contract", live_contract,
+          "schema>=2 plus ready confirmed-free model/storage preflight")
+    check("deployed_receipt_contract", deployed_contract,
+          "exact zero-model gate, safe normalized calls and passed required checks")
+    check("foundation_receipt_fresh", foundation_fresh,
+          "foundation proof is not older than 7 days and is not future-dated")
+    check("live_receipt_fresh", live_fresh,
+          "live provider proof is not older than 24 hours and is not future-dated")
+    check("deployed_receipt_fresh", deployed_fresh,
+          "deployed smoke is not older than 24 hours and is not future-dated")
     check(
         "foundation_gate_passed",
         foundation_contract
