@@ -17,6 +17,7 @@ import threading
 from typing import Dict, List, Optional
 
 from .orchestrator import DeepResearchEngine
+from .validation_director import attach_ai2_validation
 
 _MAX_HISTORY = 30
 
@@ -27,7 +28,6 @@ class AgentManager:
         self._history: Dict[str, List[Dict]] = {}
         self._lock = threading.Lock()
 
-    # ── engines ──────────────────────────────────────────────────────────────
     def get(self, project_id: str = "default") -> DeepResearchEngine:
         project_id = project_id or "default"
         with self._lock:
@@ -46,7 +46,6 @@ class AgentManager:
         with self._lock:
             return sorted(self._engines)
 
-    # ── research ─────────────────────────────────────────────────────────────
     def research(self, question: str, project_id: str = "default",
                  depth_mode: str = "DEEP", custom: Optional[Dict] = None,
                  job_id: Optional[str] = None) -> Dict:
@@ -54,7 +53,8 @@ class AgentManager:
         result = engine.research(question, depth_mode=depth_mode, custom=custom,
                                  job_id=job_id or project_id)
         self._remember(project_id, result)
-        return result
+        # AI-2 is additive and fail-safe: original research/history remain intact.
+        return attach_ai2_validation(question, result)
 
     def _remember(self, project_id: str, result: Dict) -> None:
         with self._lock:
@@ -70,7 +70,6 @@ class AgentManager:
             if len(history) > _MAX_HISTORY:
                 del history[:-_MAX_HISTORY]
 
-    # ── history ──────────────────────────────────────────────────────────────
     def history(self, project_id: str = "default") -> List[Dict]:
         with self._lock:
             return list(self._history.get(project_id, []))
@@ -82,5 +81,4 @@ class AgentManager:
             return count
 
 
-# Process-wide single instance (routes isi ko import karti hain)
 manager = AgentManager()
