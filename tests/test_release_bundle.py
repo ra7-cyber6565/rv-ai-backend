@@ -39,7 +39,12 @@ def _receipts():
         "deployed_code_revision": SHA,
         "zero_model_calls_by_construction": True,
         "capabilities_or_secrets_recorded": False,
-        "calls": ["GET /health", "GET /api", "POST /api/v1/session"],
+        "calls": [
+            "GET /health",
+            "GET /api",
+            "GET /api/v1/processing-capabilities",
+            "POST /api/v1/session",
+        ],
     }
     identity = {"available": True, "revision": SHA, "clean": True}
     return foundation, live, deployed, identity
@@ -120,6 +125,31 @@ def test_live_receipt_requires_confirmed_free_model_and_validated_storage():
 def test_deployed_receipt_requires_exact_zero_model_gate_identity():
     foundation, live, deployed, identity = _receipts()
     deployed["gate"] = "GENERIC_SMOKE"
+
+    result = verify_release_bundle(
+        foundation, live, deployed, current_identity=identity,
+    )
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["deployed_receipt_contract"] is False
+    assert checks["deployed_zero_model_gate_passed"] is False
+    assert result["passed"] is False
+
+
+def test_live_receipt_malformed_model_count_fails_closed_without_crashing():
+    foundation, live, deployed, identity = _receipts()
+    live["zero_cost_preflight"]["model_layers_usable_now"] = "not-a-number"
+
+    result = verify_release_bundle(
+        foundation, live, deployed, current_identity=identity,
+    )
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["live_receipt_contract"] is False
+    assert result["passed"] is False
+
+
+def test_deployed_receipt_rejects_model_or_research_route_in_call_ledger():
+    foundation, live, deployed, identity = _receipts()
+    deployed["calls"].append("POST /api/v1/chat")
 
     result = verify_release_bundle(
         foundation, live, deployed, current_identity=identity,
