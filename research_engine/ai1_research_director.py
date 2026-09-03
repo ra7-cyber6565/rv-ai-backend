@@ -280,8 +280,10 @@ def _grade_claim(row: Mapping) -> Tuple[str, str]:
         return "C", EVIDENCE_GRADES["C"]
     if _source_check_passes_ae(row) and "supported" in verdict and "partial" not in verdict:
         return "A", EVIDENCE_GRADES["A"]
-    if "partial" in verdict or "source_reported" in verdict or _text(
-        row.get("entailment_check"), 20).casefold() == "pass"
+    if (
+        "partial" in verdict
+        or "source_reported" in verdict
+        or _text(row.get("entailment_check"), 20).casefold() == "pass"
     ):
         return "B", EVIDENCE_GRADES["B"]
     if "unable" in verdict or "unver" in verdict or not verdict:
