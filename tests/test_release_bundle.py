@@ -9,24 +9,37 @@ SHA = "2a21a6fbcb0771be746766dad3c6a511a7c3ec5e"
 
 def _receipts():
     foundation = {
+        "schema_version": 2,
         "passed": True,
+        "offline_zero_cost": True,
         "code_revision": SHA,
         "repository_clean": True,
         "code_identity_verified": True,
     }
     live = {
+        "schema_version": 2,
         "passed": True,
         "code_revision": SHA,
         "repository_clean": True,
         "contains_answer_or_source_text": False,
         "contains_credentials": False,
+        "zero_cost_preflight": {
+            "ready": True,
+            "zero_cost_only": True,
+            "model_layers_usable_now": 1,
+            "storage_validated": True,
+            "storage_ready": True,
+            "blockers": [],
+        },
     }
     deployed = {
+        "gate": "DEPLOYED_READONLY_ZERO_MODEL_SMOKE",
         "complete": True,
         "expected_code_revision": SHA,
         "deployed_code_revision": SHA,
         "zero_model_calls_by_construction": True,
         "capabilities_or_secrets_recorded": False,
+        "calls": ["GET /health", "GET /api", "POST /api/v1/session"],
     }
     identity = {"available": True, "revision": SHA, "clean": True}
     return foundation, live, deployed, identity
@@ -40,6 +53,7 @@ def test_bundle_passes_only_when_every_gate_has_the_same_clean_revision():
     assert result["passed"] is True
     assert result["code_revision"] == SHA
     assert result["contains_credentials_or_capabilities"] is False
+    assert result["schema_version"] == 2
     assert all(row["passed"] for row in result["checks"])
 
 
@@ -69,3 +83,48 @@ def test_bundle_fails_closed_on_dirty_checkout_or_private_receipt_flags():
     assert checks["deployed_zero_model_gate_passed"] is False
     assert result["passed"] is False
 
+
+def test_bundle_rejects_handwritten_boolean_only_spoof_receipts():
+    foundation, live, deployed, identity = _receipts()
+    foundation.pop("schema_version")
+    foundation.pop("offline_zero_cost")
+    live.pop("zero_cost_preflight")
+    deployed.pop("gate")
+    deployed.pop("calls")
+
+    result = verify_release_bundle(
+        foundation, live, deployed, current_identity=identity,
+    )
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["foundation_receipt_contract"] is False
+    assert checks["live_receipt_contract"] is False
+    assert checks["deployed_receipt_contract"] is False
+    assert result["passed"] is False
+
+
+def test_live_receipt_requires_confirmed_free_model_and_validated_storage():
+    foundation, live, deployed, identity = _receipts()
+    live["zero_cost_preflight"]["model_layers_usable_now"] = 0
+    live["zero_cost_preflight"]["storage_ready"] = False
+    live["zero_cost_preflight"]["blockers"] = ["no confirmed/free model"]
+
+    result = verify_release_bundle(
+        foundation, live, deployed, current_identity=identity,
+    )
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["live_receipt_contract"] is False
+    assert checks["live_zero_cost_gate_passed"] is False
+    assert result["passed"] is False
+
+
+def test_deployed_receipt_requires_exact_zero_model_gate_identity():
+    foundation, live, deployed, identity = _receipts()
+    deployed["gate"] = "GENERIC_SMOKE"
+
+    result = verify_release_bundle(
+        foundation, live, deployed, current_identity=identity,
+    )
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["deployed_receipt_contract"] is False
+    assert checks["deployed_zero_model_gate_passed"] is False
+    assert result["passed"] is False
