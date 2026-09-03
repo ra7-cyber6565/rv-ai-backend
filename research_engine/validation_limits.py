@@ -20,6 +20,7 @@ MAX_CLASS_LABELS = 100
 MAX_CLASSIFICATION_WORK_UNITS = 2_000_000  # observations * labels
 MAX_P_VALUES = 50_000
 MAX_TRADES = 50_000
+MAX_TRADING_REGIMES = 128
 MAX_HYPOTHESES = 32
 MAX_EXECUTION_PACKETS = 32
 MAX_VARIABLES = 128
@@ -40,6 +41,9 @@ MAX_MONTE_CARLO_SIMULATIONS = 50_000
 # resamples over a 50k-row dataset even though each independent count is legal.
 MAX_RESAMPLE_WORK_UNITS = 5_000_000
 MAX_MONTE_CARLO_WORK_UNITS = 5_000_000
+# Trading friction stress constructs one stressed outcome per trade per scenario.
+# Keep this separate from Monte Carlo so the receipt names the real workload.
+MAX_TRADING_STRESS_WORK_UNITS = 2_000_000
 
 RESOURCE_LIMIT_STATUS = "RESOURCE_LIMIT_EXCEEDED"
 
@@ -110,11 +114,12 @@ def bounded_length(values: Any, maximum: int, field: str) -> Optional[dict]:
 __all__ = [
     "MAX_OBSERVATIONS", "MAX_TWO_GROUP_TOTAL_OBSERVATIONS", "MAX_CLASS_LABELS",
     "MAX_CLASSIFICATION_WORK_UNITS", "MAX_P_VALUES", "MAX_TRADES",
-    "MAX_HYPOTHESES", "MAX_EXECUTION_PACKETS", "MAX_VARIABLES",
+    "MAX_TRADING_REGIMES", "MAX_HYPOTHESES", "MAX_EXECUTION_PACKETS", "MAX_VARIABLES",
     "MAX_CONFOUNDERS", "MAX_ROBUSTNESS_ROWS", "MAX_PARAMETER_GRID_ROWS",
     "MAX_ABLATION_ROWS", "MAX_FAILURE_VALUES", "MAX_FRICTION_SCENARIOS",
     "MAX_BOOTSTRAP_RESAMPLES", "MAX_PERMUTATIONS", "MAX_BAYES_DRAWS",
     "MAX_MONTE_CARLO_SIMULATIONS", "MAX_RESAMPLE_WORK_UNITS",
-    "MAX_MONTE_CARLO_WORK_UNITS", "RESOURCE_LIMIT_STATUS", "strict_int",
-    "bounded_iterations", "resource_error", "bounded_length",
+    "MAX_MONTE_CARLO_WORK_UNITS", "MAX_TRADING_STRESS_WORK_UNITS",
+    "RESOURCE_LIMIT_STATUS", "strict_int", "bounded_iterations", "resource_error",
+    "bounded_length",
 ]
