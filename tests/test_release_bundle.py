@@ -8,6 +8,28 @@ from scripts.verify_release_bundle import verify_release_bundle
 
 SHA = "2a21a6fbcb0771be746766dad3c6a511a7c3ec5e"
 NOW = 2_000_000_000
+DEPLOYED_CHECK_NAMES = (
+    "health_http",
+    "health_state",
+    "zero_cost_only",
+    "release_state_honest",
+    "deployed_revision_matches",
+    "health_public_payload_safe",
+    "api_http",
+    "session_route_advertised",
+    "processing_route_advertised",
+    "api_public_payload_safe",
+    "processing_http",
+    "processing_contract",
+    "processing_public_payload_safe",
+    "session_http",
+    "session_capability_shape",
+    "private_no_store_headers",
+    "missing_capability_rejected",
+    "empty_project_capability_accepted",
+    "private_list_no_store",
+    "no_model_or_research_route_called",
+)
 
 
 def _receipts():
@@ -50,6 +72,10 @@ def _receipts():
             "GET /api",
             "GET /api/v1/processing-capabilities",
             "POST /api/v1/session",
+        ],
+        "checks": [
+            {"name": name, "passed": True, "detail": "ok"}
+            for name in DEPLOYED_CHECK_NAMES
         ],
     }
     identity = {"available": True, "revision": SHA, "clean": True}
@@ -106,6 +132,7 @@ def test_bundle_rejects_handwritten_boolean_only_spoof_receipts():
     live.pop("zero_cost_preflight")
     deployed.pop("gate")
     deployed.pop("calls")
+    deployed.pop("checks")
 
     result = _verify(foundation, live, deployed, identity)
     checks = {row["name"]: row["passed"] for row in result["checks"]}
@@ -171,15 +198,41 @@ def test_deployed_receipt_rejects_get_api_prefix_escape():
     assert result["passed"] is False
 
 
-def test_expected_reading_session_probe_remains_allowed():
+def test_expected_normalized_reading_session_probe_remains_allowed():
     foundation, live, deployed, identity = _receipts()
     deployed["calls"].extend([
-        "GET /api/v1/reading-sessions?project_id=opaque",
+        "GET /api/v1/reading-sessions",
+        "GET /api/v1/reading-sessions",
         "OPTIONS /api/v1/session",
     ])
 
     result = _verify(foundation, live, deployed, identity)
     assert result["passed"] is True
+
+
+def test_missing_or_failed_required_deployed_check_fails_closed():
+    foundation, live, deployed, identity = _receipts()
+    deployed["checks"] = [
+        row for row in deployed["checks"]
+        if row["name"] != "missing_capability_rejected"
+    ]
+    result = _verify(foundation, live, deployed, identity)
+    assert result["passed"] is False
+
+    foundation, live, deployed, identity = _receipts()
+    for row in deployed["checks"]:
+        if row["name"] == "private_no_store_headers":
+            row["passed"] = False
+            break
+    result = _verify(foundation, live, deployed, identity)
+    assert result["passed"] is False
+
+
+def test_duplicate_deployed_check_name_is_rejected():
+    foundation, live, deployed, identity = _receipts()
+    deployed["checks"].append(dict(deployed["checks"][0]))
+    result = _verify(foundation, live, deployed, identity)
+    assert result["passed"] is False
 
 
 def test_stale_live_receipt_cannot_be_replayed_forever():
