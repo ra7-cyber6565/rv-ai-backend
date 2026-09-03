@@ -11,12 +11,12 @@ Wahi kaam ab yahan hai, do sudhaar ke saath:
     2. HISTORY yahan rehti hai (engine stateless rehta hai) — isse ek hi project
        ke do parallel sawal ek dusre ki history corrupt nahi karte.
 
-AI-1 integration:
-    DeepResearchEngine ka measured result return hote hi deterministic AI-1
-    Research & Evidence Director packet attach hota hai. Isse /deep-research,
-    background jobs aur purana ResearchAgent shim sab ek hi structured handoff
-    paate hain. Packet existing evidence gates ko replace nahi karta; unhi ke
-    outputs ko fail-closed research-company handoff mein organize karta hai.
+Parallel research-company integration:
+    Core DeepResearchEngine ke measured result ke baad deterministic director
+    packets attach hote hain. AI-1 evidence packet pehle attach hota hai; AI-2
+    usi measured result + AI-1 handoff ko validate karta hai. Dono additive aur
+    fail-closed hain: koi director core evidence ko create/upgrade/replace nahi
+    karta, aur history compact status/score metadata hi store karti hai.
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from typing import Dict, List, Optional
 
 from .ai1_research_director import attach_ai1_research_packet
 from .orchestrator import DeepResearchEngine
+from .validation_director import attach_ai2_validation
 
 _MAX_HISTORY = 30
 
@@ -61,11 +62,17 @@ class AgentManager:
         engine = self.get(project_id)
         result = engine.research(question, depth_mode=depth_mode, custom=custom,
                                  job_id=job_id or project_id)
-        # AI-1 is deliberately attached AFTER the core engine has finished its
-        # own citation/A-E/relevance/contradiction/source-integrity checks.  It
-        # therefore cannot create evidence or upgrade a claim; it can only
-        # expose, decompose, route, or mark what the measured run actually has.
+
+        # AI-1 runs after the core engine's citation/A-E/relevance/contradiction/
+        # source-integrity gates. It may expose/decompose/route evidence but may
+        # not invent evidence or upgrade measured claims.
         result = attach_ai1_research_packet(question, result)
+
+        # AI-2 runs after AI-1 so it can consume the complete evidence handoff
+        # while preserving the original result. It keeps plans/results distinct
+        # and fails closed to INCONCLUSIVE/NOT TESTED when provenance is missing.
+        result = attach_ai2_validation(question, result)
+
         self._remember(project_id, result)
         return result
 
@@ -79,8 +86,6 @@ class AgentManager:
                 "mode": result.get("mode", ""),
                 "source_count": len(result.get("sources", [])),
                 "gemini_calls_used": result.get("gemini_calls_used", 0),
-                # History stays compact: only packet status/score, never the
-                # whole evidence packet or copied source metadata.
                 "ai1_packet_valid": bool(
                     (result.get("ai1_research_packet") or {})
                     .get("validation", {}).get("valid")
@@ -89,6 +94,16 @@ class AgentManager:
                     (result.get("ai1_research_packet") or {})
                     .get("sections", {})
                     .get("14. Confidence in Research Packet /100", {})
+                    .get("score")
+                ),
+                "ai2_packet_valid": bool(
+                    (result.get("ai2_validation") or {})
+                    .get("packet_integrity", {}).get("valid")
+                ),
+                "ai2_packet_confidence": (
+                    (result.get("ai2_validation") or {})
+                    .get("sections", {})
+                    .get("16. Confidence /100", {})
                     .get("score")
                 ),
             })
