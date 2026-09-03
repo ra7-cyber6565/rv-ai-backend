@@ -160,6 +160,28 @@ def test_deployed_receipt_rejects_model_or_research_route_in_call_ledger():
     assert result["passed"] is False
 
 
+def test_deployed_receipt_rejects_get_api_prefix_escape():
+    """`GET /api` must not accidentally authorize every `GET /api/v1/...`."""
+    foundation, live, deployed, identity = _receipts()
+    deployed["calls"].append("GET /api/v1/research-jobs")
+
+    result = _verify(foundation, live, deployed, identity)
+    checks = {row["name"]: row["passed"] for row in result["checks"]}
+    assert checks["deployed_receipt_contract"] is False
+    assert result["passed"] is False
+
+
+def test_expected_reading_session_probe_remains_allowed():
+    foundation, live, deployed, identity = _receipts()
+    deployed["calls"].extend([
+        "GET /api/v1/reading-sessions?project_id=opaque",
+        "OPTIONS /api/v1/session",
+    ])
+
+    result = _verify(foundation, live, deployed, identity)
+    assert result["passed"] is True
+
+
 def test_stale_live_receipt_cannot_be_replayed_forever():
     foundation, live, deployed, identity = _receipts()
     live["created_at_epoch"] = NOW - (24 * 60 * 60) - 1
