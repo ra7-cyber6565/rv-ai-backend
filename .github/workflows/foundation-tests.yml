@@ -91,6 +91,7 @@ jobs:
             tests/test_debate_independence_attestor.py \
             tests/test_adversarial_science.py \
             tests/test_adversarial_science_attestor.py \
+            tests/test_adversarial_independence_attestor.py \
             tests/test_blind_analysis_attestor.py \
             tests/test_triple_implementation.py \
             tests/test_triple_implementation_reproducibility.py \
