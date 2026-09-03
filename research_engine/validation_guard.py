@@ -11,26 +11,76 @@ from .validation_types import HypothesisStatus, UNKNOWN, listify, number, number
 
 
 def seal_holdout(values: Any) -> str:
+    """Return a deterministic content hash for a predeclared final holdout.
+
+    The hash by itself is not proof that sealing happened before evaluation.
+    Callers must also record ``untouched_test_sealed_before_evaluation=True``
+    when that fact is supported by their execution workflow/receipt.
+    """
     encoded = json.dumps(values, sort_keys=True, ensure_ascii=False,
                          separators=(",", ":"), default=str).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
 
 
 def audit_holdout(execution: Mapping[str, Any]) -> Dict[str, Any]:
+    """Audit whether a final test can truthfully be called *untouched*.
+
+    A final evaluation is promotion-grade only when all of the following are
+    explicit: the holdout exists, a predeclared hash matches it, sealing is
+    recorded as having happened before evaluation, it was used exactly once,
+    and it was not used for tuning/selection. Missing evidence is not silently
+    interpreted as success.
+    """
     holdout = execution.get("untouched_test")
-    declared = text(execution.get("untouched_test_hash"))
     if holdout is None:
-        return {"status": UNKNOWN, "reason": "No completely untouched test set supplied."}
+        return {
+            "status": UNKNOWN,
+            "reason": "No completely untouched test set supplied.",
+            "evaluation_valid_for_final_claim": False,
+        }
+
     current = seal_holdout(holdout)
-    uses = int(number(execution.get("untouched_test_uses")) or 0)
+    declared = text(execution.get("untouched_test_hash"))
+    sealed_before = execution.get("untouched_test_sealed_before_evaluation") is True
+    uses_number = number(execution.get("untouched_test_uses"))
+    uses = int(uses_number) if uses_number is not None and float(uses_number).is_integer() else None
     tuned = bool(execution.get("tuned_on_untouched_test"))
     changed = bool(declared) and declared != current
-    valid = not tuned and uses <= 1 and not changed
-    return {"status": "TEST PERFORMED", "hash": current,
-            "declared_hash_matches": not declared or not changed,
-            "reported_uses": uses, "tuned_on_untouched_test": tuned,
-            "integrity_pass": valid,
-            "fatal_reason": "Final holdout was used for tuning/repeated selection or changed after sealing." if not valid else ""}
+
+    issues = []
+    if not declared:
+        issues.append("PREDECLARED_HASH_MISSING")
+    elif changed:
+        issues.append("HOLDOUT_CHANGED_AFTER_DECLARATION")
+    if not sealed_before:
+        issues.append("PRE_EVALUATION_SEALING_NOT_PROVEN")
+    if uses is None:
+        issues.append("HOLDOUT_USE_COUNT_UNKNOWN")
+    elif uses != 1:
+        issues.append("HOLDOUT_NOT_USED_EXACTLY_ONCE")
+    if tuned:
+        issues.append("TUNED_ON_FINAL_HOLDOUT")
+
+    valid = not issues
+    return {
+        "status": "TEST PERFORMED",
+        "hash": current,
+        "declared_hash_present": bool(declared),
+        "declared_hash_matches": bool(declared) and not changed,
+        "sealed_before_evaluation": sealed_before,
+        "reported_uses": uses if uses is not None else UNKNOWN,
+        "tuned_on_untouched_test": tuned,
+        "integrity_pass": valid,
+        "evaluation_valid_for_final_claim": valid,
+        "issues": issues,
+        "fatal_reason": (
+            "Final holdout cannot support a promotion-grade claim: " + ", ".join(issues)
+            if issues else ""
+        ),
+        "note": (
+            "Hash equality proves content equality only; pre-evaluation sealing is a separate required receipt."
+        ),
+    }
 
 
 _FATAL_LEAKAGE = {
@@ -57,14 +107,19 @@ def leakage_bias_audit(meta: Mapping[str, Any]) -> Dict[str, Any]:
     findings, fatal = [], []
     for key, detail in _FATAL_LEAKAGE.items():
         if bool(src.get(key)):
-            findings.append({"risk": key, "severity": "FATAL", "detail": detail}); fatal.append(key)
+            findings.append({"risk": key, "severity": "FATAL", "detail": detail})
+            fatal.append(key)
     for key, detail in _OTHER_BIAS.items():
         if bool(src.get(key)):
             findings.append({"risk": key, "severity": "HIGH", "detail": detail})
     missing = [key for key in list(_FATAL_LEAKAGE) + list(_OTHER_BIAS) if key not in src]
-    return {"status": "FAIL" if fatal else ("AUDIT PARTIAL" if missing else "PASS"),
-            "fatal": fatal, "findings": findings, "not_assessed": missing,
-            "rule": "Any confirmed fatal leakage invalidates performance claims that depend on the contaminated evaluation."}
+    return {
+        "status": "FAIL" if fatal else ("AUDIT PARTIAL" if missing else "PASS"),
+        "fatal": fatal,
+        "findings": findings,
+        "not_assessed": missing,
+        "rule": "Confirmed fatal leakage invalidates the contaminated evaluation; it does not by itself prove the hypothesis false.",
+    }
 
 
 def walk_forward_summary(runs: Any, metric: str) -> Dict[str, Any]:
@@ -166,7 +221,8 @@ def failure_cluster_analysis(outcomes: Sequence[Any], *, failure_threshold: Any,
         if flag:
             cur += 1
         elif cur:
-            clusters.append(cur); cur = 0
+            clusters.append(cur)
+            cur = 0
     return {"status": "RESULT OBSERVED", "n": len(xs), "failure_threshold": threshold,
             "failure_rate": sum(flags) / len(flags), "clusters": clusters,
             "cluster_count": len(clusters), "longest_failure_cluster": max(clusters) if clusters else 0}
