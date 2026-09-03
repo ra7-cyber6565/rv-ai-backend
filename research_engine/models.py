@@ -1058,6 +1058,17 @@ class ResearchResult:
     # MARATHON-only measured checklist. Iska percentage answer/hypothesis ki
     # truth, profitability ya real-world success probability nahi hai.
     research_assurance: Dict = field(default_factory=dict)
+    # Production source-poisoning/provenance audit. Empty means the stage did
+    # not run; NO_ANOMALY_DETECTED is never called proof of source truth.
+    source_integrity: Dict = field(default_factory=dict)
+    # Critical-claim governance packet. It records measured/inferred/report
+    # separation and unresolved standards without claiming truth probability.
+    epistemic_packet: Dict = field(default_factory=dict)
+    # Production hypothesis test-plan audit. Bayesian recommendations remain
+    # blocked unless explicit priors and outcome likelihoods are supplied.
+    experiment_intelligence: Dict = field(default_factory=dict)
+    # Durable stable claim/source dependency watch for later revalidation.
+    knowledge_watch: Dict = field(default_factory=dict)
     gemini_calls_used: int = 0
     warnings: List[str] = field(default_factory=list)
 

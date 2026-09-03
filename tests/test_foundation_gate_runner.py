@@ -64,6 +64,7 @@ def test_default_stage_plan_contains_real_release_gates():
     assert "architecture_audit" in names
     assert "benchmark_cross_domain" in names
     assert "benchmark_superconductivity_v2" in names
+    assert "benchmark_dark_matter_acceptance" in names
 
     all_pytest = next(command for name, command in plan if name == "all_pytest")
     assert all_pytest == ["python", "-m", "pytest", "-q", "tests"]
@@ -136,6 +137,7 @@ def test_audits_and_cross_domain_run_before_superconductivity_benchmark():
     assert names.index("provider_bypass_audit") < names.index("architecture_audit")
     assert names.index("architecture_audit") < names.index("benchmark_cross_domain")
     assert names.index("benchmark_cross_domain") < names.index("benchmark_superconductivity_v2")
+    assert names.index("benchmark_superconductivity_v2") < names.index("benchmark_dark_matter_acceptance")
 
 
 def test_real_api_smoke_runs_after_pytest_before_core_regression():

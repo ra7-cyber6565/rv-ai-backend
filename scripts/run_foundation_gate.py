@@ -129,6 +129,8 @@ FOCUSED_PYTEST = (
     "tests/test_live_zero_cost_gate.py",
     "tests/test_windows_launchers.py",
     "tests/test_foundation_gate_runner.py",
+    "tests/test_source_integrity.py",
+    "tests/test_epistemic_governance.py",
 )
 
 
@@ -392,6 +394,12 @@ def build_stage_plan(python: str) -> list[tuple[str, list[str]]]:
         plan.append((
             "benchmark_superconductivity_v2",
             [python, benchmark.relative_to(REPO_ROOT).as_posix()],
+        ))
+    dark_matter = REPO_ROOT / "tests" / "benchmark_dark_matter_acceptance.py"
+    if dark_matter.is_file():
+        plan.append((
+            "benchmark_dark_matter_acceptance",
+            [python, dark_matter.relative_to(REPO_ROOT).as_posix()],
         ))
     return plan
 
