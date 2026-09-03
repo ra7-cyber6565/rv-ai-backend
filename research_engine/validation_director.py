@@ -176,7 +176,7 @@ class AI2ValidationDirector:
                 "measurement_rule": "Do not replace the target with an easier proxy without separate proxy-validity evidence.",
                 "uncertainty_policy": "Unknown values are UNKNOWN or TO BE ESTIMATED, never convenient defaults."},
             "3. Mathematical Model": {"domain_models_found": models,
-                "status": TEST_POSSIBLE if models and all(m["symbol_contract_complete"] for m in models) else INCONCLUSIVE,
+                "status": TEST_POSSIBLE if models and all(m.get("model_contract_complete") is True for m in models) else INCONCLUSIVE,
                 "if_absent": "UNKNOWN — no mathematical model is invented for decoration.",
                 "model_families_when_justified": ["equations", "objective functions", "constraints", "probabilistic", "causal", "optimization", "dynamical"],
                 "model_requirements": ["objective/target", "defined symbols+units+interpretation", "assumptions", "constraints", "estimable parameters", "identifiability/estimation", "data-linked prediction"],
@@ -201,7 +201,8 @@ class AI2ValidationDirector:
                 "narrow_rejection_rule": "A failed test rejects only the claim actually tested; never a whole theory family by invalid generalization."},
             "input_summary": {"structured_hypotheses_seen": len(hypotheses), "sources_seen": source_count(result),
                 "trading_specific_standard_enabled": trading, "second_pass_inputs_present": bool(second_pass_outputs),
-                "upstream_experiment_intelligence_present": upstream_ei["present"]},
+                "upstream_experiment_intelligence_present": upstream_ei["present"],
+                "ai1_research_packet_present": isinstance(result.get("ai1_research_packet"), Mapping)},
             "sections": sections, "second_pass_context": second}
         if second_pass_outputs:
             packet["second_pass_context"]["agent_outputs"] = deepcopy(dict(second_pass_outputs))
