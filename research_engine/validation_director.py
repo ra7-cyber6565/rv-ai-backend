@@ -18,7 +18,31 @@ from .validation_risk import (
     ablation_plan, bias_audit, cross_agent_alerts, failure_plan, friction_plan, meta_hypotheses,
     robustness_plan, second_pass_tasks,
 )
+from .validation_statistics import analyze_two_group_receipt, find_result_receipt
 from .validation_trading import trading_standard
+
+
+def _apply_result_receipts(experiments: Sequence[Dict[str, Any]], result: Mapping[str, Any]) -> None:
+    """Upgrade only provenance-bearing numeric receipts from plan to observed result."""
+    for row in experiments:
+        receipt = find_result_receipt(result, str(row.get("hypothesis_id") or ""))
+        if not receipt:
+            continue
+        analysis = analyze_two_group_receipt(receipt)
+        row["quantitative_result_analysis"] = analysis
+        if not analysis.get("observed"):
+            continue
+        metrics = analysis.get("metrics") if isinstance(analysis.get("metrics"), Mapping) else {}
+        row["test_state"] = RESULT_OBSERVED
+        row["hypothesis_status"] = analysis.get("status", INCONCLUSIVE)
+        row["result"] = deepcopy(analysis)
+        row["result_provenance"] = deepcopy(analysis.get("provenance") or {})
+        row["statistical_validation"]["effect_size"] = metrics.get("standardized_effect", NOT_TESTED)
+        row["statistical_validation"]["uncertainty_interval"] = analysis.get("confidence_interval", NOT_TESTED)
+        row["statistical_validation"]["confidence_interval"] = analysis.get("confidence_interval", NOT_TESTED)
+        row["statistical_validation"]["bootstrap"] = analysis.get("bootstrap", NOT_TESTED)
+        row["statistical_validation"]["permutation_test"] = analysis.get("permutation_test", NOT_TESTED)
+        row["decision_basis"] = deepcopy(analysis.get("decision") or {})
 
 
 def _blockers(experiments: Sequence[Mapping[str, Any]], confidence: Mapping[str, Any], trading: bool) -> list:
@@ -30,16 +54,17 @@ def _blockers(experiments: Sequence[Mapping[str, Any]], confidence: Mapping[str,
         blockers.append("No actual test execution evidenced; proposed tests cannot be reported as results.")
     if not any(e.get("test_state") == RESULT_OBSERVED for e in experiments):
         blockers.append("No observed result with explicit provenance available.")
-    if trading: blockers.append("Trading performance remains NOT TESTED until exact feed/cost/execution assumptions and untouched OOS results exist.")
+    if trading: blockers.append("Trading performance remains NOT TESTED unless exact feed/cost/execution assumptions and a provenance-bearing result receipt exist.")
     if float(confidence.get("score", 0) or 0) < 100: blockers.append("Evidence-readiness checklist is not fully satisfied; inspect Confidence /100 checks.")
     return list(dict.fromkeys(blockers))
 
 
 def _can_test(experiments: Sequence[Mapping[str, Any]], trading: bool) -> list:
     rows = ["Audit experiment-contract completeness, baseline adequacy, falsifiability, measurability and leakage exposure now.",
-            "Pre-register robustness, ablation, statistical and predictive-validation protocols now; numeric outcomes require data/execution."]
+            "Pre-register robustness, ablation, statistical and predictive-validation protocols now; numeric outcomes require data/execution.",
+            "Evaluate supplied provenance-bearing numeric result receipts now; no receipt means no observed result."]
     if experiments: rows.append("Convert structured hypotheses into exact test contracts; missing fields stay UNKNOWN/TO BE ESTIMATED.")
-    if trading: rows.append("Lint trading rules now; do not populate performance metrics until real feed-aware backtest execution.")
+    if trading: rows.append("Calculate supplied provenance-bearing per-trade result receipts; never import claimed summary metrics as validated performance.")
     return rows
 
 
@@ -68,10 +93,14 @@ def validate_ai2_packet(packet: Mapping[str, Any]) -> Dict[str, Any]:
             if field not in row: errors.append(f"missing_experiment_field:{field}")
         if row.get("test_state") == RESULT_OBSERVED:
             if not meaningful(row.get("result_provenance")) or row.get("result") in {NOT_TESTED, UNKNOWN, None}: errors.append("observed_result_without_provenance")
+            if row.get("hypothesis_status") in {PASS, CONDITIONAL_PASS, FAIL}:
+                decision = row.get("decision_basis")
+                if not isinstance(decision, Mapping) or decision.get("rule_source") != "SUPPLIED_IN_RESULT_RECEIPT":
+                    errors.append("decisive_status_without_explicit_decision_rule")
         elif row.get("hypothesis_status") in {PASS, CONDITIONAL_PASS, FAIL}: errors.append("decisive_status_without_observed_result")
     return {"valid": not errors, "errors": sorted(set(errors)), "missing_sections": missing,
             "required_section_count": len(REQUIRED_SECTIONS),
-            "truth_invariant": "Plans, targets and narratives are never emitted as observed results."}
+            "truth_invariant": "Plans, targets and narratives are never emitted as observed results; decisive status requires an explicit supplied decision rule."}
 
 
 class AI2ValidationDirector:
@@ -80,6 +109,7 @@ class AI2ValidationDirector:
         result = research_result if isinstance(research_result, Mapping) else {}
         hypotheses = extract_hypotheses(result)
         experiments = [normalize_experiment(h, i) for i, h in enumerate(hypotheses, 1)]
+        _apply_result_receipts(experiments, result)
         trading = is_trading(question); models = extract_math_models(hypotheses, result)
         confidence = confidence_score(experiments, result)
         upstream_ei = existing_experiment_intelligence(result); second = second_pass_summary(second_pass_outputs)
@@ -91,6 +121,11 @@ class AI2ValidationDirector:
             "statistical_validation_standard": ["effect size", "uncertainty interval", "confidence interval when justified",
                 "Bayesian evidence with explicit priors/likelihoods", "bootstrap", "permutation test", "Monte Carlo",
                 "multiple-testing correction", "power analysis"],
+            "result_receipt_contract": {"provenance_required": True,
+                "numeric_observations_required_for_calculation": True,
+                "pass_fail_rule_required": True,
+                "no_default_confidence_level": True,
+                "no_default_bootstrap_or_permutation_iterations": True},
             "result_provenance_rule": "TEST PROPOSED / TEST POSSIBLE / TEST PERFORMED / RESULT OBSERVED are distinct; RESULT OBSERVED requires explicit provenance.",
             "existing_experiment_intelligence": upstream_ei,
             "reuse_rule": "Reuse upstream Bayesian/information-gain planning when present; AI-2 adds controls rather than duplicating/replacing it.",
@@ -109,6 +144,7 @@ class AI2ValidationDirector:
                 "uncertainty_policy": "Unknown values are UNKNOWN or TO BE ESTIMATED, never convenient defaults."},
             "3. Mathematical Model": {"domain_models_found": models, "status": TEST_POSSIBLE if models and all(m["symbol_contract_complete"] for m in models) else INCONCLUSIVE,
                 "if_absent": "UNKNOWN — no mathematical model is invented for decoration.",
+                "model_families_when_justified": ["equations", "objective functions", "constraints", "probabilistic", "causal", "optimization", "dynamical"],
                 "model_requirements": ["objective/target", "defined symbols+units+interpretation", "assumptions", "constraints", "estimable parameters", "identifiability/estimation", "data-linked prediction"],
                 "unknown_value_policy": "Unmeasured parameters: TO BE ESTIMATED; unavailable quantities: UNKNOWN."},
             "4. Baselines": {"policy": "Every complex candidate must beat simplest valid baseline under same data, metric and friction assumptions.",
