@@ -10,12 +10,20 @@ Wahi kaam ab yahan hai, do sudhaar ke saath:
        hain; dict ko lock ke andar rakha hai.
     2. HISTORY yahan rehti hai (engine stateless rehta hai) — isse ek hi project
        ke do parallel sawal ek dusre ki history corrupt nahi karte.
+
+AI-1 integration:
+    DeepResearchEngine ka measured result return hote hi deterministic AI-1
+    Research & Evidence Director packet attach hota hai. Isse /deep-research,
+    background jobs aur purana ResearchAgent shim sab ek hi structured handoff
+    paate hain. Packet existing evidence gates ko replace nahi karta; unhi ke
+    outputs ko fail-closed research-company handoff mein organize karta hai.
 """
 from __future__ import annotations
 
 import threading
 from typing import Dict, List, Optional
 
+from .ai1_research_director import attach_ai1_research_packet
 from .orchestrator import DeepResearchEngine
 
 _MAX_HISTORY = 30
@@ -46,13 +54,18 @@ class AgentManager:
         with self._lock:
             return sorted(self._engines)
 
-    # ── research ─────────────────────────────────────────────────────────────
+    # ── research ──────────────────────────────────────────────────────────────
     def research(self, question: str, project_id: str = "default",
                  depth_mode: str = "DEEP", custom: Optional[Dict] = None,
                  job_id: Optional[str] = None) -> Dict:
         engine = self.get(project_id)
         result = engine.research(question, depth_mode=depth_mode, custom=custom,
                                  job_id=job_id or project_id)
+        # AI-1 is deliberately attached AFTER the core engine has finished its
+        # own citation/A-E/relevance/contradiction/source-integrity checks.  It
+        # therefore cannot create evidence or upgrade a claim; it can only
+        # expose, decompose, route, or mark what the measured run actually has.
+        result = attach_ai1_research_packet(question, result)
         self._remember(project_id, result)
         return result
 
@@ -66,6 +79,18 @@ class AgentManager:
                 "mode": result.get("mode", ""),
                 "source_count": len(result.get("sources", [])),
                 "gemini_calls_used": result.get("gemini_calls_used", 0),
+                # History stays compact: only packet status/score, never the
+                # whole evidence packet or copied source metadata.
+                "ai1_packet_valid": bool(
+                    (result.get("ai1_research_packet") or {})
+                    .get("validation", {}).get("valid")
+                ),
+                "ai1_packet_confidence": (
+                    (result.get("ai1_research_packet") or {})
+                    .get("sections", {})
+                    .get("14. Confidence in Research Packet /100", {})
+                    .get("score")
+                ),
             })
             if len(history) > _MAX_HISTORY:
                 del history[:-_MAX_HISTORY]
