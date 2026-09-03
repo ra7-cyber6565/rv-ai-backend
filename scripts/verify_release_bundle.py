@@ -49,14 +49,12 @@ _REQUIRED_DEPLOYED_CALLS = {
     "GET /api/v1/processing-capabilities",
     "POST /api/v1/session",
 }
-_ALLOWED_DEPLOYED_CALL_PREFIXES = (
-    "GET /health",
-    "GET /api",
-    "GET /api/v1/processing-capabilities",
-    "POST /api/v1/session",
+_OPTIONAL_DEPLOYED_CALL_PREFIXES = (
     "GET /api/v1/reading-sessions?",
-    "OPTIONS /api/v1/session",
 )
+_OPTIONAL_DEPLOYED_EXACT_CALLS = {
+    "OPTIONS /api/v1/session",
+}
 
 
 def _load_receipt(path: Path) -> tuple[dict, str]:
@@ -141,6 +139,17 @@ def _live_contract_ok(live: Mapping[str, object]) -> bool:
     )
 
 
+def _deployed_call_allowed(item: str) -> bool:
+    """Allow only calls the read-only smoke is designed to make.
+
+    Do not use a broad prefix like ``GET /api``: that would also accept
+    ``GET /api/v1/...`` routes and make a forged/modified call ledger look safe.
+    """
+    if item in _REQUIRED_DEPLOYED_CALLS or item in _OPTIONAL_DEPLOYED_EXACT_CALLS:
+        return True
+    return any(item.startswith(prefix) for prefix in _OPTIONAL_DEPLOYED_CALL_PREFIXES)
+
+
 def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
     calls = deployed.get("calls")
     if not isinstance(calls, list) or not calls:
@@ -149,10 +158,7 @@ def _deployed_contract_ok(deployed: Mapping[str, object]) -> bool:
         return False
     rows = set(calls)
     required_present = _REQUIRED_DEPLOYED_CALLS.issubset(rows)
-    allowed_only = all(
-        any(item.startswith(prefix) for prefix in _ALLOWED_DEPLOYED_CALL_PREFIXES)
-        for item in calls
-    )
+    allowed_only = all(_deployed_call_allowed(item) for item in calls)
     return bool(
         deployed.get("gate") == _DEPLOYED_GATE
         and required_present
