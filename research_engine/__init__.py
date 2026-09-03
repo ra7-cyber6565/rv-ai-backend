@@ -19,10 +19,6 @@ Package layout:
     reasoning_router_integrated.py
                               provider fallback + latest pass accounting facade
     source_prompt_guard.py    untrusted source-data / prompt-injection boundary
-    source_independence_guard.py
-                              work identity vs publisher/origin concentration split
-    advanced_discovery_integrated.py
-                              additive #40/#103 advanced-discovery facade
     critic.py                 Critic
     hypothesis.py             HypothesisEngine (Spec 10)
     verification.py           VerificationEngine (Spec 11)
@@ -49,34 +45,12 @@ Retrieved/uploaded source text is untrusted data. The source prompt guard wraps
 EvidencePack rendering in a strict evidence-only boundary, quotes every source
 line, neutralizes instruction-like source text without deleting research
 content, strips hidden bidi/control characters, and bounds hostile metadata.
-
-Evidence independence and source-origin concentration are separate concepts.
-The source-independence guard counts same-work mirrors/DOIs/patent families once
-without collapsing two genuinely different studies merely because they share a
-journal/repository domain. Ranking concentration keeps its separate legacy origin
-cap, so this honesty fix does not let one provider flood the source list.
-
-Advanced-discovery extensions preserve the base scientific-discovery engine and
-add separately-audited #40 triple independent numeric implementation and #103
-autonomous literature debate records. They perform no network/model call at
-package import and fail closed without promoting the base report.
 """
 from __future__ import annotations
 
-# Install before planner/relevance/connectors bind domain.detect. This module is
-# pure Python and has no heavy dependency/network side effect.
 from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
-
-# Focus guard sc-guard ke BAAD lagti hai (isliye ye sabse bahar ki parat hai):
-# ek-do ittefaqiya shabd se poora multi-domain sawaal kisi ek strict field ka
-# nahi ban jaata. Naapa gaya: 1617-token sawaal "economics" (strict) ban gaya
-# tha aur 15 me se 13 sahi sources hard-reject ho gaye the.
 from . import domain_focus_guard as _domain_focus_guard  # noqa: F401
 
-# Preserve Claude's Gemini implementation as the primary, but let every normal
-# import (including orchestrator's direct module import) see the resilient
-# subclass. reasoning_router captures the original class before this assignment;
-# the integrated facade then adds the latest pass-log/accounting compatibility.
 from . import gemini_reasoning as _gemini_reasoning
 from .reasoning_router_integrated import ResilientReasoning as _ResilientReasoning
 _gemini_reasoning.GeminiReasoning = _ResilientReasoning
@@ -92,100 +66,123 @@ from .models import (
     label_to_claim_type,
 )
 
-# Split "same work?" from "same source origin?" before evidence/debate modules
-# are imported. This is deterministic/₹0 and preserves the ranking origin cap.
-from .source_independence_guard import install as _install_source_independence_guard
-_install_source_independence_guard()
-
-# Every normal package import receives the same source-data trust boundary.
-# Installation is deterministic and performs no network/model call.
 from .source_prompt_guard import install as _install_source_prompt_guard
 _install_source_prompt_guard()
 
-# Preserve the current base advanced-discovery implementation and add #40/#103
-# through an additive subclass. Orchestrator imports the class directly from
-# ``advanced_discovery``; patching that module export here keeps the real
-# production path on the integrated facade without duplicating the base engine.
-from . import advanced_discovery as _advanced_discovery
-from .advanced_discovery_integrated import (
-    IntegratedScientificDiscoveryEngine as _IntegratedScientificDiscoveryEngine,
-)
-_advanced_discovery.ScientificDiscoveryEngine = _IntegratedScientificDiscoveryEngine
-
-# Prompt-level structured coverage is useful but not enforcement. Install a
-# final serialization gate so a long explicit outline cannot leave the engine
-# as COMPLETE when one of the user's high-level requested parts is absent.
-# This is delivery-only: it never upgrades evidence/truth/confidence.
 from .result_coverage_gate import install as _install_result_coverage_gate
 _install_result_coverage_gate()
 
 from .depth import DepthConfig, get_depth_config, quota_note
 
-# Relevant banned/censored/controversial books are a research lane, not a truth
-# shortcut. The deterministic wrapper only adds bounded legal-access search
-# directions and synthesis rules; it never marks a source verified/relevant.
 from .controversial_texts import install as _install_controversial_text_lane
 _install_controversial_text_lane()
 
-# Illegal/high-risk subject matter is not blanket-hidden. Keep contextual,
-# historical, legal, defensive and harm-reduction research visible, but seal a
-# deterministic prompt/output boundary against operational wrongdoing or serious
-# harm. This does not weaken authentication, network safety, source trust or
-# evidence gates and performs no network/model call at install time.
 from .safety_information_boundary import install as _install_safety_information_boundary
 _install_safety_information_boundary()
 
-# Stress-test hardening: long multi-domain questions get facet-wise evidence
-# axes, distinctive proposition relevance, same-proposition contradiction
-# checks, substantive section coverage, conservative hypothesis confidence and
-# a stricter synthesis contract. This layer is deterministic and can only
-# reject/downgrade/require more evidence; it never upgrades a truth claim.
 from .advanced_research_quality import install as _install_advanced_research_quality
 _install_advanced_research_quality()
 
-# Keep the legacy outline-delivery API stable while preserving PR #51's stricter
-# semantic coverage as a separate evidence-first production gate. This avoids
-# false 0/N coverage on fully surfaced answers without letting heading-only
-# stress-test answers pass as substantively complete.
 from .advanced_semantic_coverage import install as _install_advanced_semantic_coverage
 _install_advanced_semantic_coverage()
 
-# Final stress-test closure: classify specialist evidence lanes from each source
-# itself (not from unrelated active facets), expose missing required source
-# families, fail COMPLETE closed when evidence-first specialist lanes are empty,
-# and require sensitivity/scenario analysis for explicit optimization/simulation
-# models. This layer only tightens completion; it never upgrades evidence.
 from .final_stress_hardening import install as _install_final_stress_hardening
 _install_final_stress_hardening()
 
-# A giant multi-profile question must not spend the bounded specialist-query
-# budget only on the first profiles in the taxonomy. Rotate explicit source
-# families across rounds and scope archive/book leads to the profile that asked
-# for them. This is search planning only; scheduled queries never count as
-# evidence until normal relevance/verification gates accept retrieved sources.
 from .source_family_query_fairness import install as _install_source_family_query_fairness
 _install_source_family_query_fairness()
 
-# A searched/retrieved source is still only a candidate. Required specialist
-# lanes count as covered only when their candidates pass relevance, access-depth
-# and source-role qualification (plus proposition support for empirical lanes).
-# Weak candidates remain visible but can only downgrade/block COMPLETE.
 from .specialist_lane_quality import install as _install_specialist_lane_quality
 _install_specialist_lane_quality()
 
-# Hypothesis prose can sound mechanistic even when the cited papers only support
-# a neighbouring behavioural claim. Audit mechanism/reasoning step-by-step
-# against the existing same-source relevance+support verifier; unsupported steps
-# must be disclosed as INFERENCE/NO-SOURCE and can only lower confidence.
 from .hypothesis_evidence_lineage import install as _install_hypothesis_evidence_lineage
 _install_hypothesis_evidence_lineage()
 
-# Explicit causal/second-order chains are now a deterministic delivery contract,
-# not only a synthesis instruction. Every requested arrow must be represented and
-# epistemically labelled; strong evidence labels additionally need a same-edge
-# citation. Missing/ambiguous links can only downgrade COMPLETE, never upgrade it.
 from .causal_chain_quality import install as _install_causal_chain_quality
 _install_causal_chain_quality()
+
+# #11/#12 execute only explicit structured SCM/counterfactual contracts. The
+# wiring never infers a causal graph from prose and never treats a model result
+# as empirical proof of causation or a measured real-world intervention.
+from .causal_counterfactual_wiring import install as _install_causal_counterfactual_wiring
+_install_causal_counterfactual_wiring()
+
+# #101/#102 require an explicit structural mechanism contract with observables,
+# falsifiers and evidence references before bounded simulation can run. The
+# resulting trajectories/interventions are model consequences only and never
+# self-upgrade into proof that a real causal mechanism exists.
+from .mechanistic_reasoning_wiring import install as _install_mechanistic_reasoning_wiring
+_install_mechanistic_reasoning_wiring()
+
+# OCR/translation capture integrity is separate from A-E and can only
+# downgrade/block accepted support.
+from .capture_integrity_wiring import install as _install_capture_integrity_wiring
+_install_capture_integrity_wiring()
+
+# The integrated VerificationEngine uses a second A-E facade. Bind the same
+# capture-integrity contract there as explicit F_capture_integrity.
+from .evidence_capture_integrity import install as _install_evidence_capture_integrity
+_install_evidence_capture_integrity()
+
+from .runtime_capability_wiring import install as _install_runtime_capability_wiring
+_install_runtime_capability_wiring()
+
+# #103 is an audit-only literature debate over explicit structured
+# contradictions. It never invents an opposing view from prose and can only
+# expose unresolved/insufficient evidence; it never upgrades result status.
+from .literature_debate_wiring import install as _install_literature_debate_wiring
+_install_literature_debate_wiring()
+
+# #62-#65 discovery frontier runs only over explicit structured gaps,
+# contradictions, unexpected observations and evidence-backed mechanisms. It
+# creates research candidates, never facts, and cannot upgrade result status.
+from .discovery_frontier_wiring import install as _install_discovery_frontier_wiring
+_install_discovery_frontier_wiring()
+
+# #67 Neural+Symbolic audits only caller-supplied model outputs plus explicit
+# propositional contracts. It never turns prose into logic, never treats model
+# confidence as proof, and never upgrades truth/status.
+from .neural_symbolic_wiring import install as _install_neural_symbolic_wiring
+_install_neural_symbolic_wiring()
+
+# #68 World Model executes only explicit bounded software dynamics supplied in
+# a structured contract. Its rollouts/counterfactuals remain model predictions;
+# they do not claim reality or close sim-to-reality by themselves.
+from .world_model_wiring import install as _install_world_model_wiring
+_install_world_model_wiring()
+
+# #70 Technology Readiness evaluates explicit evidence receipts only. Feature
+# names, prose and model confidence cannot manufacture maturity, certification,
+# hardware observation or operational evidence.
+from .technology_readiness_wiring import install as _install_technology_readiness_wiring
+_install_technology_readiness_wiring()
+
+# #71 Manufacturing Reality evaluates only explicit process requirements and
+# evidence receipts. It may block a manufacturing-relevant COMPLETE result, but
+# cannot infer factory measurements, claim hardware authenticity/certification,
+# or turn a software audit into real-world manufacturability proof.
+from .manufacturing_reality_wiring import install as _install_manufacturing_reality_wiring
+_install_manufacturing_reality_wiring()
+
+# #104 Historical Context uses only explicit structured chronology transported
+# through the existing result/coverage path. It preserves uncertain ranges,
+# blocks hindsight/anachronism/impossible causal order, and never infers dates
+# or historical actor knowledge from prose.
+from .historical_context_wiring import install as _install_historical_context_wiring
+_install_historical_context_wiring()
+
+# #85/#95/#110/#119/#120 are explicit structured epistemic-stress contracts.
+# The wrapper never infers hidden assumptions, synthetic lineage, conspiracy
+# labels or falsifiers from prose; it only audits caller-supplied structures and
+# can never upgrade result status/truth.
+from .epistemic_stress_wiring import install as _install_epistemic_stress_wiring
+_install_epistemic_stress_wiring()
+
+# #100 Economic Reality executes only explicit structured cash-flow/scenario
+# assumptions. It never guesses demand/pricing/costs from prose and never turns
+# positive model economics into proof of profitability or real-world viability.
+from .economic_reality_wiring import install as _install_economic_reality_wiring
+_install_economic_reality_wiring()
 
 __all__ = [
     "Claim", "ClaimType", "EvidencePack", "Passage", "ResearchResult",
