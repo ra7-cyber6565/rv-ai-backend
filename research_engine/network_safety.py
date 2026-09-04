@@ -121,9 +121,6 @@ def validate_public_http_url(
     if allowed and host not in allowed:
         raise UnsafeURL("connector host is not allowlisted")
 
-    # Connector endpoints are hard-coded and exact-host allowlisted.  Untrusted
-    # full-text hostnames must resolve now, and every answer must be globally
-    # routable.  One private answer is enough to fail closed.
     if resolve_dns and literal_state is None and not allowed:
         try:
             addresses = _resolved_addresses(host)
@@ -159,12 +156,7 @@ def safe_get_with_redirects(
     resolve_dns: bool = True,
     max_redirects: int = MAX_REDIRECTS,
 ) -> Tuple[object, str]:
-    """GET with manual redirect validation.
-
-    ``requests`` normally follows redirects before callers can inspect the next
-    host.  Manual following guarantees that every hop passes the same public-IP
-    and allowlist policy as the original URL.
-    """
+    """GET with manual redirect validation."""
     current = str(url or "")
     first_params = params
     for hop in range(max(0, int(max_redirects)) + 1):
@@ -239,7 +231,6 @@ def read_bounded_response(response, max_bytes: int) -> bytes:
         _close(response)
         raise
     data = b"".join(chunks)
-    # requests.Response.json()/content continue to work after bounded streaming.
     try:
         response._content = data
         response._content_consumed = True
@@ -256,12 +247,16 @@ def normalized_content_type(response) -> str:
 def require_content_type(response, expected: str) -> None:
     """Reject a declared type that is incompatible with the expected artifact."""
     actual = normalized_content_type(response)
-    if not actual:  # Some public archives omit it; magic/content checks still run.
+    if not actual:
         return
     groups = {
         "discovery": (
             "application/json", "application/ld+json", "application/xml",
             "application/atom+xml", "text/xml", "text/plain",
+            # Trusted code-owned Archive.org caption paths are still bounded by
+            # the exact discovery host allowlist + byte cap.  Accepting caption
+            # MIME here does NOT allow arbitrary URLs or media downloads.
+            "text/vtt", "text/srt", "application/srt", "application/x-subrip",
         ),
         "json": ("application/json", "application/ld+json", "text/json"),
         "pdf": (
