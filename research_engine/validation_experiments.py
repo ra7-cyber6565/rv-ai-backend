@@ -20,15 +20,24 @@ def normalize_variables(h: Mapping[str, Any]) -> List[Dict[str, Any]]:
     for i, item in enumerate(as_list(raw), 1):
         if isinstance(item, Mapping):
             name = text(first(item, "name", "variable", "label"), UNKNOWN)
+            symbol = text(item.get("symbol"))
+            definition = text(first(item, "definition", "description"), name)
+            unit = text(item.get("unit"))
+            interpretation = text(item.get("interpretation"))
+            symbol_metadata_complete = symbol == UNKNOWN or all(
+                value != UNKNOWN for value in (definition, unit, interpretation)
+            )
             rows.append({
                 "name": name,
-                "symbol": text(item.get("symbol")),
+                "symbol": symbol,
                 "role": text(first(item, "role", "type")),
-                "unit": text(item.get("unit")),
-                "definition": text(first(item, "definition", "description"), name),
-                "interpretation": text(item.get("interpretation")),
+                "unit": unit,
+                "definition": definition,
+                "interpretation": interpretation,
                 "measurement_method": text(first(item, "measurement_method", "measurement")),
-                "status": "EXPLICIT" if name != UNKNOWN else "PARTIAL",
+                "applicability": text(first(item, "applicability", "applies"), "APPLICABLE"),
+                "symbol_metadata_complete": symbol_metadata_complete,
+                "status": "EXPLICIT" if name != UNKNOWN and symbol_metadata_complete else "PARTIAL",
             })
         elif meaningful(item):
             name = text(item)
@@ -36,12 +45,14 @@ def normalize_variables(h: Mapping[str, Any]) -> List[Dict[str, Any]]:
                 "name": name, "symbol": UNKNOWN, "role": UNKNOWN, "unit": UNKNOWN,
                 "definition": name, "interpretation": UNKNOWN,
                 "measurement_method": text(prediction.get("measurement_method")),
+                "applicability": "APPLICABLE", "symbol_metadata_complete": True,
                 "status": "PARTIAL",
             })
     return rows or [{
         "name": UNKNOWN, "symbol": UNKNOWN, "role": UNKNOWN, "unit": UNKNOWN,
         "definition": "No measurable variable explicitly supplied.",
-        "interpretation": UNKNOWN, "measurement_method": UNKNOWN, "status": "MISSING",
+        "interpretation": UNKNOWN, "measurement_method": UNKNOWN,
+        "applicability": UNKNOWN, "symbol_metadata_complete": True, "status": "MISSING",
     }]
 
 
@@ -59,11 +70,10 @@ def _experiment_field_missing(row: Mapping[str, Any], field: str) -> bool:
 def normalize_experiment(h: Mapping[str, Any], index: int) -> Dict[str, Any]:
     prediction = h.get("prediction") if isinstance(h.get("prediction"), Mapping) else {}
     experiment = h.get("experiment") if isinstance(h.get("experiment"), Mapping) else {}
+    raw_experiment_text = h.get("experiment") if isinstance(h.get("experiment"), str) else None
     state = test_state(h)
     upstream_status = clean_status(h.get("validation_status") or h.get("hypothesis_status") or h.get("status"))
 
-    # Upstream PASS/FAIL is retained as a claim, never adopted as AI-2's verdict.
-    # Only the receipt evaluator may later promote INCONCLUSIVE to PASS/FAIL.
     row: Dict[str, Any] = {
         "hypothesis_id": text(first(h, "id", "hypothesis_id"), f"H{index}"),
         "test_state": state,
@@ -74,7 +84,7 @@ def normalize_experiment(h: Mapping[str, Any], index: int) -> Dict[str, Any]:
         "Dataset/sample": text(first(experiment, "dataset_or_sample", "dataset", "sample",
                                       fallback=first(h, "dataset", "sample"))),
         "Experimental setup": text(first(experiment, "experimental_setup", "setup",
-                                          fallback=first(h, "how_to_test"))),
+                                          fallback=first(h, "how_to_test", fallback=raw_experiment_text))),
         "Prediction": text(first(prediction, "expected_outcome", "prediction",
                                   fallback=h.get("prediction") if isinstance(h.get("prediction"), str) else None)),
         "Null hypothesis": text(first(experiment, "null_hypothesis", "null", fallback=h.get("null_hypothesis"))),
@@ -116,7 +126,11 @@ def normalize_experiment(h: Mapping[str, Any], index: int) -> Dict[str, Any]:
         "Falsification condition", "Replication method",
     )
     row["missing_required_fields"] = [field for field in required if _experiment_field_missing(row, field)]
-    row["contract_complete"] = not row["missing_required_fields"]
+    row["variable_symbol_contract_complete"] = all(
+        not isinstance(v, Mapping) or v.get("symbol_metadata_complete") is not False
+        for v in row["Variables"]
+    )
+    row["contract_complete"] = not row["missing_required_fields"] and row["variable_symbol_contract_complete"]
     if row["test_state"] == TEST_PROPOSED and row["contract_complete"]:
         row["test_state"] = TEST_POSSIBLE
     return row
@@ -136,9 +150,12 @@ def extract_math_models(hypotheses: Sequence[Mapping[str, Any]], result: Mapping
     for i, item in enumerate(candidates, 1):
         if not isinstance(item, Mapping):
             models.append({
-                "model_id": f"M{i}", "expression": text(item), "objective": UNKNOWN,
-                "constraints": [], "parameters": {}, "symbol_metadata": [],
+                "model_id": f"M{i}", "model_type": UNKNOWN, "expression": text(item),
+                "objective": UNKNOWN, "constraints": UNKNOWN, "assumptions": [UNKNOWN],
+                "parameters": {}, "symbol_metadata": [], "estimation_method": UNKNOWN,
+                "identifiability": UNKNOWN, "data_linked_prediction": UNKNOWN,
                 "symbol_contract_complete": False, "model_contract_complete": False,
+                "requirements_status": {},
                 "symbol_rule": "Every symbol requires definition, unit and interpretation; none are inferred from equation text.",
                 "unknown_parameter_policy": "Unmeasured numeric parameters are TO BE ESTIMATED.",
                 "status": INCONCLUSIVE,
@@ -179,14 +196,42 @@ def extract_math_models(hypotheses: Sequence[Mapping[str, Any]], result: Mapping
             for s in symbols
         )
         expression = text(first(item, "equation", "expression", "model", "objective_function", "mathematical_model"))
-        objective = text(first(item, "objective", "purpose"))
-        model_complete = symbol_complete and expression != UNKNOWN and objective != UNKNOWN
+        objective = text(first(item, "objective", "purpose", "target"))
+        model_type = text(first(item, "model_type", "type", "family"))
+        assumptions = as_list(first(item, "assumptions", "model_assumptions")) or [UNKNOWN]
+        estimation_method = text(first(item, "estimation_method", "estimator", "parameter_estimation"))
+        identifiability = text(first(item, "identifiability", "identification_strategy", "identification"))
+        data_linked_prediction = text(first(item, "data_linked_prediction", "observable_prediction", "testable_prediction", "prediction"))
+        constraint_keys = ("constraints", "constraint")
+        constraints_declared = any(key in item for key in constraint_keys)
+        if "constraints" in item:
+            constraints: Any = deepcopy(item.get("constraints"))
+        elif "constraint" in item:
+            constraints = deepcopy(item.get("constraint"))
+        else:
+            constraints = UNKNOWN
+
+        requirements_status = {
+            "model_type_explicit": model_type != UNKNOWN,
+            "expression_explicit": expression != UNKNOWN,
+            "objective_explicit": objective != UNKNOWN,
+            "constraints_explicit_or_declared_none": constraints_declared,
+            "assumptions_explicit": any(value != UNKNOWN for value in assumptions),
+            "symbols_defined_with_units_and_interpretation": symbol_complete,
+            "estimation_method_explicit_or_not_applicable": estimation_method != UNKNOWN,
+            "identifiability_explicit_or_not_applicable": identifiability != UNKNOWN,
+            "data_linked_prediction_explicit": data_linked_prediction != UNKNOWN,
+        }
+        model_complete = all(requirements_status.values())
         models.append({
-            "model_id": f"M{i}", "expression": expression, "objective": objective,
-            "constraints": deepcopy(first(item, "constraints", fallback=[])) if meaningful(first(item, "constraints")) else [],
+            "model_id": f"M{i}", "model_type": model_type, "expression": expression,
+            "objective": objective, "constraints": constraints, "assumptions": assumptions,
             "parameters": deepcopy(raw), "symbol_metadata": symbols,
+            "estimation_method": estimation_method, "identifiability": identifiability,
+            "data_linked_prediction": data_linked_prediction,
             "symbol_contract_complete": symbol_complete,
             "model_contract_complete": model_complete,
+            "requirements_status": requirements_status,
             "symbol_rule": "Every symbol requires definition, unit and interpretation; none are inferred from equation text.",
             "unknown_parameter_policy": "Unmeasured numeric parameters are TO BE ESTIMATED; no threshold is invented.",
             "status": TEST_POSSIBLE if model_complete else INCONCLUSIVE,
