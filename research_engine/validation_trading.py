@@ -4,6 +4,7 @@ from copy import deepcopy
 from typing import Any, Dict, List, Mapping, Sequence
 from .validation_contracts import NOT_TESTED, TRADING_FIELDS, UNKNOWN, first, meaningful, trade_contract
 from .validation_statistics import analyze_trading_receipt, find_trading_receipt
+from .validation_trading_risk import simulate_risk_of_ruin
 
 
 def trading_standard(hypotheses: Sequence[Mapping[str, Any]], result: Mapping[str, Any]) -> Dict[str, Any]:
@@ -46,7 +47,7 @@ def trading_standard(hypotheses: Sequence[Mapping[str, Any]], result: Mapping[st
                       "maximum_drawdown", "losing_streak_distribution", "MAE", "MFE"):
             if field in metrics:
                 values[field] = deepcopy(metrics[field])
-        values["risk_of_ruin"] = analysis.get("risk_of_ruin", NOT_TESTED)
+        values["risk_of_ruin"] = simulate_risk_of_ruin(receipt, receipt.get("trade_returns", [])) if isinstance(receipt, Mapping) else NOT_TESTED
         values["out_of_sample"] = analysis.get("out_of_sample", NOT_TESTED)
         values["walk_forward"] = analysis.get("walk_forward", NOT_TESTED)
         values["monte_carlo"] = analysis.get("monte_carlo", NOT_TESTED)
@@ -65,5 +66,6 @@ def trading_standard(hypotheses: Sequence[Mapping[str, Any]], result: Mapping[st
     values["validation_rule"] = "Targets, narratives and claimed summaries never populate performance metrics. Only numeric per-trade observations with explicit provenance are calculated."
     values["decision_rule"] = "PASS/FAIL requires a supplied numeric metric/operator/threshold rule; no profitability threshold is invented."
     values["friction_rule"] = "Net evaluation must use per-trade returns after feed-appropriate spread, commission, slippage, latency and liquidity assumptions; provenance must identify the tested dataset/run."
+    values["risk_of_ruin_rule"] = "Risk of ruin is calculated only when bankroll, ruin boundary, horizon, simulations, seed, return mode and dependence model are explicitly supplied."
     values["upstream_trade_contract"] = upstream
     return values
