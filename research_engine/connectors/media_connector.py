@@ -1,12 +1,14 @@
 """MediaArchiveConnector — keyless archive media discovery + public captions.
 
-This lane uses archive.org's own public APIs.  It never downloads audio/video
+This lane uses archive.org's own public APIs. It never downloads audio/video
 media, never bypasses access control and never treats a search description as a
-transcript.  When an item exposes a public .vtt/.srt file in Archive metadata,
-the connector may read that *text caption file* completely, parse timestamps,
-and pass only a bounded relevant excerpt downstream while retaining an honest
-full-transcript read marker.  Otherwise it falls back to the uploader-written
-description with SNIPPET ONLY depth.
+transcript. The low-level connector defaults to discovery-only behavior so a
+caller can audit exactly one search request. The production MediaConnector
+facade opts into public-caption deep reading: when an item exposes a public
+.vtt/.srt file in Archive metadata, that text caption file may be read fully,
+timestamp-parsed, and reduced to a bounded relevant excerpt while retaining an
+honest full-transcript read marker. Otherwise the result falls back to the
+uploader-written description with SNIPPET ONLY depth.
 
 Critical truth boundaries:
 - media discovered != media watched/listened
@@ -111,11 +113,19 @@ def _best_chunk(chunks: List[Dict], query: str) -> Dict:
 
 
 class MediaArchiveConnector(BaseConnector):
-    """Archive.org media search; upgrades to transcript only with public captions."""
+    """Archive.org media search, optionally upgraded with public captions.
+
+    The default is deliberately discovery-only. Production wiring opts in via
+    MediaConnector below. This keeps the low-level search contract auditable
+    while still allowing the real runtime to deep-read public caption text.
+    """
 
     name = "archive_media"
     source_type = SourceType.TRANSCRIPT
     timeout: Tuple[int, int] = SLOW_TIMEOUT
+
+    def __init__(self, *, read_public_captions: bool = False):
+        self.read_public_captions = bool(read_public_captions)
 
     def _public_caption(self, identifier: str, title: str, query: str) -> Dict:
         """Read a public VTT/SRT text file from Archive metadata, fail-closed."""
@@ -211,7 +221,9 @@ class MediaArchiveConnector(BaseConnector):
             if isinstance(subject, list):
                 subject = ", ".join(str(s) for s in subject[:5])
 
-            caption = self._public_caption(identifier, title, clean)
+            caption = ({"ok": False, "reason": "caption deep-read disabled"}
+                       if not self.read_public_captions
+                       else self._public_caption(identifier, title, clean))
             if caption.get("ok"):
                 caption_reads += 1
                 out.append(SourceRecord(
@@ -238,7 +250,8 @@ class MediaArchiveConnector(BaseConnector):
                 ))
                 continue
 
-            caption_misses += 1
+            if self.read_public_captions:
+                caption_misses += 1
             description = item.get("description")
             if isinstance(description, list):
                 description = " ".join(str(part) for part in description)
@@ -264,26 +277,37 @@ class MediaArchiveConnector(BaseConnector):
                 read_note=NOT_READ_NOTE,
             ))
 
+        caption_note = (
+            f"{caption_reads} public caption text poori process hui, "
+            f"{caption_misses} item par public caption nahi/usable nahi thi"
+            if self.read_public_captions
+            else "public-caption deep-read is low-level call me disabled tha"
+        )
+        filter_note = (
+            f"{dropped_kind} non-media, {dropped_thin} bina usable description "
+            f"(minimum {MIN_DESCRIPTION_CHARS} chars)"
+        )
         if not out:
             if dropped_kind or dropped_thin or caption_misses:
                 self.last_reason = "filtered"
             self.last_note = (
-                f"0 media source bheje — {dropped_kind} non-media, {dropped_thin} "
-                f"bina usable description, {caption_misses} item par public caption "
-                f"nahi/usable nahi thi")
+                f"0 media source bheje — {filter_note}; {caption_note}; "
+                "media files kabhi download/dekhi/suni nahi gayi")
         else:
             self.last_note = (
-                f"{len(out)} media source mile: {caption_reads} public caption text "
-                f"poori process hui, {caption_misses} item caption ke bina description-only "
-                f"rahe; media files kabhi download/dekhi/suni nahi gayi")
+                f"{len(out)} media source mile — {filter_note}; {caption_note}; "
+                "caption na ho to description-only; media files kabhi "
+                "download/dekhi/suni nahi gayi")
         return out
 
 
 class MediaConnector:
-    """Media lane facade."""
+    """Production media lane facade with safe public-caption deep reading on."""
 
     def __init__(self):
-        self.connectors: List[BaseConnector] = [MediaArchiveConnector()]
+        self.connectors: List[BaseConnector] = [
+            MediaArchiveConnector(read_public_captions=True)
+        ]
 
     def by_name(self, name: str) -> Optional[BaseConnector]:
         return next((c for c in self.connectors if c.name == name), None)
