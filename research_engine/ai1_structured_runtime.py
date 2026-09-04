@@ -1,10 +1,9 @@
 """Production wiring for AI-1 structured and specialist source families.
 
 This adapter stays additive: the core DeepResearchEngine and all ordinary
-SourceDiscovery lanes remain intact. AI-1 adds relevance-gated public code,
-dissertation and official-archive lanes, performs bounded dataset/code
-inspection, and records critical full-text anatomy before contradiction analysis
-and model reasoning.
+SourceDiscovery lanes remain intact. AI-1 adds only relevance-gated public code,
+dissertation and official-archive lanes, then performs bounded dataset/code
+inspection before contradiction analysis and model reasoning.
 
 Nothing here changes AI-2 validation semantics or promotes evidence quality.
 """
@@ -71,6 +70,7 @@ register_structured_read_level()
 
 
 def code_lane_relevant(plan: Dict, query: str) -> bool:
+    """Whether public implementation evidence is relevant; routing != evidence."""
     domain = str((plan or {}).get("domain") or "").strip().casefold()
     if domain in _TECHNICAL_DOMAINS:
         return True
@@ -86,6 +86,7 @@ def code_lane_relevant(plan: Dict, query: str) -> bool:
 
 
 def thesis_lane_relevant(plan: Dict, query: str) -> bool:
+    """Use the dissertation lane only for explicit or research-heavy asks."""
     low = " ".join(str(query or "").casefold().split())
     if any(cue in low for cue in _THESIS_QUERY_CUES):
         return True
@@ -94,6 +95,7 @@ def thesis_lane_relevant(plan: Dict, query: str) -> bool:
 
 
 def archive_lane_relevant(plan: Dict, query: str) -> bool:
+    """Official archive API lane is only for actual archival/declassified intent."""
     if list((plan or {}).get("official_archive_queries") or []):
         return True
     low = " ".join(str(query or "").casefold().split())
@@ -171,53 +173,80 @@ class AI1StructuredSourceInspector(StructuredSourceInspector):
         return report
 
 
+class _CapturingProcessor:
+    """Proxy that exposes processed text to AI-1 without retaining it in results."""
+
+    def __init__(self, delegate, owner):
+        self._delegate = delegate
+        self._owner = owner
+
+    def process(self, *args, **kwargs):
+        result = self._delegate.process(*args, **kwargs)
+        if isinstance(result, dict) and result.get("ok"):
+            self._owner._last_processed_text = str(result.get("text") or "")
+        else:
+            self._owner._last_processed_text = ""
+        return result
+
+
 class StructuredAwareContentFetcher(_BaseStructuredAwareContentFetcher):
-    """Full-text reader + anatomy receipt + bounded structured reader."""
+    """Production reader + bounded inspectors + critical full-text anatomy."""
 
     def __init__(self, allow_network=None):
         super().__init__(allow_network=allow_network)
         self.structured = AI1StructuredSourceInspector(
             allow_network=self.allow_network)
+        self._last_processed_text = ""
 
-    @classmethod
-    def signals_from_text(cls, text: str) -> Dict:
-        signals = dict(super().signals_from_text(text))
-        signals["critical_source_anatomy"] = extract_critical_source_anatomy(text)
-        return signals
+    def _processor(self):
+        # ContentFetcher.read_source() calls this polymorphically. The proxy
+        # captures only the in-memory processed text long enough to build the
+        # deterministic anatomy receipt; raw text is not persisted in the
+        # receipt or source metadata.
+        return _CapturingProcessor(super()._processor(), self)
 
-    def enrich(self, pack, max_sources: int = 3,
-               budget_chars: int = 2400) -> Dict:
+    def read_source(self, source, question: str, budget_chars: int = 2400) -> Dict:
+        self._last_processed_text = ""
+        entry = super().read_source(source, question, budget_chars)
+        if isinstance(entry, dict) and entry.get("ok") and self._last_processed_text:
+            entry["critical_source_anatomy"] = extract_critical_source_anatomy(
+                self._last_processed_text)
+        # Drop raw capture immediately after derivation so no whole document is
+        # retained by this adapter beyond the ordinary ContentFetcher lifecycle.
+        self._last_processed_text = ""
+        return entry
+
+    def enrich(self, pack, max_sources: int = 3, budget_chars: int = 2400) -> Dict:
         report = super().enrich(
             pack, max_sources=max_sources, budget_chars=budget_chars)
-        anatomy_count = 0
-        complete_count = 0
-        for entry in list(report.get("entries") or []):
-            if not isinstance(entry, dict) or not entry.get("ok"):
+        anatomy_by_source = {
+            str(entry.get("source_id") or ""): entry.get("critical_source_anatomy")
+            for entry in list(report.get("entries") or [])
+            if isinstance(entry, dict) and isinstance(entry.get("critical_source_anatomy"), dict)
+        }
+        attached = 0
+        for source in list(getattr(pack, "sources", []) or []):
+            anatomy = anatomy_by_source.get(str(getattr(source, "source_id", "") or ""))
+            if not anatomy:
                 continue
-            anatomy = ((entry.get("signals") or {}).get("critical_source_anatomy")
-                       if isinstance(entry.get("signals"), dict) else None)
-            if not isinstance(anatomy, dict) or not anatomy.get("ran"):
-                continue
-            source = pack.by_id(str(entry.get("source_id") or ""))
-            if source is None:
-                continue
-            verdict = dict(getattr(source, "domain_verdict", {}) or {})
+            verdict = getattr(source, "domain_verdict", None)
+            verdict = dict(verdict) if isinstance(verdict, dict) else {}
             verdict["critical_source_anatomy"] = anatomy
             source.domain_verdict = verdict
-            anatomy_count += 1
-            complete_count += int(anatomy.get("complete") is True)
+            attached += 1
         report["critical_source_anatomy"] = {
-            "sources_analyzed": anatomy_count,
-            "complete_anatomy": complete_count,
+            "attached": attached,
+            "raw_full_text_retained": False,
             "rule": (
-                "full-text access does not imply methods/sample/assumptions/findings/"
-                "limitations/replication were all exposed; missing fields stay UNKNOWN"
+                "Anatomy records explicit headings/cues only; missing cues remain UNKNOWN "
+                "and anatomy completeness is not study validity or claim truth."
             ),
         }
         return report
 
 
 def configure_ai1_structured_runtime(engine):
+    """Install the AI-1 source-family lanes on one DeepResearchEngine instance."""
     register_structured_read_level()
     discovery = getattr(engine, "discovery", None)
     if not isinstance(discovery, AI1StructuredSourceDiscovery):
@@ -231,8 +260,12 @@ def configure_ai1_structured_runtime(engine):
 
 
 __all__ = [
-    "AI1StructuredSourceDiscovery", "AI1StructuredSourceInspector",
-    "StructuredAwareContentFetcher", "archive_lane_relevant", "code_lane_relevant",
-    "configure_ai1_structured_runtime", "register_structured_read_level",
+    "AI1StructuredSourceDiscovery",
+    "AI1StructuredSourceInspector",
+    "StructuredAwareContentFetcher",
+    "archive_lane_relevant",
+    "code_lane_relevant",
+    "configure_ai1_structured_runtime",
+    "register_structured_read_level",
     "thesis_lane_relevant",
 ]
