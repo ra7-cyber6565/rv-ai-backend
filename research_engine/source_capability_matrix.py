@@ -6,7 +6,7 @@ split into discovery, actual reading/inspection, provenance/locator proof and a
 hard limitation. Runtime evidence then shows which implemented paths were
 actually exercised in a given research run.
 
-v1.2 hardens the runtime receipt layer itself:
+Receipt hardening revision 2 strengthens the runtime receipt layer itself:
 - every declared family must have an explicit runtime classifier;
 - generic Archive.org media must not masquerade as an official archive;
 - a generic lecture/transcript must not masquerade as a podcast/user-audio run;
@@ -36,20 +36,15 @@ _IMPLEMENTATION_STATUSES = {
 }
 _DEEP_LEVELS = {"sections", "claims", "full_text"}
 
-_OFFICIAL_ARCHIVE_HOSTS = {
+_OFFICIAL_ARCHIVE_BASE_HOSTS = {
     "archives.gov",
-    "catalog.archives.gov",
     "cia.gov",
-    "www.cia.gov",
     "fbi.gov",
-    "www.fbi.gov",
     "govinfo.gov",
-    "www.govinfo.gov",
     "nsa.gov",
-    "www.nsa.gov",
 }
 _PODCAST_CUES = (
-    "podcast", "episode", "rss audio", "audio episode", "podcast transcript",
+    "podcast", "rss audio", "audio episode", "podcast transcript",
 )
 _LOCAL_STT_CUES = (
     "auto-transcrib", "machine transcription", "speech-to-text", "faster-whisper",
@@ -254,6 +249,12 @@ def _host(source: Mapping) -> str:
         return ""
 
 
+def _host_matches(host: str, base: str) -> bool:
+    clean = str(host or "").rstrip(".").casefold()
+    root = str(base or "").rstrip(".").casefold()
+    return bool(clean and root and (clean == root or clean.endswith("." + root)))
+
+
 def _text_surface(source: Mapping) -> str:
     return " ".join(
         str(source.get(key) or "")
@@ -345,7 +346,9 @@ def _match_podcast_or_user_audio(source: Mapping) -> bool:
 def _match_official_archive(source: Mapping) -> bool:
     connector = str(source.get("connector") or "").casefold()
     host = _host(source)
-    return connector == "nara_archive" or host in _OFFICIAL_ARCHIVE_HOSTS
+    return connector == "nara_archive" or any(
+        _host_matches(host, base) for base in _OFFICIAL_ARCHIVE_BASE_HOSTS
+    )
 
 
 def _match_historical_primary_text(source: Mapping) -> bool:
@@ -354,8 +357,8 @@ def _match_historical_primary_text(source: Mapping) -> bool:
     kind = str(source.get("doc_kind") or "").casefold()
     return (
         connector.startswith("wikisource")
-        or host.endswith("wikisource.org")
-        or host.endswith("gutenberg.org")
+        or _host_matches(host, "wikisource.org")
+        or _host_matches(host, "gutenberg.org")
         or "historical_primary" in kind
         or "primary_text" in kind
     )
