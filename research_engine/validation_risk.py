@@ -51,11 +51,28 @@ def meta_hypotheses(trading: bool) -> List[Dict[str, Any]]:
     return rows
 
 
+def _normalized_key(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _bias_candidate(evidence: Mapping[str, Any], risk: str) -> Any:
+    normalized = {_normalized_key(key): value for key, value in evidence.items()}
+    candidates = [risk]
+    if risk == "hidden target leakage":
+        candidates += ["target leakage", "target_leakage"]
+    for candidate in candidates:
+        key = _normalized_key(candidate)
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
 def bias_audit(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    raw = result.get("bias_audit") or result.get("leakage_audit"); evidence = raw if isinstance(raw, Mapping) else {}
+    raw = result.get("bias_audit") or result.get("leakage_audit")
+    evidence = raw if isinstance(raw, Mapping) else {}
     rows = []
     for risk in BIAS_RISKS:
-        candidate = evidence.get(risk) or evidence.get(risk.replace(" ", "_"))
+        candidate = _bias_candidate(evidence, risk)
         provenance: Any = {}
         if isinstance(candidate, Mapping):
             status = text(first(candidate, "status", "state"), NOT_TESTED)
@@ -101,9 +118,10 @@ def friction_plan(trading: bool, result: Mapping[str, Any] | None = None) -> Lis
         raw = result.get("friction_audit") or result.get("real_world_friction")
         if isinstance(raw, Mapping):
             supplied = raw
+    normalized_supplied = {_normalized_key(key): value for key, value in supplied.items()}
     rows: List[Dict[str, Any]] = []
     for factor in FRICTION_FACTORS:
-        candidate = supplied.get(factor) or supplied.get(factor.replace(" ", "_"))
+        candidate = normalized_supplied.get(_normalized_key(factor))
         value: Any = TO_BE_ESTIMATED
         tested = False
         provenance: Any = {}
