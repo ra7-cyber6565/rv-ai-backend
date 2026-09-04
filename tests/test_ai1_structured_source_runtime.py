@@ -3,17 +3,15 @@ import base64
 from research_engine.agent_manager import AgentManager
 from research_engine.ai1_structured_runtime import (
     AI1StructuredSourceDiscovery,
+    AI1StructuredSourceInspector,
+    StructuredAwareContentFetcher,
     code_lane_relevant,
 )
 from research_engine.connectors import code_repository_connector as github_code
 from research_engine.content_fetcher import ContentFetcher
 from research_engine.deep_source_integrity import build_deep_source_integrity_report
 from research_engine.models import EvidencePack, SourceRecord, SourceType
-from research_engine.structured_source_reader import (
-    StructuredAwareContentFetcher,
-    StructuredSourceInspector,
-    StructuredSourceRecord,
-)
+from research_engine.structured_source_reader import StructuredSourceRecord
 
 
 def _plan(**extra):
@@ -76,6 +74,8 @@ def test_series_meta_becomes_real_bounded_dataset_passage_without_network():
         connector="world_bank_series",
         source_type=SourceType.DATASET,
         read_level="full_text",
+        full_text_available=True,
+        full_text_chars=1200,
         series_meta={
             "points": [
                 {"period": "2021", "value": 10.0},
@@ -85,7 +85,8 @@ def test_series_meta_becomes_real_bounded_dataset_passage_without_network():
         },
     )
     pack = EvidencePack(question="How did this indicator change?", sources=[source])
-    report = StructuredSourceInspector(allow_network=False).enrich(pack, max_sources=1)
+    report = AI1StructuredSourceInspector(allow_network=False).enrich(
+        pack, max_sources=1)
 
     assert report["dataset_inspected"] == 1
     upgraded = pack.sources[0]
@@ -93,8 +94,16 @@ def test_series_meta_becomes_real_bounded_dataset_passage_without_network():
     assert upgraded.dataset_inspection["rows_inspected"] == 3
     assert upgraded.dataset_inspection["complete_dataset"] is False
     assert upgraded.dataset_inspection["truth_boundary"]
+    assert upgraded.dataset_inspection["non_structured_text_chars_before_inspection"] == 1200
+    assert upgraded.reading_level() == "sections"
+    assert upgraded.access_depth() == "RELEVANT SECTIONS REVIEWED"
+    assert upgraded.full_text_available is False
+    assert upgraded.full_text_chars == 0
+    assert pack.read_level_counts().get("sections") == 1
+    assert pack.full_text_read_count == 0
     assert pack.passages
     assert pack.passages[0].provenance == "structured_dataset_rows"
+    assert pack.passages[0].read_level_at_capture == "sections"
     assert "Sample row" in pack.passages[0].text
 
     deep = build_deep_source_integrity_report(
@@ -142,7 +151,8 @@ def test_code_inspector_reads_source_file_not_readme_and_never_claims_execution(
         doc_kind="code_repository",
     )
     pack = EvidencePack(question="How is evidence score computed?", sources=[source])
-    report = StructuredSourceInspector(allow_network=True).enrich(pack, max_sources=1)
+    report = AI1StructuredSourceInspector(allow_network=True).enrich(
+        pack, max_sources=1)
 
     assert report["code_inspected"] == 1
     upgraded = pack.sources[0]
@@ -150,8 +160,11 @@ def test_code_inspector_reads_source_file_not_readme_and_never_claims_execution(
     assert upgraded.code_inspection["executed"] is False
     assert upgraded.code_inspection["tests_run"] is False
     assert upgraded.code_inspection["repository_complete"] is False
+    assert upgraded.reading_level() == "sections"
+    assert upgraded.access_depth() == "RELEVANT SECTIONS REVIEWED"
     assert all("README" not in path for path in upgraded.code_files)
     assert pack.passages[0].provenance == "public_code_file_excerpt"
+    assert pack.passages[0].read_level_at_capture == "sections"
     assert "src/evidence.py:L" in pack.passages[0].locator
 
     deep = build_deep_source_integrity_report(
@@ -195,6 +208,7 @@ def test_agent_manager_production_engine_is_structured_aware():
     engine = manager.get("ai1-structured-runtime-test")
     assert isinstance(engine.discovery, AI1StructuredSourceDiscovery)
     assert isinstance(engine.reader, StructuredAwareContentFetcher)
+    assert isinstance(engine.reader.structured, AI1StructuredSourceInspector)
 
 
 def test_readme_only_repository_stays_uninspected_when_code_reader_has_no_code(monkeypatch):
@@ -221,10 +235,13 @@ def test_readme_only_repository_stays_uninspected_when_code_reader_has_no_code(m
         doc_kind="code_repository",
     )
     pack = EvidencePack(question="inspect implementation", sources=[source])
-    report = StructuredSourceInspector(allow_network=True).enrich(pack, max_sources=1)
+    report = AI1StructuredSourceInspector(allow_network=True).enrich(
+        pack, max_sources=1)
 
     assert report["code_inspected"] == 0
     assert report["failed"] == 1
+    # Failed inspection may not launder the pre-existing page/full-text marker
+    # into code proof. Deep-source family semantics must still block it.
     deep = build_deep_source_integrity_report({}, [pack.sources[0].to_dict()])
     assert deep["sources"][0]["deep_status"] != "CODE INSPECTED"
     assert deep["blocking_gap_count"] >= 1
