@@ -1,5 +1,6 @@
 """Robustness, bias, friction and second-pass logic for AI-2."""
 from __future__ import annotations
+from copy import deepcopy
 from typing import Any, Dict, List, Mapping, Sequence
 from .validation_contracts import (
     BIAS_RISKS, FAILURE_DIMENSIONS, FRICTION_FACTORS, INCONCLUSIVE, NOT_TESTED,
@@ -12,23 +13,33 @@ def meta_hypotheses(trading: bool) -> List[Dict[str, Any]]:
     rows = [
         {"hypothesis_id": "AI2-H1-BASELINE-EDGE", "hypothesis_status": INCONCLUSIVE, "test_state": TEST_PROPOSED,
          "mechanism": "Useful complexity must add reproducible out-of-sample value beyond the simplest valid baseline.",
-         "variables": [{"name": "candidate performance", "symbol": UNKNOWN, "unit": "domain metric", "interpretation": "locked primary outcome"},
-                       {"name": "baseline performance", "symbol": UNKNOWN, "unit": "same domain metric", "interpretation": "same outcome on baseline"}],
+         "variables": [
+             {"name": "candidate performance", "symbol": UNKNOWN, "role": "dependent", "unit": "domain metric",
+              "definition": "Locked primary outcome achieved by the candidate method.", "interpretation": "candidate primary outcome"},
+             {"name": "baseline performance", "symbol": UNKNOWN, "role": "control", "unit": "same domain metric",
+              "definition": "Same locked primary outcome achieved by the simplest valid baseline.", "interpretation": "baseline primary outcome"}],
          "prediction": "Candidate materially outperforms baseline on untouched data.",
          "test": "Lock metric, baseline, data split and analysis; compare on untouched data with uncertainty.",
          "falsification": "No credible incremental value or advantage reverses on untouched/external data.",
          "baseline": "Simplest valid domain baseline; exact choice TO BE ESTIMATED from task semantics."},
         {"hypothesis_id": "AI2-H2-STABILITY", "hypothesis_status": INCONCLUSIVE, "test_state": TEST_PROPOSED,
          "mechanism": "A real effect should occupy a stable neighborhood, not one finely tuned parameter/time/definition point.",
-         "variables": [{"name": "performance across perturbations", "symbol": UNKNOWN, "unit": "domain metric", "interpretation": "outcome under pre-specified changes"}],
+         "variables": [
+             {"name": "performance across perturbations", "symbol": UNKNOWN, "role": "dependent", "unit": "domain metric",
+              "definition": "Locked outcome measured under pre-specified parameter/time/definition/noise/regime changes.",
+              "interpretation": "robustness surface"}],
          "prediction": "Direction and practical magnitude survive reasonable pre-specified perturbations.",
          "test": "Evaluate parameter, temporal, definition, noise, reduced-data, assumption and regime perturbations without final-set retuning.",
          "falsification": "Effect exists only at a sharp optimum or collapses/reverses under reasonable perturbations.",
          "baseline": "Locked nominal candidate and same simple baseline across perturbations."},
         {"hypothesis_id": "AI2-H3-REAL-WORLD-SURVIVAL", "hypothesis_status": INCONCLUSIVE, "test_state": TEST_PROPOSED,
          "mechanism": "Laboratory or simulation value must survive deployment friction and failure tails.",
-         "variables": [{"name": "net deployment outcome", "symbol": UNKNOWN, "unit": "domain outcome", "interpretation": "outcome after relevant costs/errors"},
-                       {"name": "failure severity", "symbol": UNKNOWN, "unit": "domain loss/harm", "interpretation": "adverse outcome magnitude incl. tails"}],
+         "variables": [
+             {"name": "net deployment outcome", "symbol": UNKNOWN, "role": "dependent", "unit": "domain outcome",
+              "definition": "Outcome after materially relevant costs, implementation errors and deployment constraints.",
+              "interpretation": "net real-world utility"},
+             {"name": "failure severity", "symbol": UNKNOWN, "role": "uncertainty", "unit": "domain loss/harm",
+              "definition": "Magnitude of adverse outcomes including tail events.", "interpretation": "failure-tail severity"}],
          "prediction": "Net value remains useful under realistic friction/stress with acceptable failure severity.",
          "test": "Evaluate costs/errors, tails, clustered failures and worst credible scenarios; replicate in a deployment-like environment.",
          "falsification": "Realistic friction erases value or plausible tail failure becomes unacceptable.",
@@ -40,16 +51,40 @@ def meta_hypotheses(trading: bool) -> List[Dict[str, Any]]:
     return rows
 
 
+def _normalized_key(value: Any) -> str:
+    return "".join(ch for ch in str(value or "").lower() if ch.isalnum())
+
+
+def _bias_candidate(evidence: Mapping[str, Any], risk: str) -> Any:
+    normalized = {_normalized_key(key): value for key, value in evidence.items()}
+    candidates = [risk]
+    if risk == "hidden target leakage":
+        candidates += ["target leakage", "target_leakage"]
+    for candidate in candidates:
+        key = _normalized_key(candidate)
+        if key in normalized:
+            return normalized[key]
+    return None
+
+
 def bias_audit(result: Mapping[str, Any]) -> List[Dict[str, Any]]:
-    raw = result.get("bias_audit") or result.get("leakage_audit"); evidence = raw if isinstance(raw, Mapping) else {}
+    raw = result.get("bias_audit") or result.get("leakage_audit")
+    evidence = raw if isinstance(raw, Mapping) else {}
     rows = []
     for risk in BIAS_RISKS:
-        candidate = evidence.get(risk) or evidence.get(risk.replace(" ", "_"))
+        candidate = _bias_candidate(evidence, risk)
+        provenance: Any = {}
         if isinstance(candidate, Mapping):
-            status = text(first(candidate, "status", "state"), NOT_TESTED); detail = text(first(candidate, "detail", "evidence", "note"))
-        elif meaningful(candidate): status = text(candidate); detail = UNKNOWN
-        else: status = NOT_TESTED; detail = UNKNOWN
-        rows.append({"risk": risk, "status": status, "evidence": detail, "action_if_found": "INVALIDATE_OR_DOWNGRADE"})
+            status = text(first(candidate, "status", "state"), NOT_TESTED)
+            detail = text(first(candidate, "detail", "evidence", "note"))
+            raw_provenance = candidate.get("provenance") or candidate.get("result_provenance")
+            provenance = deepcopy(raw_provenance) if isinstance(raw_provenance, Mapping) else {}
+        elif meaningful(candidate):
+            status = text(candidate); detail = UNKNOWN
+        else:
+            status = NOT_TESTED; detail = UNKNOWN
+        rows.append({"risk": risk, "status": status, "evidence": detail,
+                     "provenance": provenance, "action_if_found": "INVALIDATE_OR_DOWNGRADE"})
     return rows
 
 
@@ -76,11 +111,35 @@ def ablation_plan(hypotheses: Sequence[Mapping[str, Any]]) -> Dict[str, Any]:
             "interaction_rule": "Test higher-order combinations only with mechanism or nested-validation justification."}
 
 
-def friction_plan(trading: bool) -> List[Dict[str, Any]]:
+def friction_plan(trading: bool, result: Mapping[str, Any] | None = None) -> List[Dict[str, Any]]:
     trading_relevant = {"transaction costs", "slippage", "latency", "liquidity", "taxes", "regulation"}
-    return [{"factor": f, "relevance": "RELEVANT" if trading and f in trading_relevant else UNKNOWN,
-             "value": TO_BE_ESTIMATED, "tested": False,
-             "rule": "Measure or source materially applicable values; never assume convenient values."} for f in FRICTION_FACTORS]
+    supplied = {}
+    if isinstance(result, Mapping):
+        raw = result.get("friction_audit") or result.get("real_world_friction")
+        if isinstance(raw, Mapping):
+            supplied = raw
+    normalized_supplied = {_normalized_key(key): value for key, value in supplied.items()}
+    rows: List[Dict[str, Any]] = []
+    for factor in FRICTION_FACTORS:
+        candidate = normalized_supplied.get(_normalized_key(factor))
+        value: Any = TO_BE_ESTIMATED
+        tested = False
+        provenance: Any = {}
+        relevance = "RELEVANT" if trading and factor in trading_relevant else UNKNOWN
+        if isinstance(candidate, Mapping):
+            if meaningful(candidate.get("value")):
+                value = deepcopy(candidate.get("value"))
+            tested = candidate.get("tested") is True
+            if meaningful(candidate.get("relevance")):
+                relevance = text(candidate.get("relevance"))
+            raw_provenance = candidate.get("provenance") or candidate.get("source")
+            provenance = deepcopy(raw_provenance) if isinstance(raw_provenance, Mapping) else raw_provenance or {}
+        elif meaningful(candidate):
+            value = deepcopy(candidate)
+        rows.append({"factor": factor, "relevance": relevance, "value": value,
+                     "tested": tested, "provenance": provenance,
+                     "rule": "Measure or source materially applicable values; never assume convenient values."})
+    return rows
 
 
 def failure_plan() -> List[Dict[str, Any]]:

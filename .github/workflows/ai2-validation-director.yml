@@ -45,7 +45,9 @@ jobs:
             research_engine/validation_experiments.py \
             research_engine/validation_statistics.py \
             research_engine/validation_inference.py \
+            research_engine/validation_advanced.py \
             research_engine/validation_risk.py \
+            research_engine/validation_trading_risk.py \
             research_engine/validation_trading.py \
             research_engine/validation_director.py \
             research_engine/agent_manager.py
