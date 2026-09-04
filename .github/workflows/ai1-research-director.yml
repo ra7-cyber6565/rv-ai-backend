@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: ai1-research-director-${{ github.ref }}
@@ -24,6 +24,9 @@ jobs:
     steps:
       - name: Checkout proposed code
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref || github.ref_name }}
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -69,6 +72,45 @@ jobs:
             tests/test_ai1_capability_receipt_hardening.py \
             tests/test_caption_content_type.py \
             2>&1 | tee ai1-test-output.txt
+
+      - name: Correct obsolete media discovery comment once
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/ai1-audit-hardening'
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('research_engine/source_discovery.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        # Video/audio ka lane bhi ALAG hai (#133b). Book lane CATALOGUE deta hai
+          # aur classics lane MOOL TEXT — ye lane un dono se alag cheez laata hai:
+          # kisi lecture/interview/recording ka LIKHA HUA parichay. Media khud
+          # padha nahi jaata (na dekha, na suna), isliye har record par
+          # `read_level="snippet"` hi rehta hai. Ye lane sirf craft-study tier se
+          # chalta hai, aur wahan bhi tab jab planner ne `craft_study` bhara ho.
+          '''
+          # Keep indentation exact: dedent only the Python literal's formatting.
+          old = old.replace('\n          #', '\n        #').replace("\n          ''", "\n")
+          new = '''        # Video/audio lane bhi ALAG hai (#133b). Production MediaConnector
+        # public VTT/SRT caption mile to transcript text process kar sakta hai;
+        # caption na mile to record description/snippet-only hi rehta hai. Media
+        # file khud kabhi download/dekhi/suni nahi jaati. Base SourceDiscovery
+        # ise study lanes me use karta hai; AI1StructuredSourceDiscovery alag se
+        # relevance-gated general transcript/media-intent lane add karta hai.
+'''
+          if old not in text:
+              raise SystemExit('expected stale media comment block not found exactly')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+          if git diff --quiet -- research_engine/source_discovery.py; then
+            echo "No stale comment diff produced"
+            exit 1
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research_engine/source_discovery.py
+          git commit -m "Correct stale media discovery truth comment"
+          git push origin HEAD:${{ github.head_ref }}
 
       - name: Upload focused test diagnostics
         if: always()
