@@ -80,6 +80,10 @@ def extend_ai1_packet(question: str, result: Dict) -> Dict:
 
     capability = build_source_capability_matrix(result)
     packet["source_capability_matrix"] = capability
+    capability_errors = [
+        str(item) for item in (capability.get("validation_errors") or [])
+        if str(item).strip()
+    ]
     sources = _source_map(result)
 
     strongest = sections.get(_SECTION_5)
@@ -138,6 +142,7 @@ def extend_ai1_packet(question: str, result: Dict) -> Dict:
     confidence = sections.get(_SECTION_14)
     if isinstance(confidence, dict):
         confidence["source_capability_matrix_valid"] = bool(capability.get("valid"))
+        confidence["source_capability_validation_error_count"] = len(capability_errors)
         confidence["critical_anatomy_sources_attached"] = anatomy_attached
         confidence["critical_anatomy_gap_count"] = len(anatomy_missing)
         if anatomy_missing:
@@ -152,15 +157,20 @@ def extend_ai1_packet(question: str, result: Dict) -> Dict:
             f"Critical-document anatomy has {len(anatomy_missing)} unresolved field/source gap(s)."
         )
     if not capability.get("valid"):
+        details = capability_errors or [
+            f"missing module: {name}"
+            for name in (capability.get("missing_required_modules") or [])
+        ] or ["unknown source-capability validation failure"]
         blocker_rows.append(
-            "AI-1 source capability matrix import proof is incomplete: "
-            + ", ".join(capability.get("missing_required_modules") or [])
+            "AI-1 source capability matrix validation failed: "
+            + "; ".join(details[:8])
         )
     sections[_SECTION_15] = list(dict.fromkeys(str(item) for item in blocker_rows if str(item)))
 
     packet["source_family_extension"] = {
         "valid": bool(capability.get("valid")) and len(sections) == 15,
         "exact_15_sections_preserved": len(sections) == 15,
+        "source_capability_validation_error_count": len(capability_errors),
         "critical_anatomy_attached": anatomy_attached,
         "critical_anatomy_gap_count": len(anatomy_missing),
         "claim_grades_modified": False,
