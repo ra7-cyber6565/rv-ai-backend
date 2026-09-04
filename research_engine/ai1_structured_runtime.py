@@ -1,9 +1,10 @@
 """Production wiring for AI-1 structured and specialist source families.
 
-This adapter stays additive: the core DeepResearchEngine and all ordinary
-SourceDiscovery lanes remain intact. AI-1 adds only relevance-gated public code,
-dissertation and official-archive lanes, then performs bounded dataset/code
-inspection before contradiction analysis and model reasoning.
+The core DeepResearchEngine and ordinary SourceDiscovery lanes stay intact.
+AI-1 adds relevance-gated code, dissertation, official-archive and general
+transcript/media lanes, then performs bounded dataset/code/documentation reads,
+critical-source anatomy and multilingual original-text provenance before the
+result leaves the evidence foundation.
 
 Nothing here changes AI-2 validation semantics or promotes evidence quality.
 """
@@ -16,6 +17,8 @@ from .connectors.archive_connector import ArchiveConnector
 from .connectors.code_repository_connector import CodeRepositoryConnector
 from .connectors.thesis_connector import ThesisConnector
 from .critical_source_anatomy import extract_critical_source_anatomy
+from .multilingual_source_provenance import annotate_multilingual_provenance
+from .public_documentation_reader import PublicDocumentationReader
 from .source_discovery import SourceDiscovery
 from .structured_source_reader import (
     StructuredAwareContentFetcher as _BaseStructuredAwareContentFetcher,
@@ -51,6 +54,15 @@ _ARCHIVE_QUERY_CUES = (
     "government archive", "project stargate", "gateway process", "remote viewing",
 )
 
+_MEDIA_QUERY_CUES = (
+    "podcast", "interview", "lecture", "talk", "speech", "keynote",
+    "video transcript", "audio transcript", "transcript", "captions", "subtitles",
+    "recorded lecture", "recorded interview", "oral history", "press conference",
+)
+_MEDIA_SOURCE_TYPE_CUES = {
+    "media", "video", "audio", "transcript", "podcast", "interview", "lecture",
+}
+
 
 def register_structured_read_level() -> None:
     """Register generic bounded-section depth in the shared read vocabulary."""
@@ -69,16 +81,20 @@ def register_structured_read_level() -> None:
 register_structured_read_level()
 
 
+def _useful_source_types(plan: Dict) -> set[str]:
+    return {
+        str(item or "").strip().casefold()
+        for item in ((plan or {}).get("useful_source_types") or [])
+        if str(item or "").strip()
+    }
+
+
 def code_lane_relevant(plan: Dict, query: str) -> bool:
     """Whether public implementation evidence is relevant; routing != evidence."""
     domain = str((plan or {}).get("domain") or "").strip().casefold()
     if domain in _TECHNICAL_DOMAINS:
         return True
-    useful = {
-        str(item or "").strip().casefold()
-        for item in ((plan or {}).get("useful_source_types") or [])
-        if str(item or "").strip()
-    }
+    useful = _useful_source_types(plan)
     if any(any(cue in item for cue in _CODE_SOURCE_TYPE_CUES) for item in useful):
         return True
     low = " ".join(str(query or "").casefold().split())
@@ -100,6 +116,15 @@ def archive_lane_relevant(plan: Dict, query: str) -> bool:
         return True
     low = " ".join(str(query or "").casefold().split())
     return any(cue in low for cue in _ARCHIVE_QUERY_CUES)
+
+
+def media_lane_relevant(plan: Dict, query: str) -> bool:
+    """Route public transcript/caption evidence for general media-source asks."""
+    useful = _useful_source_types(plan)
+    if any(any(cue in item for cue in _MEDIA_SOURCE_TYPE_CUES) for item in useful):
+        return True
+    low = " ".join(str(query or "").casefold().split())
+    return any(cue in low for cue in _MEDIA_QUERY_CUES)
 
 
 class AI1StructuredSourceDiscovery(SourceDiscovery):
@@ -142,6 +167,18 @@ class AI1StructuredSourceDiscovery(SourceDiscovery):
                 limit = max(1, min(int(max_per_connector or 1), 3))
                 tasks.append((connector.name,
                               self._single(connector, archive_query, limit)))
+
+        # The core media facade used to be reachable mainly through craft-study.
+        # AI-1 needs interviews/lectures/podcasts as evidence sources too. This
+        # general route remains transcript-first: the Archive connector reads a
+        # public VTT/SRT when present and otherwise returns only a labelled
+        # description; it never downloads or claims to hear/watch media.
+        if media_lane_relevant(plan, primary):
+            connector = self.media.by_name("archive_media")
+            if connector is not None:
+                limit = max(1, min(int(max_per_connector or 1), 2))
+                tasks.append(("ai1_media_transcript",
+                              self._single(connector, primary, limit)))
         return tasks
 
 
@@ -190,11 +227,13 @@ class _CapturingProcessor:
 
 
 class StructuredAwareContentFetcher(_BaseStructuredAwareContentFetcher):
-    """Production reader + bounded inspectors + critical full-text anatomy."""
+    """Production readers + inspectors + anatomy + multilingual provenance."""
 
     def __init__(self, allow_network=None):
         super().__init__(allow_network=allow_network)
         self.structured = AI1StructuredSourceInspector(
+            allow_network=self.allow_network)
+        self.documentation = PublicDocumentationReader(
             allow_network=self.allow_network)
         self._last_processed_text = ""
 
@@ -211,8 +250,6 @@ class StructuredAwareContentFetcher(_BaseStructuredAwareContentFetcher):
         if isinstance(entry, dict) and entry.get("ok") and self._last_processed_text:
             entry["critical_source_anatomy"] = extract_critical_source_anatomy(
                 self._last_processed_text)
-        # Drop raw capture immediately after derivation so no whole document is
-        # retained by this adapter beyond the ordinary ContentFetcher lifecycle.
         self._last_processed_text = ""
         return entry
 
@@ -242,6 +279,20 @@ class StructuredAwareContentFetcher(_BaseStructuredAwareContentFetcher):
                 "and anatomy completeness is not study validity or claim truth."
             ),
         }
+
+        # Ordinary ContentFetcher intentionally avoids arbitrary HTML. AI-1's
+        # documentation reader is a narrower second pass over sources that
+        # already carry strong docs/manual/reference signals, with SSRF, redirect,
+        # content-type and byte guards. One page is always clamped to sections.
+        doc_limit = max(0, min(2, int(max_sources or 0)))
+        documentation = self.documentation.enrich(pack, max_sources=doc_limit)
+        report["documentation"] = documentation
+
+        # This runs after every text transformation above so the receipt reflects
+        # the actual evidence surface entering reasoning. It detects Unicode
+        # scripts only, does not guess languages and never calls a search bridge a
+        # translation.
+        report["multilingual_provenance"] = annotate_multilingual_provenance(pack)
         return report
 
 
@@ -266,6 +317,7 @@ __all__ = [
     "archive_lane_relevant",
     "code_lane_relevant",
     "configure_ai1_structured_runtime",
+    "media_lane_relevant",
     "register_structured_read_level",
     "thesis_lane_relevant",
 ]
