@@ -13,16 +13,17 @@ Wahi kaam ab yahan hai, do sudhaar ke saath:
 
 Parallel research-company integration:
     Core DeepResearchEngine ke measured result ke baad deterministic director
-    packets attach hote hain. AI-1 evidence packet pehle attach hota hai; AI-2
-    usi measured result + AI-1 handoff ko validate karta hai. Dono additive aur
-    fail-closed hain: koi director core evidence ko create/upgrade/replace nahi
-    karta, aur history compact status/score metadata hi store karti hai.
+    packets attach hote hain. AI-1 evidence packet pehle attach hota hai; AI-1's
+    source-family extension then adds capability/anatomy receipts without
+    changing its exact 15 sections; AI-2 consumes that complete handoff. Every
+    layer is additive and fail-closed.
 """
 from __future__ import annotations
 
 import threading
 from typing import Dict, List, Optional
 
+from .ai1_packet_extensions import extend_ai1_packet
 from .ai1_research_director import attach_ai1_research_packet
 from .ai1_structured_runtime import configure_ai1_structured_runtime
 from .orchestrator import DeepResearchEngine
@@ -47,12 +48,10 @@ class AgentManager:
             engine = self._engines.get(project_id)
             if engine is None:
                 engine = DeepResearchEngine(project_id=project_id)
-                # AI-1 structured evidence lanes are installed on the core
-                # engine itself, before any research run. The adapter preserves
-                # ordinary discovery/full-text behavior and only adds relevant
-                # public code discovery + bounded dataset/code inspection. This
-                # happens before contradiction/reasoning, while AI-2 below stays
-                # a post-core validation layer and is not modified here.
+                # AI-1 source-family lanes live inside the core evidence stage,
+                # before contradiction/reasoning. Ordinary discovery/readers are
+                # preserved; the adapter adds bounded code/dataset, dissertation,
+                # official-archive and critical-source anatomy receipts.
                 engine = configure_ai1_structured_runtime(engine)
                 self._engines[project_id] = engine
             return engine
@@ -74,22 +73,18 @@ class AgentManager:
         result = engine.research(question, depth_mode=depth_mode, custom=custom,
                                  job_id=job_id or project_id)
 
-        # AI-1 runs after the core engine's citation/A-E/relevance/contradiction/
-        # source-integrity gates. It may expose/decompose/route evidence but may
-        # not invent evidence or upgrade measured claims.
+        # Base AI-1 creates the exact 15-section evidence handoff.
         result = attach_ai1_research_packet(question, result)
+        # Source-family completeness stays inside that contract: it attaches a
+        # machine capability matrix and nested critical-document anatomy receipts,
+        # never a 16th section and never an evidence-grade promotion.
+        result = extend_ai1_packet(question, result)
 
-        # AI-2 runs after AI-1 so it can consume the complete evidence handoff
-        # while preserving the original result. It keeps plans/results distinct
-        # and fails closed to INCONCLUSIVE/NOT TESTED when provenance is missing.
+        # AI-2 runs after the complete AI-1 handoff while preserving the original
+        # result. It keeps plans/results distinct and fails closed to
+        # INCONCLUSIVE/NOT TESTED when provenance is missing.
         result = attach_ai2_validation(question, result)
 
-        # Final AI-2-only runtime audit checks the original role specification
-        # line by line. It runs only on a real, complete 17-section AI-2 packet.
-        # Test doubles and sanitized failure packets are intentionally left
-        # untouched. Every post-AI2 layer is fail-closed: it can add calculations
-        # from explicit receipts or downgrade/scope a verdict, never manufacture
-        # evidence or upgrade missing data into empirical truth.
         ai2_packet = result.get("ai2_validation")
         ai2_sections = ai2_packet.get("sections") if isinstance(ai2_packet, dict) else None
         if (
@@ -100,9 +95,6 @@ class AgentManager:
         ):
             result = harden_ai2_runtime_result(question, result)
             result = extend_ai2_quantitative_receipts(result)
-            # Composition safety: a verified bias/leakage downgrade is one-way.
-            # Later AI-2 composition may never restore a decisive status until a
-            # clean re-test replaces the affected evidence path.
             result = enforce_ai2_final_truth_guards(result)
 
         self._remember(project_id, result)
@@ -121,6 +113,10 @@ class AgentManager:
                 "ai1_packet_valid": bool(
                     (result.get("ai1_research_packet") or {})
                     .get("validation", {}).get("valid")
+                ),
+                "ai1_source_family_extension_valid": bool(
+                    (result.get("ai1_research_packet") or {})
+                    .get("source_family_extension", {}).get("valid")
                 ),
                 "ai1_packet_confidence": (
                     (result.get("ai1_research_packet") or {})
@@ -157,5 +153,4 @@ class AgentManager:
             return count
 
 
-# Process-wide single instance (routes isi ko import karti hain)
 manager = AgentManager()
