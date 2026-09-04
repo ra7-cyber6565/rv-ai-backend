@@ -8,6 +8,12 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, Mapping, Optional, Sequence
 
+from .validation_advanced import (
+    analyze_ablation_receipt, analyze_failure_receipt, analyze_predictive_receipt,
+    analyze_robustness_receipt, apply_bias_guard, collect_second_pass_outputs,
+    find_ablation_receipt, find_failure_receipt, find_predictive_receipt,
+    find_robustness_receipt, variable_role_audit,
+)
 from .validation_contracts import (
     AGENT_ID, CONDITIONAL_PASS, EXPERIMENT_FIELDS, FAIL, HYPOTHESIS_STATUSES,
     INCONCLUSIVE, NOT_TESTED, PASS, REQUIRED_SECTIONS, RESULT_OBSERVED,
@@ -60,18 +66,38 @@ def _result_missing(value: Any) -> bool:
     return value is None or value == NOT_TESTED or value == UNKNOWN
 
 
-def _blockers(experiments: Sequence[Mapping[str, Any]], confidence: Mapping[str, Any], trading: bool) -> list:
+def _analysis_state(analysis: Any) -> str:
+    if isinstance(analysis, Mapping) and analysis.get("observed"):
+        return RESULT_OBSERVED
+    return NOT_TESTED
+
+
+def _blockers(
+    experiments: Sequence[Mapping[str, Any]], confidence: Mapping[str, Any], trading: bool,
+    models: Sequence[Mapping[str, Any]], advanced: Mapping[str, Any], bias_guard: Mapping[str, Any],
+) -> list:
     blockers = []
     if not experiments:
         blockers.append("No structured domain hypothesis supplied to AI-2.")
     for row in experiments:
         blockers.extend(f"{row.get('hypothesis_id', 'hypothesis')}: missing {field}." for field in row.get("missing_required_fields", []))
+        if row.get("variable_symbol_contract_complete") is False:
+            blockers.append(f"{row.get('hypothesis_id', 'hypothesis')}: one or more explicit variable symbols lack definition/unit/interpretation.")
+    if models and any(model.get("model_contract_complete") is not True for model in models):
+        blockers.append("At least one mathematical model lacks a complete type/expression/objective/constraints/assumptions/symbol/estimation/identifiability/data-linked-prediction contract.")
     if not any(e.get("test_state") in {TEST_PERFORMED, RESULT_OBSERVED} for e in experiments):
-        blockers.append("No actual test execution evidenced; proposed tests cannot be reported as results.")
+        blockers.append("No actual domain test execution evidenced; proposed tests cannot be reported as results.")
     if not any(e.get("test_state") == RESULT_OBSERVED for e in experiments):
-        blockers.append("No observed result with explicit provenance available.")
+        blockers.append("No domain-hypothesis observed result with explicit provenance available.")
+    for label, analysis in advanced.items():
+        if not (isinstance(analysis, Mapping) and analysis.get("observed")):
+            blockers.append(f"{label} remains NOT TESTED because no valid provenance-bearing receipt was supplied.")
+    if bias_guard.get("unverified_findings"):
+        blockers.append("One or more bias/leakage findings are asserted without sufficient evidence/provenance and require investigation.")
+    if bias_guard.get("verified_findings"):
+        blockers.append("Verified bias/leakage finding(s) require a clean re-test before an unqualified positive verdict.")
     if trading:
-        blockers.append("Trading performance is NOT TESTED unless a provenance-bearing per-trade result receipt exists; a deployment PASS also requires friction-net returns.")
+        blockers.append("Trading deployment conclusions require provenance-bearing friction-net per-trade data, OOS validation, stability evidence and explicit ruin-model inputs where risk of ruin is claimed.")
     if float(confidence.get("score", 0) or 0) < 100:
         blockers.append("Evidence-readiness checklist is not fully satisfied; inspect Confidence /100 checks.")
     return list(dict.fromkeys(blockers))
@@ -83,11 +109,12 @@ def _can_test(experiments: Sequence[Mapping[str, Any]], trading: bool) -> list:
         "Pre-register robustness, ablation, statistical and predictive-validation protocols now; numeric outcomes require data/execution.",
         "Evaluate supplied provenance-bearing numeric result receipts now; no receipt means no observed result.",
         "Calculate Bayesian update, multiplicity correction and power only when their required priors/likelihoods/p-values/alpha/effect inputs are explicitly supplied.",
+        "Evaluate supplied predictive, robustness, ablation and failure-distribution receipts without inventing thresholds.",
     ]
     if experiments:
         rows.append("Convert structured hypotheses into exact test contracts; missing fields stay UNKNOWN/TO BE ESTIMATED.")
     if trading:
-        rows.append("Calculate provenance-bearing per-trade receipts; never import claimed summary metrics as validated performance.")
+        rows.append("Calculate provenance-bearing per-trade receipts and risk-of-ruin only when all bankroll/horizon/dependence inputs are explicit.")
     return rows
 
 
@@ -129,6 +156,16 @@ def validate_ai2_packet(packet: Mapping[str, Any]) -> Dict[str, Any]:
                     errors.append("decisive_status_without_explicit_decision_rule")
         elif row.get("hypothesis_status") in {PASS, CONDITIONAL_PASS, FAIL}:
             errors.append("decisive_status_without_observed_result")
+
+    advanced = packet.get("advanced_receipt_analyses") if isinstance(packet, Mapping) else {}
+    if isinstance(advanced, Mapping):
+        predictive = advanced.get("predictive_validation")
+        if isinstance(predictive, Mapping) and predictive.get("status") in {PASS, CONDITIONAL_PASS, FAIL}:
+            if predictive.get("final_test_valid") is not True:
+                errors.append("predictive_decision_without_valid_untouched_test")
+            decision = predictive.get("decision")
+            if not isinstance(decision, Mapping) or decision.get("rule_source") != "SUPPLIED_IN_RESULT_RECEIPT":
+                errors.append("predictive_decision_without_explicit_rule")
     return {"valid": not errors, "errors": sorted(set(errors)), "missing_sections": missing,
             "required_section_count": len(REQUIRED_SECTIONS),
             "truth_invariant": "Plans/targets/narratives are never observed results; decisive status requires explicit provenance and supplied decision rule."}
@@ -138,12 +175,31 @@ class AI2ValidationDirector:
     def build_packet(self, question: str, research_result: Optional[Mapping[str, Any]],
                      second_pass_outputs: Optional[Mapping[str, Any]] = None) -> Dict[str, Any]:
         result = research_result if isinstance(research_result, Mapping) else {}
+        handoffs = collect_second_pass_outputs(result, second_pass_outputs)
         hypotheses = extract_hypotheses(result)
         experiments = [normalize_experiment(h, i) for i, h in enumerate(hypotheses, 1)]
         _apply_result_receipts(experiments, result)
-        trading = is_trading(question); models = extract_math_models(hypotheses, result)
+        trading = is_trading(question)
+        models = extract_math_models(hypotheses, result)
+
+        predictive_receipt = find_predictive_receipt(result)
+        robustness_receipt = find_robustness_receipt(result)
+        ablation_receipt = find_ablation_receipt(result)
+        failure_receipt = find_failure_receipt(result)
+        advanced = {
+            "predictive_validation": analyze_predictive_receipt(predictive_receipt) if predictive_receipt else {"observed": False, "status": INCONCLUSIVE, "reason": "No predictive validation receipt supplied."},
+            "robustness": analyze_robustness_receipt(robustness_receipt) if robustness_receipt else {"observed": False, "status": INCONCLUSIVE, "reason": "No robustness receipt supplied."},
+            "ablation": analyze_ablation_receipt(ablation_receipt) if ablation_receipt else {"observed": False, "status": INCONCLUSIVE, "reason": "No ablation receipt supplied."},
+            "failure_distribution": analyze_failure_receipt(failure_receipt) if failure_receipt else {"observed": False, "status": INCONCLUSIVE, "reason": "No failure-distribution receipt supplied."},
+        }
+
+        bias_rows = bias_audit(result)
+        bias_guard = apply_bias_guard(bias_rows, experiments)
         confidence = confidence_score(experiments, result)
-        upstream_ei = existing_experiment_intelligence(result); second = second_pass_summary(second_pass_outputs)
+        confidence["advanced_validation_states"] = {name: _analysis_state(value) for name, value in advanced.items()}
+        confidence["bias_guard_active"] = bool(bias_guard.get("verified_findings"))
+        upstream_ei = existing_experiment_intelligence(result)
+        second = second_pass_summary(handoffs)
 
         experiment_section: Dict[str, Any] = {
             "domain_hypothesis_experiments": experiments,
@@ -151,18 +207,28 @@ class AI2ValidationDirector:
             "predictive_validation_standard": {"training": "Discovery only.", "validation": "Model/parameter selection only.",
                 "untouched_test": "Final evaluation; lock before tuning and never optimize on it.",
                 "additional": ["rolling", "walk-forward", "external replication", "cross-dataset", "temporal", "regime"]},
+            "executed_predictive_validation": advanced["predictive_validation"],
             "statistical_validation_standard": ["effect size", "uncertainty interval", "confidence interval when justified",
                 "Bayesian evidence with explicit priors/likelihoods", "bootstrap", "permutation test", "Monte Carlo",
                 "multiple-testing correction", "power analysis"],
             "result_receipt_contract": {"provenance_required": True, "numeric_observations_required_for_calculation": True,
-                "pass_fail_rule_required": True, "no_default_confidence_level": True,
-                "no_default_bootstrap_or_permutation_iterations": True,
+                "pass_fail_rule_required": True, "conditional_pass_supported_by_explicit_rule": True,
+                "no_default_confidence_level": True, "no_default_bootstrap_or_permutation_iterations": True,
                 "no_default_alpha_power_prior_or_likelihood": True},
             "result_provenance_rule": "TEST PROPOSED / TEST POSSIBLE / TEST PERFORMED / RESULT OBSERVED are distinct; RESULT OBSERVED requires explicit provenance.",
             "existing_experiment_intelligence": upstream_ei,
             "reuse_rule": "Reuse upstream Bayesian/information-gain planning when present; AI-2 adds controls rather than replacing it."}
         if trading:
             experiment_section["trading_validation_standard"] = trading_standard(hypotheses, result)
+
+        robustness_section = robustness_plan()
+        robustness_section.append({"dimension": "EXECUTED ROBUSTNESS RECEIPT", "state": _analysis_state(advanced["robustness"]),
+                                   "observed_result": advanced["robustness"]})
+        ablation_section = ablation_plan(hypotheses)
+        ablation_section["executed_analysis"] = advanced["ablation"]
+        failure_section = failure_plan()
+        failure_section.append({"dimension": "EXECUTED FAILURE DISTRIBUTION RECEIPT", "state": _analysis_state(advanced["failure_distribution"]),
+                                "observed_result": advanced["failure_distribution"]})
 
         sections: Dict[str, Any] = {
             "1. Interpretation of User Goal": {"original_question": text(question, ""),
@@ -171,15 +237,16 @@ class AI2ValidationDirector:
                 "do_not_change_task_rule": "Measurement convenience must not silently redefine the requested outcome.",
                 "measurement_limits": "Separate directly measurable outcomes, defensible proxies, unobservable constructs and unavailable measurements."},
             "2. Quantifiable Components": {"variables_by_hypothesis": [{"hypothesis_id": e["hypothesis_id"], "variables": e["Variables"]} for e in experiments],
+                "variable_role_audit": variable_role_audit(experiments),
                 "required_variable_roles": ["independent", "dependent", "control", "mediator", "confounder", "state", "uncertainty"],
-                "symbol_rule": "Every mathematical symbol needs definition, unit and interpretation; missing metadata remains UNKNOWN.",
+                "symbol_rule": "Every explicit mathematical symbol needs definition, unit and interpretation; missing metadata remains UNKNOWN and blocks a complete symbol contract.",
                 "measurement_rule": "Do not replace the target with an easier proxy without separate proxy-validity evidence.",
                 "uncertainty_policy": "Unknown values are UNKNOWN or TO BE ESTIMATED, never convenient defaults."},
             "3. Mathematical Model": {"domain_models_found": models,
                 "status": TEST_POSSIBLE if models and all(m.get("model_contract_complete") is True for m in models) else INCONCLUSIVE,
                 "if_absent": "UNKNOWN — no mathematical model is invented for decoration.",
                 "model_families_when_justified": ["equations", "objective functions", "constraints", "probabilistic", "causal", "optimization", "dynamical"],
-                "model_requirements": ["objective/target", "defined symbols+units+interpretation", "assumptions", "constraints", "estimable parameters", "identifiability/estimation", "data-linked prediction"],
+                "model_requirements": ["model type", "objective/target", "defined symbols+units+interpretation", "assumptions", "constraints or explicit none", "estimable parameters", "identifiability/estimation or explicit not-applicable", "data-linked prediction"],
                 "unknown_value_policy": "Unmeasured parameters: TO BE ESTIMATED; unavailable quantities: UNKNOWN."},
             "4. Baselines": {"policy": "Every complex candidate must beat the simplest valid baseline under the same data, metric and friction assumptions.",
                 "domain_baselines": [{"hypothesis_id": e["hypothesis_id"], "baseline": e["Baseline"]} for e in experiments],
@@ -187,12 +254,17 @@ class AI2ValidationDirector:
                 "selection_status": "PARTIALLY_EXPLICIT" if any(e["Baseline"] != UNKNOWN for e in experiments) else TO_BE_ESTIMATED},
             "5. Independent Testable Hypotheses": meta_hypotheses(trading),
             "6. Exact Experiments / Backtests / Simulations Required": experiment_section,
-            "7. Bias & Leakage Risks": bias_audit(result), "8. Robustness Plan": robustness_plan(),
-            "9. Ablation Plan": ablation_plan(hypotheses), "10. Real-World Friction": friction_plan(trading),
-            "11. Failure Modes": failure_plan(), "12. What Can Be Tested Now": _can_test(experiments, trading),
-            "13. What Cannot Yet Be Tested": _cannot_test(experiments), "14. Cross-Agent Alerts": cross_agent_alerts(experiments, trading),
-            "15. Highest-Value Second-Pass Validation Tasks": second_pass_tasks(experiments, trading, second_pass_outputs),
-            "16. Confidence /100": confidence, "17. Exactly What Prevents a Higher Score": _blockers(experiments, confidence, trading)}
+            "7. Bias & Leakage Risks": bias_rows,
+            "8. Robustness Plan": robustness_section,
+            "9. Ablation Plan": ablation_section,
+            "10. Real-World Friction": friction_plan(trading, result),
+            "11. Failure Modes": failure_section,
+            "12. What Can Be Tested Now": _can_test(experiments, trading),
+            "13. What Cannot Yet Be Tested": _cannot_test(experiments),
+            "14. Cross-Agent Alerts": cross_agent_alerts(experiments, trading),
+            "15. Highest-Value Second-Pass Validation Tasks": second_pass_tasks(experiments, trading, handoffs),
+            "16. Confidence /100": confidence,
+            "17. Exactly What Prevents a Higher Score": _blockers(experiments, confidence, trading, models, advanced, bias_guard)}
         packet: Dict[str, Any] = {"title": "AI-2 VALIDATION PACKET", "agent_id": AGENT_ID, "schema_version": SCHEMA_VERSION,
             "mode": "PARALLEL MULTI-AGENT RESEARCH COMPANY", "role": "Quantitative Science, Experiment, Testing & Validation Director",
             "truth_policy": {"never_invent_results": True, "unknown_labels": [UNKNOWN, TO_BE_ESTIMATED, NOT_TESTED],
@@ -200,12 +272,14 @@ class AI2ValidationDirector:
                 "hypothesis_statuses": [PASS, CONDITIONAL_PASS, INCONCLUSIVE, FAIL],
                 "narrow_rejection_rule": "A failed test rejects only the claim actually tested; never a whole theory family by invalid generalization."},
             "input_summary": {"structured_hypotheses_seen": len(hypotheses), "sources_seen": source_count(result),
-                "trading_specific_standard_enabled": trading, "second_pass_inputs_present": bool(second_pass_outputs),
+                "trading_specific_standard_enabled": trading, "second_pass_inputs_present": bool(handoffs),
                 "upstream_experiment_intelligence_present": upstream_ei["present"],
                 "ai1_research_packet_present": isinstance(result.get("ai1_research_packet"), Mapping)},
+            "advanced_receipt_analyses": advanced,
+            "decision_guards": {"bias_leakage_guard": bias_guard},
             "sections": sections, "second_pass_context": second}
-        if second_pass_outputs:
-            packet["second_pass_context"]["agent_outputs"] = deepcopy(dict(second_pass_outputs))
+        if handoffs:
+            packet["second_pass_context"]["agent_outputs"] = deepcopy(handoffs)
         packet["packet_integrity"] = validate_ai2_packet(packet)
         return packet
 
