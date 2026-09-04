@@ -42,6 +42,25 @@ def test_generic_archive_media_is_not_podcast_or_official_archive():
     assert families["official_archives_and_declassified_records"]["runtime"]["exercised"] is False
 
 
+def test_episode_word_alone_does_not_turn_a_lecture_into_a_podcast():
+    result = {
+        "sources": [
+            _source(
+                "E1",
+                title="Recorded Lecture Episode 1 transcript",
+                url="https://archive.org/details/lecture-episode-1",
+                connector="archive_media",
+                source_type="transcript",
+                read_level="full_text",
+            )
+        ]
+    }
+    families = _by_family(scm.build_source_capability_matrix(result))
+
+    assert families["video_audio_transcripts_interviews_lectures"]["runtime"]["exercised"] is True
+    assert families["podcasts_and_user_audio"]["runtime"]["exercised"] is False
+
+
 def test_podcast_and_local_user_audio_require_explicit_signals():
     result = {
         "sources": [
@@ -107,6 +126,34 @@ def test_official_archive_classifier_is_provider_or_host_specific():
 
     assert set(runtime["exercised_source_ids"]) == {"N1", "C1"}
     assert "M1" not in runtime["exercised_source_ids"]
+
+
+def test_official_archive_host_boundary_rejects_lookalike_domain():
+    result = {
+        "sources": [
+            _source(
+                "GOOD",
+                title="NARA subdomain record",
+                url="https://catalog.archives.gov/id/456",
+                connector="web",
+                source_type="web",
+                read_level="sections",
+            ),
+            _source(
+                "EVIL",
+                title="Lookalike archive page",
+                url="https://evilarchives.gov/example",
+                connector="web",
+                source_type="web",
+                read_level="full_text",
+            ),
+        ]
+    }
+    runtime = _by_family(scm.build_source_capability_matrix(result))[
+        "official_archives_and_declassified_records"
+    ]["runtime"]
+
+    assert runtime["exercised_source_ids"] == ["GOOD"]
 
 
 def test_pdf_and_historical_primary_text_receipts_are_exercisable():
