@@ -51,6 +51,7 @@ jobs:
             research_engine/validation_trading.py \
             research_engine/validation_director.py \
             research_engine/validation_spec_hardening.py \
+            research_engine/validation_spec_final_guard.py \
             research_engine/agent_manager.py
 
       - name: Run all AI-2 focused fail-closed validation tests
