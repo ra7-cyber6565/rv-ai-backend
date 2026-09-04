@@ -66,6 +66,7 @@ jobs:
             tests/test_ai1_structured_source_runtime.py \
             tests/test_ai1_source_family_completeness.py \
             tests/test_ai1_final_source_runtime_coverage.py \
+            tests/test_ai1_capability_receipt_hardening.py \
             tests/test_caption_content_type.py \
             2>&1 | tee ai1-test-output.txt
 

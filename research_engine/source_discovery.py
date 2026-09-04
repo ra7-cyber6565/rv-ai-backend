@@ -75,12 +75,12 @@ class SourceDiscovery:
         # test chalata hai — bina khud koi network call kiye. Plan me `markets`
         # key na ho to ye tier chalta hi nahi.
         self.markets = MarketConnector()
-        # Video/audio ka lane bhi ALAG hai (#133b). Book lane CATALOGUE deta hai
-        # aur classics lane MOOL TEXT — ye lane un dono se alag cheez laata hai:
-        # kisi lecture/interview/recording ka LIKHA HUA parichay. Media khud
-        # padha nahi jaata (na dekha, na suna), isliye har record par
-        # `read_level="snippet"` hi rehta hai. Ye lane sirf craft-study tier se
-        # chalta hai, aur wahan bhi tab jab planner ne `craft_study` bhara ho.
+        # Video/audio lane bhi ALAG hai (#133b). Production MediaConnector
+        # public VTT/SRT caption mile to transcript text process kar sakta hai;
+        # caption na mile to record description/snippet-only hi rehta hai. Media
+        # file khud kabhi download/dekhi/suni nahi jaati. Base SourceDiscovery
+        # ise study lanes me use karta hai; AI1StructuredSourceDiscovery alag se
+        # relevance-gated general transcript/media-intent lane add karta hai.
         self.media = MediaConnector()
         self.max_workers = max_workers
 
