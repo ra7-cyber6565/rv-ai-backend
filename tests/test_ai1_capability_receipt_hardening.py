@@ -148,7 +148,8 @@ def test_pdf_and_historical_primary_text_receipts_are_exercisable():
 def test_every_declared_family_has_contract_and_runtime_classifier():
     matrix = scm.build_source_capability_matrix({})
 
-    assert matrix["schema_version"] == "ai1-source-capability-matrix-1.2"
+    assert matrix["schema_version"] == "ai1-source-capability-matrix-1.1"
+    assert matrix["receipt_hardening_revision"] == 2
     assert matrix["valid"] is True
     assert matrix["contract_errors"] == []
     assert matrix["validation_errors"] == []
