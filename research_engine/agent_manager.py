@@ -75,11 +75,20 @@ class AgentManager:
         result = attach_ai2_validation(question, result)
 
         # Final AI-2-only runtime audit checks the original role specification
-        # line by line.  It is additive/fail-closed: it may add scope/reasons or
-        # downgrade an over-broad positive verdict, but never manufactures a
-        # result or upgrades missing evidence.  Core/AI-1/AI-2 output survives
-        # even if this audit layer cannot run.
-        result = harden_ai2_runtime_result(question, result)
+        # line by line. It runs only on a real, complete 17-section AI-2 packet.
+        # Test doubles and sanitized failure packets are intentionally left
+        # untouched. The layer is additive/fail-closed: it may add scope/reasons
+        # or downgrade an over-broad positive verdict, but never manufactures a
+        # result or upgrades missing evidence.
+        ai2_packet = result.get("ai2_validation")
+        ai2_sections = ai2_packet.get("sections") if isinstance(ai2_packet, dict) else None
+        if (
+            isinstance(ai2_packet, dict)
+            and ai2_packet.get("title") == "AI-2 VALIDATION PACKET"
+            and isinstance(ai2_sections, dict)
+            and len(ai2_sections) == 17
+        ):
+            result = harden_ai2_runtime_result(question, result)
 
         self._remember(project_id, result)
         return result
