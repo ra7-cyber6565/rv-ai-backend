@@ -41,9 +41,14 @@ jobs:
         run: |
           python -m py_compile \
             research_engine/ai1_research_director.py \
+            research_engine/ai1_packet_extensions.py \
             research_engine/deep_source_integrity.py \
+            research_engine/critical_source_anatomy.py \
+            research_engine/source_capability_matrix.py \
             research_engine/connectors/media_connector.py \
             research_engine/connectors/code_repository_connector.py \
+            research_engine/connectors/thesis_connector.py \
+            research_engine/connectors/archive_connector.py \
             research_engine/structured_source_reader.py \
             research_engine/ai1_structured_runtime.py \
             research_engine/network_safety.py \
@@ -57,6 +62,7 @@ jobs:
             tests/test_ai1_research_director.py \
             tests/test_ai1_deep_source_integrity.py \
             tests/test_ai1_structured_source_runtime.py \
+            tests/test_ai1_source_family_completeness.py \
             tests/test_caption_content_type.py \
             2>&1 | tee ai1-test-output.txt
 

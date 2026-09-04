@@ -1,24 +1,21 @@
-"""Production wiring for AI-1 structured source discovery and reading.
+"""Production wiring for AI-1 structured and specialist source families.
 
-This adapter is intentionally narrow and additive:
+This adapter stays additive: the core DeepResearchEngine and all ordinary
+SourceDiscovery lanes remain intact. AI-1 adds only relevance-gated public code,
+dissertation and official-archive lanes, then performs bounded dataset/code
+inspection before contradiction analysis and model reasoning.
 
-* the existing DeepResearchEngine stays the orchestrator;
-* the ordinary SourceDiscovery lanes still run unchanged;
-* a public GitHub code-repository lane is added only when the runtime plan/query
-  is technically relevant;
-* the ordinary ContentFetcher still performs legal document/full-text reading;
-* bounded dataset/code inspection runs immediately afterwards, before the core
-  engine reaches contradiction detection and model reasoning.
-
-Nothing in this module changes AI-2 validation.  It only makes AI-1's evidence
-foundation richer while preserving the same fail-closed truth boundaries.
+Nothing here changes AI-2 validation semantics or promotes evidence quality.
 """
 from __future__ import annotations
 
 from typing import Dict, List, Tuple
 
 from . import models as model_vocab
+from .connectors.archive_connector import ArchiveConnector
 from .connectors.code_repository_connector import CodeRepositoryConnector
+from .connectors.thesis_connector import ThesisConnector
+from .critical_source_anatomy import extract_critical_source_anatomy
 from .source_discovery import SourceDiscovery
 from .structured_source_reader import (
     StructuredAwareContentFetcher as _BaseStructuredAwareContentFetcher,
@@ -34,17 +31,29 @@ _CODE_QUERY_CUES = (
 )
 _CODE_SOURCE_TYPE_CUES = {"code", "repository", "software", "implementation"}
 
+_THESIS_QUERY_CUES = (
+    "thesis", "dissertation", "doctoral", "phd", "master's thesis", "masters thesis",
+    "doctoral research", "doctoral dissertation",
+)
+_THESIS_RESEARCH_CUES = (
+    "research", "evidence", "literature", "study", "studies", "review",
+    "history", "mechanism", "theory", "experiment", "empirical",
+)
+_THESIS_DOMAINS = {
+    "superconductivity", "materials_physics", "medicine_health",
+    "biology_genetics", "cs_ml", "energy_climate", "economics", "chemistry",
+    "space", "engineering", "archaeology_history",
+}
+
+_ARCHIVE_QUERY_CUES = (
+    "declassified", "cia document", "cia documents", "cia reading room", "foia",
+    "national archives", "nara", "fbi vault", "official archive", "archival record",
+    "government archive", "project stargate", "gateway process", "remote viewing",
+)
+
 
 def register_structured_read_level() -> None:
-    """Register generic bounded-section depth in the shared read vocabulary.
-
-    ``sections`` existed in AI-1's deep-source auditor before it existed in the
-    older SourceRecord display vocabulary.  Registering it here keeps all
-    production views aligned: SourceRecord.access_depth(), EvidencePack read
-    counts, prompt labels and AI-1 deep-source audit now describe a bounded
-    dataset/code read the same way.  This is an access-depth label only; it does
-    not promote any claim or change evidence quality.
-    """
+    """Register generic bounded-section depth in the shared read vocabulary."""
     order = model_vocab.READ_LEVEL_ORDER
     if "sections" not in order:
         try:
@@ -61,16 +70,10 @@ register_structured_read_level()
 
 
 def code_lane_relevant(plan: Dict, query: str) -> bool:
-    """Deterministically decide whether public implementation evidence helps.
-
-    This is a routing decision, never evidence.  A positive result only permits
-    GitHub repository discovery; it does not imply that a repository exists or
-    that any code was inspected.
-    """
+    """Whether public implementation evidence is relevant; routing != evidence."""
     domain = str((plan or {}).get("domain") or "").strip().casefold()
     if domain in _TECHNICAL_DOMAINS:
         return True
-
     useful = {
         str(item or "").strip().casefold()
         for item in ((plan or {}).get("useful_source_types") or [])
@@ -78,48 +81,72 @@ def code_lane_relevant(plan: Dict, query: str) -> bool:
     }
     if any(any(cue in item for cue in _CODE_SOURCE_TYPE_CUES) for item in useful):
         return True
-
     low = " ".join(str(query or "").casefold().split())
     return any(cue in low for cue in _CODE_QUERY_CUES)
 
 
+def thesis_lane_relevant(plan: Dict, query: str) -> bool:
+    """Use the dissertation lane only for explicit or research-heavy asks."""
+    low = " ".join(str(query or "").casefold().split())
+    if any(cue in low for cue in _THESIS_QUERY_CUES):
+        return True
+    domain = str((plan or {}).get("domain") or "").strip().casefold()
+    return domain in _THESIS_DOMAINS and any(cue in low for cue in _THESIS_RESEARCH_CUES)
+
+
+def archive_lane_relevant(plan: Dict, query: str) -> bool:
+    """Official archive API lane is only for actual archival/declassified intent."""
+    if list((plan or {}).get("official_archive_queries") or []):
+        return True
+    low = " ".join(str(query or "").casefold().split())
+    return any(cue in low for cue in _ARCHIVE_QUERY_CUES)
+
+
 class AI1StructuredSourceDiscovery(SourceDiscovery):
-    """Existing discovery plus a bounded, relevance-gated public code lane."""
+    """Ordinary discovery plus bounded, auditable AI-1 family lanes."""
 
     def __init__(self, max_workers: int = 6):
         super().__init__(max_workers=max_workers)
         self.code_repositories = CodeRepositoryConnector()
+        self.theses = ThesisConnector()
+        self.archives = ArchiveConnector()
 
     def _tasks(self, queries: List[str], plan: Dict, max_per_connector: int,
                max_web: int) -> List[Tuple[str, object]]:
         tasks = list(super()._tasks(queries, plan, max_per_connector, max_web))
         primary = str(queries[0] if queries else "").strip()
-        if not primary or not code_lane_relevant(plan, primary):
+        if not primary:
             return tasks
 
-        connector = self.code_repositories.by_name("github_code")
-        if connector is None:
-            return tasks
+        if code_lane_relevant(plan, primary):
+            connector = self.code_repositories.by_name("github_code")
+            if connector is not None:
+                limit = max(1, min(int(max_per_connector or 1), 3))
+                tasks.append((connector.name, self._single(connector, primary, limit)))
 
-        # One bounded task per round.  Unlike paper lanes, we do not fan the
-        # repository API out over every query because public GitHub search is
-        # rate-limited and the structured reader later makes additional bounded
-        # tree/file calls for repositories that survive ranking.
-        limit = max(1, min(int(max_per_connector or 1), 3))
-        tasks.append((connector.name, self._single(connector, primary, limit)))
+        if thesis_lane_relevant(plan, primary):
+            connector = self.theses.by_name("crossref_dissertation")
+            if connector is not None:
+                limit = max(1, min(int(max_per_connector or 1), 3))
+                tasks.append((connector.name, self._single(connector, primary, limit)))
+
+        if archive_lane_relevant(plan, primary):
+            connector = self.archives.by_name("nara_archive")
+            if connector is not None:
+                archive_queries = [
+                    str(item or "").strip()
+                    for item in list((plan or {}).get("official_archive_queries") or [])
+                    if str(item or "").strip()
+                ]
+                archive_query = archive_queries[0] if archive_queries else primary
+                limit = max(1, min(int(max_per_connector or 1), 3))
+                tasks.append((connector.name,
+                              self._single(connector, archive_query, limit)))
         return tasks
 
 
 class AI1StructuredSourceInspector(StructuredSourceInspector):
-    """Structured inspector with a hard access-depth clamp after success.
-
-    A provider series may arrive marked ``full_text`` because the complete
-    provider response was read.  Once AI-1 turns that source into a bounded row
-    sample/profile, however, the evidence surface used for reasoning is a
-    *subset*.  Likewise selected repository files are never a whole-repository
-    read.  The postcondition below prevents an inherited full-text marker from
-    silently surviving that transformation.
-    """
+    """Structured inspector with a hard section-depth clamp after success."""
 
     def enrich(self, pack, *, max_sources: int = 3,
                budget_chars: int = 2400) -> Dict:
@@ -137,36 +164,94 @@ class AI1StructuredSourceInspector(StructuredSourceInspector):
             if code and prior_chars:
                 code.setdefault(
                     "non_structured_text_chars_before_inspection", prior_chars)
-
-            # These records now represent the bounded structured evidence that
-            # actually enters reasoning, not a whole dataset/repository.
             source.read_level = "sections"
             source.full_text_available = False
             source.full_text_chars = 0
-
             for passage in list(getattr(pack, "passages", []) or []):
                 if passage.source_id == source.source_id:
                     passage.read_level_at_capture = "sections"
         return report
 
 
+class _CapturingProcessor:
+    """Proxy that exposes processed text to AI-1 without retaining it in results."""
+
+    def __init__(self, delegate, owner):
+        self._delegate = delegate
+        self._owner = owner
+
+    def process(self, *args, **kwargs):
+        result = self._delegate.process(*args, **kwargs)
+        if isinstance(result, dict) and result.get("ok"):
+            self._owner._last_processed_text = str(result.get("text") or "")
+        else:
+            self._owner._last_processed_text = ""
+        return result
+
+
 class StructuredAwareContentFetcher(_BaseStructuredAwareContentFetcher):
-    """Production full-text reader followed by AI-1's clamped inspector."""
+    """Production reader + bounded inspectors + critical full-text anatomy."""
 
     def __init__(self, allow_network=None):
         super().__init__(allow_network=allow_network)
         self.structured = AI1StructuredSourceInspector(
             allow_network=self.allow_network)
+        self._last_processed_text = ""
+
+    def _processor(self):
+        # ContentFetcher.read_source() calls this polymorphically. The proxy
+        # captures only the in-memory processed text long enough to build the
+        # deterministic anatomy receipt; raw text is not persisted in the
+        # receipt or source metadata.
+        return _CapturingProcessor(super()._processor(), self)
+
+    def read_source(self, source, question: str, budget_chars: int = 2400) -> Dict:
+        self._last_processed_text = ""
+        entry = super().read_source(source, question, budget_chars)
+        if isinstance(entry, dict) and entry.get("ok") and self._last_processed_text:
+            entry["critical_source_anatomy"] = extract_critical_source_anatomy(
+                self._last_processed_text)
+        # Drop raw capture immediately after derivation so no whole document is
+        # retained by this adapter beyond the ordinary ContentFetcher lifecycle.
+        self._last_processed_text = ""
+        return entry
+
+    def enrich(self, pack, max_sources: int = 3, budget_chars: int = 2400) -> Dict:
+        report = super().enrich(
+            pack, max_sources=max_sources, budget_chars=budget_chars)
+        anatomy_by_source = {
+            str(entry.get("source_id") or ""): entry.get("critical_source_anatomy")
+            for entry in list(report.get("entries") or [])
+            if isinstance(entry, dict) and isinstance(entry.get("critical_source_anatomy"), dict)
+        }
+        attached = 0
+        for source in list(getattr(pack, "sources", []) or []):
+            anatomy = anatomy_by_source.get(str(getattr(source, "source_id", "") or ""))
+            if not anatomy:
+                continue
+            verdict = getattr(source, "domain_verdict", None)
+            verdict = dict(verdict) if isinstance(verdict, dict) else {}
+            verdict["critical_source_anatomy"] = anatomy
+            source.domain_verdict = verdict
+            attached += 1
+        report["critical_source_anatomy"] = {
+            "attached": attached,
+            "raw_full_text_retained": False,
+            "rule": (
+                "Anatomy records explicit headings/cues only; missing cues remain UNKNOWN "
+                "and anatomy completeness is not study validity or claim truth."
+            ),
+        }
+        return report
 
 
 def configure_ai1_structured_runtime(engine):
-    """Install the AI-1 structured lanes on one DeepResearchEngine instance."""
+    """Install the AI-1 source-family lanes on one DeepResearchEngine instance."""
     register_structured_read_level()
     discovery = getattr(engine, "discovery", None)
     if not isinstance(discovery, AI1StructuredSourceDiscovery):
         workers = int(getattr(discovery, "max_workers", 6) or 6)
         engine.discovery = AI1StructuredSourceDiscovery(max_workers=workers)
-
     reader = getattr(engine, "reader", None)
     if not isinstance(reader, StructuredAwareContentFetcher):
         allow_network = getattr(reader, "allow_network", None)
@@ -178,7 +263,9 @@ __all__ = [
     "AI1StructuredSourceDiscovery",
     "AI1StructuredSourceInspector",
     "StructuredAwareContentFetcher",
+    "archive_lane_relevant",
     "code_lane_relevant",
     "configure_ai1_structured_runtime",
     "register_structured_read_level",
+    "thesis_lane_relevant",
 ]
