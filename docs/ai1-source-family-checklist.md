@@ -20,10 +20,18 @@ A checkbox is complete only when the capability is implemented in the production
 - [x] OCR/scanned-document lane remains fail-closed when extraction quality needs review.
 - [x] Historical/public-domain primary-text lane remains separate from modern empirical validation.
 - [x] Paywalled/private/authenticated/unavailable material is never treated as an implementation shortcut or silently called read.
+- [x] Runtime capability accounting requires an explicit classifier for every declared source family (PR #77).
+- [x] Generic Archive.org media cannot masquerade as an official/declassified archive (PR #77).
+- [x] Generic lecture/transcript evidence cannot masquerade as podcast/user-audio without explicit podcast or local-STT evidence (PR #77).
+- [x] PDF/large-document and historical-primary-text families record real per-run exercise receipts (PR #77).
+- [x] Capability-matrix validity fails closed on malformed contracts, missing classifiers or missing required modules (PR #77).
+- [x] SourceDiscovery media comment matches the production transcript-vs-description behavior (PR #77).
 - [x] Exact-head five-gate validation for PR #74: head `e9d174007085cab79f5c086ce60f8995c9786ce6`, all five gates passed before merge.
 - [x] PR #74 safely merged to `main`: merge `96869c3254c17f6fa0fe0f34d95a466370b17e35`.
 - [x] Exact-head five-gate validation for PR #75: head `f763fcca1145e77511d98932bb7df6bc9c58cecb`, all five gates passed before merge.
 - [x] PR #75 safely merged to `main`: merge `98bec29ec71840aa8dd7ce5e6688a2adaece2a4f`.
+- [x] Exact-head five-gate validation for PR #77: head `b8f8370341e9958402b6dd702870417ccc8a57c5`, all five gates passed before merge.
+- [x] PR #77 safely merged to `main`: merge `92470fbf4abd17f872479011a564c2e1e9a5f2d6`.
 
 ## Completion scope
 
