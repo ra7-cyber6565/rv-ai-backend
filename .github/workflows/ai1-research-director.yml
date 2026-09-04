@@ -45,6 +45,8 @@ jobs:
             research_engine/deep_source_integrity.py \
             research_engine/critical_source_anatomy.py \
             research_engine/source_capability_matrix.py \
+            research_engine/public_documentation_reader.py \
+            research_engine/multilingual_source_provenance.py \
             research_engine/connectors/media_connector.py \
             research_engine/connectors/code_repository_connector.py \
             research_engine/connectors/thesis_connector.py \
@@ -63,6 +65,7 @@ jobs:
             tests/test_ai1_deep_source_integrity.py \
             tests/test_ai1_structured_source_runtime.py \
             tests/test_ai1_source_family_completeness.py \
+            tests/test_ai1_final_source_runtime_coverage.py \
             tests/test_caption_content_type.py \
             2>&1 | tee ai1-test-output.txt
 
