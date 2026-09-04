@@ -36,6 +36,10 @@ def _result():
     return {"question": "Does it work?", "hypotheses": [_hypothesis()], "sources": [{"id": "S1"}]}
 
 
+def _experiment(packet):
+    return packet["sections"]["6. Exact Experiments / Backtests / Simulations Required"]["domain_hypothesis_experiments"][0]
+
+
 def test_math_model_requires_full_pro_max_contract():
     r = _result()
     r["mathematical_model"] = {
@@ -148,7 +152,7 @@ def test_verified_bias_finding_downgrades_positive_hypothesis_verdict():
                             "provenance": {"artifact": "audit-1"}}
     }
     packet = AI2ValidationDirector().build_packet("Does it work?", r)
-    exp = packet["sections"]["6. Exact Experiments / Backtests / Simulations Required"]["domain_hypothesis_experiments"][0]
+    exp = _experiment(packet)
     assert exp["pre_bias_guard_status"] == "PASS"
     assert exp["hypothesis_status"] == INCONCLUSIVE
     assert packet["decision_guards"]["bias_leakage_guard"]["positive_verdicts_downgraded"] is True
@@ -161,6 +165,9 @@ def test_auto_consumes_existing_ai1_handoff_for_second_pass_without_restart():
     assert packet["second_pass_context"]["present"] is True
     assert "AI-1" in packet["second_pass_context"]["agents_received"]
     assert "AI-1" in packet["second_pass_context"]["agent_outputs"]
+    assert packet["second_pass_context"]["agent_outputs"]["AI-1"]["full_payload_embedded"] is False
+    assert "hypotheses" not in packet["second_pass_context"]["agent_outputs"]["AI-1"]
+    assert packet["second_pass_context"]["full_payloads_embedded_in_ai2_packet"] is False
     tasks = packet["sections"]["15. Highest-Value Second-Pass Validation Tasks"]
     assert "Triangulate" in tasks[0]["task"]
 
@@ -206,3 +213,57 @@ def test_variable_role_audit_is_explicit_without_forcing_irrelevant_roles():
     assert "dependent" in audit["provided_roles"]
     assert "mediator" in audit["role_categories_not_explicitly_supplied"]
     assert "not automatically errors" in audit["interpretation"]
+
+
+def test_generic_numeric_receipt_supports_explicit_conditional_pass():
+    r = _result()
+    r["validation_receipts"] = [{
+        "hypothesis_id": "H1",
+        "provenance": {"test_id": "T-COND", "dataset_id": "locked"},
+        "observations": {"candidate": [4, 5, 6], "baseline": [1, 2, 3]},
+        "decision_rule": {
+            "metric": "mean_difference", "operator": ">", "threshold": 0,
+            "status_if_pass": "CONDITIONAL PASS",
+        },
+    }]
+    exp = _experiment(AI2ValidationDirector().build_packet("Does it work?", r))
+    assert exp["test_state"] == RESULT_OBSERVED
+    assert exp["hypothesis_status"] == CONDITIONAL_PASS
+    assert exp["decision_basis"]["status"] == CONDITIONAL_PASS
+    assert exp["decision_basis"]["rule_source"] == "SUPPLIED_IN_RESULT_RECEIPT"
+
+
+def test_verified_bias_also_invalidates_fail_until_clean_retest():
+    r = _result()
+    r["validation_receipts"] = [{
+        "hypothesis_id": "H1",
+        "provenance": {"test_id": "T-FAIL", "dataset_id": "locked"},
+        "observations": {"candidate": [1, 1, 1], "baseline": [3, 4, 5]},
+        "decision_rule": {"metric": "mean_difference", "operator": ">", "threshold": 0},
+    }]
+    r["bias_audit"] = {
+        "target_leakage": {"status": "DETECTED", "evidence": "target-derived feature entered the evaluated design",
+                           "provenance": {"artifact": "audit-fail"}}
+    }
+    packet = AI2ValidationDirector().build_packet("Does it work?", r)
+    exp = _experiment(packet)
+    assert exp["pre_bias_guard_status"] == "FAIL"
+    assert exp["hypothesis_status"] == INCONCLUSIVE
+    guard = packet["decision_guards"]["bias_leakage_guard"]
+    assert guard["decisive_verdicts_downgraded"] is True
+
+
+def test_handoff_compaction_prevents_ai1_packet_duplication():
+    r = _result()
+    r["ai1_research_packet"] = {
+        "validation": {"valid": True},
+        "sections": {"very_large": {"payload": "x" * 5000}},
+        "hypotheses": [{"id": "AI1-H1", "statement": "Evidence-backed mechanism"}],
+    }
+    packet = AI2ValidationDirector().build_packet("Does it work?", r)
+    stored = packet["second_pass_context"]["agent_outputs"]["AI-1"]
+    assert stored["full_payload_embedded"] is False
+    assert stored["packet_valid"] is True
+    assert "sections" not in stored
+    assert "hypotheses" not in stored
+    assert packet["second_pass_context"]["full_payloads_used_internally"] is True
