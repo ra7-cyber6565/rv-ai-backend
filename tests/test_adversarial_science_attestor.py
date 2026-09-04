@@ -89,7 +89,7 @@ def test_attestor_mints_only_execution_and_reproducibility(tmp_path):
     assert all(row["proof_kind"] != ProofKind.HARDWARE.value for row in rows)
 
 
-def test_specialized_readiness_routes_are_repo_backed_but_independence_stays_external():
+def test_specialized_readiness_routes_are_repo_backed_and_independence_stays_external():
     report = audit_attestation_readiness(_root())
     for capability_id in CAPABILITY_IDS:
         execution = _route(report, capability_id, ProofKind.EXECUTION)
@@ -106,8 +106,10 @@ def test_specialized_readiness_routes_are_repo_backed_but_independence_stays_ext
         )
 
     independent = _route(report, 36, ProofKind.INDEPENDENT)
-    assert independent.status == "GENERIC_EXTERNAL_ROUTE"
-    assert independent.attestor_id == ""
+    assert independent.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+    assert independent.attestor_id == "adversarial-independent"
+    assert independent.verifiers == ("trusted-independent-validator",)
+    assert independent.subjects == ("capability-36-independent-validation",)
     assert independent.external_required is True
 
 
