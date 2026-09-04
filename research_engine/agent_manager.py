@@ -24,6 +24,7 @@ import threading
 from typing import Dict, List, Optional
 
 from .ai1_research_director import attach_ai1_research_packet
+from .ai1_structured_runtime import configure_ai1_structured_runtime
 from .orchestrator import DeepResearchEngine
 from .validation_director import attach_ai2_validation
 from .validation_spec_final_guard import enforce_ai2_final_truth_guards
@@ -46,6 +47,13 @@ class AgentManager:
             engine = self._engines.get(project_id)
             if engine is None:
                 engine = DeepResearchEngine(project_id=project_id)
+                # AI-1 structured evidence lanes are installed on the core
+                # engine itself, before any research run. The adapter preserves
+                # ordinary discovery/full-text behavior and only adds relevant
+                # public code discovery + bounded dataset/code inspection. This
+                # happens before contradiction/reasoning, while AI-2 below stays
+                # a post-core validation layer and is not modified here.
+                engine = configure_ai1_structured_runtime(engine)
                 self._engines[project_id] = engine
             return engine
 
