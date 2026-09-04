@@ -21,7 +21,7 @@ import importlib.util
 from typing import Callable, Dict, List, Mapping, Sequence
 from urllib.parse import urlsplit
 
-SCHEMA_VERSION = "ai1-source-capability-matrix-1.2"
+SCHEMA_VERSION = "ai1-source-capability-matrix-1.1"
 
 DEEP_RUNTIME = "DEEP_RUNTIME"
 BOUNDED_RUNTIME = "BOUNDED_RUNTIME"
@@ -492,6 +492,7 @@ def build_source_capability_matrix(result: Mapping | None = None) -> Dict:
     ]
     return {
         "schema_version": SCHEMA_VERSION,
+        "receipt_hardening_revision": 2,
         "families": rows,
         "family_count": len(rows),
         "implementation_status_counts": counts,
