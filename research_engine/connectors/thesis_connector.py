@@ -116,7 +116,7 @@ class CrossrefDissertationConnector(BaseConnector):
             oa_pdf = _open_pdf(item)
             url = oa_pdf or self._clean(item.get("URL"), 600)
             if not url and doi:
-                url = f"https://doi.org/{quote(doi, safe='/') }"
+                url = f"https://doi.org/{quote(doi, safe='/')}"
             institution = self._clean(
                 _first_text(item.get("institution") or item.get("publisher")), 300)
             if not (title or doi or url):
@@ -160,12 +160,15 @@ class CrossrefDissertationConnector(BaseConnector):
         if not clean:
             self.last_reason = "empty_query"
             return []
+        # Crossref recommends selective fields only when needed; the exact set
+        # of selectable fields may evolve. The dissertation lane is already
+        # tightly bounded to <=20 rows, so omitting `select` avoids a brittle
+        # schema dependency while keeping response size modest.
         response = http_get(
             "https://api.crossref.org/types/dissertation/works",
             params={
                 "query": clean[:180],
                 "rows": max(1, min(max(int(max_results or 1) * 3, 6), 20)),
-                "select": "DOI,title,author,published-print,published-online,issued,created,deposited,publisher,institution,type,URL,abstract,link,license",
             },
         )
         records = self.parse(response.json(), query=query)[:max_results]
