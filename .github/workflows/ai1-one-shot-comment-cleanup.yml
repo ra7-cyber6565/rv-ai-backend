@@ -1,0 +1,56 @@
+name: AI-1 one-shot stale comment cleanup
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    if: github.head_ref == 'feature/ai1-audit-hardening'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+
+      - name: Replace obsolete media discovery comment
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('research_engine/source_discovery.py')
+          text = path.read_text(encoding='utf-8')
+          old = '''        # Video/audio ka lane bhi ALAG hai (#133b). Book lane CATALOGUE deta hai
+        # aur classics lane MOOL TEXT — ye lane un dono se alag cheez laata hai:
+        # kisi lecture/interview/recording ka LIKHA HUA parichay. Media khud
+        # padha nahi jaata (na dekha, na suna), isliye har record par
+        # `read_level="snippet"` hi rehta hai. Ye lane sirf craft-study tier se
+        # chalta hai, aur wahan bhi tab jab planner ne `craft_study` bhara ho.
+'''
+          new = '''        # Video/audio lane bhi ALAG hai (#133b). Production MediaConnector
+        # public VTT/SRT caption mile to transcript text process kar sakta hai;
+        # caption na mile to record description/snippet-only hi rehta hai. Media
+        # file khud kabhi download/dekhi/suni nahi jaati. Base SourceDiscovery
+        # ise study lanes me use karta hai; AI1StructuredSourceDiscovery alag se
+        # relevance-gated general transcript/media-intent lane add karta hai.
+'''
+          if old not in text:
+              raise SystemExit('expected stale media comment block not found exactly')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+
+      - name: Remove one-shot workflow and commit cleanup
+        shell: bash
+        run: |
+          rm .github/workflows/ai1-one-shot-comment-cleanup.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research_engine/source_discovery.py .github/workflows/ai1-one-shot-comment-cleanup.yml
+          git commit -m "Correct stale media discovery truth comment"
+          git push origin HEAD:${{ github.head_ref }}
