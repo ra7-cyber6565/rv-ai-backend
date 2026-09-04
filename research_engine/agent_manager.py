@@ -26,6 +26,7 @@ from typing import Dict, List, Optional
 from .ai1_research_director import attach_ai1_research_packet
 from .orchestrator import DeepResearchEngine
 from .validation_director import attach_ai2_validation
+from .validation_spec_final_guard import enforce_ai2_final_truth_guards
 from .validation_spec_hardening import harden_ai2_runtime_result
 
 _MAX_HISTORY = 30
@@ -89,6 +90,10 @@ class AgentManager:
             and len(ai2_sections) == 17
         ):
             result = harden_ai2_runtime_result(question, result)
+            # Composition safety: a verified bias/leakage downgrade is one-way.
+            # Later AI-2 composition may never restore a decisive status until a
+            # clean re-test replaces the affected evidence path.
+            result = enforce_ai2_final_truth_guards(result)
 
         self._remember(project_id, result)
         return result
