@@ -28,6 +28,7 @@ from .orchestrator import DeepResearchEngine
 from .validation_director import attach_ai2_validation
 from .validation_spec_final_guard import enforce_ai2_final_truth_guards
 from .validation_spec_hardening import harden_ai2_runtime_result
+from .validation_spec_quant_extension import extend_ai2_quantitative_receipts
 
 _MAX_HISTORY = 30
 
@@ -78,9 +79,9 @@ class AgentManager:
         # Final AI-2-only runtime audit checks the original role specification
         # line by line. It runs only on a real, complete 17-section AI-2 packet.
         # Test doubles and sanitized failure packets are intentionally left
-        # untouched. The layer is additive/fail-closed: it may add scope/reasons
-        # or downgrade an over-broad positive verdict, but never manufactures a
-        # result or upgrades missing evidence.
+        # untouched. Every post-AI2 layer is fail-closed: it can add calculations
+        # from explicit receipts or downgrade/scope a verdict, never manufacture
+        # evidence or upgrade missing data into empirical truth.
         ai2_packet = result.get("ai2_validation")
         ai2_sections = ai2_packet.get("sections") if isinstance(ai2_packet, dict) else None
         if (
@@ -90,6 +91,7 @@ class AgentManager:
             and len(ai2_sections) == 17
         ):
             result = harden_ai2_runtime_result(question, result)
+            result = extend_ai2_quantitative_receipts(result)
             # Composition safety: a verified bias/leakage downgrade is one-way.
             # Later AI-2 composition may never restore a decisive status until a
             # clean re-test replaces the affected evidence path.
