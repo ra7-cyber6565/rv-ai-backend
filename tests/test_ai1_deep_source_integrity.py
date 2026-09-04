@@ -167,7 +167,8 @@ def test_archive_media_connector_upgrades_only_when_public_caption_is_read(monke
         return responses.pop(0)
 
     monkeypatch.setattr(media, "http_get", fake_get)
-    rows = media.MediaArchiveConnector().search("causal inference evidence", 1)
+    rows = media.MediaArchiveConnector(read_public_captions=True).search(
+        "causal inference evidence", 1)
     assert len(rows) == 1
     record = rows[0]
     assert record.read_level == "full_text"
@@ -187,12 +188,19 @@ def test_archive_media_connector_falls_back_to_snippet_without_caption(monkeypat
         return responses.pop(0)
 
     monkeypatch.setattr(media, "http_get", fake_get)
-    rows = media.MediaArchiveConnector().search("research lecture", 1)
+    rows = media.MediaArchiveConnector(read_public_captions=True).search(
+        "research lecture", 1)
     assert len(rows) == 1
     record = rows[0]
     assert record.read_level == "snippet"
     assert record.full_text_available is False
     assert record.full_text_chars == 0
+
+
+def test_production_media_facade_enables_caption_deep_read():
+    connector = media.MediaConnector().by_name("archive_media")
+    assert connector is not None
+    assert connector.read_public_captions is True
 
 
 def test_lyrics_hunt_never_touches_network(monkeypatch):
