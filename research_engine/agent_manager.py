@@ -26,6 +26,7 @@ from typing import Dict, List, Optional
 from .ai1_research_director import attach_ai1_research_packet
 from .orchestrator import DeepResearchEngine
 from .validation_director import attach_ai2_validation
+from .validation_spec_hardening import harden_ai2_runtime_result
 
 _MAX_HISTORY = 30
 
@@ -73,6 +74,13 @@ class AgentManager:
         # and fails closed to INCONCLUSIVE/NOT TESTED when provenance is missing.
         result = attach_ai2_validation(question, result)
 
+        # Final AI-2-only runtime audit checks the original role specification
+        # line by line.  It is additive/fail-closed: it may add scope/reasons or
+        # downgrade an over-broad positive verdict, but never manufactures a
+        # result or upgrades missing evidence.  Core/AI-1/AI-2 output survives
+        # even if this audit layer cannot run.
+        result = harden_ai2_runtime_result(question, result)
+
         self._remember(project_id, result)
         return result
 
@@ -105,6 +113,9 @@ class AgentManager:
                     .get("sections", {})
                     .get("16. Confidence /100", {})
                     .get("score")
+                ),
+                "ai2_line_by_line_audit_valid": bool(
+                    (result.get("ai2_line_by_line_audit") or {}).get("valid")
                 ),
             })
             if len(history) > _MAX_HISTORY:
