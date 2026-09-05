@@ -273,6 +273,24 @@ def chief_handoff(company: Dict) -> str:
     )
 
 
+def generate_company_chief(brain, prompt: str, label: str = "") -> str:
+    """The chief must not enter legacy SDK discovery without an eligible model."""
+    from utils.zero_cost_guard import zero_cost_enabled
+    from .reasoning_router_integrated import QuotaExhausted
+    eligible = zero_cost_enabled() and (
+        brain._gemini_allowed()
+        or any(provider.configured for provider in brain.fallback_providers)
+    )
+    if eligible:
+        return brain.generate(prompt, label)
+    if brain.remaining <= 0:
+        raise QuotaExhausted("company chief logical call budget exhausted")
+    brain.calls_used += 1
+    brain.pass_log.append({"label": label, "ok": False, "http_attempts": 0, "model": ""})
+    brain.errors.append("Company chief unavailable: no eligible confirmed-zero-cost model.")
+    return ""
+
+
 def attach_company_passes(out: Dict, company: Dict) -> None:
     """Extend existing completion gates and combine chief/worker accounting."""
     company["chief_execution"] = {"done_passes": list(out.get("done_passes") or []),

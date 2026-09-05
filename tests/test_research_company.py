@@ -191,6 +191,9 @@ def test_real_chief_pipeline_receives_drafts_preserves_lab_and_accounts_workers(
     from research_engine import orchestrator as core
     from research_engine.reasoning_router_integrated import ResilientReasoning
     prompts, brains = [], []
+    monkeypatch.setenv("ZERO_COST_ONLY", "true")
+    monkeypatch.setenv("GEMINI_API_KEY", "fixture-key-never-sent")
+    monkeypatch.setenv("GEMINI_ZERO_COST_CONFIRMED", "true")
 
     class Brain(ResilientReasoning):
         def __init__(self, budget):
@@ -213,6 +216,21 @@ def test_real_chief_pipeline_receives_drafts_preserves_lab_and_accounts_workers(
     assert len([p for p in result["done_passes"] if p.startswith("company_")]) == 4
     assert result["calls"] == len(prompts) + 4
     assert "lab" in result and "rejects" in result
+
+
+def test_chief_with_no_eligible_model_never_enters_sdk_or_spends_http(monkeypatch):
+    from research_engine.reasoning_router_integrated import ResilientReasoning, QuotaExhausted
+    brain = ResilientReasoning(budget=1, fallback_providers=[])
+    monkeypatch.setenv("ZERO_COST_ONLY", "true")
+    monkeypatch.setattr(brain, "_gemini_allowed", lambda: False)
+    def forbidden(*args):
+        raise AssertionError("No eligible model must never enter generation")
+    monkeypatch.setattr(brain, "generate", forbidden)
+    assert company.generate_company_chief(brain, "private fixture", "analysis") == ""
+    assert brain.attempts == 0 and brain.calls_used == 1
+    assert brain.pass_log[-1]["ok"] is False
+    with pytest.raises(QuotaExhausted):
+        company.generate_company_chief(brain, "private fixture", "analysis")
 
 
 def test_depth_modes_api_discloses_worker_and_total_budget():

@@ -58,6 +58,8 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 - Windows/Python live ₹0 gate accepts COMPANY/COMPANY_PLUS and requires actual
   worker/chief generation plus complete accounting. Live execution remains
   pending on a configured confirmed-free deployment.
+- Company chief generation also fails before SDK entry when no eligible free
+  model exists; the legacy no-backup route cannot bypass this company check.
 
 - Isolated branch: `codex/research-company-20260905`, based on main
   `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`. Exact base Foundation Actions

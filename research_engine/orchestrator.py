@@ -46,7 +46,7 @@ from .evidence_drafting import (
 from .epistemic_governance import build_runtime_evidence_packet
 from .experiment_intelligence import build_runtime_experiment_packet
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
-from .research_company import run_company, chief_handoff, attach_company_passes
+from .research_company import run_company, chief_handoff, attach_company_passes, generate_company_chief
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from .knowledge_watch import KnowledgeWatch, update_from_research_run
@@ -897,6 +897,9 @@ class DeepResearchEngine:
             memory_note = chief_handoff(company) + "\n" + memory_note
             config = replace(config, gemini_calls=company["chief_call_budget"])
         brain = GeminiReasoning(budget=config.gemini_calls)
+        generate = brain.generate
+        if company is not None:
+            generate = lambda prompt, label="": generate_company_chief(brain, prompt, label)
         # #130 — gaane ki farmaish par "hunar kya kehta hai" wala padha hua
         # hissa. Ye poora offline hai (0 Gemini call, koi network nahi): jo
         # sources DISCOVERY me pehle se aa chuke hain, unhi me se craft ki
@@ -1112,7 +1115,7 @@ class DeepResearchEngine:
                     self._track(job_id, "HYPOTHESIS",
                                 f"{hypothesis_count} hypotheses (pehli call ke andar)")
                     prompt += self.hypotheses.prompt_appendix(hypothesis_count)
-                text = brain.generate(prompt, "analysis")
+                text = generate(prompt, "analysis")
                 if explicit_hypotheses and text:
                     body, hypothesis_part = self._split_hypotheses(text)
                     out["analysis"] = body or text
@@ -1124,7 +1127,7 @@ class DeepResearchEngine:
                 if company is not None:
                     no_source_prompt = f"{memory_note}\n\n{no_source_prompt}"
                 no_source_prompt = f"{no_source_prompt}\n\n{evidence_first_block}"
-                out["analysis"] = brain.generate(
+                out["analysis"] = generate(
                     no_source_prompt, "no-source answer")
         except QuotaExhausted as exc:
             out["errors"].append(str(exc))
@@ -1138,7 +1141,7 @@ class DeepResearchEngine:
                 self._track(job_id, "HYPOTHESIS", "hypothesis generation (same call)")
                 prompt += self.hypotheses.prompt_appendix(hypothesis_count)
             try:
-                text = brain.generate(prompt, "critique")
+                text = generate(prompt, "critique")
             except QuotaExhausted as exc:
                 text = ""
                 out["errors"].append(str(exc))
@@ -1161,7 +1164,7 @@ class DeepResearchEngine:
                 and brain.remaining >= 2):
             self._track(job_id, "HYPOTHESIS", "dedicated hypothesis pass (alag call)")
             try:
-                out["hypothesis_raw"] = brain.generate(
+                out["hypothesis_raw"] = generate(
                     self.hypotheses.prompt(question, out["analysis"], pack, plan,
                                            contradiction_dicts,
                                            count=hypothesis_count, gate=gate),
@@ -1227,7 +1230,7 @@ class DeepResearchEngine:
                     prompt += "\n\n" + music_study.prompt_block(
                         music_guidance_pack.get("guidance") or {})
             try:
-                text = brain.generate(prompt, "synthesis")
+                text = generate(prompt, "synthesis")
             except QuotaExhausted as exc:
                 text = ""
                 out["errors"].append(str(exc))
@@ -1338,7 +1341,7 @@ class DeepResearchEngine:
             if brain.remaining >= 1:
                 def reviser(prompt: str) -> str:
                     try:
-                        return brain.generate(prompt, "craft_redraft")
+                        return generate(prompt, "craft_redraft")
                     except QuotaExhausted:
                         return ""
             # #141 — dobara likhwane ke prompt me PADHI HUI baat bhi jaani

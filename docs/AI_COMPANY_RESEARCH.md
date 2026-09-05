@@ -66,7 +66,9 @@ result; this is explicitly **not** a crash-safe mid-run checkpoint system.
   clinical, manufacturing and other physical validation are not performed by
   these text workers. A drug research hypothesis is not an established cure.
 - Company workers force confirmed-zero-cost routing. No eligible model yields
-  a zero-call unavailable result. A local model is still hardware dependent.
+  a zero-call unavailable result. The chief also checks eligibility before
+  entering generation, including the legacy no-backup SDK route. A local model
+  is still hardware dependent.
 - Each process has a 180-second deadline and is terminated on timeout. No raw
   exception/provider body is forwarded. Usage after a killed process can be
   unknown: totals become explicit lower bounds with a missing-receipt count.
