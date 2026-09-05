@@ -60,6 +60,8 @@ class DepthConfig:
     # process (rounds, axis-search, full text, independence, red-team, claim
     # checks) ka target hai. 0 = is preset par scalar target expose mat karo.
     research_process_target_percent: int = 0
+    # Separate first-pass model workers; the remaining budget belongs to the chief.
+    company_agents: int = 0
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -106,6 +108,10 @@ _PRESETS = {
     "DEEP": DEEP,
     "MAXIMUM": MAXIMUM,
     "MARATHON": MARATHON,
+    "COMPANY": DepthConfig(**{**asdict(MARATHON), "name": "COMPANY",
+                              "company_agents": 4, "gemini_calls": 8}),
+    "COMPANY_PLUS": DepthConfig(**{**asdict(MARATHON), "name": "COMPANY_PLUS",
+                                   "company_agents": 6, "gemini_calls": 10}),
 }
 
 # Safety rails — CUSTOM mode mein user in limits se aage nahi ja sakta
@@ -167,6 +173,17 @@ def get_depth_config(mode: str = "DEEP", custom: Optional[Dict] = None) -> Depth
 
 def quota_note(config: DepthConfig) -> str:
     """Honest quota statement jo final answer mein jaata hai."""
+    if config.company_agents:
+        return (
+            f"{config.name}: {config.company_agents} specialist workers + chief; "
+            f"maximum {config.gemini_calls} logical reasoning calls total. "
+            f"Up to {config.max_sources} sources, {config.max_rounds} search rounds, "
+            f"{config.max_fulltext} legally accessible full texts. "
+            "Workers share the retrieved corpus; roles are not distinct models or "
+            "independent scientific replication. Existing confirmed-zero-cost "
+            "routing applies; available provider quota may prevent completion. "
+            "Retries can require additional HTTP attempts."
+        )
     return (
         f"{config.name} mode: maximum {config.gemini_calls} Gemini call(s), "
         f"up to {config.max_sources} ranked sources, up to {config.max_rounds} "

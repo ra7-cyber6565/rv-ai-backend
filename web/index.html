@@ -36,7 +36,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
 .pname{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;font:inherit;font-size:12.5px;flex:1;min-width:150px}
 .docsep{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
 .doclist{margin-top:9px}.doc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:12.5px;overflow-wrap:anywhere}.doc b{font-weight:650}.doc .dm{color:var(--muted);font-size:11.5px;margin-top:2px}.doc.err{border-color:#f5c6c2;background:#fdeceb;color:#8a2018}.doc.err .dm{color:#8a2018}
-@media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
+@media(max-width:600px){header{padding:0 7px;min-height:58px;height:auto;flex-wrap:wrap}.brand span:last-child{display:none}.modes{max-width:100%;overflow-x:auto}.modes button{padding:7px 8px;font-size:12px;flex-shrink:0}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
 <body>
@@ -47,6 +47,8 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
     <button data-mode="DEEP">Deep</button>
     <button data-mode="MAXIMUM">Max</button>
     <button data-mode="MARATHON">Marathon</button>
+    <button data-mode="COMPANY">AI Company · 4</button>
+    <button data-mode="COMPANY_PLUS">Company+ · 6</button>
   </div>
 </header>
 <div class="hint" id="hint">Chat — turant seedha jawab.</div>
@@ -62,6 +64,17 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
   </section>
 </main></div>
 <footer>
+  <section class="docs" id="memorypanel" hidden aria-label="Research memory">
+    <div class="dochead"><strong>Yaad rakhi baatein</strong><button type="button" class="x" id="memoryclose" aria-label="Memory panel band karo">✕</button></div>
+    <div class="docnote">Is private session ki memory dekho aur sudharo. AI ki saved baatein verified evidence nahi hain. Memory saaf karne par original uploads aur job archives alag rehte hain.</div>
+    <div class="docbtns"><button type="button" class="dbtn" id="memoryrefresh">Refresh</button><button type="button" class="dbtn" id="memoryexport">Export</button><button type="button" class="dbtn" id="memoryclear">Session ki research memory saaf karo</button></div>
+    <div id="memorystatus" class="docnote" role="status" aria-live="polite"></div>
+    <div id="memorylist" class="doclist"></div>
+    <label class="docnote" for="memorykind">Baat kis tarah ki hai?</label>
+    <select id="memorykind" class="pname"><option value="preference">Meri preference</option><option value="project_state">Project ki baat</option><option value="source">Source note</option><option value="execution">Kaam ka record</option><option value="hypothesis">Test karne ka idea</option><option value="conclusion">Research conclusion</option></select>
+    <textarea id="memorytext" class="pastebox" rows="3" maxlength="8000" placeholder="Kya yaad rakhna ya sudharna hai?" aria-label="Memory note"></textarea>
+    <div class="docbtns"><button type="button" class="dbtn go" id="memorysave">Yaad rakho</button><button type="button" class="dbtn" id="memoryreset">Nayi baat</button></div>
+  </section>
   <section class="docs" id="docs" hidden>
     <div class="dochead"><strong>Tumhare diye documents</strong><button type="button" class="x" id="docsclose" title="Panel band karo" aria-label="Panel band karo">✕</button></div>
     <div class="docnote" id="docnote">Copyright book ki poori copy internet se nahi laayi jaati — par tumhare paas jo PDF/notes/explanation already hai, wo yahan do to research usko padhegi. Ye file sirf is tab ki private session mein jaati hai, iska koi public link nahi banta, answer mein iska label alag rehta hai ("tumhara uploaded document"), aur akela uploaded document kisi baat ko VERIFIED nahi banata. Page refresh karne par session nayi ban jaati hai, tab files dobara deni hongi.</div>
@@ -87,7 +100,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
       <div class="doclist" id="booklist"></div>
     </div>
   </section>
-  <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
+  <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><button type="button" class="attach" id="memorytoggle" title="Yaad rakhi baatein" aria-label="Yaad rakhi baatein">🧠</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
   <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
 </footer>
 <script>
@@ -100,6 +113,8 @@ const FAILOVER={backup:"",active:false,announced:false};
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
 const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — 5 full rounds, multilingual books, source-derived thinkers, counter-evidence aur 90% research-process target. Ye truth/profit probability nahi hai."};
+HINT.COMPANY="4 specialists + main AI: evidence, testing plan, hypotheses aur red-team. Books/PDF sources ke saath gehri research; free quota aur available evidence ke andar.";
+HINT.COMPANY_PLUS="6 specialists + main AI: data quality aur implementation review bhi. Zyada samay/quota lagega; har role ka alag model hona guaranteed nahi hai.";
 let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
 const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
@@ -237,6 +252,51 @@ async function projectPost(url,makePayload,timeoutMs=0){
   }
   throw new Error("project session recovery failed");
 }
+
+const MEMORY={data:null,editing:"",busy:false};
+function memoryHtml(data){
+  const names={preference:"Preference",project_state:"Project",source:"Source note",execution:"Kaam ka record",hypothesis:"Idea",conclusion:"Conclusion"};
+  return (data.records||[]).map(record=>{
+    const body=record.body||{},text=body.note||body.summary||JSON.stringify(body,null,2);
+    return '<div class="docsep"><strong>'+esc(names[record.kind]||record.kind)+'</strong><div class="docnote">'+esc(record.status)+' · revision '+esc(record.revision)+'</div><div style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(text)+'</div><div class="docbtns"><button type="button" class="dbtn" data-memory-edit="'+esc(record.id)+'">Sudharo</button><button type="button" class="dbtn" data-memory-delete="'+esc(record.id)+'">Hatao</button></div></div>';
+  }).join("")||'<div class="docnote">Abhi koi governed memory record nahi hai.</div>';
+}
+async function memoryRequest(method="GET",suffix="",body){
+  await ensureSession();
+  const options={method,headers:projectHeaders()};if(body!==undefined)options.body=JSON.stringify(body);
+  const {r,data}=await jsonFetch(API+"/api/v1/projects/"+encodeURIComponent(PROJECT.id)+"/research-memory"+suffix,options,20000);
+  if(!r.ok)throw new Error(typeof data.detail==="string"?data.detail:"Memory request complete nahi hui. Dobara try karo.");
+  return data;
+}
+async function refreshMemory(){
+  const data=await memoryRequest();MEMORY.data=data;$("#memorylist").innerHTML=memoryHtml(data);
+  $("#memorystatus").textContent=data.count+" records. Purani research notes export mein bhi milengi.";
+}
+async function memoryAction(action){
+  if(MEMORY.busy)return;MEMORY.busy=true;$("#memorystatus").textContent="Memory update ho rahi hai…";
+  try{await action();}catch(e){$("#memorystatus").textContent=e.message;}finally{MEMORY.busy=false;}
+}
+function resetMemoryEditor(){MEMORY.editing="";$("#memorytext").value="";$("#memorykind").value="preference";$("#memorysave").textContent="Yaad rakho";}
+$("#memorytoggle").onclick=()=>{$("#memorypanel").hidden=!$("#memorypanel").hidden;if(!$("#memorypanel").hidden)memoryAction(refreshMemory);};
+$("#memoryclose").onclick=()=>{$("#memorypanel").hidden=true;};
+$("#memoryrefresh").onclick=()=>memoryAction(refreshMemory);
+$("#memoryreset").onclick=resetMemoryEditor;
+$("#memorysave").onclick=()=>memoryAction(async()=>{
+  const note=$("#memorytext").value.trim();if(!note)throw new Error("Pehle baat likho.");
+  await memoryRequest(MEMORY.editing?"PUT":"POST",MEMORY.editing?"/"+encodeURIComponent(MEMORY.editing):"",{kind:$("#memorykind").value,body:{note}});
+  resetMemoryEditor();await refreshMemory();
+});
+$("#memorylist").onclick=e=>{
+  const button=e.target.closest("button");if(!button||MEMORY.busy)return;
+  const id=button.dataset.memoryEdit;
+  if(id){const record=(MEMORY.data?.records||[]).find(r=>r.id===id);if(!record)return;MEMORY.editing=id;$("#memorykind").value=record.kind;$("#memorytext").value=record.body.note||record.body.summary||JSON.stringify(record.body,null,2);$("#memorysave").textContent="Sudhaar save karo";$("#memorytext").focus();}
+  else if(button.dataset.memoryDelete)memoryAction(async()=>{await memoryRequest("DELETE","/"+encodeURIComponent(button.dataset.memoryDelete));resetMemoryEditor();await refreshMemory();});
+};
+$("#memoryclear").onclick=()=>memoryAction(async()=>{await memoryRequest("DELETE");resetMemoryEditor();await refreshMemory();});
+$("#memoryexport").onclick=()=>memoryAction(async()=>{
+  const data=await memoryRequest(),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
+  const link=document.createElement("a");link.href=url;link.download="infinity-research-memory.json";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);$("#memorystatus").textContent="Memory export download hua.";
+});
 
 // ── "Apni PDF/notes do" ──────────────────────────────────────────────────────
 // Upload usi private session mein jaata hai jisme sawaal jaata hai, isliye
@@ -641,19 +701,24 @@ function progressCounts(p){const prog=p||{};return Number(prog.sources_discovere
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="rows"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),rows:el.querySelector(".rows")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0)),total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+progressCounts(p);ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";ui.rows.innerHTML=stageRowsHtml(p);down();}
 
-async function runResearch(question,el,requestedMode=mode){const ui=progressPanel(el);let jobId="",jobToken="";try{
-  const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
+async function runResearch(question,el,requestedMode=mode,existingJob=null){const ui=progressPanel(el);let jobId="",jobToken="";try{
+  const start=existingJob?{r:{ok:true},data:existingJob}:await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
-  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMinutes=requestedMode==="MARATHON"?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
+  const stop=document.createElement("button");stop.textContent="Research roko";stop.type="button";
+  stop.onclick=async()=>{stop.disabled=true;const out=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/cancel",{...pollOpts,method:"POST"});if(!out.r.ok){stop.disabled=false;stop.textContent="Rok nahi paaye — dobara try karo";}};
+  el.querySelector(".progress").appendChild(stop);
+  const longMode=["MARATHON","COMPANY","COMPANY_PLUS"].includes(requestedMode);
+  const hardDeadline=Date.now()+(longMode?60:30)*60*1000,stallMinutes=longMode?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
     const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
     if(prog.r.ok){const p=prog.data.progress||{};paintProgress(ui,p);const signature=[status.data.status,p.current_stage,p.stages_done,Array.isArray(p.log)?p.log.length:0].join("|");if(signature!==lastSignature){lastSignature=signature;lastChange=Date.now();}}
     if(status.data.status==="completed")break;
-    if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
+    if(status.data.status==="cancelled"){friendly(el,"Research rok di gayi. Nayi provider calls band hain; pehle se chal rahi call timeout tak finish ho sakti hai.");restoreQuestion(question);return false;}
+    if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Saved checkpoints se resume try kar sakte ho; changed code/input ya exhausted budget par naya run chahiye.");restoreQuestion(question);const resume=document.createElement("button");resume.type="button";resume.textContent="Saved work se resume";resume.onclick=async()=>{resume.disabled=true;const out=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/resume",{...pollOpts,method:"POST"});if(out.r.ok){runResearch(question,el,requestedMode,{job_id:jobId,job_access_token:jobToken});}else{resume.textContent="Resume unavailable — naya run chahiye";}};el.appendChild(resume);return false;}
     if(Date.now()>hardDeadline){friendly(el,"Research browser ki wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
     if(Date.now()-lastChange>stallMs){friendly(el,`Research progress ${stallMinutes} minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.`);restoreQuestion(question);return false;}
     await sleep(1200);
@@ -797,7 +862,7 @@ function renderResearch(el,data){
   const hypoCount=(Array.isArray(data.hypotheses)?data.hypotheses:[]).length;
   const srcCount=(Array.isArray(data.sources)?data.sources:[]).length;
   const snap=data.research_progress||{};
-  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:processHtml(data),audit:auditHtml(split,data)};
+  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:contractHtml(data)+companyHtml(data)+processHtml(data),audit:auditHtml(split,data)};
   const badge={answer:"",evidence:claimCount?String(claimCount):"",lab:String(hypoCount),sources:String(srcCount),process:(snap.available===true?Number(snap.stages_done||0)+"/"+Number(snap.stages_total||STAGES.length):""),audit:String((((data.research_state||{}).conflicts)||[]).length||"")};
   const order=["answer","evidence","lab","sources","process","audit"];
   const box=document.createElement("div");
@@ -810,6 +875,35 @@ function renderResearch(el,data){
   el.innerHTML="";el.appendChild(box);
   const sNote=statusNote(data);if(sNote)note(el,sNote);
   down();
+}
+
+function contractHtml(data){
+  const contract=data.task_contract;if(!contract)return "";
+  const coverage=new Map((contract.coverage||[]).map(r=>[r.requirement_id,r.assessment]));
+  const labels={SATISFIED:"Poora hua",MISSING:"Baqi hai",NOT_ASSESSED:"Completion verify nahi hui"};
+  const rows=(contract.requirements||[]).filter(r=>r.kind!=="original_request").map(r=>'<li>'+esc(r.text)+' — '+esc(labels[coverage.get(r.id)]||"Completion verify nahi hui")+'</li>').join("");
+  return '<section><h3>Tumhari request ka coverage</h3><p>'+esc(contract.assessment)+'</p>'+(rows?'<ul>'+rows+'</ul>':'<p>Har hissa poora hua ya nahi, iska automatic assessment available nahi hai.</p>')+(contract.worker_requirement_gap?'<p>Maange gaye AI workers poore execute nahi hue.</p>':'')+'</section>';
+}
+function companyHtml(data){
+  const c=(data.verification||{}).research_company;
+  if(!c||!Array.isArray(c.workers))return "";
+  let out='<h4>AI Company</h4><p>'+esc(c.completed_workers)+' / '+esc(c.requested_workers)+' specialist drafts ready. Main AI inhe sources ke against review karta hai.</p>';
+  out+='<p>Sabko shared sources mile. Alag roles ka matlab alag models nahi. In workers ne lab/clinical experiments perform nahi kiye.</p>';
+  if(c.accounting_complete!==true)out+='<p>Ek ya zyada worker ki usage receipt nahi mili; call counts poora total nahi hain.</p>';
+  for(const w of c.workers){const r=w.report||{};
+    out+='<details class="process"><summary>'+esc(w.role)+' — '+esc(w.status)+'</summary><div class="plain">'+htmlText(r.summary||"Worker ki usable report nahi mili.")+'</div>';
+    if(Array.isArray(r.claims))for(const claim of r.claims)out+='<p><strong>'+esc(claim.kind)+'</strong>: '+esc(claim.text)+' '+esc((claim.source_ids||[]).map(s=>'['+s+']').join(' '))+'</p>';
+    if(Array.isArray(r.hypotheses))for(const h of r.hypotheses)out+='<p><strong>TEST PROPOSED · INCONCLUSIVE</strong>: '+esc(h.hypothesis)+'</p><p>Prediction: '+esc(h.prediction)+'<br>Baseline: '+esc(h.baseline)+'<br>Test: '+esc(h.test)+'<br>Falsification: '+esc(h.falsification)+'</p>';
+    if(Array.isArray(r.limitations)&&r.limitations.length)out+='<p>Limits: '+esc(r.limitations.join('; '))+'</p>';
+    for(const [key,label] of [["assumptions","Assumptions"],["contradictions","Contradictions"],["remaining_questions","Remaining questions"]]){
+      if(Array.isArray(r[key])&&r[key].length)out+='<p>'+esc(label)+': '+esc(r[key].join('; '))+'</p>';
+    }
+    if(Array.isArray(r.contract_issues)&&r.contract_issues.length)out+='<p>Report gaps: '+esc(r.contract_issues.join(', '))+'</p>';
+    if(w.restored_from_checkpoint)out+='<p>Saved checkpoint se restore hua; model ko dobara call nahi kiya.</p>';
+    if(Array.isArray(r.tool_results))for(const t of r.tool_results){out+='<p>Calculation: '+esc(t.state)+' — physical/clinical validation nahi.</p>';if(t.artifact&&t.artifact.media_type==="application/json"&&typeof t.artifact.content==="string"){out+='<a download="result.json" href="data:application/json;charset=utf-8,'+encodeURIComponent(t.artifact.content)+'">Calculation JSON download</a><pre>'+esc(t.artifact.content)+'</pre>';}}
+    out+='</details>';
+  }
+  return out;
 }
 
 // Source card. Pehle scheme check (safeHttpUrl), USKE BAAD escape — sirf escape

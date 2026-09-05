@@ -133,7 +133,7 @@ def start_research_job(
     """Start long research only inside the caller's private project namespace."""
     require_project_access(request.project_id, x_project_token)
     mode = (request.depth_mode or "DEEP").upper().strip()
-    if mode not in {"QUICK", "DEEP", "MAXIMUM", "MARATHON", "CUSTOM"}:
+    if mode not in {"QUICK", "DEEP", "MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS", "CUSTOM"}:
         raise HTTPException(status_code=400, detail="depth_mode invalid hai")
     if not (request.question or "").strip():
         raise HTTPException(status_code=400, detail="question khaali nahi ho sakta")
@@ -191,7 +191,27 @@ def research_job_progress(
     x_research_job_token: str | None = Header(default=None, alias="X-Research-Job-Token"),
 ):
     item = _authorized_job(job_id, x_research_job_token)
-    return {"job": item, "progress": get_progress(job_id)}
+    from utils.research_runtime import RuntimeStore
+    return {"job": item, "progress": get_progress(job_id),
+            "runtime": RuntimeStore().snapshot(item["project_id"], job_id)}
+
+
+@router.post("/research-jobs/{job_id}/cancel")
+def cancel_research_job(job_id: str,
+    x_research_job_token: str | None = Header(default=None, alias="X-Research-Job-Token")):
+    _authorized_job(job_id, x_research_job_token)
+    return {"cancelled": runner.cancel(job_id), "job": runner.get(job_id)}
+
+
+@router.post("/research-jobs/{job_id}/resume", status_code=202)
+def resume_research_job(job_id: str,
+    x_research_job_token: str | None = Header(default=None, alias="X-Research-Job-Token")):
+    _authorized_job(job_id, x_research_job_token)
+    from research_engine.agent_manager import manager
+    try:
+        return runner.resume(job_id, manager.research).public()
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Job resume nahi ho sakta; terminal state ya retry limit.") from exc
 
 
 @router.get("/research-jobs/{job_id}/result")
@@ -205,7 +225,7 @@ def research_job_result(
             "message": "Research abhi chal rahi hai",
             "status": item["status"],
         })
-    if item["status"] == "interrupted":
+    if item["status"] in {"interrupted", "cancelled"}:
         raise HTTPException(status_code=409, detail={
             "message": "Research server/process restart ki wajah se beech me ruk gayi. Is job ko dobara start karein.",
             "status": "interrupted",
@@ -219,6 +239,14 @@ def research_job_result(
     if not isinstance(result, dict):
         return result
     response = dict(result)
+    if not isinstance(item.get("project_id"), str) or not item["project_id"]:
+        raise HTTPException(status_code=409, detail="Stored job project provenance unavailable; result cannot be safely reassessed.")
+    from utils.governed_memory import GovernedMemory
+    reassessment = GovernedMemory().reassessment(item["project_id"], job_id)
+    if reassessment:
+        return {"question": response.get("question", ""), "status": "PARTIAL",
+                "answer": "Is purane result ka source/memory badla hai. Naya research run zaroori hai; purana conclusion ab verified jawab ke roop mein available nahi hai.",
+                "evidence_level": "UNVERIFIED", "source_reassessment": reassessment}
     progress = _progress_result_snapshot(job_id)
     response["research_progress"] = progress
     # Final research quality is enforced on the user-facing copy, after the

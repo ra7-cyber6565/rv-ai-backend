@@ -129,6 +129,13 @@ def _accepts_request_options(func) -> bool:
 def generate(model, prompt, timeout: Optional[int] = None):
     """`model.generate_content(prompt)` — par bandhe hue time ke saath."""
     call = getattr(model, "generate_content")
+    from utils.research_runtime import current, RuntimeBlocked
+    if current() is not None:
+        # SDK retry is disabled: every retry must acquire a fresh central lease.
+        if not _accepts_request_options(call):
+            raise RuntimeBlocked("model adapter cannot enforce bounded requests")
+        return call(prompt, request_options={"timeout": timeout or call_timeout(), "retry": None},
+                    generation_config={"max_output_tokens": 6000})
     if _accepts_request_options(call):
         try:
             return call(prompt, request_options={"timeout": timeout or call_timeout()})

@@ -44,6 +44,63 @@ Storage target: GitHub = code/version history; laptop D: = bounded fast runtime/
 
 ChatGPT owns final integration/reliability, independent audit of Claude work, evidence correctness at the system boundary, ₹0/provider safety, large-file/storage lifecycle, async durability, security, integrated regression and final architecture review. After foundation passes, ChatGPT also owns the Advanced Scientific Discovery Engine work listed below.
 
+## AI Company integration — ChatGPT, 2026-09-05
+
+- Continuation implementation/testing: durable SQLite stages/events and atomic application quotas,
+  same-code/input resume/cancel, source/memory invalidation, task contract and
+  typed numeric tools with downloadable receipts. Ownership: ChatGPT on isolated
+  `codex/company-reliability-20260905`, extending reviewed PR #79 head `d0def705`.
+  No other branch/PR or user Windows work is being merged or overwritten.
+- Run instructions and explicit boundaries: `docs/RELIABILITY_RUNTIME.md`.
+  Current continuation table in the requirement ledger supersedes first-wave
+  gaps that it closes. Public synchronous/chat budgets, memory correction/clear
+  controls and transitive invalidation are included. General execution backend,
+  actual provider token/billing receipts and live empirical comparisons remain open.
+- Refreshed workspace dependency install was cancelled by network approval;
+  dependency-free SQLite/process and evaluation tests run locally. Exact-head
+  full CI remains required before this continuation can be called verified.
+
+- Latest user specification: `Pasted markdown(20260905-064523).md`, 22 sections.
+  Full requirement/acceptance ledger: `docs/INFINITY_REQUIREMENT_LEDGER.md`.
+  It preserves PARTIAL/MISSING/BLOCKED items; a green software gate does not
+  close general recovery, central provider quotas, arbitrary execution or live
+  empirical validation gaps.
+- Additional integration: worker IDs/UTC timestamps/input hashes, bounded raw
+  draft artifact references, append-only in-run events, assumptions/dissent/
+  questions and separate chief receipts. Events are saved with final results;
+  mid-run crash recovery remains explicitly false.
+- Windows/Python live ₹0 gate accepts COMPANY/COMPANY_PLUS and requires actual
+  worker/chief generation plus complete accounting. Live execution remains
+  pending on a configured confirmed-free deployment.
+- Company chief generation also fails before SDK entry when no eligible free
+  model exists; the legacy no-backup route cannot bypass this company check.
+
+- Isolated branch: `codex/research-company-20260905`, based on main
+  `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`. Exact base Foundation Actions
+  run `33852832167` passed before advanced integration began.
+- COMPANY / COMPANY_PLUS connect 4 / 6 real specialist worker invocations to
+  the existing chief, evidence checks, lab and completion gates. Shared corpus,
+  separate first-pass contexts, bounded process isolation, zero-cost routing,
+  typed draft validation and aggregate usage receipts. Existing presets retain
+  their budgets. Web/API expose both new modes and worker reports.
+- Focused fixture tests have passed during development; the commit's full
+  offline gates and live confirmed-₹0 validation remain separate required
+  evidence. Do not call this empirically superior or release-ready from fixtures.
+- Initial broad local tests were blocked after an outbound Google endpoint
+  attempt. Subsequent validation uses blank credentials and an inherited
+  socket-level network denial. Clean-checkout attestors require committing
+  source edits before integrated validation.
+- See `docs/AI_COMPANY_RESEARCH.md` for exact limits, deployment considerations,
+  test scope and remaining benchmark/independent-retrieval work.
+- PR #79 first exact head passed AI-1, AI-2, model-reality and anti-confirmation
+  CI; Foundation found stale browser source-pattern assertions (4112 full-suite
+  tests passed, one failed). Checks now cover the explicit three long modes,
+  unchanged deadline/stall limits and both company + existing progress panels.
+  Local native SDK traffic is blocked by a fail-closed kernel syscall filter;
+  earlier Python-only isolation did not block that native path.
+- Existing PRs #63/#65 and other contributors' branches were not merged or
+  overwritten. No local Windows changes or external receipts were touched.
+
 ## Active foundation status
 
 | Task | Owner | Status | Notes |
