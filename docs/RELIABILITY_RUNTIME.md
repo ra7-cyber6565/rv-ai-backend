@@ -5,7 +5,8 @@ measured claim that multiple workers outperform a strong single model.
 
 ## Durable research jobs
 
-Capability-protected background jobs now use an SQLite runtime in the existing
+Capability-protected background jobs, synchronous research and QUICK chat now
+use an SQLite runtime in the existing
 private data root. Schema creation is automatic; no paid database or additional
 package is required. Keep this database on a local filesystem with SQLite locking.
 
@@ -21,6 +22,13 @@ code/input/budget contract and the original one-hour run deadline. Changing code
 or inputs requires a new run; resume cannot reset spent quota. An unfinished
 read/reasoning stage may repeat after interruption and can consume additional
 reserved calls. Hosted generation is not claimed to be exactly reproducible.
+
+At most 2,000 runtime records are retained. Checkpoints expire six days after
+their original execution deadline; expired records are pruned when another run
+starts. Stage payloads are capped at 16 MB each, with a shared 256 MiB UTF-8
+payload ceiling (`RESEARCH_CHECKPOINT_BYTES`). This is not total filesystem usage:
+SQLite metadata, WAL, memory records and archived job results need separate host
+capacity. Cancellation also blocks late checkpoint completion.
 
 Endpoints, using the existing `X-Research-Job-Token` header:
 
@@ -58,8 +66,11 @@ They are conservative application caps, **not a provider quota/billing oracle**.
 The existing confirmed-zero-cost guard still decides eligibility. Actual input
 token counts and billed/used output tokens remain UNKNOWN when provider receipts
 do not provide them; input bytes must never be presented as measured tokens.
-Legacy direct/synchronous generation outside a durable job does not inherit this
-run context. Full provider-wide control of those older entry points remains open.
+All public research and QUICK chat routes establish this context. QUICK chat has
+four HTTP attempts, 2 MB of input bytes, 24,000 reserved output tokens and five
+minutes; local small talk may use zero requests. Raw programmatic adapter calls
+outside these application entry points do not inherit a runtime. Provider metadata
+discovery requests are separate from these generation-attempt counters.
 
 ## Governed memory and source corrections
 
@@ -67,6 +78,11 @@ Private project endpoints use the existing `X-Project-Token` header:
 
 - `GET /api/v1/projects/{project_id}/research-memory`: inspect/export JSON records.
 - `POST` to the same endpoint: add a typed user-supplied unverified record.
+- `PUT /api/v1/projects/{project_id}/research-memory/{record_id}`: validate then
+  atomically correct a record, increment revision and invalidate consumers.
+- `DELETE /api/v1/projects/{project_id}/research-memory`: clear governed records,
+  legacy project research notes, graph hints and project concept hints. Stop active
+  research first. Original uploads, canonical job archives and backups remain.
 - `DELETE /api/v1/projects/{project_id}/research-memory/{record_id}`: delete a
   governed record and its derived runtime checkpoints. Active research must stop
   first. Canonical job archives/original uploads/external backups are separately
@@ -80,8 +96,12 @@ Memory separates record kind, trust, source references, revision, creation and
 expiry. Generated text stays GENERATED_UNVERIFIED. Records require revalidation
 after 30 days; each project is capped at 1,000 records. Runtime memory is quoted as
 untrusted context. Concept hints created inside durable jobs are project-scoped.
-Legacy JSON memory, graph indexes and external archive deletion are not silently
-claimed covered by the new per-record endpoint.
+The UI's memory button exposes inspect, export, add, correct and delete. Memory
+consumption records the exact revision; correction/deletion propagates through
+downstream research-memory consumers, not just the answer that created a record.
+Project hints are evicted on corrections. The single-record delete endpoint does
+not erase all legacy notes; use the project-memory clear endpoint for those.
+Existing session capabilities remain tab-scoped, so export before losing a session.
 
 ## Actual tools and artifacts
 
@@ -114,7 +134,7 @@ interpreter is not mislabeled as a general Python/container runtime.
 
 ## Task contracts and evaluation
 
-Durable jobs preserve the original request, explicit numbered parts, recognized
+Research runs preserve the original request, explicit numbered parts, recognized
 deliverables, task types, freshness, resource settings and a bounded dependency
 graph. Unrecognized coverage stays NOT_ASSESSED. The compiler is a deterministic
 heuristic, not a guarantee of perfect language interpretation. Existing detailed

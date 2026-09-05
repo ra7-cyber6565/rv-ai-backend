@@ -41,6 +41,48 @@ class GovernedToolsAcceptance(unittest.TestCase):
         self.assertEqual(self.memory.inspect("p")["count"], 0)
         self.assertTrue(self.memory.reassessment("p", "run1"))
 
+    def test_invalid_correction_preserves_original_and_valid_correction_revises(self):
+        identity = self.memory.put("p", "preference", {"language": "Hindi"}, user_supplied=True)
+        with self.assertRaises(ValueError):
+            self.memory.correct("p", identity, "VERIFIED_FACT", {"language": "English"})
+        self.assertEqual(self.memory.inspect("p")["records"][0]["body"]["language"], "Hindi")
+        self.assertTrue(self.memory.correct("p", identity, "preference", {"language": "Hinglish"}))
+        record = self.memory.inspect("p")["records"][0]
+        self.assertEqual(record["revision"], 2)
+        self.assertEqual(record["trust"], "USER_SUPPLIED_UNVERIFIED")
+
+    def test_midrun_source_correction_is_not_lost_before_dependencies_register(self):
+        self.runtime.start("p", "r", "i", "v", {"http": 1, "input_bytes": 100, "output_tokens": 10, "seconds": 3600})
+        self.memory.invalidate_source("p", "https://example.org/a", "Correction during retrieval")
+        self.memory.record_result("p", "r", {"answer": "old result", "sources": [{"url": "https://example.org/a"}]})
+        self.assertTrue(self.memory.reassessment("p", "r"))
+        self.assertEqual(self.memory.inspect("p")["records"][0]["status"], "REASSESSMENT_REQUIRED")
+
+    def test_corrected_preference_invalidates_transitive_consumers(self):
+        identity = self.memory.put("p", "preference", {"preference": "Hindi answers"}, user_supplied=True)
+        limits = {"http": 0, "input_bytes": 0, "output_tokens": 0, "seconds": 3600}
+        for run, question, answer in [("a", "Hindi", "alpha"), ("b", "alpha", "beta")]:
+            self.runtime.start("p", run, run, "v", limits)
+            with bind(RunContext(self.runtime, "p", run)):
+                self.assertTrue(self.memory.context("p", question))
+            self.memory.record_result("p", run, {"question": question, "answer": answer, "sources": []})
+        self.memory.record_result("other", "a", {"answer": "unrelated", "sources": []})
+        self.memory.correct("p", identity, "preference", {"preference": "English answers"})
+        self.assertTrue(self.memory.reassessment("p", "a"))
+        self.assertTrue(self.memory.reassessment("p", "b"))
+        self.assertIsNone(self.memory.reassessment("other", "a"))
+        self.assertNotIn("alpha", self.memory.context("p", "alpha"))
+
+    def test_graph_hint_deletion_preserves_other_project(self):
+        from knowledge import graph
+        from unittest.mock import patch
+        with patch.object(graph, "GRAPH_FILE", str(Path(self.temp.name) / "graph.json")):
+            graph.extract_and_store("Alpha question", "Alpha Beta", "p")
+            graph.extract_and_store("Gamma question", "Gamma Delta", "other")
+            self.assertTrue(graph.delete_project_hints("p"))
+            self.assertEqual(graph.get_entity_stats("p")["total_entities"], 0)
+            self.assertGreater(graph.get_entity_stats("other")["total_entities"], 0)
+
     def test_real_numeric_execution_and_downloadable_json_artifact(self):
         receipt = execute_tool("numeric", {"code": "result = (capital * rate) + capital", "inputs": {"capital": 100, "rate": 0.05}},
             role="validation", allowed_effects={"bounded_calculation"}, call_id="calculation")

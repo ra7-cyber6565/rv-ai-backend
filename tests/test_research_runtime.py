@@ -92,6 +92,24 @@ except RuntimeBlocked:
         with self.assertRaises(ResearchCancelled):
             self.store.check("p", "future")
 
+    def test_cancelled_stage_cannot_publish_checkpoint(self):
+        self.store.claim("p", "r", "late", digest({}), "owner", replay_safe=True)
+        self.store.cancel("p", "r")
+        with self.assertRaises(ResearchCancelled):
+            self.store.finish("p", "r", "late", "owner", {"answer": "too late"})
+        with self.store.db() as db:
+            self.assertNotEqual(db.execute("SELECT state FROM stages WHERE stage='late'").fetchone()[0], "COMPLETED")
+
+    def test_checkpoint_bytes_are_shared_across_projects_and_use_utf8(self):
+        from unittest.mock import patch
+        self.store.start("other", "second", "i", "v", self.limits)
+        with patch.dict(os.environ, {"RESEARCH_CHECKPOINT_BYTES": "12"}):
+            with bind(self.ctx):
+                checkpoint("first", {}, lambda: "ééé")  # Eight UTF-8 bytes including quotes.
+            with bind(RunContext(self.store, "other", "second")):
+                with self.assertRaisesRegex(RuntimeBlocked, "payload capacity"):
+                    checkpoint("second", {}, lambda: "ééé")
+
     def test_resume_rejects_changed_inputs_version_and_budgets(self):
         for fingerprint, version, limits in [("new", "v1", self.limits),
                 ("input", "v2", self.limits), ("input", "v1", dict(self.limits, http=4))]:

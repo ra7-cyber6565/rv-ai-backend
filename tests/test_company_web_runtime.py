@@ -17,8 +17,10 @@ const page=fs.readFileSync(process.argv[1],"utf8");
 function body(name){const marker="function "+name+"(";const start=page.indexOf(marker);assert(start>=0);
   const tail=page.slice(start);const next=tail.indexOf("\nfunction ",marker.length);
   return next<0?tail:tail.slice(0,next);}
-const ctx={};vm.runInNewContext([body("esc"),body("htmlText"),body("companyHtml")].join("\n"),ctx);
+const ctx={};vm.runInNewContext([body("esc"),body("htmlText"),body("companyHtml"),body("memoryHtml")].join("\n"),ctx);
 const attack='<img src=x onerror="alert(1)">';
+const memory=ctx.memoryHtml({records:[{id:attack,kind:attack,status:attack,revision:1,body:{note:attack}}]});
+assert(!memory.includes('<img'));assert(memory.includes('&lt;img'));assert(memory.includes('Sudharo'));
 const report={summary:attack,claims:[{kind:attack,text:attack,source_ids:[attack]}],
   hypotheses:[{hypothesis:attack,prediction:attack,baseline:attack,test:attack,falsification:attack}],
   limitations:[attack],contract_issues:[attack],assumptions:[attack],contradictions:[attack],remaining_questions:[attack]};

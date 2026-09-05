@@ -50,8 +50,11 @@ results; the existing size-limited storage can compact unusually large reports.
 Each worker has an ID, UTC start/end times, input/output hashes, a logical-call
 reservation, router accounting and an artifact reference to its bounded raw
 response. Assumptions, contradictions and remaining questions survive the chief
-handoff. Events are append-only within the run and saved with the final job
-result; this is explicitly **not** a crash-safe mid-run checkpoint system.
+handoff. Public research now binds a durable SQLite runtime; events and completed
+worker/provider/tool stages survive an interrupted job. See
+`RELIABILITY_RUNTIME.md` for input/code binding, original-deadline resume,
+cancellation and limits. Direct standalone calls without that context retain
+only their in-memory/final-report events.
 
 ## Truth and usage boundaries
 
@@ -62,7 +65,9 @@ result; this is explicitly **not** a crash-safe mid-run checkpoint system.
   remain necessary. Worker drafts do not create new source evidence.
 - Worker hypotheses are **INCONCLUSIVE / TEST_PROPOSED**. Workers cannot promote
   themselves to experimental PASS, even if their generated JSON requests it.
-  Actual numeric execution belongs to the existing safe lab. In-vitro, animal,
+  Validation/implementation workers can request bounded numeric execution through
+  the server-controlled registry; actual receipts stay distinct from proposed tests.
+  In-vitro, animal,
   clinical, manufacturing and other physical validation are not performed by
   these text workers. A drug research hypothesis is not an established cure.
 - Company workers force confirmed-zero-cost routing. No eligible model yields
@@ -77,8 +82,9 @@ result; this is explicitly **not** a crash-safe mid-run checkpoint system.
   from the number of workers.
 - `RESEARCH_COMPANY_CONCURRENCY=1..4` caps simultaneous workers (default 4).
   Set a lower value on constrained hosts. SDK process isolation costs RAM;
-  process-local cooldowns are not shared between workers. Hosting restart
-  recovery retains the existing job-runner limitations.
+  process-local cooldowns are not shared between workers. Atomic application
+  budgets are shared across processes/projects; restart recovery reuses completed
+  checkpoints under the same code, inputs, limits and original deadline.
 - Handoffs allot bounded space to every specialist. Very long drafts may be
   clipped for the chief; that leaves a missing handoff pass and prevents a
   complete-review claim. The available original worker report remains in the

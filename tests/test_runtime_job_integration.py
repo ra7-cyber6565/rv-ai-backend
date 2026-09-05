@@ -98,3 +98,32 @@ def test_corrected_source_cannot_return_old_strong_api_result(monkeypatch, tmp_p
     assert result["status"] == "PARTIAL"
     assert result["evidence_level"] == "UNVERIFIED"
     assert "strong old claim" not in result["answer"]
+
+
+def test_result_with_missing_project_provenance_fails_closed(monkeypatch):
+    from api import job_routes
+    monkeypatch.setattr(job_routes, "_authorized_job", lambda *a, **kw: {
+        "status": "completed", "result": {"answer": "unbound"}})
+    with pytest.raises(HTTPException) as exc:
+        job_routes.research_job_result("j", "capability")
+    assert exc.value.status_code == 409
+
+
+def test_synchronous_manager_calls_have_distinct_durable_budget_scopes(monkeypatch, tmp_path):
+    from research_engine import agent_manager
+    from utils import research_runtime
+    state = RuntimeStore(tmp_path / "state.sqlite3")
+    monkeypatch.setattr(research_runtime, "RuntimeStore", lambda: state)
+    manager = agent_manager.AgentManager()
+    seen = []
+    def fake_research(question, *args):
+        from utils.research_runtime import current, reserve_request
+        seen.append(current().run)
+        reserve_request("fixture", question, 10)
+        return {"question": question, "answer": "fixture", "sources": []}
+    monkeypatch.setattr(manager, "_research", fake_research)
+    a = manager.research("first", project_id="project", job_id="project")
+    b = manager.research("second", project_id="project", job_id="project")
+    assert len(set(seen)) == 2
+    assert a["runtime_execution"]["reserved_http_attempts"] == 1
+    assert b["runtime_execution"]["reserved_http_attempts"] == 1

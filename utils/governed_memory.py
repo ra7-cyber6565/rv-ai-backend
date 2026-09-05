@@ -28,6 +28,9 @@ class GovernedMemory:
                 project TEXT, run TEXT, at REAL, reason TEXT, PRIMARY KEY(project,run));
               CREATE TABLE IF NOT EXISTS source_corrections (
                 project TEXT, source TEXT, at REAL, reason TEXT, PRIMARY KEY(project,source));
+              CREATE TABLE IF NOT EXISTS memory_usage (
+                project TEXT, id TEXT, run TEXT, revision INTEGER,
+                PRIMARY KEY(project,id,run));
             """)
 
     def put(self, project, kind, body, *, sources=(), record_id=None, user_supplied=False):
@@ -70,9 +73,13 @@ class GovernedMemory:
         sources = sorted({str(s.get("url")) for s in result.get("sources", [])
                           if isinstance(s, dict) and s.get("url")})[:80]
         # This is a compact memory hint. The canonical result remains in its job.
-        self.put(project, "conclusion", {"run_id": run, "question": str(result.get("question", ""))[:1000],
-            "summary": str(result.get("answer", ""))[:8000], "reported_status": result.get("status"),
-            "not_evidence": True}, sources=sources, record_id="run_" + run)
+        recorded = True
+        try:
+            self.put(project, "conclusion", {"run_id": run, "question": str(result.get("question", ""))[:1000],
+                "summary": str(result.get("answer", ""))[:8000], "reported_status": result.get("status"),
+                "not_evidence": True}, sources=sources, record_id="run_" + run)
+        except ValueError:
+            recorded = False  # Memory cap cannot erase an otherwise useful answer.
         with self.runtime.transaction() as db:
             db.executemany("INSERT OR IGNORE INTO run_sources VALUES(?,?,?)", [(project, run, s) for s in sources])
             runtime = db.execute("SELECT deadline,limits FROM runs WHERE project=? AND run=?", (project, run)).fetchone()
@@ -82,6 +89,51 @@ class GovernedMemory:
                 if correction and correction["at"] >= started:
                     db.execute("INSERT OR REPLACE INTO invalidated_runs VALUES(?,?,?,?)", (project, run, correction["at"], correction["reason"]))
                     db.execute("UPDATE memory_entries SET status='REASSESSMENT_REQUIRED' WHERE project=? AND id=?", (project, "run_" + run))
+        return {"recorded": recorded, "dependencies_registered": True}
+
+    def clear(self, project):
+        records = self.inspect(project)["records"]
+        for row in records:
+            self.delete(project, row["id"])
+        return len(records)
+
+    def _invalidate_memory(self, db, project, record_id, reason):
+        runs, visited, pending = set(), set(), [record_id]
+        while pending:
+            identity = pending.pop()
+            if identity in visited:
+                continue
+            visited.add(identity)
+            linked = {r[0] for r in db.execute(
+                "SELECT run FROM memory_usage WHERE project=? AND id=?", (project, identity))}
+            row = db.execute("SELECT body FROM memory_entries WHERE project=? AND id=?", (project, identity)).fetchone()
+            if row:
+                own_run = json.loads(row[0]).get("run_id")
+                if own_run:
+                    linked.add(own_run)
+            pending.extend("run_" + run for run in linked - runs)
+            runs.update(linked)
+        for run in runs:
+            db.execute("DELETE FROM stages WHERE project=? AND run=?", (project, run))
+            db.execute("INSERT OR REPLACE INTO invalidated_runs VALUES(?,?,?,?)", (project, run, time.time(), reason))
+            db.execute("UPDATE memory_entries SET status='REASSESSMENT_REQUIRED' WHERE project=? AND id=?", (project, "run_" + run))
+        return runs
+
+    def correct(self, project, record_id, kind, body):
+        if kind not in self.KINDS or not isinstance(body, dict):
+            raise ValueError("invalid memory record")
+        text = json.dumps(body, ensure_ascii=False, allow_nan=False)
+        if len(text.encode()) > 64000:
+            raise ValueError("memory record too large")
+        with self.runtime.transaction() as db:
+            old = db.execute("SELECT body FROM memory_entries WHERE project=? AND id=?", (project, record_id)).fetchone()
+            if old is None:
+                return False
+            self._invalidate_memory(db, project, record_id, "Dependent memory was corrected.")
+            db.execute("UPDATE memory_entries SET kind=?,body=?,trust='USER_SUPPLIED_UNVERIFIED',status='UNVERIFIED',expires=?,revision=revision+1 WHERE project=? AND id=?",
+                       (kind, text, time.time()+30*86400, project, record_id))
+            db.execute("DELETE FROM memory_refs WHERE project=? AND id=?", (project, record_id))
+        return True
 
     def invalidate_source(self, project, source, reason):
         if not source or len(source) > 2000 or not reason.strip() or len(reason) > 1000:
@@ -89,10 +141,14 @@ class GovernedMemory:
         with self.runtime.transaction() as db:
             db.execute("INSERT OR REPLACE INTO source_corrections VALUES(?,?,?,?)", (project, source, time.time(), reason))
             affected = db.execute("SELECT DISTINCT run FROM run_sources WHERE project=? AND source=?", (project, source)).fetchall()
+            affected_runs = {row[0] for row in affected}
+            record_ids = [r[0] for r in db.execute("SELECT id FROM memory_refs WHERE project=? AND source=?", (project, source))]
+            for record_id in record_ids:
+                affected_runs.update(self._invalidate_memory(db, project, record_id, reason))
             db.execute("UPDATE memory_entries SET status='REASSESSMENT_REQUIRED',revision=revision+1 WHERE project=? AND id IN (SELECT id FROM memory_refs WHERE project=? AND source=?)", (project, project, source))
-            for row in affected:
-                db.execute("INSERT OR REPLACE INTO invalidated_runs VALUES(?,?,?,?)", (project, row[0], time.time(), reason))
-            return {"affected_runs": [row[0] for row in affected], "status": "REASSESSMENT_REQUIRED",
+            for run in affected_runs:
+                db.execute("INSERT OR REPLACE INTO invalidated_runs VALUES(?,?,?,?)", (project, run, time.time(), reason))
+            return {"affected_runs": sorted(affected_runs), "status": "REASSESSMENT_REQUIRED",
                     "reason": reason, "source": source}
 
     def reassessment(self, project, run):
@@ -105,13 +161,7 @@ class GovernedMemory:
             row = db.execute("SELECT body FROM memory_entries WHERE project=? AND id=?", (project, record_id)).fetchone()
             if row is None:
                 return False
-            body = json.loads(row[0])
-            run = body.get("run_id")
-            if run:
-                # Delete derived prompt-bearing checkpoints, and invalidate the
-                # archived result so future API reads cannot serve stale context.
-                db.execute("DELETE FROM stages WHERE project=? AND run=?", (project, run))
-                db.execute("INSERT OR REPLACE INTO invalidated_runs VALUES(?,?,?,?)", (project, run, time.time(), "Dependent memory was deleted."))
+            self._invalidate_memory(db, project, record_id, "Dependent memory was deleted.")
             db.execute("DELETE FROM memory_refs WHERE project=? AND id=?", (project, record_id))
             db.execute("DELETE FROM memory_entries WHERE project=? AND id=?", (project, record_id))
             return True
@@ -127,7 +177,19 @@ class GovernedMemory:
             text = json.dumps(row["body"], ensure_ascii=False)
             overlap = len(terms & set(re.findall(r"\w{3,}", text.casefold())))
             if overlap:
-                rows.append((overlap, row["created"], text))
-        text = "\n".join(v[2] for v in sorted(rows, reverse=True)[:3])
+                rows.append((overlap, row["created"], text, row["id"], row["revision"]))
+        selected = sorted(rows, reverse=True)[:3]
+        from .research_runtime import current
+        ctx = current()
+        if ctx and ctx.project == project:
+            with self.runtime.transaction() as db:
+                for _, _, _, identity, revision in selected:
+                    latest = db.execute("SELECT revision,status FROM memory_entries WHERE project=? AND id=?", (project, identity)).fetchone()
+                    if latest is None or latest[0] != revision or latest[1] != "UNVERIFIED":
+                        db.execute("INSERT OR REPLACE INTO invalidated_runs VALUES(?,?,?,?)",
+                                   (project, ctx.run, time.time(), "Memory changed while preparing context."))
+                        continue
+                    db.execute("INSERT OR REPLACE INTO memory_usage VALUES(?,?,?,?)", (project, identity, ctx.run, revision))
+        text = "\n".join(v[2] for v in selected)
         return ("UNTRUSTED MEMORY HINTS — not evidence, authority or verified facts:\n" +
                 quote_untrusted(text, limit=8000)) if text else ""

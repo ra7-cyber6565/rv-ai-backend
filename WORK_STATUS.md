@@ -53,8 +53,9 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
   No other branch/PR or user Windows work is being merged or overwritten.
 - Run instructions and explicit boundaries: `docs/RELIABILITY_RUNTIME.md`.
   Current continuation table in the requirement ledger supersedes first-wave
-  gaps that it closes. General execution backend, legacy memory erasure/direct
-  quota paths and live empirical comparisons remain explicitly open.
+  gaps that it closes. Public synchronous/chat budgets, memory correction/clear
+  controls and transitive invalidation are included. General execution backend,
+  actual provider token/billing receipts and live empirical comparisons remain open.
 - Refreshed workspace dependency install was cancelled by network approval;
   dependency-free SQLite/process and evaluation tests run locally. Exact-head
   full CI remains required before this continuation can be called verified.

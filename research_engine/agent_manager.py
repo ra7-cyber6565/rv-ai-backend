@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import threading
 import re
+import uuid
 from typing import Dict, List, Optional
 
 from .ai1_packet_extensions import extend_ai1_packet
@@ -42,6 +43,7 @@ class AgentManager:
         self._history: Dict[str, List[Dict]] = {}
         self._lock = threading.Lock()
         self._project_locks: Dict[str, threading.Lock] = {}
+        self._active: Dict[str, int] = {}
 
     # ── engines ──────────────────────────────────────────────────────────────
     def get(self, project_id: str = "default") -> DeepResearchEngine:
@@ -71,8 +73,21 @@ class AgentManager:
     def research(self, question: str, project_id: str = "default",
                  depth_mode: str = "DEEP", custom: Optional[Dict] = None,
                  job_id: Optional[str] = None) -> Dict:
-        if not job_id or not re.fullmatch(r"[a-f0-9]{32}", job_id):
-            return self._research(question, project_id, depth_mode, custom, job_id)
+        with self._lock:
+            self._active[project_id] = self._active.get(project_id, 0) + 1
+        try:
+            return self._research_with_runtime(question, project_id, depth_mode, custom, job_id)
+        finally:
+            with self._lock:
+                self._active[project_id] -= 1
+
+    def active(self, project_id):
+        with self._lock:
+            return self._active.get(project_id, 0) > 0
+
+    def _research_with_runtime(self, question: str, project_id: str,
+                              depth_mode: str, custom: Optional[Dict], job_id: Optional[str]) -> Dict:
+        runtime_id = job_id if job_id and job_id != project_id and re.fullmatch(r"[a-f0-9]{32}", job_id) else uuid.uuid4().hex
         from .depth import get_depth_config
         from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version, checkpoint
         config = get_depth_config(depth_mode, custom)
@@ -82,18 +97,36 @@ class AgentManager:
         limits = {"http": calls * 4, "input_bytes": calls * 2000000,
                   "output_tokens": calls * 4 * 6000, "seconds": 3600}
         store = RuntimeStore()
-        store.start(project_id, job_id, digest([question, depth_mode, custom]), code_version(), limits)
-        with bind(RunContext(store, project_id, job_id)):
+        store.start(project_id, runtime_id, digest([question, depth_mode, custom]), code_version(), limits)
+        with bind(RunContext(store, project_id, runtime_id)):
             from utils.governed_memory import GovernedMemory
             memory = GovernedMemory(store)
-            if memory.reassessment(project_id, job_id):
+            if memory.reassessment(project_id, runtime_id):
                 from utils.research_runtime import RuntimeBlocked
                 raise RuntimeBlocked("source or memory changed; a new research run is required")
             result = checkpoint("final_result", [question, depth_mode, custom],
                 lambda: self._research(question, project_id, depth_mode, custom, job_id))
-            memory.record_result(project_id, job_id, result)
+            memory_receipt = memory.record_result(project_id, runtime_id, result)
+            correction = memory.reassessment(project_id, runtime_id)
+            if correction:
+                # A running engine may have repopulated hints after the source
+                # correction endpoint evicted them. Remove those stale hints too.
+                from knowledge.graph import delete_project_hints
+                from .concept_ledger import ConceptLedger, _default_dir
+                from pathlib import Path
+                delete_project_hints(project_id)
+                ConceptLedger(str(Path(_default_dir()) / "projects" / digest(project_id))).clear()
+                self.drop(project_id)
+                result = {"question": question, "status": "PARTIAL", "evidence_level": "UNVERIFIED",
+                          "answer": "Research ke dauraan source/memory badla. Naya assessment zaroori hai; purana conclusion verified jawab nahi hai.",
+                          "source_reassessment": correction}
+            result["memory_write"] = memory_receipt
             result["task_contract"] = assess_contract(contract, result)
-            result["runtime_execution"] = store.snapshot(project_id, job_id)
+            if result["task_contract"]["worker_requirement_gap"]:
+                result["status"] = "PARTIAL"
+                result["answer"] = "Maange gaye worker jobs poore execute nahi hue; yeh partial result hai.\n\n" + str(result.get("answer", ""))
+            result["runtime_execution"] = store.snapshot(project_id, runtime_id)
+            self._remember(project_id, result)
             return result
 
     def _research(self, question: str, project_id: str = "default",
@@ -130,7 +163,6 @@ class AgentManager:
             result = extend_ai2_quantitative_receipts(result)
             result = enforce_ai2_final_truth_guards(result)
 
-        self._remember(project_id, result)
         return result
 
     def _remember(self, project_id: str, result: Dict) -> None:

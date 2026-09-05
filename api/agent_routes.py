@@ -35,7 +35,7 @@ def execute_project_tool(project_id: str, request: ToolRequest,
     x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
     require_project_access(project_id, x_project_token)
     from research_engine.tool_registry import execute_tool
-    from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version
+    from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version, RuntimeBlocked
     # User endpoint has a fixed server-owned role/effects; role is not accepted
     # from arbitrary input or from a generated source document.
     store = RuntimeStore()
@@ -48,6 +48,8 @@ def execute_project_tool(project_id: str, request: ToolRequest,
                 allowed_effects={"bounded_calculation", "return_artifact"}, call_id=request.call_id)
     except (ValueError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail="Tool arguments or permissions invalid.") from exc
+    except RuntimeBlocked as exc:
+        raise HTTPException(status_code=409, detail="Tool run cannot continue with this call ID or resource state.") from exc
 
 
 @router.get("/projects/{project_id}/research-memory")
@@ -55,7 +57,58 @@ def inspect_research_memory(project_id: str,
     x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
     require_project_access(project_id, x_project_token)
     from utils.governed_memory import GovernedMemory
-    return GovernedMemory().inspect(project_id)
+    from research_engine.research_memory import ResearchMemory
+    result = GovernedMemory().inspect(project_id)
+    result["legacy_research_memory"] = ResearchMemory(project_id).load()
+    return result
+
+
+def _evict_project_hints(project_id):
+    from knowledge.graph import delete_project_hints
+    from research_engine.concept_ledger import ConceptLedger, _default_dir
+    from utils.research_runtime import digest
+    from pathlib import Path
+    graph = delete_project_hints(project_id)
+    concepts = ConceptLedger(str(Path(_default_dir()) / "projects" / digest(project_id))).clear()
+    manager.drop(project_id)
+    return {"graph_hints_cleared": graph, "project_concept_hints_cleared": concepts}
+
+
+@router.put("/projects/{project_id}/research-memory/{record_id}")
+def update_research_memory(project_id: str, record_id: str, request: MemoryInput,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.governed_memory import GovernedMemory
+    memory = GovernedMemory()
+    if not any(r["id"] == record_id for r in memory.inspect(project_id)["records"]):
+        raise HTTPException(status_code=404, detail="Memory record nahi mila.")
+    from utils.research_jobs import runner
+    if runner.has_active(project_id) or manager.active(project_id):
+        raise HTTPException(status_code=409, detail="Pehle active research roko.")
+    try:
+        if not memory.correct(project_id, record_id, request.kind, request.body):
+            raise HTTPException(status_code=404, detail="Memory record nahi mila.")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Memory kind ya content invalid.") from exc
+    return {"id": record_id, "trust": "USER_SUPPLIED_UNVERIFIED", **_evict_project_hints(project_id)}
+
+
+@router.delete("/projects/{project_id}/research-memory")
+def clear_project_research_memory(project_id: str,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.research_jobs import runner
+    if runner.has_active(project_id) or manager.active(project_id):
+        raise HTTPException(status_code=409, detail="Pehle active research roko.")
+    from utils.governed_memory import GovernedMemory
+    from research_engine.research_memory import ResearchMemory
+    count = GovernedMemory().clear(project_id)
+    legacy = ResearchMemory(project_id)
+    legacy._data = legacy._blank()
+    saved = legacy.save()
+    return {"deleted_governed_records": count, "legacy_research_memory_cleared": saved,
+            **_evict_project_hints(project_id),
+            "retained": "original uploads, canonical job archives and external backups; account-wide erasure is separate"}
 
 
 @router.post("/projects/{project_id}/research-memory")
@@ -74,12 +127,11 @@ def delete_research_memory(project_id: str, record_id: str,
     x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
     require_project_access(project_id, x_project_token)
     from utils.research_jobs import runner
-    if runner.has_active(project_id):
+    if runner.has_active(project_id) or manager.active(project_id):
         raise HTTPException(status_code=409, detail="Pehle active research ko roko; phir memory delete karo.")
     from utils.governed_memory import GovernedMemory
     removed = GovernedMemory().delete(project_id, record_id)
-    manager.drop(project_id)
-    return {"deleted": removed, "scope": "governed record and dependent runtime checkpoints",
+    return {"deleted": removed, **_evict_project_hints(project_id), "scope": "governed record and dependent runtime checkpoints",
             "retained": "original uploaded documents, legacy memory files, job archives and external backups; not an account-wide erasure"}
 
 
@@ -89,8 +141,7 @@ def correct_research_source(project_id: str, request: SourceCorrection,
     require_project_access(project_id, x_project_token)
     from utils.governed_memory import GovernedMemory
     result = GovernedMemory().invalidate_source(project_id, request.source, request.reason)
-    manager.drop(project_id)
-    return result
+    return {**result, **_evict_project_hints(project_id)}
 
 # Public JSON endpoints must not accept arbitrarily large single strings. Large
 # source material belongs in the streaming upload path; a question/message stays
@@ -200,7 +251,13 @@ def chat(
     require_project_access(request.project_id, x_project_token)
     from research_engine.chat import quick_chat
 
-    result = quick_chat(request.message, request.history)
+    from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version
+    import uuid
+    store, runtime_id = RuntimeStore(), uuid.uuid4().hex
+    limits = {"http": 4, "input_bytes": 2000000, "output_tokens": 24000, "seconds": 300}
+    store.start(request.project_id, runtime_id, digest([request.message, request.history]), code_version(), limits)
+    with bind(RunContext(store, request.project_id, runtime_id)):
+        result = quick_chat(request.message, request.history)
     if not result.get("fallback_required"):
         return result
     return _async_research_chat_fallback(result.get("reason"))

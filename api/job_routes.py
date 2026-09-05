@@ -239,6 +239,8 @@ def research_job_result(
     if not isinstance(result, dict):
         return result
     response = dict(result)
+    if not isinstance(item.get("project_id"), str) or not item["project_id"]:
+        raise HTTPException(status_code=409, detail="Stored job project provenance unavailable; result cannot be safely reassessed.")
     from utils.governed_memory import GovernedMemory
     reassessment = GovernedMemory().reassessment(item["project_id"], job_id)
     if reassessment:

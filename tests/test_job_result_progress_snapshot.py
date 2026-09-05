@@ -7,6 +7,7 @@ from api import job_routes
 def _completed(result=None):
     return {
         "job_id": "job-safe",
+        "project_id": "fixture-project",
         "status": "completed",
         "result": result or {"answer": "final answer", "sources": []},
     }

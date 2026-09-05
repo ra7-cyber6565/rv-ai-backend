@@ -35,7 +35,7 @@ def code_version():
     # Bind recovery to shipped production source, including uncommitted changes.
     root = Path(__file__).resolve().parent.parent
     h = hashlib.sha256()
-    for folder in ("research_engine", "utils"):
+    for folder in ("research_engine", "utils", "api", "knowledge"):
         for path in sorted((root / folder).rglob("*.py")):
             h.update(str(path.relative_to(root)).encode())
             h.update(path.read_bytes())
@@ -138,6 +138,14 @@ class RuntimeStore:
                 if json.loads(row["limits"]) != limits:
                     raise RuntimeBlocked("resume cannot enlarge or change resource limits")
             else:
+                # Expired checkpoints cannot resume after their original deadline;
+                # retain them for six further days for inspection, then prune.
+                expired = db.execute("SELECT project,run FROM runs WHERE deadline<?", (time.time()-6*86400,)).fetchall()
+                for old in expired:
+                    for table in ("stages", "events", "runs"):
+                        db.execute(f"DELETE FROM {table} WHERE project=? AND run=?", (old["project"], old["run"]))
+                if db.execute("SELECT count(*) FROM runs").fetchone()[0] >= 2000:
+                    raise RuntimeBlocked("runtime retention capacity reached")
                 cancelled = db.execute("SELECT 1 FROM events WHERE project=? AND run=? AND kind='CANCEL_REQUESTED' LIMIT 1", (project, run)).fetchone()
                 db.execute("INSERT INTO runs(project,run,fingerprint,version,deadline,limits,cancelled) VALUES(?,?,?,?,?,?,?)",
                            (project, run, fingerprint, version, time.time() + limits["seconds"], json.dumps(limits), int(bool(cancelled))))
@@ -228,6 +236,12 @@ class RuntimeStore:
         if len(payload.encode()) > 16000000:
             raise RuntimeBlocked("checkpoint exceeds 16 MB stage limit")
         with self.transaction() as db:
+            self._check(db.execute("SELECT * FROM runs WHERE project=? AND run=?", (project, run)).fetchone())
+            cap = max(0, int(os.environ.get("RESEARCH_CHECKPOINT_BYTES", "268435456")))
+            used = db.execute("SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM stages").fetchone()[0]
+            old = db.execute("SELECT length(CAST(payload AS BLOB)) FROM stages WHERE project=? AND run=? AND stage=?", (project, run, stage)).fetchone()
+            if used - (old[0] if old else 0) + len(payload.encode()) > cap:
+                raise RuntimeBlocked("shared checkpoint payload capacity reached")
             changed = db.execute("UPDATE stages SET state='COMPLETED',payload=?,sha=?,updated=? WHERE project=? AND run=? AND stage=? AND owner=? AND state='RUNNING'",
                 (payload, hashlib.sha256(payload.encode()).hexdigest(), time.time(), project, run, stage, owner)).rowcount
             if changed != 1:
@@ -256,7 +270,7 @@ class RuntimeStore:
                 "reserved_http_attempts": row["http"], "input_utf8_bytes": row["input_bytes"],
                 "reserved_max_output_tokens": row["output_tokens"], "actual_tokens": "UNKNOWN",
                 "limits": json.loads(row["limits"]), "events": [dict(e, detail=json.loads(e["detail"])) for e in reversed(events)],
-                "event_durability": "SQLITE_TRANSACTION", "pricing_verified_by": "existing_zero_cost_provider_guard"}
+                "event_durability": "SQLITE_TRANSACTION", "eligibility_enforced_by": "existing_confirmed_zero_cost_guard"}
 
 
 _CURRENT = contextvars.ContextVar("research_runtime", default=None)

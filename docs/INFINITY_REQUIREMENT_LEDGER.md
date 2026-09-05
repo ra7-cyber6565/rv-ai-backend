@@ -19,14 +19,14 @@ gaps remain open. Exact final results belong to PR #79, not inferred from filena
 | R03, R04 | Real workers gain stable IDs, durable raw envelope checkpoints and typed numeric tool receipts | Shared corpus/model diversity and live quality remain unproved |
 | R05 | Discovery and enriched reading are typed/hash-checked checkpoints | Fresh OCR/table/equation ground truth still required |
 | R06, R08, R09, R11 | Existing claim, hypothesis, complete-test-plan and domain guards retained; numeric execution never promotes clinical truth | External semantic/scientific validation and adequate statistical data still required |
-| R07, R14 | `governed_memory.py`: scoped provenance/trust/expiry, inspect/export/delete and source-to-dependent-run invalidation; stale API answers blocked | Legacy memory/graph/archive erasure not covered by new per-record endpoint |
+| R07, R14 | Scoped trust/expiry/revisions; private UI inspect/export/correct/delete; transitive memory/source dependencies; clear legacy notes and project hints; stale API answers blocked | Original uploads, canonical job archives and external backups remain separately retained |
 | R10, R16 | `tool_registry.py`: fixed role/effect/argument checks; actual restricted AST calculations with artifact hashes | General arbitrary-code isolation/build backend unavailable |
-| R12, R13 | `research_runtime.py`: atomic per-run and shared-provider HTTP/input-byte/output-token reservations before retries; Gemini output cap/SDK retry control | Application caps are not verified provider quota; legacy direct entry points and actual input-token accounting remain open |
+| R12, R13 | Atomic per-run and shared-provider generation-attempt reservations on public research and QUICK chat; SDK retry/output caps; shared checkpoint byte ceiling | Actual input-token counts, metadata discovery HTTP and verified provider billing remain separate |
 | R15 | SQLite stages/events; same-input/code recovery, cancellation, bounded resume, non-replay of ambiguous effects | In-flight request ends at timeout; unfinished reads may rerun; same deadline persists |
 | R18, R20 | Frozen paired-evaluation harness; protected supplied holdout, task-cluster uncertainty, missing denominators; changes stay reviewable PR proposals | No live matched baseline/holdout campaign or validated automated promotion loop |
 | R19 | New process budget, restart, cancellation, correction, tool injection/failure/artifact and evaluation tests complement original 18-case map | Full integrated CI plus declared external-data/live cases remain separate evidence |
 
-Local evidence during development: 10 actual SQLite/process runtime tests PASS;
+Local evidence during development: 12 actual SQLite/process runtime tests PASS;
 3 synthetic paired-evaluation tests PASS; architecture/provider audits and JS
 syntax PASS. Governed-tool suite initially could not import because the refreshed
 workspace lacks dependencies; network approval cancelled installation. No such

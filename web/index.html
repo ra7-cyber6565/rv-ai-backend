@@ -64,6 +64,17 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
   </section>
 </main></div>
 <footer>
+  <section class="docs" id="memorypanel" hidden aria-label="Research memory">
+    <div class="dochead"><strong>Yaad rakhi baatein</strong><button type="button" class="x" id="memoryclose" aria-label="Memory panel band karo">✕</button></div>
+    <div class="docnote">Is private session ki memory dekho aur sudharo. AI ki saved baatein verified evidence nahi hain. Memory saaf karne par original uploads aur job archives alag rehte hain.</div>
+    <div class="docbtns"><button type="button" class="dbtn" id="memoryrefresh">Refresh</button><button type="button" class="dbtn" id="memoryexport">Export</button><button type="button" class="dbtn" id="memoryclear">Session ki research memory saaf karo</button></div>
+    <div id="memorystatus" class="docnote" role="status" aria-live="polite"></div>
+    <div id="memorylist" class="doclist"></div>
+    <label class="docnote" for="memorykind">Baat kis tarah ki hai?</label>
+    <select id="memorykind" class="pname"><option value="preference">Meri preference</option><option value="project_state">Project ki baat</option><option value="source">Source note</option><option value="execution">Kaam ka record</option><option value="hypothesis">Test karne ka idea</option><option value="conclusion">Research conclusion</option></select>
+    <textarea id="memorytext" class="pastebox" rows="3" maxlength="8000" placeholder="Kya yaad rakhna ya sudharna hai?" aria-label="Memory note"></textarea>
+    <div class="docbtns"><button type="button" class="dbtn go" id="memorysave">Yaad rakho</button><button type="button" class="dbtn" id="memoryreset">Nayi baat</button></div>
+  </section>
   <section class="docs" id="docs" hidden>
     <div class="dochead"><strong>Tumhare diye documents</strong><button type="button" class="x" id="docsclose" title="Panel band karo" aria-label="Panel band karo">✕</button></div>
     <div class="docnote" id="docnote">Copyright book ki poori copy internet se nahi laayi jaati — par tumhare paas jo PDF/notes/explanation already hai, wo yahan do to research usko padhegi. Ye file sirf is tab ki private session mein jaati hai, iska koi public link nahi banta, answer mein iska label alag rehta hai ("tumhara uploaded document"), aur akela uploaded document kisi baat ko VERIFIED nahi banata. Page refresh karne par session nayi ban jaati hai, tab files dobara deni hongi.</div>
@@ -89,7 +100,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
       <div class="doclist" id="booklist"></div>
     </div>
   </section>
-  <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
+  <div class="composer"><button type="button" class="attach" id="attach" title="Apni PDF/notes do" aria-label="Apni PDF ya notes do">📎</button><button type="button" class="attach" id="memorytoggle" title="Yaad rakhi baatein" aria-label="Yaad rakhi baatein">🧠</button><textarea id="input" rows="1" placeholder="Kuch bhi poocho…" autofocus></textarea><button id="send" class="send" title="Bhejo">↑</button></div>
   <div class="foot">Important decisions ke liye sources aur evidence zaroor check karein.</div>
 </footer>
 <script>
@@ -241,6 +252,51 @@ async function projectPost(url,makePayload,timeoutMs=0){
   }
   throw new Error("project session recovery failed");
 }
+
+const MEMORY={data:null,editing:"",busy:false};
+function memoryHtml(data){
+  const names={preference:"Preference",project_state:"Project",source:"Source note",execution:"Kaam ka record",hypothesis:"Idea",conclusion:"Conclusion"};
+  return (data.records||[]).map(record=>{
+    const body=record.body||{},text=body.note||body.summary||JSON.stringify(body,null,2);
+    return '<div class="docsep"><strong>'+esc(names[record.kind]||record.kind)+'</strong><div class="docnote">'+esc(record.status)+' · revision '+esc(record.revision)+'</div><div style="white-space:pre-wrap;overflow-wrap:anywhere">'+esc(text)+'</div><div class="docbtns"><button type="button" class="dbtn" data-memory-edit="'+esc(record.id)+'">Sudharo</button><button type="button" class="dbtn" data-memory-delete="'+esc(record.id)+'">Hatao</button></div></div>';
+  }).join("")||'<div class="docnote">Abhi koi governed memory record nahi hai.</div>';
+}
+async function memoryRequest(method="GET",suffix="",body){
+  await ensureSession();
+  const options={method,headers:projectHeaders()};if(body!==undefined)options.body=JSON.stringify(body);
+  const {r,data}=await jsonFetch(API+"/api/v1/projects/"+encodeURIComponent(PROJECT.id)+"/research-memory"+suffix,options,20000);
+  if(!r.ok)throw new Error(typeof data.detail==="string"?data.detail:"Memory request complete nahi hui. Dobara try karo.");
+  return data;
+}
+async function refreshMemory(){
+  const data=await memoryRequest();MEMORY.data=data;$("#memorylist").innerHTML=memoryHtml(data);
+  $("#memorystatus").textContent=data.count+" records. Purani research notes export mein bhi milengi.";
+}
+async function memoryAction(action){
+  if(MEMORY.busy)return;MEMORY.busy=true;$("#memorystatus").textContent="Memory update ho rahi hai…";
+  try{await action();}catch(e){$("#memorystatus").textContent=e.message;}finally{MEMORY.busy=false;}
+}
+function resetMemoryEditor(){MEMORY.editing="";$("#memorytext").value="";$("#memorykind").value="preference";$("#memorysave").textContent="Yaad rakho";}
+$("#memorytoggle").onclick=()=>{$("#memorypanel").hidden=!$("#memorypanel").hidden;if(!$("#memorypanel").hidden)memoryAction(refreshMemory);};
+$("#memoryclose").onclick=()=>{$("#memorypanel").hidden=true;};
+$("#memoryrefresh").onclick=()=>memoryAction(refreshMemory);
+$("#memoryreset").onclick=resetMemoryEditor;
+$("#memorysave").onclick=()=>memoryAction(async()=>{
+  const note=$("#memorytext").value.trim();if(!note)throw new Error("Pehle baat likho.");
+  await memoryRequest(MEMORY.editing?"PUT":"POST",MEMORY.editing?"/"+encodeURIComponent(MEMORY.editing):"",{kind:$("#memorykind").value,body:{note}});
+  resetMemoryEditor();await refreshMemory();
+});
+$("#memorylist").onclick=e=>{
+  const button=e.target.closest("button");if(!button||MEMORY.busy)return;
+  const id=button.dataset.memoryEdit;
+  if(id){const record=(MEMORY.data?.records||[]).find(r=>r.id===id);if(!record)return;MEMORY.editing=id;$("#memorykind").value=record.kind;$("#memorytext").value=record.body.note||record.body.summary||JSON.stringify(record.body,null,2);$("#memorysave").textContent="Sudhaar save karo";$("#memorytext").focus();}
+  else if(button.dataset.memoryDelete)memoryAction(async()=>{await memoryRequest("DELETE","/"+encodeURIComponent(button.dataset.memoryDelete));resetMemoryEditor();await refreshMemory();});
+};
+$("#memoryclear").onclick=()=>memoryAction(async()=>{await memoryRequest("DELETE");resetMemoryEditor();await refreshMemory();});
+$("#memoryexport").onclick=()=>memoryAction(async()=>{
+  const data=await memoryRequest(),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:"application/json"}));
+  const link=document.createElement("a");link.href=url;link.download="infinity-research-memory.json";document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);$("#memorystatus").textContent="Memory export download hua.";
+});
 
 // ── "Apni PDF/notes do" ──────────────────────────────────────────────────────
 // Upload usi private session mein jaata hai jisme sawaal jaata hai, isliye
