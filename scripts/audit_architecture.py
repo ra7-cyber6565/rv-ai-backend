@@ -684,7 +684,7 @@ def run_audit() -> AuditReport:
             "$PSScriptRoot",
             '"--data-root"',
             '"--depth-mode"',
-            '[ValidateSet("MAXIMUM", "MARATHON")]',
+            '[ValidateSet("MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS")]',
             "$gateExitCode",
         ),
         _contains(
