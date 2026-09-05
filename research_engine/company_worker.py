@@ -29,9 +29,13 @@ def execute(payload, brain_factory=None):
         brain_factory = ResilientReasoning
     brain = None
     try:
+        from utils.research_runtime import RunContext, RuntimeStore, bind
+        wire = payload.get("runtime_context")
+        context = RunContext(RuntimeStore(wire["path"]), wire["project"], wire["run"]) if wire else None
         brain = brain_factory(budget=1)
-        answer = brain.generate(worker_prompt(payload["role"], question, evidence),
-                                label="company_" + payload["role"])
+        with bind(context):
+            answer = brain.generate(worker_prompt(payload["role"], question, evidence),
+                                    label="company_" + payload["role"])
         return {"answer": answer[:24000] if isinstance(answer, str) else "",
                 "error": "" if answer else "no_model_output",
                 "response_chars": len(answer) if isinstance(answer, str) else 0,

@@ -1,6 +1,6 @@
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from research_engine.agent_manager import manager
@@ -12,6 +12,85 @@ from utils.project_guard import require_project_access
 from utils.reasoning_status import reasoning_status
 
 router = APIRouter()
+
+
+class MemoryInput(BaseModel):
+    kind: str = Field(default="preference", max_length=30)
+    body: Dict
+
+
+class SourceCorrection(BaseModel):
+    source: str = Field(min_length=1, max_length=2000)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
+class ToolRequest(BaseModel):
+    tool: str = Field(min_length=1, max_length=40)
+    arguments: Dict
+    call_id: str = Field(min_length=1, max_length=80)
+
+
+@router.post("/projects/{project_id}/tools/execute")
+def execute_project_tool(project_id: str, request: ToolRequest,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from research_engine.tool_registry import execute_tool
+    from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version
+    # User endpoint has a fixed server-owned role/effects; role is not accepted
+    # from arbitrary input or from a generated source document.
+    store = RuntimeStore()
+    run = digest(["tool", project_id, request.call_id])[:32]
+    limits = {"http": 0, "input_bytes": 0, "output_tokens": 0, "seconds": 3600}
+    try:
+        store.start(project_id, run, digest([request.tool, request.arguments]), code_version(), limits)
+        with bind(RunContext(store, project_id, run)):
+            return execute_tool(request.tool, request.arguments, role="supervisor",
+                allowed_effects={"bounded_calculation", "return_artifact"}, call_id=request.call_id)
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail="Tool arguments or permissions invalid.") from exc
+
+
+@router.get("/projects/{project_id}/research-memory")
+def inspect_research_memory(project_id: str,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.governed_memory import GovernedMemory
+    return GovernedMemory().inspect(project_id)
+
+
+@router.post("/projects/{project_id}/research-memory")
+def add_research_memory(project_id: str, request: MemoryInput,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.governed_memory import GovernedMemory
+    try:
+        return {"id": GovernedMemory().put(project_id, request.kind, request.body, user_supplied=True)}
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Memory kind, size or limit invalid.") from exc
+
+
+@router.delete("/projects/{project_id}/research-memory/{record_id}")
+def delete_research_memory(project_id: str, record_id: str,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.research_jobs import runner
+    if runner.has_active(project_id):
+        raise HTTPException(status_code=409, detail="Pehle active research ko roko; phir memory delete karo.")
+    from utils.governed_memory import GovernedMemory
+    removed = GovernedMemory().delete(project_id, record_id)
+    manager.drop(project_id)
+    return {"deleted": removed, "scope": "governed record and dependent runtime checkpoints",
+            "retained": "original uploaded documents, legacy memory files, job archives and external backups; not an account-wide erasure"}
+
+
+@router.post("/projects/{project_id}/source-corrections")
+def correct_research_source(project_id: str, request: SourceCorrection,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.governed_memory import GovernedMemory
+    result = GovernedMemory().invalidate_source(project_id, request.source, request.reason)
+    manager.drop(project_id)
+    return result
 
 # Public JSON endpoints must not accept arbitrarily large single strings. Large
 # source material belongs in the streaming upload path; a question/message stays

@@ -6,6 +6,35 @@ research-team path in the existing application. **This ledger does not declare
 the entire specification complete.** A partial status is not an external blocker;
 remaining engineering work is named separately from unavailable live evidence.
 
+## Current continuation — reliability runtime
+
+The original inventory below records the first company implementation. These
+current changes supersede its corresponding gap descriptions; unchanged empirical
+gaps remain open. Exact final results belong to PR #79, not inferred from filenames.
+
+| IDs | Current implementation / acceptance evidence | Remaining limit |
+|---|---|---|
+| R01, R21, R22 | Preserve reviewed head; extend same app/PR; `RELIABILITY_RUNTIME.md` has configuration, commands and evidence scope | Full vision not universally complete |
+| R02, R17 | `task_contract.py`: original request, explicit parts, types, dependencies, coverage; private UI stop/resume and numeric downloads | Heuristic parsing; arbitrary-part completion stays NOT_ASSESSED |
+| R03, R04 | Real workers gain stable IDs, durable raw envelope checkpoints and typed numeric tool receipts | Shared corpus/model diversity and live quality remain unproved |
+| R05 | Discovery and enriched reading are typed/hash-checked checkpoints | Fresh OCR/table/equation ground truth still required |
+| R06, R08, R09, R11 | Existing claim, hypothesis, complete-test-plan and domain guards retained; numeric execution never promotes clinical truth | External semantic/scientific validation and adequate statistical data still required |
+| R07, R14 | `governed_memory.py`: scoped provenance/trust/expiry, inspect/export/delete and source-to-dependent-run invalidation; stale API answers blocked | Legacy memory/graph/archive erasure not covered by new per-record endpoint |
+| R10, R16 | `tool_registry.py`: fixed role/effect/argument checks; actual restricted AST calculations with artifact hashes | General arbitrary-code isolation/build backend unavailable |
+| R12, R13 | `research_runtime.py`: atomic per-run and shared-provider HTTP/input-byte/output-token reservations before retries; Gemini output cap/SDK retry control | Application caps are not verified provider quota; legacy direct entry points and actual input-token accounting remain open |
+| R15 | SQLite stages/events; same-input/code recovery, cancellation, bounded resume, non-replay of ambiguous effects | In-flight request ends at timeout; unfinished reads may rerun; same deadline persists |
+| R18, R20 | Frozen paired-evaluation harness; protected supplied holdout, task-cluster uncertainty, missing denominators; changes stay reviewable PR proposals | No live matched baseline/holdout campaign or validated automated promotion loop |
+| R19 | New process budget, restart, cancellation, correction, tool injection/failure/artifact and evaluation tests complement original 18-case map | Full integrated CI plus declared external-data/live cases remain separate evidence |
+
+Local evidence during development: 10 actual SQLite/process runtime tests PASS;
+3 synthetic paired-evaluation tests PASS; architecture/provider audits and JS
+syntax PASS. Governed-tool suite initially could not import because the refreshed
+workspace lacks dependencies; network approval cancelled installation. No such
+blocked check is counted as PASS. See exact-head CI in PR #79 for final results.
+
+Every whole-requirement status below remains conservative: implementing a new
+subcomponent does not automatically close the rest of a PARTIAL requirement.
+
 Evidence register:
 
 - E0: base main `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`, Foundation

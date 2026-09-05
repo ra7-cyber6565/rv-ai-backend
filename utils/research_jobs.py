@@ -274,6 +274,8 @@ class Job:
     result_compacted: bool = False
     durable: bool = False
     storage_warning: str = ""
+    custom: Dict[str, Any] = field(default_factory=dict)
+    resume_count: int = 0
 
     def public(self) -> Dict[str, Any]:
         return {
@@ -290,6 +292,7 @@ class Job:
             "result_compacted": self.result_compacted,
             "result_bytes": self.result_bytes,
             "storage_warning": self.storage_warning,
+            "resume_count": self.resume_count,
         }
 
 
@@ -557,6 +560,8 @@ class ResearchJobRunner:
                 job.error = "Server/process restart ke wajah se running research resume nahi ho saki."
                 job.finished_at = time.time()
                 job.durable = False
+                from utils.research_runtime import RuntimeStore
+                RuntimeStore().recover(job.project_id, job.job_id)
             elif job.status == "completed" and job.result is not None and not job.result_file:
                 try:
                     self._persist_result_locked(job)
@@ -612,6 +617,7 @@ class ResearchJobRunner:
             project_id=project_id or "default",
             question=(question or "").strip(),
             mode=(mode or "DEEP").upper(),
+            custom=dict(custom or {}),
         )
         if not job.question:
             raise ValueError("question khaali nahi ho sakta")
@@ -632,6 +638,9 @@ class ResearchJobRunner:
     ) -> None:
         with self._lock:
             job = self._jobs[job_id]
+            if job.status == "cancelled":
+                self._futures.pop(job_id, None)
+                return
             job.status = "running"
             job.started_at = time.time()
             try:
@@ -649,7 +658,7 @@ class ResearchJobRunner:
             )
         except Exception as exc:  # noqa: BLE001
             with self._lock:
-                job.status = "failed"
+                job.status = "cancelled" if job.status == "cancelled" else "failed"
                 job.error = _safe_error(exc)
                 job.finished_at = time.time()
                 job.durable = False
@@ -661,6 +670,9 @@ class ResearchJobRunner:
             return
 
         with self._lock:
+            if job.status == "cancelled":
+                self._futures.pop(job_id, None)
+                return
             job.result = result if isinstance(result, dict) else {"result": result}
             job.status = "completed"
             job.finished_at = time.time()
@@ -683,6 +695,39 @@ class ResearchJobRunner:
                     f"{type(exc).__name__}."
                 )
             self._futures.pop(job_id, None)
+
+    def cancel(self, job_id: str) -> bool:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"queued", "running"}:
+                return False
+            from utils.research_runtime import RuntimeStore
+            RuntimeStore().cancel(job.project_id, job_id)
+            job.status, job.finished_at = "cancelled", time.time()
+            job.error = "User ne research rok di; in-flight provider call timeout tak finish ho sakti hai."
+            future = self._futures.get(job_id)
+            if future:
+                future.cancel()
+            self._persist_locked()
+            return True
+
+    def has_active(self, project_id: str) -> bool:
+        with self._lock:
+            return any(j.project_id == project_id and
+                       (j.status in {"queued", "running"} or
+                        (j.job_id in self._futures and not self._futures[j.job_id].done()))
+                       for j in self._jobs.values())
+
+    def resume(self, job_id: str, run: Callable[..., Dict[str, Any]]) -> Job:
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.status not in {"interrupted", "failed"} or job.resume_count >= 3:
+                raise ValueError("job cannot resume; restart limit or terminal state")
+            job.resume_count += 1
+            job.status, job.error, job.finished_at = "queued", "", None
+            self._persist_locked()
+            self._futures[job_id] = self._executor.submit(self._execute, job_id, job.custom, run)
+            return job
 
     def get(self, job_id: str, *, include_result: bool = False) -> Optional[Dict[str, Any]]:
         with self._lock:
@@ -709,7 +754,7 @@ class ResearchJobRunner:
     def _prune_locked(self) -> None:
         if len(self._jobs) < self.max_jobs:
             return
-        finished_states = {"completed", "failed", "interrupted"}
+        finished_states = {"completed", "failed", "interrupted", "cancelled"}
         finished = sorted(
             (job for job in self._jobs.values() if job.status in finished_states),
             key=lambda j: j.finished_at or j.created_at,

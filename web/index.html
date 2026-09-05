@@ -645,11 +645,14 @@ function progressCounts(p){const prog=p||{};return Number(prog.sources_discovere
 function progressPanel(el){el.innerHTML='<div class="progress"><div class="stage">Shuru kar raha hoon…</div><div class="stagecount">0/'+STAGES.length+' stages</div><div class="bar"><div class="fill"></div></div><div class="rows"></div></div>';return {stage:el.querySelector(".stage"),count:el.querySelector(".stagecount"),fill:el.querySelector(".fill"),rows:el.querySelector(".rows")};}
 function paintProgress(ui,p){if(!p||p.error)return;if(p.current_stage)ui.stage.textContent=STAGE_LABEL[p.current_stage]||p.current_stage;const done=Math.max(0,Number(p.stages_done||0)),total=Number(p.stages_total||STAGES.length);ui.count.textContent=done+"/"+total+" stages • "+progressCounts(p);ui.fill.style.width=Math.min(100,Math.round(done/Math.max(1,total)*100))+"%";ui.rows.innerHTML=stageRowsHtml(p);down();}
 
-async function runResearch(question,el,requestedMode=mode){const ui=progressPanel(el);let jobId="",jobToken="";try{
-  const start=await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
+async function runResearch(question,el,requestedMode=mode,existingJob=null){const ui=progressPanel(el);let jobId="",jobToken="";try{
+  const start=existingJob?{r:{ok:true},data:existingJob}:await projectPost("/api/v1/research-jobs",projectId=>({question,project_id:projectId,depth_mode:requestedMode}));
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
+  const stop=document.createElement("button");stop.textContent="Research roko";stop.type="button";
+  stop.onclick=async()=>{stop.disabled=true;const out=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/cancel",{...pollOpts,method:"POST"});if(!out.r.ok){stop.disabled=false;stop.textContent="Rok nahi paaye — dobara try karo";}};
+  el.querySelector(".progress").appendChild(stop);
   const longMode=["MARATHON","COMPANY","COMPANY_PLUS"].includes(requestedMode);
   const hardDeadline=Date.now()+(longMode?60:30)*60*1000,stallMinutes=longMode?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
@@ -658,7 +661,8 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
     const prog=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/progress",pollOpts);
     if(prog.r.ok){const p=prog.data.progress||{};paintProgress(ui,p);const signature=[status.data.status,p.current_stage,p.stages_done,Array.isArray(p.log)?p.log.length:0].join("|");if(signature!==lastSignature){lastSignature=signature;lastChange=Date.now();}}
     if(status.data.status==="completed")break;
-    if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Question input mein wapas rakh diya hai; naya background job start kar sakte ho.");restoreQuestion(question);return false;}
+    if(status.data.status==="cancelled"){friendly(el,"Research rok di gayi. Nayi provider calls band hain; pehle se chal rahi call timeout tak finish ho sakti hai.");restoreQuestion(question);return false;}
+    if(status.data.status==="failed"||status.data.status==="interrupted"){friendly(el,"Research worker beech mein ruk gaya. Saved checkpoints se resume try kar sakte ho; changed code/input ya exhausted budget par naya run chahiye.");restoreQuestion(question);const resume=document.createElement("button");resume.type="button";resume.textContent="Saved work se resume";resume.onclick=async()=>{resume.disabled=true;const out=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId)+"/resume",{...pollOpts,method:"POST"});if(out.r.ok){runResearch(question,el,requestedMode,{job_id:jobId,job_access_token:jobToken});}else{resume.textContent="Resume unavailable — naya run chahiye";}};el.appendChild(resume);return false;}
     if(Date.now()>hardDeadline){friendly(el,"Research browser ki wait-limit se lambi ho gayi. Job server par durable hai; page refresh ke baad status dobara check kiya ja sakta hai.");restoreQuestion(question);return false;}
     if(Date.now()-lastChange>stallMs){friendly(el,`Research progress ${stallMinutes} minute se badli nahi. Question input mein wapas rakh diya hai; server health check karke retry karo.`);restoreQuestion(question);return false;}
     await sleep(1200);
@@ -832,6 +836,8 @@ function companyHtml(data){
       if(Array.isArray(r[key])&&r[key].length)out+='<p>'+esc(label)+': '+esc(r[key].join('; '))+'</p>';
     }
     if(Array.isArray(r.contract_issues)&&r.contract_issues.length)out+='<p>Report gaps: '+esc(r.contract_issues.join(', '))+'</p>';
+    if(w.restored_from_checkpoint)out+='<p>Saved checkpoint se restore hua; model ko dobara call nahi kiya.</p>';
+    if(Array.isArray(r.tool_results))for(const t of r.tool_results){out+='<p>Calculation: '+esc(t.state)+' — physical/clinical validation nahi.</p>';if(t.artifact&&t.artifact.media_type==="application/json"&&typeof t.artifact.content==="string"){out+='<a download="result.json" href="data:application/json;charset=utf-8,'+encodeURIComponent(t.artifact.content)+'">Calculation JSON download</a><pre>'+esc(t.artifact.content)+'</pre>';}}
     out+='</details>';
   }
   return out;

@@ -21,6 +21,7 @@ Parallel research-company integration:
 from __future__ import annotations
 
 import threading
+import re
 from typing import Dict, List, Optional
 
 from .ai1_packet_extensions import extend_ai1_packet
@@ -40,6 +41,7 @@ class AgentManager:
         self._engines: Dict[str, DeepResearchEngine] = {}
         self._history: Dict[str, List[Dict]] = {}
         self._lock = threading.Lock()
+        self._project_locks: Dict[str, threading.Lock] = {}
 
     # ── engines ──────────────────────────────────────────────────────────────
     def get(self, project_id: str = "default") -> DeepResearchEngine:
@@ -69,9 +71,40 @@ class AgentManager:
     def research(self, question: str, project_id: str = "default",
                  depth_mode: str = "DEEP", custom: Optional[Dict] = None,
                  job_id: Optional[str] = None) -> Dict:
+        if not job_id or not re.fullmatch(r"[a-f0-9]{32}", job_id):
+            return self._research(question, project_id, depth_mode, custom, job_id)
+        from .depth import get_depth_config
+        from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version, checkpoint
+        config = get_depth_config(depth_mode, custom)
+        from .task_contract import compile_contract, assess_contract
+        contract = compile_contract(question, depth_mode, custom)
+        calls = max(0, int(config.gemini_calls))
+        limits = {"http": calls * 4, "input_bytes": calls * 2000000,
+                  "output_tokens": calls * 4 * 6000, "seconds": 3600}
+        store = RuntimeStore()
+        store.start(project_id, job_id, digest([question, depth_mode, custom]), code_version(), limits)
+        with bind(RunContext(store, project_id, job_id)):
+            from utils.governed_memory import GovernedMemory
+            memory = GovernedMemory(store)
+            if memory.reassessment(project_id, job_id):
+                from utils.research_runtime import RuntimeBlocked
+                raise RuntimeBlocked("source or memory changed; a new research run is required")
+            result = checkpoint("final_result", [question, depth_mode, custom],
+                lambda: self._research(question, project_id, depth_mode, custom, job_id))
+            memory.record_result(project_id, job_id, result)
+            result["task_contract"] = assess_contract(contract, result)
+            result["runtime_execution"] = store.snapshot(project_id, job_id)
+            return result
+
+    def _research(self, question: str, project_id: str = "default",
+                  depth_mode: str = "DEEP", custom: Optional[Dict] = None,
+                  job_id: Optional[str] = None) -> Dict:
         engine = self.get(project_id)
-        result = engine.research(question, depth_mode=depth_mode, custom=custom,
-                                 job_id=job_id or project_id)
+        with self._lock:
+            project_lock = self._project_locks.setdefault(project_id, threading.Lock())
+        with project_lock:
+            result = engine.research(question, depth_mode=depth_mode, custom=custom,
+                                     job_id=job_id or project_id)
 
         # Base AI-1 creates the exact 15-section evidence handoff.
         result = attach_ai1_research_packet(question, result)

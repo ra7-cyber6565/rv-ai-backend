@@ -46,6 +46,19 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 ## AI Company integration — ChatGPT, 2026-09-05
 
+- Continuation ACTIVE: durable SQLite stages/events and atomic application quotas,
+  same-code/input resume/cancel, source/memory invalidation, task contract and
+  typed numeric tools with downloadable receipts. Ownership: ChatGPT on isolated
+  `codex/company-reliability-20260905`, extending reviewed PR #79 head `d0def705`.
+  No other branch/PR or user Windows work is being merged or overwritten.
+- Run instructions and explicit boundaries: `docs/RELIABILITY_RUNTIME.md`.
+  Current continuation table in the requirement ledger supersedes first-wave
+  gaps that it closes. General execution backend, legacy memory erasure/direct
+  quota paths and live empirical comparisons remain explicitly open.
+- Refreshed workspace dependency install was cancelled by network approval;
+  dependency-free SQLite/process and evaluation tests run locally. Exact-head
+  full CI remains required before this continuation can be called verified.
+
 - Latest user specification: `Pasted markdown(20260905-064523).md`, 22 sections.
   Full requirement/acceptance ledger: `docs/INFINITY_REQUIREMENT_LEDGER.md`.
   It preserves PARTIAL/MISSING/BLOCKED items; a green software gate does not

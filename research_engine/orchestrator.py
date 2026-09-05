@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import replace
+from utils.research_runtime import checkpoint, check_cancelled
 from typing import Dict, List, Optional
 
 from .citation import CitationEngine
@@ -130,6 +131,7 @@ class DeepResearchEngine:
             pass
 
     def _track(self, job_id: Optional[str], stage: str, note: str = "") -> None:
+        check_cancelled()
         if not job_id:
             return
         try:
@@ -1527,7 +1529,8 @@ class DeepResearchEngine:
         doc_records, doc_note = self._document_records(question, config)
 
         # 3. discovery (hamesha — PDF ho ya na ho)
-        discovered = self._discover(question, plan, config, doc_records, job_id)
+        discovered = checkpoint("discovery", [question, plan, config, doc_records],
+                                lambda: self._discover(question, plan, config, doc_records, job_id))
         pack: EvidencePack = discovered["pack"]
         discovery_note = self.discovery.discovery_note(discovered["log"])
         if not pack.sources:
@@ -1607,8 +1610,11 @@ class DeepResearchEngine:
         # banata hai — aur jo nahi padh paye, uska honest reason bhi deta hai.
         self._track(job_id, "READING",
                     f"top {config.max_fulltext} sources ka full text padha ja raha hai")
-        reading = self.reader.enrich(pack, max_sources=config.max_fulltext,
-                                     budget_chars=config.chars_per_source * 2)
+        def read_full_text():
+            report = self.reader.enrich(pack, max_sources=config.max_fulltext,
+                                        budget_chars=config.chars_per_source * 2)
+            return report, pack
+        reading, pack = checkpoint("full_text_reading", [pack, config.max_fulltext, config.chars_per_source], read_full_text)
         if reading.get("note"):
             discovery_note = f"{discovery_note} | Reading: {reading['note']}"
         self._counts(job_id, full_text_read=reading.get("succeeded", 0))
@@ -1668,14 +1674,22 @@ class DeepResearchEngine:
 
         # 5. memory + knowledge graph hints
         memory_note = self.memory.context_note(question) if self.memory else ""
+        from utils.research_runtime import current
+        context = current()
+        if context:
+            from utils.governed_memory import GovernedMemory
+            # Governed records supersede legacy hints on durable jobs; source
+            # correction/delete/expiry must not be bypassed by an older cache.
+            memory_note = GovernedMemory(context.store).context(context.project, question)
         graph_note = self.graph.related_note(question, self.project_id)
         if graph_note:
             memory_note = f"{memory_note}\n\n{graph_note}".strip()
 
         # 6. gemini passes
-        passes = self._run_passes(question, pack, plan, config, contradiction_dicts,
-                                  memory_note, job_id,
-                                  counter_search_performed=axis_counter_search)
+        check_cancelled()
+        passes = checkpoint("chief_and_lab", [question, pack, plan, config, contradiction_dicts, memory_note],
+            lambda: self._run_passes(question, pack, plan, config, contradiction_dicts,
+                                    memory_note, job_id, counter_search_performed=axis_counter_search))
         # §9 — engine ke raw error (429/protobuf/exception class) warnings mein
         # nahi jaate. Warning insaani bhasha mein, raw line report ke sabse
         # neeche. Pichhle live run mein yahi text "Seedha jawab" ke neeche
