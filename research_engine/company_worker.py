@@ -34,6 +34,8 @@ def execute(payload, brain_factory=None):
                                 label="company_" + payload["role"])
         return {"answer": answer[:24000] if isinstance(answer, str) else "",
                 "error": "" if answer else "no_model_output",
+                "response_chars": len(answer) if isinstance(answer, str) else 0,
+                "output_truncated": isinstance(answer, str) and len(answer) > 24000,
                 "accounting": _safe_accounting(brain.api_accounting()), "accounting_complete": True}
     except Exception:
         # Never serialize credentials, provider bodies, local paths or tracebacks.

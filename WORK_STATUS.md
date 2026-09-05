@@ -46,6 +46,19 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 ## AI Company integration — ChatGPT, 2026-09-05
 
+- Latest user specification: `Pasted markdown(20260905-064523).md`, 22 sections.
+  Full requirement/acceptance ledger: `docs/INFINITY_REQUIREMENT_LEDGER.md`.
+  It preserves PARTIAL/MISSING/BLOCKED items; a green software gate does not
+  close general recovery, central provider quotas, arbitrary execution or live
+  empirical validation gaps.
+- Additional integration: worker IDs/UTC timestamps/input hashes, bounded raw
+  draft artifact references, append-only in-run events, assumptions/dissent/
+  questions and separate chief receipts. Events are saved with final results;
+  mid-run crash recovery remains explicitly false.
+- Windows/Python live ₹0 gate accepts COMPANY/COMPANY_PLUS and requires actual
+  worker/chief generation plus complete accounting. Live execution remains
+  pending on a configured confirmed-free deployment.
+
 - Isolated branch: `codex/research-company-20260905`, based on main
   `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`. Exact base Foundation Actions
   run `33852832167` passed before advanced integration began.

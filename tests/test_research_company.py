@@ -21,13 +21,14 @@ def report(**changes):
             "claims": [{"text": "A reported result", "source_ids": ["S1"], "kind": "SOURCE_REPORTED"}],
             "hypotheses": [{"hypothesis": "H", "prediction": "A exceeds baseline", "baseline": "B",
                             "test": "Compare A and B on a frozen holdout", "falsification": "No improvement"}],
-            "limitations": ["No external replication"]}
+            "limitations": ["No external replication"], "assumptions": [],
+            "contradictions": [], "remaining_questions": []}
     data.update(changes)
     return json.dumps(data)
 
 
 def envelope(answer=None):
-    return {"answer": answer or report(), "accounting_complete": True,
+    return {"answer": answer or report(), "accounting_complete": True, "output_truncated": False,
             "accounting": {"logical_reasoning_calls": 1, "actual_http_attempts": 2,
                            "successful_calls": 1, "models_tried": ["same-model"]}}
 
@@ -49,6 +50,13 @@ def test_parallel_workers_receive_no_peer_answers_and_cannot_fake_model_independ
     assert result["independent_models_verified"] is False
     assert result["independent_scientific_replication"] is False
     assert result["experiments_performed_by_workers"] is False
+    assert len({w["worker_id"] for w in result["workers"]}) == 4
+    assert len(result["events"]) == 8
+    assert [e["sequence"] for e in result["events"]] == list(range(1, 9))
+    for w in result["workers"]:
+        assert w["started_at"] <= w["finished_at"]
+        assert result["artifacts"][w["raw_output_ref"]]["content"] == report()
+    assert result["mid_run_restart_recovery"] is False
 
 
 def test_unknown_citations_and_fabricated_verified_labels_fail_closed():
@@ -75,6 +83,19 @@ def test_incomplete_hypothesis_is_recorded_as_gap():
     assert result["hypotheses"] == []
     assert result["status"] == "PARTIAL"
     assert "incomplete_testable_hypothesis" in result["contract_issues"]
+
+
+def test_overlong_handoff_keeps_every_role_and_blocks_complete_review():
+    verbose = report(claims=[{"text": "Measured description " * 90, "source_ids": ["S1"],
+                              "kind": "SOURCE_REPORTED"} for _ in range(10)])
+    result = company.run_company("Q", packet(), get_depth_config("COMPANY"), worker=lambda p: envelope(verbose))
+    handoff = company.chief_handoff(result)
+    assert len(result["handoff_truncated_roles"]) == 4
+    assert all(role in handoff for role, _ in company.ROLES[:4])
+    passes = {"planned_passes": [], "done_passes": [], "notes": [], "api_accounting": {}}
+    company.attach_company_passes(passes, result)
+    assert "specialist_handoff" in passes["planned_passes"]
+    assert "specialist_handoff" not in passes["done_passes"]
 
 
 def test_timeout_keeps_usage_unknown_and_completion_gate_open():

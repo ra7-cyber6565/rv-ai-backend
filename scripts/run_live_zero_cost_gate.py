@@ -36,7 +36,7 @@ RAW_PUBLIC_TOKENS = (
     "traceback", "protobuf", "permissiondenied", "invalidargument",
     "generaterequestsperday", "<class", "api_key=",
 )
-LIVE_DEPTH_MODES = ("MAXIMUM", "MARATHON")
+LIVE_DEPTH_MODES = ("MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS")
 
 
 def _truthy(value: object) -> bool:
@@ -418,6 +418,34 @@ def evaluate_result(
                 and assurance.get("hypothesis_success_probability_claimed") is False,
                 "no global exhaustion or hypothesis success-probability claim",
             ),
+        ])
+    if requested_mode in {"COMPANY", "COMPANY_PLUS"}:
+        company = verification.get("research_company") or {}
+        expected_workers = 4 if requested_mode == "COMPANY" else 6
+        workers = company.get("workers") or []
+        workers = [row for row in workers if isinstance(row, Mapping)]
+        ready = [row for row in workers if row.get("status") == "DRAFT_READY"]
+        def positive_count(row, name):
+            value = (row.get("accounting") or {}).get(name)
+            return type(value) is int and value > 0
+        chief = company.get("chief_execution") or {}
+        checks.extend([
+            ("company_workers_executed",
+             len(workers) == len(ready) == expected_workers
+             and len({row.get("worker_id") for row in workers if row.get("worker_id")}) == expected_workers
+             and all(positive_count(row, "actual_http_attempts")
+                     and positive_count(row, "successful_calls") for row in workers),
+             f"{len(ready)}/{expected_workers} complete worker receipts"),
+            ("company_usage_complete", company.get("accounting_complete") is True
+             and accounting.get("accounting_complete") is True
+             and all(row.get("accounting_complete") is True for row in workers),
+             "no missing/unknown worker usage receipts"),
+            ("company_chief_executed", {"analysis", "synthesis"}.issubset(set(chief.get("done_passes") or []))
+             and positive_count(chief, "successful_calls"),
+             "chief analysis and synthesis have execution receipts"),
+            ("company_no_false_replication", company.get("independent_scientific_replication") is False
+             and company.get("experiments_performed_by_workers") is False,
+             "text workers are not scientific or clinical replication"),
         ])
     rows = [{"name": name, "passed": bool(passed), "detail": detail}
             for name, passed, detail in checks]

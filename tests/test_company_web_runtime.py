@@ -21,11 +21,12 @@ const ctx={};vm.runInNewContext([body("esc"),body("htmlText"),body("companyHtml"
 const attack='<img src=x onerror="alert(1)">';
 const report={summary:attack,claims:[{kind:attack,text:attack,source_ids:[attack]}],
   hypotheses:[{hypothesis:attack,prediction:attack,baseline:attack,test:attack,falsification:attack}],
-  limitations:[attack],contract_issues:[attack]};
+  limitations:[attack],contract_issues:[attack],assumptions:[attack],contradictions:[attack],remaining_questions:[attack]};
 const html=ctx.companyHtml({verification:{research_company:{completed_workers:1,requested_workers:4,
   accounting_complete:false,workers:[{role:attack,status:attack,report}]}}});
 assert(!html.includes('<img'));assert(html.includes('&lt;img'));
 assert(html.includes('TEST PROPOSED'));assert(html.includes('usage receipt'));
+assert(html.includes('Assumptions'));assert(html.includes('Contradictions'));assert(html.includes('Remaining questions'));
 assert.strictEqual(ctx.companyHtml({}),"");
 const declarations=page.split("\n").filter(line=>line.trim().startsWith("const longMode=")||
   line.trim().startsWith("const hardDeadline=")).join("\n");

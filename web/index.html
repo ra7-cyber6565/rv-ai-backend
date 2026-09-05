@@ -828,6 +828,9 @@ function companyHtml(data){
     if(Array.isArray(r.claims))for(const claim of r.claims)out+='<p><strong>'+esc(claim.kind)+'</strong>: '+esc(claim.text)+' '+esc((claim.source_ids||[]).map(s=>'['+s+']').join(' '))+'</p>';
     if(Array.isArray(r.hypotheses))for(const h of r.hypotheses)out+='<p><strong>TEST PROPOSED · INCONCLUSIVE</strong>: '+esc(h.hypothesis)+'</p><p>Prediction: '+esc(h.prediction)+'<br>Baseline: '+esc(h.baseline)+'<br>Test: '+esc(h.test)+'<br>Falsification: '+esc(h.falsification)+'</p>';
     if(Array.isArray(r.limitations)&&r.limitations.length)out+='<p>Limits: '+esc(r.limitations.join('; '))+'</p>';
+    for(const [key,label] of [["assumptions","Assumptions"],["contradictions","Contradictions"],["remaining_questions","Remaining questions"]]){
+      if(Array.isArray(r[key])&&r[key].length)out+='<p>'+esc(label)+': '+esc(r[key].join('; '))+'</p>';
+    }
     if(Array.isArray(r.contract_issues)&&r.contract_issues.length)out+='<p>Report gaps: '+esc(r.contract_issues.join(', '))+'</p>';
     out+='</details>';
   }

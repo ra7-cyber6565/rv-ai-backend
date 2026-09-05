@@ -47,6 +47,11 @@ from each specialist.
 The **Research process** tab shows worker reports. The structured record is at
 `verification.research_company`. This record is preserved in normal durable job
 results; the existing size-limited storage can compact unusually large reports.
+Each worker has an ID, UTC start/end times, input/output hashes, a logical-call
+reservation, router accounting and an artifact reference to its bounded raw
+response. Assumptions, contradictions and remaining questions survive the chief
+handoff. Events are append-only within the run and saved with the final job
+result; this is explicitly **not** a crash-safe mid-run checkpoint system.
 
 ## Truth and usage boundaries
 
@@ -73,7 +78,8 @@ results; the existing size-limited storage can compact unusually large reports.
   process-local cooldowns are not shared between workers. Hosting restart
   recovery retains the existing job-runner limitations.
 - Handoffs allot bounded space to every specialist. Very long drafts may be
-  clipped for the chief; the available original worker report remains in the
+  clipped for the chief; that leaves a missing handoff pass and prevents a
+  complete-review claim. The available original worker report remains in the
   structured result subject to durable-storage limits.
 
 ## Validation and remaining evidence
@@ -97,3 +103,20 @@ cross-model comparison, independent retrieval per worker, targeted second-pass
 retrieval and real external experimental replication remain separate work.
 No universal problem-solving, scientific discovery or 100/100 maturity claim is
 established by this implementation.
+
+## Runnable validation
+
+The existing live gate now accepts both company modes and requires actual worker
+and chief execution receipts. Merely printing four role headings cannot pass it.
+On the existing Windows installation, after checking out the reviewed version:
+
+```powershell
+.\RUN_LIVE_ZERO_COST_GATE.ps1 -DepthMode COMPANY -DataRoot "D:\InfinityResearchAI"
+.\RUN_LIVE_ZERO_COST_GATE.ps1 -Execute -DepthMode COMPANY -DataRoot "D:\InfinityResearchAI"
+```
+
+The first command is preflight only. The second performs live work only when
+confirmed-zero-cost prerequisites pass. Use `COMPANY_PLUS` for six workers. This
+document records runnable commands, not a claim that either live run occurred.
+The complete 22-part specification audit and 18 acceptance-case mappings are in
+`docs/INFINITY_REQUIREMENT_LEDGER.md`.
