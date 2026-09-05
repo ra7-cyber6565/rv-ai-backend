@@ -133,7 +133,7 @@ def start_research_job(
     """Start long research only inside the caller's private project namespace."""
     require_project_access(request.project_id, x_project_token)
     mode = (request.depth_mode or "DEEP").upper().strip()
-    if mode not in {"QUICK", "DEEP", "MAXIMUM", "MARATHON", "CUSTOM"}:
+    if mode not in {"QUICK", "DEEP", "MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS", "CUSTOM"}:
         raise HTTPException(status_code=400, detail="depth_mode invalid hai")
     if not (request.question or "").strip():
         raise HTTPException(status_code=400, detail="question khaali nahi ho sakta")

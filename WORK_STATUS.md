@@ -44,6 +44,28 @@ Storage target: GitHub = code/version history; laptop D: = bounded fast runtime/
 
 ChatGPT owns final integration/reliability, independent audit of Claude work, evidence correctness at the system boundary, ₹0/provider safety, large-file/storage lifecycle, async durability, security, integrated regression and final architecture review. After foundation passes, ChatGPT also owns the Advanced Scientific Discovery Engine work listed below.
 
+## AI Company integration — ChatGPT, 2026-09-05
+
+- Isolated branch: `codex/research-company-20260905`, based on main
+  `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`. Exact base Foundation Actions
+  run `33852832167` passed before advanced integration began.
+- COMPANY / COMPANY_PLUS connect 4 / 6 real specialist worker invocations to
+  the existing chief, evidence checks, lab and completion gates. Shared corpus,
+  separate first-pass contexts, bounded process isolation, zero-cost routing,
+  typed draft validation and aggregate usage receipts. Existing presets retain
+  their budgets. Web/API expose both new modes and worker reports.
+- Focused fixture tests have passed during development; the commit's full
+  offline gates and live confirmed-₹0 validation remain separate required
+  evidence. Do not call this empirically superior or release-ready from fixtures.
+- Initial broad local tests were blocked after an outbound Google endpoint
+  attempt. Subsequent validation uses blank credentials and an inherited
+  socket-level network denial. Clean-checkout attestors require committing
+  source edits before integrated validation.
+- See `docs/AI_COMPANY_RESEARCH.md` for exact limits, deployment considerations,
+  test scope and remaining benchmark/independent-retrieval work.
+- Existing PRs #63/#65 and other contributors' branches were not merged or
+  overwritten. No local Windows changes or external receipts were touched.
+
 ## Active foundation status
 
 | Task | Owner | Status | Notes |

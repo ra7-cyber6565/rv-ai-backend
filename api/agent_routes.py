@@ -137,7 +137,7 @@ def chat_diag():
 def depth_modes():
     """Har mode ka honest quota/limit disclosure (Spec Section 13 + 18)."""
     modes = {}
-    for name in ("QUICK", "DEEP", "MAXIMUM", "MARATHON"):
+    for name in ("QUICK", "DEEP", "MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS"):
         config = get_depth_config(name)
         modes[name] = {**config.to_dict(), "note": quota_note(config)}
     modes["CUSTOM"] = {

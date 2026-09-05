@@ -25,6 +25,7 @@ Do sabse important design decisions:
 from __future__ import annotations
 
 import re
+from dataclasses import replace
 from typing import Dict, List, Optional
 
 from .citation import CitationEngine
@@ -45,6 +46,7 @@ from .evidence_drafting import (
 from .epistemic_governance import build_runtime_evidence_packet
 from .experiment_intelligence import build_runtime_experiment_packet
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
+from .research_company import run_company, chief_handoff, attach_company_passes
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from .knowledge_watch import KnowledgeWatch, update_from_research_run
@@ -887,6 +889,13 @@ class DeepResearchEngine:
             4-5     → analysis + critique + dedicated hypothesis + synthesis
                       (sirf CUSTOM mode, jahan user khud budget badha sakta hai)
         """
+        company = None
+        if getattr(config, "company_agents", 0):
+            self._track(job_id, "SPECIALIST_ANALYSIS",
+                        f"{config.company_agents} specialist workers: independent drafts, shared evidence")
+            company = run_company(question, pack, config)
+            memory_note = chief_handoff(company) + "\n" + memory_note
+            config = replace(config, gemini_calls=company["chief_call_budget"])
         brain = GeminiReasoning(budget=config.gemini_calls)
         # #130 — gaane ki farmaish par "hunar kya kehta hai" wala padha hua
         # hissa. Ye poora offline hai (0 Gemini call, koi network nahi): jo
@@ -1112,6 +1121,8 @@ class DeepResearchEngine:
                     out["analysis"] = text
             else:
                 no_source_prompt = brain.prompt_no_sources(question, plan)
+                if company is not None:
+                    no_source_prompt = f"{memory_note}\n\n{no_source_prompt}"
                 no_source_prompt = f"{no_source_prompt}\n\n{evidence_first_block}"
                 out["analysis"] = brain.generate(
                     no_source_prompt, "no-source answer")
@@ -1446,6 +1457,8 @@ class DeepResearchEngine:
                     "synthesis": bool(out["final"])}
         out["done_passes"] = [name for name in out["planned_passes"]
                               if produced.get(name)]
+        if company is not None:
+            attach_company_passes(out, company)
         return out
 
     # ── main ─────────────────────────────────────────────────────────────────
@@ -2062,6 +2075,8 @@ class DeepResearchEngine:
         # report ke text mein nahi. `verification` dict pehle se result mein
         # jaata hai, isliye naya top-level field banane ki zaroorat nahi.
         verification["claim_checks"] = claim_checks
+        if passes.get("research_company"):
+            verification["research_company"] = passes["research_company"]
         verification["evidence_first_audit"] = evidence_first_audit
         verification["evidence_first_manifest"] = (
             passes.get("evidence_first_manifest") or {})

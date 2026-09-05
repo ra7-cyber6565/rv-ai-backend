@@ -36,7 +36,7 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
 .pname{border:1px solid var(--line);border-radius:10px;background:#fff;padding:8px 9px;font:inherit;font-size:12.5px;flex:1;min-width:150px}
 .docsep{border-top:1px solid var(--line);margin-top:12px;padding-top:10px}
 .doclist{margin-top:9px}.doc{background:#fff;border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-top:6px;font-size:12.5px;overflow-wrap:anywhere}.doc b{font-weight:650}.doc .dm{color:var(--muted);font-size:11.5px;margin-top:2px}.doc.err{border-color:#f5c6c2;background:#fdeceb;color:#8a2018}.doc.err .dm{color:#8a2018}
-@media(max-width:600px){header{padding:0 7px}.brand span:last-child{display:none}.modes button{padding:7px 8px;font-size:12px}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
+@media(max-width:600px){header{padding:0 7px;min-height:58px;height:auto;flex-wrap:wrap}.brand span:last-child{display:none}.modes{max-width:100%;overflow-x:auto}.modes button{padding:7px 8px;font-size:12px;flex-shrink:0}#thread{padding-left:12px;padding-right:12px}.welcome{margin-top:8vh}}
 </style>
 </head>
 <body>
@@ -47,6 +47,8 @@ footer{position:fixed;bottom:0;left:0;right:0;background:linear-gradient(transpa
     <button data-mode="DEEP">Deep</button>
     <button data-mode="MAXIMUM">Max</button>
     <button data-mode="MARATHON">Marathon</button>
+    <button data-mode="COMPANY">AI Company · 4</button>
+    <button data-mode="COMPANY_PLUS">Company+ · 6</button>
   </div>
 </header>
 <div class="hint" id="hint">Chat — turant seedha jawab.</div>
@@ -100,6 +102,8 @@ const FAILOVER={backup:"",active:false,announced:false};
 const STAGES=["QUEUED","PLANNING","DISCOVERING","PROCESSING","READING","EVIDENCE_ANALYSIS","SPECIALIST_ANALYSIS","CRITIQUE","HYPOTHESIS","SYNTHESIS","SAFETY_CHECK","COMPLETE"];
 const STAGE_LABEL={QUEUED:"Queue mein hai…",PLANNING:"Sawaal ko tod kar plan bana raha hoon",DISCOVERING:"Relevant sources dhoondh raha hoon",PROCESSING:"Documents process kar raha hoon",READING:"Available full text padh raha hoon",EVIDENCE_ANALYSIS:"Evidence check kar raha hoon",SPECIALIST_ANALYSIS:"Alag fields ke angle mila raha hoon",CRITIQUE:"Answer ko challenge kar raha hoon",HYPOTHESIS:"Testable ideas bana raha hoon",SYNTHESIS:"Final answer bana raha hoon",SAFETY_CHECK:"Aakhri check",COMPLETE:"Research complete"};
 const HINT={QUICK:"Chat — turant seedha jawab.",DEEP:"Deep — sources + evidence + cross-check. Result background job mein banta hai.",MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai.",MARATHON:"Marathon — 5 full rounds, multilingual books, source-derived thinkers, counter-evidence aur 90% research-process target. Ye truth/profit probability nahi hai."};
+HINT.COMPANY="4 specialists + main AI: evidence, testing plan, hypotheses aur red-team. Books/PDF sources ke saath gehri research; free quota aur available evidence ke andar.";
+HINT.COMPANY_PLUS="6 specialists + main AI: data quality aur implementation review bhi. Zyada samay/quota lagega; har role ka alag model hona guaranteed nahi hai.";
 let mode="QUICK",busy=false,sessionPromise=null;const history=[];const PROJECT={id:"",token:""};
 const $=s=>document.querySelector(s),thread=$("#thread"),scroll=$("#scroll"),input=$("#input"),send=$("#send");
 function esc(s){return String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
@@ -646,7 +650,8 @@ async function runResearch(question,el,requestedMode=mode){const ui=progressPane
   if(!start.r.ok||!start.data.job_id||!start.data.job_access_token){friendly(el,clientFailure(start.r.status,start.data,"Research"));restoreQuestion(question);return false;}
   jobId=start.data.job_id;jobToken=start.data.job_access_token;
   const pollOpts={headers:{"X-Research-Job-Token":jobToken}};
-  const hardDeadline=Date.now()+(requestedMode==="MARATHON"?60:30)*60*1000,stallMinutes=requestedMode==="MARATHON"?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
+  const longMode=["MARATHON","COMPANY","COMPANY_PLUS"].includes(requestedMode);
+  const hardDeadline=Date.now()+(longMode?60:30)*60*1000,stallMinutes=longMode?10:6,stallMs=stallMinutes*60*1000;let lastChange=Date.now(),lastSignature="";
   while(true){
     const status=await jsonFetch(API+"/api/v1/research-jobs/"+encodeURIComponent(jobId),pollOpts);
     if(!status.r.ok){friendly(el,clientFailure(status.r.status,status.data,"Research status"));restoreQuestion(question);return false;}
@@ -797,7 +802,7 @@ function renderResearch(el,data){
   const hypoCount=(Array.isArray(data.hypotheses)?data.hypotheses:[]).length;
   const srcCount=(Array.isArray(data.sources)?data.sources:[]).length;
   const snap=data.research_progress||{};
-  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:processHtml(data),audit:auditHtml(split,data)};
+  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:companyHtml(data)+processHtml(data),audit:auditHtml(split,data)};
   const badge={answer:"",evidence:claimCount?String(claimCount):"",lab:String(hypoCount),sources:String(srcCount),process:(snap.available===true?Number(snap.stages_done||0)+"/"+Number(snap.stages_total||STAGES.length):""),audit:String((((data.research_state||{}).conflicts)||[]).length||"")};
   const order=["answer","evidence","lab","sources","process","audit"];
   const box=document.createElement("div");
@@ -810,6 +815,23 @@ function renderResearch(el,data){
   el.innerHTML="";el.appendChild(box);
   const sNote=statusNote(data);if(sNote)note(el,sNote);
   down();
+}
+
+function companyHtml(data){
+  const c=(data.verification||{}).research_company;
+  if(!c||!Array.isArray(c.workers))return "";
+  let out='<h4>AI Company</h4><p>'+esc(c.completed_workers)+' / '+esc(c.requested_workers)+' specialist drafts ready. Main AI inhe sources ke against review karta hai.</p>';
+  out+='<p>Sabko shared sources mile. Alag roles ka matlab alag models nahi. In workers ne lab/clinical experiments perform nahi kiye.</p>';
+  if(c.accounting_complete!==true)out+='<p>Ek ya zyada worker ki usage receipt nahi mili; call counts poora total nahi hain.</p>';
+  for(const w of c.workers){const r=w.report||{};
+    out+='<details class="process"><summary>'+esc(w.role)+' — '+esc(w.status)+'</summary><div class="plain">'+htmlText(r.summary||"Worker ki usable report nahi mili.")+'</div>';
+    if(Array.isArray(r.claims))for(const claim of r.claims)out+='<p><strong>'+esc(claim.kind)+'</strong>: '+esc(claim.text)+' '+esc((claim.source_ids||[]).map(s=>'['+s+']').join(' '))+'</p>';
+    if(Array.isArray(r.hypotheses))for(const h of r.hypotheses)out+='<p><strong>TEST PROPOSED · INCONCLUSIVE</strong>: '+esc(h.hypothesis)+'</p><p>Prediction: '+esc(h.prediction)+'<br>Baseline: '+esc(h.baseline)+'<br>Test: '+esc(h.test)+'<br>Falsification: '+esc(h.falsification)+'</p>';
+    if(Array.isArray(r.limitations)&&r.limitations.length)out+='<p>Limits: '+esc(r.limitations.join('; '))+'</p>';
+    if(Array.isArray(r.contract_issues)&&r.contract_issues.length)out+='<p>Report gaps: '+esc(r.contract_issues.join(', '))+'</p>';
+    out+='</details>';
+  }
+  return out;
 }
 
 // Source card. Pehle scheme check (safeHttpUrl), USKE BAAD escape — sirf escape
