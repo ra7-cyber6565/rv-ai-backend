@@ -796,13 +796,16 @@ def test_the_revision_call_uses_the_budget_that_already_exists():
     window = src[start:where]
     # Naya budget nahi banta: usi brain se, aur sirf tab jab call bacha ho.
     assert "brain.remaining >= 1" in window
-    assert 'brain.generate(prompt, "craft_redraft")' in window
+    # Company mode eligibility guard bhi usi brain/budget ko use karta hai.
+    assert "generate = brain.generate" in src[:start]
+    assert "generate_company_chief(brain, prompt, label)" in src[:start]
+    assert 'generate(prompt, "craft_redraft")' in window
     assert "QuotaExhausted" in window
     # Is khidki me koi doosra reasoning engine khada nahi hota, warna kharcha
     # chup-chaap badh jaata.
     assert "GeminiReasoning(" not in window
     # Ek hi redraft call — do jagah likhne se ginti do baar hoti.
-    assert window.count('brain.generate(prompt, "craft_redraft")') == 1
+    assert window.count('generate(prompt, "craft_redraft")') == 1
 
 
 def test_synthesizer_puts_the_block_in_the_lab_section_and_the_audit_tail():
