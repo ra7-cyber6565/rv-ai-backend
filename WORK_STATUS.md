@@ -63,6 +63,12 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
   source edits before integrated validation.
 - See `docs/AI_COMPANY_RESEARCH.md` for exact limits, deployment considerations,
   test scope and remaining benchmark/independent-retrieval work.
+- PR #79 first exact head passed AI-1, AI-2, model-reality and anti-confirmation
+  CI; Foundation found stale browser source-pattern assertions (4112 full-suite
+  tests passed, one failed). Checks now cover the explicit three long modes,
+  unchanged deadline/stall limits and both company + existing progress panels.
+  Local native SDK traffic is blocked by a fail-closed kernel syscall filter;
+  earlier Python-only isolation did not block that native path.
 - Existing PRs #63/#65 and other contributors' branches were not merged or
   overwritten. No local Windows changes or external receipts were touched.
 

@@ -641,7 +641,9 @@ def run_audit() -> AuditReport:
         _contains(
             "web/index.html",
             'data-mode="MARATHON"',
-            'requestedMode==="MARATHON"',
+            '["MARATHON","COMPANY","COMPANY_PLUS"].includes(requestedMode)',
+            '(longMode?60:30)',
+            'stallMinutes=longMode?10:6',
         ),
         _contains(
             "research_engine/planner.py",

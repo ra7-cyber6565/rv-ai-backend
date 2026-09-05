@@ -194,19 +194,20 @@ def _browser_checks() -> None:
           "/api/v1/history/" not in page)
 
     check(
-        "default 30-minute and Marathon 60-minute deadlines present",
-        'requestedMode==="MARATHON"?60:30' in page
+        "default 30-minute and Marathon/company 60-minute deadlines present",
+        '["MARATHON","COMPANY","COMPANY_PLUS"].includes(requestedMode)' in page
+        and '(longMode?60:30)' in page
         and "*60*1000" in page,
     )
     check("stalled progress guard present",
-          'stallMinutes=requestedMode==="MARATHON"?10:6' in page
+          'stallMinutes=longMode?10:6' in page
           and "stallMs=stallMinutes*60*1000" in page and "lastChange" in page)
     check("single live progress writer", code.count("paintProgress(ui,p);") == 1)
 
     check("completed research process remains visible",
           "function processHtml(" in page
           and "data.research_progress" in page
-          and "process:processHtml(data)" in page)
+          and "process:companyHtml(data)+processHtml(data)" in page)
     check("missing process snapshot is stated, not faked",
           "p.available!==true" in page and "snapshot nahi aaya" in page)
     unescaped = _unescaped_process_fields(page)
