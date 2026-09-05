@@ -46,7 +46,7 @@ ChatGPT owns final integration/reliability, independent audit of Claude work, ev
 
 ## AI Company integration — ChatGPT, 2026-09-05
 
-- Continuation ACTIVE: durable SQLite stages/events and atomic application quotas,
+- Continuation implementation/testing: durable SQLite stages/events and atomic application quotas,
   same-code/input resume/cancel, source/memory invalidation, task contract and
   typed numeric tools with downloadable receipts. Ownership: ChatGPT on isolated
   `codex/company-reliability-20260905`, extending reviewed PR #79 head `d0def705`.

@@ -39,6 +39,28 @@ class PairedEvaluationAcceptance(unittest.TestCase):
         with self.assertRaises(ValueError):
             evaluate(m, a, b, expected_manifest_hash=digest(m))
 
+    def test_slower_latency_is_worse_and_missing_denominators_remain_visible(self):
+        m, a, b = self.fixture()
+        b = [dict(row, latency_seconds=5) for row in b]
+        b[0]["coverage"] = None
+        result = evaluate(m, a, b, expected_manifest_hash=digest(m), draws=100)
+        latency = result["metrics"]["latency_seconds"]
+        self.assertEqual(latency["tasks_worse"], 2)
+        self.assertEqual(latency["worst_task_delta"], 3)
+        self.assertEqual(latency["direction"], "LOWER_IS_BETTER")
+        self.assertEqual(result["metrics"]["coverage"]["eligible_pairs"], 3)
+        self.assertEqual(result["metrics"]["coverage"]["missing_pairs"], 1)
+
+    def test_mixed_execution_and_different_grading_are_rejected(self):
+        m, a, b = self.fixture()
+        b[0]["execution_kind"] = "LIVE"
+        with self.assertRaisesRegex(ValueError, "separately"):
+            evaluate(m, a, b, expected_manifest_hash=digest(m))
+        b[0]["execution_kind"] = "FIXTURE"
+        b[0]["grader"] = "MODEL_ASSISTED_UNCALIBRATED"
+        with self.assertRaisesRegex(ValueError, "grading"):
+            evaluate(m, a, b, expected_manifest_hash=digest(m))
+
 
 if __name__ == "__main__":
     unittest.main()

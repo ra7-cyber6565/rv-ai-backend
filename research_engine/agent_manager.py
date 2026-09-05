@@ -125,6 +125,9 @@ class AgentManager:
             if result["task_contract"]["worker_requirement_gap"]:
                 result["status"] = "PARTIAL"
                 result["answer"] = "Maange gaye worker jobs poore execute nahi hue; yeh partial result hai.\n\n" + str(result.get("answer", ""))
+            elif result["task_contract"]["assessment"] == "PARTIAL":
+                result["status"] = "PARTIAL"
+                result["answer"] = "Maange gaye kuch hisson ki completion verify nahi hui; coverage Process tab mein dekho.\n\n" + str(result.get("answer", ""))
             result["runtime_execution"] = store.snapshot(project_id, runtime_id)
             self._remember(project_id, result)
             return result

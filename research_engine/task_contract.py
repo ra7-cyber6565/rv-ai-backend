@@ -24,7 +24,7 @@ def compile_contract(question, mode, custom=None):
               {"id": "reason", "depends_on": ["read"]},
               {"id": "validate", "depends_on": ["reason"]},
               {"id": "deliver", "depends_on": ["validate"]}]
-    worker_request = re.search(r"\b([4-9])\s+(?:ai|agents?|workers?|specialists?)\b", question, re.I)
+    worker_request = re.search(r"\b([1-9][0-9]{0,3})\s+(?:ai|agents?|workers?|specialists?)\b", question, re.I)
     return {"schema_version": 1, "contract_sha256": digest([question, mode, custom]),
             "objective": question, "requirements": requirements, "dependency_graph": stages,
             "parser": "deterministic heuristic; original request retained verbatim",
@@ -56,6 +56,11 @@ def assess_contract(contract, result):
     company = (result.get("verification") or {}).get("research_company") or {}
     required = contract["explicit_min_workers"]
     worker_gap = bool(required and company.get("completed_workers", 0) < required)
+    explicit_ids = {r["id"] for r in contract["requirements"] if r["kind"] == "explicit_part"}
+    unresolved_parts = [r["requirement_id"] for r in coverage
+                        if r["requirement_id"] in explicit_ids and r["assessment"] != "SATISFIED"]
+    missing = [r["requirement_id"] for r in coverage if r["assessment"] == "MISSING"]
     return {**contract, "coverage": coverage, "worker_requirement_gap": worker_gap,
-            "assessment": "PARTIAL" if worker_gap or contract["unparsed_numbered_parts"] else "REQUIRES_COVERAGE_REVIEW",
+            "unresolved_explicit_parts": unresolved_parts, "known_missing_deliverables": missing,
+            "assessment": "PARTIAL" if worker_gap or unresolved_parts or missing or contract["unparsed_numbered_parts"] else "REQUIRES_COVERAGE_REVIEW",
             "task_completion_is_claim_truth": False}

@@ -27,7 +27,7 @@ gaps remain open. Exact final results belong to PR #79, not inferred from filena
 | R19 | New process budget, restart, cancellation, correction, tool injection/failure/artifact and evaluation tests complement original 18-case map | Full integrated CI plus declared external-data/live cases remain separate evidence |
 
 Local evidence during development: 12 actual SQLite/process runtime tests PASS;
-3 synthetic paired-evaluation tests PASS; architecture/provider audits and JS
+5 synthetic paired-evaluation tests PASS; architecture/provider audits and JS
 syntax PASS. Governed-tool suite initially could not import because the refreshed
 workspace lacks dependencies; network approval cancelled installation. No such
 blocked check is counted as PASS. See exact-head CI in PR #79 for final results.
@@ -63,7 +63,11 @@ passes. A subsequent kernel-isolated full local gate stalled on SDK retries,
 timed out its focused stage and was interrupted. Exact-head CI is recorded
 separately; none of these outcomes is hidden or converted into a pass.
 
-## Requirements
+## Historical first-wave requirements
+
+This section preserves the initial audit. For the implemented continuation and
+remaining work, use the current table above and the acceptance table below.
+Historical MISSING statements are not the current state when superseded above.
 
 Each record includes location, observed behavior, remaining gap, change/next
 action, acceptance check and evidence. Status concerns the entire numbered
@@ -311,15 +315,15 @@ run. It does not imply live external data or whole-feature completeness.
 | 7. Failed code/simulation | `test_code_sandbox.py`, simulation and lab checks | Existing constrained-executor fixture |
 | 8. Four workers with failure | `test_research_company.py`, live-gate receipt checks | Fixture; live NOT TESTED |
 | 9. Timeout/malformed/no free model | `test_research_company.py` | Fixture plus actual no-model child process |
-| 10. Parallel budget competition | Company fixed disjoint logical allocations tested | PARTIAL; provider-wide token/HTTP leases missing |
+| 10. Parallel budget competition | `test_research_runtime.py`: 12 actual processes over 3 slots; cross-project caps | PASS for application HTTP/input-byte/output reservations; provider balance unknown |
 | 11. Prompt injection/exfiltration | `test_source_prompt_guard.py`, company handoff and JS runtime checks | Fixture; not a live attack-rate claim |
-| 12. Resume without repeated effect | Durable final job and interrupted-state tests only | MISSING stage/effect replay acceptance |
-| 13. Source correction invalidation | Source/memory primitives have fixtures | MISSING complete cached-answer invalidation acceptance |
+| 12. Resume without repeated effect | SQLite completed-stage reuse, interrupted safe-read recovery and ambiguous-effect block; actual fixture company reuses four worker drafts | PASS within tested single-host runtime |
+| 13. Source correction invalidation | Private API returns reassessment instead of old strong answer; memory revisions invalidate downstream runs | PASS for registered dependencies; original archives retained |
 | 14. Trading look-ahead leakage | Existing lab/trading/data-forensics checks | Fixture; no new live strategy backtest |
 | 15. Hypothesis promoted to cure | Company status-coercion test; physical-reality guards | Fixture; no clinical validation |
 | 16. Missing requested output | Existing requested/coverage/final quality gates | Existing fixture |
 | 17. Insufficient evidence | Existing fail-closed claim/quality tests | Existing fixture |
-| 18. Usable generated artifact | This PR's executable JS/API path; raw draft artifacts | PARTIAL; arbitrary builds/artifacts not supported |
+| 18. Usable generated artifact | Actual restricted numeric execution, result hash, downloadable JSON, hostile UI content escaped | PASS for JSON/numeric artifacts; arbitrary app builds BLOCKED on isolation backend |
 
 ## Before/after and operational limits
 
@@ -335,5 +339,41 @@ consumption, latency percentiles and provider rate limits are UNKNOWN until
 measured on the real configured host. Windows launcher syntax is statically
 checked here; PowerShell/live execution on the user's laptop is NOT TESTED.
 
-A software CI PASS will not close R12/R14/R15/R16 engineering gaps or E6's live
-and empirical gaps. Those requirements remain visible after this PR.
+A software CI PASS establishes the specific runtime/memory/tool behaviors above.
+It does not close E6 live/empirical gaps or the remaining engineering listed below.
+
+
+## Continuation evidence and remaining work
+
+- `f0191db`: Foundation FAIL; 4,142 full-suite passes and two legacy result-route
+  fixtures missing project provenance. Existing assertions were preserved; test
+  fixtures now supply the real Job schema's project identity.
+- `0342a535`: all five workflows PASS. [Foundation 33974442359](https://github.com/ra7-cyber6565/rv-ai-backend/actions/runs/33974442359)
+  reports 4,152 full-suite passes, 42 API smoke passes, 649 cross-domain and 156
+  superconductivity fixture checks. Gate totals overlap; do not add them into an
+  independent experimental sample size.
+- Final coverage/evaluation hardening: exact subsequent head results are in PR #79.
+  It rejects mixed fixture/live campaigns and mismatched graders, counts slower
+  latency as worse, exposes metric denominators, and keeps unchecked explicit
+  deliverables PARTIAL in the answer and UI.
+- Local current tests: 12 runtime/process cases, 5 synthetic evaluator cases and
+  executed shipped-JS injection/coverage rendering checks PASS. The workspace
+  dependency installation was cancelled by network approval; integrated Python
+  tests are certified by CI, not claimed to have run locally.
+- Actual local COMPANY preflight on 2026-09-05: BLOCKED; zero confirmed-free
+  usable model layers. No live research, deployed-host validation, physical or
+  clinical experiment occurred. This is an observed blocker, not a failed model
+  quality experiment.
+
+| Type | Remaining item | Exact next action / acceptance |
+|---|---|---|
+| External access | Confirmed-free model unavailable | Configure eligible private model credentials and current quota evidence on the user's host; run the existing COMPANY and COMPANY_PLUS live gate on the reviewed revision |
+| External executor | No approved general untrusted-code/build backend | Provision an isolation backend; verify filesystem/network/process/memory/time enforcement, then add the backend behind the typed registry and run actual application builds |
+| Data + engineering | No representative frozen baseline/holdout campaign | Freeze tasks and independent grading criteria, use the existing holdout vault and paired evaluator, run repeated single/company trials; report HTTP, tokens, hardware, latency and task success separately |
+| Data + engineering | OCR/table/equation fidelity not measured end-to-end | Supply licensed page images and ground-truth spans/tables; measure extraction and locator correctness by document type before expanding retrieval claims |
+| Engineering + evaluation | Universal task decomposition and complete hypothesis/test-plan generation remain heuristic | Expand semantic contract/plan coverage using representative mixed requests; retain unknown fields and missing-output downgrade; validate without tuning on held-out answers |
+| Engineering | Controlled automatic proposal/testing loop not fully wired | Connect existing autonomous-debugging/proposal primitives to observed failures and protected paired/regression runners; retain current production promotion gates and rollback history |
+| Deployment | Exact-revision live and host receipts absent | Run the existing live-zero-cost and post-deployment validation gates on the actual target host after configuration; do not infer this from CI |
+
+The revision adds substantial functional coverage. There is no defensible 100/100
+score or statement that all 22 broad requirements are universally complete.

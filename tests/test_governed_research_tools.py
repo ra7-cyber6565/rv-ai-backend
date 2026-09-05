@@ -73,6 +73,13 @@ class GovernedToolsAcceptance(unittest.TestCase):
         self.assertIsNone(self.memory.reassessment("other", "a"))
         self.assertNotIn("alpha", self.memory.context("p", "alpha"))
 
+    def test_unavailable_large_worker_request_is_disclosed(self):
+        contract = compile_contract("10 AI workers se research karo", "COMPANY_PLUS")
+        result = assess_contract(contract, {"verification": {"research_company": {"completed_workers": 6}}})
+        self.assertEqual(result["explicit_min_workers"], 10)
+        self.assertTrue(result["worker_requirement_gap"])
+        self.assertEqual(result["assessment"], "PARTIAL")
+
     def test_graph_hint_deletion_preserves_other_project(self):
         from knowledge import graph
         from unittest.mock import patch

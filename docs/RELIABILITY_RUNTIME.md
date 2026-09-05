@@ -101,6 +101,9 @@ consumption records the exact revision; correction/deletion propagates through
 downstream research-memory consumers, not just the answer that created a record.
 Project hints are evicted on corrections. The single-record delete endpoint does
 not erase all legacy notes; use the project-memory clear endpoint for those.
+Public research consumes governed summaries, whose revisions can be invalidated;
+the legacy graph remains inspectable but its untracked answer summaries are not
+fed back into this runtime. Concept names remain unverified search leads.
 Existing session capabilities remain tab-scoped, so export before losing a session.
 
 ## Actual tools and artifacts
@@ -146,6 +149,10 @@ missing pairs, duplicate trials and unequal HTTP/time allocations. It clusters
 bootstrap uncertainty by task, preserves missing metric denominators and reports
 task failure tails. FIXTURE, RECORDED_REPLAY and LIVE remain separate. A numerical
 score does not establish independent grader validity or scientific truth.
+Mixed execution campaigns or different paired grading methods are rejected.
+Latency is lower-is-better; missing pairs and task-weighted baseline/candidate
+means are explicit. HTTP/time matching alone does not prove equal token spend or
+hardware. Unchecked explicit task parts remain PARTIAL and appear in the UI.
 
 No representative live model comparison, OCR ground-truth evaluation, hardware
 load measurement or clinical/physical experiment was performed here. Before

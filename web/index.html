@@ -862,7 +862,7 @@ function renderResearch(el,data){
   const hypoCount=(Array.isArray(data.hypotheses)?data.hypotheses:[]).length;
   const srcCount=(Array.isArray(data.sources)?data.sources:[]).length;
   const snap=data.research_progress||{};
-  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:companyHtml(data)+processHtml(data),audit:auditHtml(split,data)};
+  const panes={answer:answerPane,evidence:evidencePane,lab:labHtml(split,data),sources:sourcesHtml(split,data),process:contractHtml(data)+companyHtml(data)+processHtml(data),audit:auditHtml(split,data)};
   const badge={answer:"",evidence:claimCount?String(claimCount):"",lab:String(hypoCount),sources:String(srcCount),process:(snap.available===true?Number(snap.stages_done||0)+"/"+Number(snap.stages_total||STAGES.length):""),audit:String((((data.research_state||{}).conflicts)||[]).length||"")};
   const order=["answer","evidence","lab","sources","process","audit"];
   const box=document.createElement("div");
@@ -877,6 +877,13 @@ function renderResearch(el,data){
   down();
 }
 
+function contractHtml(data){
+  const contract=data.task_contract;if(!contract)return "";
+  const coverage=new Map((contract.coverage||[]).map(r=>[r.requirement_id,r.assessment]));
+  const labels={SATISFIED:"Poora hua",MISSING:"Baqi hai",NOT_ASSESSED:"Completion verify nahi hui"};
+  const rows=(contract.requirements||[]).filter(r=>r.kind!=="original_request").map(r=>'<li>'+esc(r.text)+' — '+esc(labels[coverage.get(r.id)]||"Completion verify nahi hui")+'</li>').join("");
+  return '<section><h3>Tumhari request ka coverage</h3><p>'+esc(contract.assessment)+'</p>'+(rows?'<ul>'+rows+'</ul>':'<p>Har hissa poora hua ya nahi, iska automatic assessment available nahi hai.</p>')+(contract.worker_requirement_gap?'<p>Maange gaye AI workers poore execute nahi hue.</p>':'')+'</section>';
+}
 function companyHtml(data){
   const c=(data.verification||{}).research_company;
   if(!c||!Array.isArray(c.workers))return "";

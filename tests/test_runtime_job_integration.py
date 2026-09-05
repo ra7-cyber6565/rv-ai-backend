@@ -127,3 +127,35 @@ def test_synchronous_manager_calls_have_distinct_durable_budget_scopes(monkeypat
     assert len(set(seen)) == 2
     assert a["runtime_execution"]["reserved_http_attempts"] == 1
     assert b["runtime_execution"]["reserved_http_attempts"] == 1
+
+
+def test_unchecked_explicit_deliverable_prevents_complete_answer(monkeypatch, tmp_path):
+    from research_engine import agent_manager
+    from utils import research_runtime
+    state = RuntimeStore(tmp_path / "state.sqlite3")
+    monkeypatch.setattr(research_runtime, "RuntimeStore", lambda: state)
+    manager = agent_manager.AgentManager()
+    monkeypatch.setattr(manager, "_research", lambda *a: {"status": "COMPLETE", "answer": "partial draft", "sources": []})
+    result = manager.research("1. Explain the model\n2. Build a downloadable app", project_id="p")
+    assert result["status"] == "PARTIAL"
+    assert result["task_contract"]["unresolved_explicit_parts"] == ["part_1", "part_2"]
+    assert "verify nahi hui" in result["answer"]
+
+
+def test_memory_mutations_check_project_access_first(monkeypatch):
+    from api import agent_routes
+    from utils import governed_memory
+    def denied(*args):
+        raise HTTPException(status_code=404, detail="unavailable")
+    monkeypatch.setattr(agent_routes, "require_project_access", denied)
+    monkeypatch.setattr(governed_memory, "GovernedMemory", lambda: pytest.fail("memory opened without access"))
+    request = agent_routes.MemoryInput(kind="preference", body={"note": "private"})
+    actions = [lambda: agent_routes.inspect_research_memory("p", "bad"),
+        lambda: agent_routes.add_research_memory("p", request, "bad"),
+        lambda: agent_routes.update_research_memory("p", "id", request, "bad"),
+        lambda: agent_routes.delete_research_memory("p", "id", "bad"),
+        lambda: agent_routes.clear_project_research_memory("p", "bad")]
+    for action in actions:
+        with pytest.raises(HTTPException) as exc:
+            action()
+        assert exc.value.status_code == 404

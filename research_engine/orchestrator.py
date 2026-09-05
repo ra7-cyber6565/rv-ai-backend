@@ -1678,11 +1678,16 @@ class DeepResearchEngine:
         context = current()
         if context:
             from utils.governed_memory import GovernedMemory
-            # Governed records supersede legacy hints on durable jobs; source
+            # Governed records supersede legacy hints on public research; source
             # correction/delete/expiry must not be bypassed by an older cache.
             memory_note = GovernedMemory(context.store).context(context.project, question)
-        graph_note = self.graph.related_note(question, self.project_id)
+        # Legacy summaries have no consumed revision/run dependency. Keep their
+        # browseable graph, but use governed summaries in the active runtime so
+        # expired/corrected memory cannot re-enter through the legacy graph.
+        graph_note = "" if context else self.graph.related_note(question, self.project_id)
         if graph_note:
+            from .source_prompt_guard import quote_untrusted
+            graph_note = quote_untrusted(graph_note, limit=4000)
             memory_note = f"{memory_note}\n\n{graph_note}".strip()
 
         # 6. gemini passes
