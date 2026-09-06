@@ -32,6 +32,14 @@ assert(!html.includes('<img'));assert(html.includes('&lt;img'));
 assert(html.includes('TEST PROPOSED'));assert(html.includes('usage receipt'));
 assert(html.includes('Assumptions'));assert(html.includes('Contradictions'));assert(html.includes('Remaining questions'));
 assert.strictEqual(ctx.companyHtml({}),"");
+// Execute the shipped pane composition too: adding request coverage must keep
+// both specialist reports and the completed progress snapshot in the Process tab.
+const paneLine=page.split("\n").find(line=>line.trim().startsWith("const panes="));
+assert(paneLine);
+const processPane=vm.runInNewContext(paneLine+"\npanes.process",{
+  answerPane:"",evidencePane:"",split:{},data:{},labHtml:()=>"",sourcesHtml:()=>"",auditHtml:()=>"",
+  contractHtml:()=>"COVERAGE_SENTINEL",companyHtml:()=>"COMPANY_SENTINEL",processHtml:()=>"PROGRESS_SENTINEL"});
+for(const marker of ["COVERAGE_SENTINEL","COMPANY_SENTINEL","PROGRESS_SENTINEL"])assert(processPane.includes(marker));
 const declarations=page.split("\n").filter(line=>line.trim().startsWith("const longMode=")||
   line.trim().startsWith("const hardDeadline=")).join("\n");
 assert(declarations.includes("longMode"));

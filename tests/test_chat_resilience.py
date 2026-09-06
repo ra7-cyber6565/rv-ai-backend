@@ -204,10 +204,13 @@ def _browser_checks() -> None:
           and "stallMs=stallMinutes*60*1000" in page and "lastChange" in page)
     check("single live progress writer", code.count("paintProgress(ui,p);") == 1)
 
+    process_renderer = re.search(r"\bconst panes=\{[^\n]*\bprocess:([^,}]+)", page)
     check("completed research process remains visible",
           "function processHtml(" in page
           and "data.research_progress" in page
-          and "process:companyHtml(data)+processHtml(data)" in page)
+          and process_renderer is not None
+          and "processHtml(data)" in process_renderer.group(1)
+          and "companyHtml(data)" in process_renderer.group(1))
     check("missing process snapshot is stated, not faked",
           "p.available!==true" in page and "snapshot nahi aaya" in page)
     unescaped = _unescaped_process_fields(page)
