@@ -4,6 +4,13 @@ This file is the coordination source of truth for multi-agent work.
 
 ## Current continuation — ChatGPT, 2026-09-06
 
+- Host continuation adds the private Linux/WSL preparation and validation
+  launcher, real-host suite accounting, a zero-model localhost smoke and fresh
+  exact-revision live mode receipts. Default remains preflight-only. See
+  `docs/COMPANY_HOST_SETUP.md`. Actual Windows/WSL and live provider execution
+  remain unperformed. Railway OAuth exposed names only; a remote smoke attempt
+  was cancelled at network approval, with no alternate-route retry.
+
 - PR #79 remains the integration branch; main and other contributors' branches
   are unchanged. Prior exact head `e3344fb7` passed all five workflows with
   4,157 full-suite cases and 42 API smoke checks. This is software evidence.

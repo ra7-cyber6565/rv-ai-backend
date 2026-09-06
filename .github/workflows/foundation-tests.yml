@@ -165,21 +165,30 @@ jobs:
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
 
-      - name: Validate actual isolated Python and Node builds and protected improvement trial
+      - name: Parse Windows company host launcher
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          $parsedTokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) "RUN_COMPANY_HOST.ps1"), [ref]$parsedTokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw "Company host launcher syntax failed" }
+
+      - name: Validate actual isolated builds, improvement trials and localhost API
         run: |
           docker build -t infinity-executor-ci -f tests/fixtures/executor.Dockerfile tests/fixtures
           export INFINITY_BUILD_EXECUTOR=docker
           export INFINITY_PYTHON_IMAGE="$(docker image inspect infinity-executor-ci --format '{{.Id}}')"
           export INFINITY_NODE_IMAGE="${INFINITY_PYTHON_IMAGE}"
           export INFINITY_REAL_EXECUTOR_TEST=1
-          python -m unittest discover -s tests -p test_isolated_build_runtime.py -v
-          python -m unittest discover -s tests -p test_improvement_runtime.py -v
+          python scripts/run_company_host.py --data-root "${INFINITY_DATA_ROOT}" --execute-host --check-local-api --port 8765
 
       - name: Upload foundation receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: foundation-gate-receipt-${{ github.run_id }}
-          path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
+          path: |
+            /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
+            /tmp/rv-ai-infinity-data/audit/company_host_latest.json
           if-no-files-found: warn
           retention-days: 1

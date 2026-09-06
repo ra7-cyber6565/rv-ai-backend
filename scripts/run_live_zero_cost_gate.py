@@ -429,7 +429,14 @@ def evaluate_result(
             value = (row.get("accounting") or {}).get(name)
             return type(value) is int and value > 0
         chief = company.get("chief_execution") or {}
+        runtime = result.get("runtime_execution") or {}
+        attempts = runtime.get("reserved_http_attempts")
         checks.extend([
+            ("company_public_runtime_executed", runtime.get("available") is True
+             and runtime.get("event_durability") == "SQLITE_TRANSACTION"
+             and runtime.get("cancelled") is False and type(attempts) is int
+             and attempts >= expected_workers + 2,
+             "public manager runtime and worker/chief attempt reservations present"),
             ("company_workers_executed",
              len(workers) == len(ready) == expected_workers
              and len({row.get("worker_id") for row in workers if row.get("worker_id")}) == expected_workers
@@ -575,14 +582,21 @@ def _write_receipt_safely(path: Path, payload: Mapping[str, Any]) -> bool:
 
 
 def run_live(depth_mode: str = "MAXIMUM") -> Dict[str, Any]:
-    from research_engine.orchestrator import DeepResearchEngine
+    from research_engine.agent_manager import AgentManager
+    import uuid
 
     mode = str(depth_mode or "").upper().strip()
     if mode not in LIVE_DEPTH_MODES:
         raise ValueError("unsupported live-gate depth mode")
-    project = f"live_gate_{int(time.time())}"
-    engine = DeepResearchEngine(project_id=project, enable_kg=False, enable_memory=False)
-    return engine.research(LIVE_QUESTION, depth_mode=mode, job_id=project)
+    job = uuid.uuid4().hex
+    project = "live_gate_" + job
+    # Same manager as public research: quotas, checkpoints, governed memory and
+    # task coverage must execute in the live gate too.
+    manager = AgentManager()
+    try:
+        return manager.research(LIVE_QUESTION, project_id=project, depth_mode=mode, job_id=job)
+    finally:
+        manager.drop(project)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

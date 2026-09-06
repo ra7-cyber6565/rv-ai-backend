@@ -119,6 +119,8 @@ def test_company_live_gate_requires_actual_workers_chief_and_complete_usage(mode
     result = _result()
     result["coverage"]["mode"] = mode
     result["api_accounting"] = {"accounting_complete": True}
+    result["runtime_execution"] = {"available": True, "event_durability": "SQLITE_TRANSACTION",
+                                   "cancelled": False, "reserved_http_attempts": count + 2}
     company = {
         "workers": [{"worker_id": str(i), "status": "DRAFT_READY", "accounting_complete": True,
                      "accounting": {"actual_http_attempts": 1, "successful_calls": 1}} for i in range(count)],
@@ -138,6 +140,33 @@ def test_company_live_gate_requires_actual_workers_chief_and_complete_usage(mode
     company["chief_execution"]["done_passes"] = ["analysis"]
     assert next(row for row in evaluate_result(result, required_depth_mode=mode)["checks"]
                 if row["name"] == "company_chief_executed")["passed"] is False
+
+
+def test_company_live_gate_rejects_missing_public_runtime_reservations():
+    result = _result()
+    result["coverage"]["mode"] = "COMPANY"
+    for runtime in ({}, {"available": True, "event_durability": "SQLITE_TRANSACTION", "cancelled": False,
+                        "reserved_http_attempts": True}):
+        result["runtime_execution"] = runtime
+        checked = evaluate_result(result, required_depth_mode="COMPANY")
+        assert next(row for row in checked["checks"] if row["name"] == "company_public_runtime_executed")["passed"] is False
+
+
+def test_live_execution_uses_public_manager_with_unique_run_scope(monkeypatch):
+    from research_engine import agent_manager
+    calls, dropped = [], []
+    class Manager:
+        def research(self, question, **kwargs):
+            calls.append(kwargs)
+            return {"fixture": True}
+        def drop(self, project):
+            dropped.append(project)
+    monkeypatch.setattr(agent_manager, "AgentManager", Manager)
+    assert live_gate.run_live("COMPANY") == {"fixture": True}
+    live_gate.run_live("COMPANY_PLUS")
+    assert len({row["job_id"] for row in calls}) == 2
+    assert [row["depth_mode"] for row in calls] == ["COMPANY", "COMPANY_PLUS"]
+    assert dropped == [row["project_id"] for row in calls]
 
 
 def test_company_live_gate_does_not_accept_four_role_headings_without_receipts():

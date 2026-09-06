@@ -43,6 +43,13 @@ setup, limits, examples and evaluation protocol. It does not establish that an
 app can solve every possible question, discover a cure, or outperform every
 model. Those claims have no measured score in this work.
 
+Host continuation: `RUN_COMPANY_HOST.ps1` and `scripts/run_company_host.py` now
+provide preparation, no-call preflight, actual isolated suites, zero-model local
+API smoke, separately gated COMPANY/COMPANY_PLUS live runs, and localhost
+serving. `docs/COMPANY_HOST_SETUP.md` gives the runnable commands and real
+access/hosting limits. This is an executable handoff for the unavailable target
+PC; it does not claim that WSL or the user's host was configured from here.
+
 Local evidence during development: 12 actual SQLite/process runtime tests PASS;
 5 synthetic paired-evaluation tests PASS; architecture/provider audits and JS
 syntax PASS. Governed-tool suite initially could not import because the refreshed
