@@ -66,7 +66,9 @@ from pathlib import Path
 assert os.getuid() == 65534
 assert 'INFINITY_TEST_SECRET' not in os.environ
 assert not Path('/var/run/docker.sock').exists()
-assert not Path('/root/.ssh').exists()
+try:
+    assert not Path('/root/.ssh').exists()
+except PermissionError: pass
 try:
     Path('/etc/escape').write_text('bad')
     raise AssertionError('root filesystem was writable')

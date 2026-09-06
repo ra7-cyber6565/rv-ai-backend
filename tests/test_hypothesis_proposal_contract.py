@@ -1,7 +1,7 @@
 import unittest
 
 from research_engine.hypothesis_contract import PLAN_FIELDS, complete_proposal
-from research_engine.research_company import normalize_report
+from research_engine.research_company import normalize_report, chief_handoff
 import json
 
 
@@ -50,6 +50,17 @@ class HypothesisProposalTests(unittest.TestCase):
         report = normalize_report(json.dumps(raw), ["S1"])
         self.assertEqual(report["hypotheses"][0]["test_plan"]["replication_method"], "specified replication_method")
         self.assertEqual(report["hypotheses"][0]["mechanism"], row["mechanism"])
+
+    def test_binary_download_does_not_crowd_out_chief_reasoning_or_modify_download(self):
+        artifact = {"encoding": "base64", "content": "A"*24000, "sha256": "ARTIFACT_HASH"}
+        company = {"workers": [{"role": "validation", "status": "DRAFT_READY", "report": {
+            "summary": "TEST_RECEIPT", "tool_results": [{"state": "EXECUTED", "artifact": artifact}]}}]}
+        prompt = chief_handoff(company)
+        self.assertIn("ARTIFACT_HASH", prompt)
+        self.assertIn("TEST_RECEIPT", prompt)
+        self.assertNotIn("A"*100, prompt)
+        self.assertEqual(len(artifact["content"]), 24000)
+        self.assertEqual(company["handoff_truncated_roles"], [])
 
 
 if __name__ == "__main__":

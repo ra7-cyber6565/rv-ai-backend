@@ -291,8 +291,19 @@ def run_company(question: str, pack, config, *, worker: Callable | None = None) 
 
 
 def chief_handoff(company: Dict) -> str:
-    drafts = [{"role": r["role"], "status": r["status"], "report": r.get("report")}
-              for r in company["workers"]]
+    # Binary download payloads are user artifacts, not useful reasoning tokens.
+    # Preserve receipts and hashes in the chief prompt and full files in result.
+    import copy
+    drafts = []
+    for row in company["workers"]:
+        report = copy.deepcopy(row.get("report"))
+        if isinstance(report, dict):
+            for tool in report.get("tool_results", []):
+                artifact = tool.get("artifact")
+                if isinstance(artifact, dict) and artifact.get("encoding") == "base64":
+                    artifact.pop("content", None)
+                    artifact["binary_payload_location"] = "original tool result artifact"
+        drafts.append({"role": row["role"], "status": row["status"], "report": report})
     encoded = [(draft["role"], json.dumps(draft, ensure_ascii=False, indent=2)) for draft in drafts]
     company["handoff_prepared"] = True
     company["handoff_truncated_roles"] = [role for role, text in encoded if len(text) > 16000]

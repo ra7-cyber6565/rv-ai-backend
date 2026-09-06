@@ -2,6 +2,31 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Current continuation — ChatGPT, 2026-09-06
+
+- PR #79 remains the integration branch; main and other contributors' branches
+  are unchanged. Prior exact head `e3344fb7` passed all five workflows with
+  4,157 full-suite cases and 42 API smoke checks. This is software evidence.
+- This continuation adds operator-enabled local Docker Python/Node builds,
+  bounded execution/ZIP artifacts, complete hypothesis-plan fields, observed
+  failure proposals, private inspection and protected baseline/candidate trials.
+  Execution, semantic adequacy and physical/clinical proof remain separate.
+- General executor source and proposal/testing wiring are now implemented;
+  older MISSING statements below are historical. The current all-22 table is
+  `docs/INFINITY_REQUIREMENT_LEDGER.md`; setup and scope are in
+  `docs/ISOLATED_BUILDS_AND_IMPROVEMENT.md`.
+- Mandatory Foundation CI now provisions a test image and executes real Python
+  and Node builds, isolation/failure checks and protected improvement trials.
+  Use the exact final PR head and workflow receipts, not a prior revision's
+  pass or skipped offline container tests, as acceptance authority.
+- Local Docker is unavailable and local Python lacks integrated dependencies;
+  the cancelled dependency-install approval was not bypassed. Local source,
+  stdlib contract and shipped JavaScript checks are distinct from CI execution.
+- Read-only inspection found the existing Railway service on main. No deploy,
+  merge, model-key change, paid service or live research was performed. Exact-
+  revision confirmed-free model, target-host and representative quality/data
+  receipts remain external work; earlier Windows passes do not certify this head.
+
 ## Independent audit update — 2026-08-28
 
 - Production `main` audited at `8c8ee5fe8cb3b4644b52eb644904267156494300`;

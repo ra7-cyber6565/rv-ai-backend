@@ -34,7 +34,7 @@ def execute_tool(name, arguments, *, role, allowed_effects, call_id):
         raise ValueError("tool arguments do not match schema")
     if not isinstance(call_id, str) or not 1 <= len(call_id) <= 80:
         raise ValueError("stable tool call id required")
-    if len(json.dumps(arguments, ensure_ascii=False, allow_nan=False).encode()) > 64000:
+    if len(json.dumps(arguments, ensure_ascii=False, allow_nan=False).encode()) > (600000 if name == "isolated_build" else 64000):
         raise ValueError("tool input too large")
     if name == "numeric" and (not isinstance(arguments["code"], str) or not isinstance(arguments["inputs"], dict)):
         raise ValueError("numeric expects code:string and inputs:object")
@@ -66,4 +66,5 @@ def execute_tool(name, arguments, *, role, allowed_effects, call_id):
                           result=None, artifact=None, adequacy="NOT_ASSESSED")
         record["finished_at"] = time.time()
         return record
-    return checkpoint("tool_" + call_id, [name, arguments, role, sorted(allowed_effects)], run)
+    return checkpoint("tool_" + call_id, [name, arguments, role, sorted(allowed_effects)], run,
+                      replay_safe=name != "isolated_build")

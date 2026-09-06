@@ -6,25 +6,42 @@ research-team path in the existing application. **This ledger does not declare
 the entire specification complete.** A partial status is not an external blocker;
 remaining engineering work is named separately from unavailable live evidence.
 
-## Current continuation — reliability runtime
+## Current implementation — all 22 requirements
 
 The original inventory below records the first company implementation. These
 current changes supersede its corresponding gap descriptions; unchanged empirical
 gaps remain open. Exact final results belong to PR #79, not inferred from filenames.
 
-| IDs | Current implementation / acceptance evidence | Remaining limit |
+| ID | Current implementation / acceptance evidence | Remaining limit |
 |---|---|---|
-| R01, R21, R22 | Preserve reviewed head; extend same app/PR; `RELIABILITY_RUNTIME.md` has configuration, commands and evidence scope | Full vision not universally complete |
-| R02, R17 | `task_contract.py`: original request, explicit parts, types, dependencies, coverage; private UI stop/resume and numeric downloads | Heuristic parsing; arbitrary-part completion stays NOT_ASSESSED |
-| R03, R04 | Real workers gain stable IDs, durable raw envelope checkpoints and typed numeric tool receipts | Shared corpus/model diversity and live quality remain unproved |
-| R05 | Discovery and enriched reading are typed/hash-checked checkpoints | Fresh OCR/table/equation ground truth still required |
-| R06, R08, R09, R11 | Existing claim, hypothesis, complete-test-plan and domain guards retained; numeric execution never promotes clinical truth | External semantic/scientific validation and adequate statistical data still required |
-| R07, R14 | Scoped trust/expiry/revisions; private UI inspect/export/correct/delete; transitive memory/source dependencies; clear legacy notes and project hints; stale API answers blocked | Original uploads, canonical job archives and external backups remain separately retained |
-| R10, R16 | `tool_registry.py`: fixed role/effect/argument checks; actual restricted AST calculations with artifact hashes | General arbitrary-code isolation/build backend unavailable |
-| R12, R13 | Atomic per-run and shared-provider generation-attempt reservations on public research and QUICK chat; SDK retry/output caps; shared checkpoint byte ceiling | Actual input-token counts, metadata discovery HTTP and verified provider billing remain separate |
-| R15 | SQLite stages/events; same-input/code recovery, cancellation, bounded resume, non-replay of ambiguous effects | In-flight request ends at timeout; unfinished reads may rerun; same deadline persists |
-| R18, R20 | Frozen paired-evaluation harness; protected supplied holdout, task-cluster uncertainty, missing denominators; changes stay reviewable PR proposals | No live matched baseline/holdout campaign or validated automated promotion loop |
-| R19 | New process budget, restart, cancellation, correction, tool injection/failure/artifact and evaluation tests complement original 18-case map | Full integrated CI plus declared external-data/live cases remain separate evidence |
+| R01 | Same repository and draft PR; source inventory and preserved base recorded | Target host has not run this exact revision |
+| R02 | Original request, explicit parts, typed intent, dependencies and completion coverage retained by `task_contract.py` | Semantic decomposition remains heuristic; unchecked arbitrary parts remain PARTIAL |
+| R03 | Four/six actual specialist processes, bounded concurrency, chief handoff and failure downgrade | Shared corpus and possibly shared model; no live multi-model quality result |
+| R04 | Stable worker/run IDs, sequenced durable events, typed drafts and hash-checked checkpoints | Single-host SQLite scope; external scientific replication is different |
+| R05 | Existing search/books/papers/PDF/OCR paths plus resumable enriched reading | Fresh document/table/equation extraction needs independent ground truth |
+| R06 | Claim/span verification, citation membership and strong-label gates retained | Semantic support/methodology matching requires independently labelled evaluation |
+| R07 | Contradiction/source-dependence checks plus transitive source-correction invalidation | Only registered dependencies can be invalidated; source truth is not automatic |
+| R08 | Competing hypotheses/baselines/tournament plus preserved mechanisms, assumptions and source IDs | Novelty and causal adequacy remain unestablished without external evidence |
+| R09 | Detailed plan schema, variable units/roles, controls, uncertainty, power/stopping/replication; missing fields visible in Process | Structural completeness is not semantic adequacy; unknown data are not fabricated |
+| R10 | Typed `isolated_build` backend for Python/Node, bounded local Docker, real ZIP artifacts; numeric AST remains available | Operator must provision reviewed images and supported host; Linux container scope only |
+| R11 | Existing domain validation, trading leakage tests and physical/clinical boundaries retained | New market/engineering/clinical findings require corresponding real data/experiments |
+| R12 | Atomic per-run/shared-provider attempt/input-byte/output reservations; fixed worker/chief allocations and build resource caps | Provider balance, actual token counts and optimal effort routing need measurements |
+| R13 | Confirmed-free provider eligibility, no paid fallback and no app image pulls or package installs | Current account/quota eligibility and exact-head live gate remain unverified here |
+| R14 | Private inspect/export/correct/delete/clear; memory trust/revision/expiry and downstream invalidation | Original uploads, canonical job archives and external backups have separate retention |
+| R15 | Durable stages, cancellation, code/input-bound resume and ambiguous build effect non-replay | Single host; incomplete safe reads can rerun; controller crash needs lease reconciliation |
+| R16 | Role/effect/argument checks, private capabilities, prompt guards, escaped output and container boundary | No finite suite establishes universal prompt-injection or kernel-escape resistance |
+| R17 | Answer/evidence/lab/source/process/audit views; progress, memory, coverage, plans, proposals and JSON/ZIP download | Representative desktop/mobile usability and arbitrary deliverable quality unmeasured |
+| R18 | Frozen paired evaluator with task-cluster uncertainty and denominators; one-use protected implementation trials | No representative live single-versus-company held-out quality campaign |
+| R19 | All 18 scenarios mapped below; actual build/failure and protected-regression lanes added to Foundation CI | Fixture tests and actual software execution remain distinct from external data/live tests |
+| R20 | Observed failure → stored proposal → frozen baseline/candidate → host-owned protected tests → receipt; regression rejection; Git rollback | Candidate generation/review is operator-assisted; production auto-promotion is deliberately absent |
+| R21 | Research, memory, recovery, tools, proposals and UI integrated in the existing public research path | Multimodal fidelity, semantic quality and target-host operation remain separate evaluations |
+| R22 | Code, CLI/API commands, configuration and acceptance evidence in PR #79 and linked runtime docs | Exact final CI and target-host/live receipts are separately required |
+
+The implementation closes the previously missing general executor and observed-
+failure proposal/testing wiring. See `ISOLATED_BUILDS_AND_IMPROVEMENT.md` for
+setup, limits, examples and evaluation protocol. It does not establish that an
+app can solve every possible question, discover a cure, or outperform every
+model. Those claims have no measured score in this work.
 
 Local evidence during development: 12 actual SQLite/process runtime tests PASS;
 5 synthetic paired-evaluation tests PASS; architecture/provider audits and JS
@@ -311,8 +328,8 @@ run. It does not imply live external data or whole-feature completeness.
 | 3. Broken PDF/OCR/table | `test_pdf_sparse_sampling.py`; expand page/table ground truth | PARTIAL; full OCR/table fidelity not established |
 | 4. Valid URL, unsupported claim | `test_claim_verification.py`, `test_evidence_verification.py` | Existing fixture |
 | 5. Zero eligible claims | `test_evidence_first_release_contract.py`, `test_claim_label_accounting.py` | Existing fixture |
-| 6. Incomplete hypothesis plan | `test_research_company.py`, AI-2 validation tests | Fixture |
-| 7. Failed code/simulation | `test_code_sandbox.py`, simulation and lab checks | Existing constrained-executor fixture |
+| 6. Incomplete hypothesis plan | Company/AI-2 tests plus `test_hypothesis_proposal_contract.py`: missing units, unknown thresholds, inapplicability, truncation and fabricated results | Fixture; structural checks only |
+| 7. Failed code/simulation | Existing numeric/lab checks plus mandatory `test_isolated_build_runtime.py`: failed program, unsafe output, log/time bounds, cleanup | Actual software execution lane; exact result in PR #79 |
 | 8. Four workers with failure | `test_research_company.py`, live-gate receipt checks | Fixture; live NOT TESTED |
 | 9. Timeout/malformed/no free model | `test_research_company.py` | Fixture plus actual no-model child process |
 | 10. Parallel budget competition | `test_research_runtime.py`: 12 actual processes over 3 slots; cross-project caps | PASS for application HTTP/input-byte/output reservations; provider balance unknown |
@@ -323,7 +340,7 @@ run. It does not imply live external data or whole-feature completeness.
 | 15. Hypothesis promoted to cure | Company status-coercion test; physical-reality guards | Fixture; no clinical validation |
 | 16. Missing requested output | Existing requested/coverage/final quality gates | Existing fixture |
 | 17. Insufficient evidence | Existing fail-closed claim/quality tests | Existing fixture |
-| 18. Usable generated artifact | Actual restricted numeric execution, result hash, downloadable JSON, hostile UI content escaped | PASS for JSON/numeric artifacts; arbitrary app builds BLOCKED on isolation backend |
+| 18. Usable generated artifact | Restricted numeric JSON plus isolated multifile Python/Node HTML builds returned in downloadable ZIPs; shipped JS download boundaries executed | Actual software execution lane; host provisioning still required |
 
 ## Before/after and operational limits
 
@@ -344,6 +361,16 @@ It does not close E6 live/empirical gaps or the remaining engineering listed bel
 
 
 ## Continuation evidence and remaining work
+
+- `b503e738`: all four specialist/attestor workflows PASS; Foundation's full
+  offline suite and strict gate PASS. The new mandatory real-container lane
+  failed one assertion: denied access to `/root/.ssh` raised PermissionError
+  instead of returning a missing-path boolean. Python/Node artifact builds,
+  failed-code rejection, output bounds, fresh workspaces and wall timeout ran
+  successfully. The host-secret probe now accepts either absence or permission
+  denial, while still rejecting readable access; no isolation control changed.
+  The protected improvement trial did not run after this failed step. Final
+  rerun evidence is recorded against the subsequent PR head.
 
 - `f0191db`: Foundation FAIL; 4,142 full-suite passes and two legacy result-route
   fixtures missing project provenance. Existing assertions were preserved; test
@@ -368,11 +395,11 @@ It does not close E6 live/empirical gaps or the remaining engineering listed bel
 | Type | Remaining item | Exact next action / acceptance |
 |---|---|---|
 | External access | Confirmed-free model unavailable | Configure eligible private model credentials and current quota evidence on the user's host; run the existing COMPANY and COMPANY_PLUS live gate on the reviewed revision |
-| External executor | No approved general untrusted-code/build backend | Provision an isolation backend; verify filesystem/network/process/memory/time enforcement, then add the backend behind the typed registry and run actual application builds |
+| Host provisioning | General backend implemented; target host not configured/tested | Provision approved local Docker/images on a supported host; run the existing real executor lane there before enabling it for users |
 | Data + engineering | No representative frozen baseline/holdout campaign | Freeze tasks and independent grading criteria, use the existing holdout vault and paired evaluator, run repeated single/company trials; report HTTP, tokens, hardware, latency and task success separately |
 | Data + engineering | OCR/table/equation fidelity not measured end-to-end | Supply licensed page images and ground-truth spans/tables; measure extraction and locator correctness by document type before expanding retrieval claims |
-| Engineering + evaluation | Universal task decomposition and complete hypothesis/test-plan generation remain heuristic | Expand semantic contract/plan coverage using representative mixed requests; retain unknown fields and missing-output downgrade; validate without tuning on held-out answers |
-| Engineering | Controlled automatic proposal/testing loop not fully wired | Connect existing autonomous-debugging/proposal primitives to observed failures and protected paired/regression runners; retain current production promotion gates and rollback history |
+| Semantic evaluation | Universal task decomposition and test-plan generation remain heuristic | Use representative mixed requests with independent labels; detailed fields and missing-output downgrades now exist, but semantic correctness needs evaluation |
+| Operator-assisted improvement | Proposal/testing loop wired; candidate generation is not unrestricted self-modification | Supply a reviewable candidate and independent protected cases; inspect actual trial receipt and retain current production gates and Git rollback |
 | Deployment | Exact-revision live and host receipts absent | Run the existing live-zero-cost and post-deployment validation gates on the actual target host after configuration; do not infer this from CI |
 
 The revision adds substantial functional coverage. There is no defensible 100/100

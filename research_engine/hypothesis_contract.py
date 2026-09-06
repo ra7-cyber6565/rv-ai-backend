@@ -33,12 +33,19 @@ def complete_proposal(row, source_ids):
             if isinstance(value, str) and len(value.strip()) > 1200:
                 truncated.append(field)
     variables = []
-    for v in (plan.get("variables") if isinstance(plan.get("variables"), list) else [])[:12]:
+    raw_variables = plan.get("variables") if isinstance(plan.get("variables"), list) else []
+    if len(raw_variables) > 12:
+        truncated.append("variables")
+    for v in raw_variables[:12]:
         if not isinstance(v, dict):
             continue
         variable = {key: text(v.get(key), 300) for key in ("symbol", "definition", "unit", "role")}
         if all(known(value) for value in variable.values()) and variable["role"] in _ROLES:
             variables.append(variable)
+            if any(isinstance(v.get(key), str) and len(v[key].strip()) > 300 for key in variable):
+                truncated.append("variable_definition")
+    if len(variables) != len(raw_variables[:12]):
+        missing.append("invalid_variable_definitions")
     variable_applicability = plan.get("variables_applicability")
     if not variables and not (isinstance(variable_applicability, dict) and
         variable_applicability.get("state") == "NOT_APPLICABLE" and known(variable_applicability.get("reason"))):
