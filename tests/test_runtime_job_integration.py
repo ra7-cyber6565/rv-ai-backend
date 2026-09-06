@@ -140,6 +140,19 @@ def test_unchecked_explicit_deliverable_prevents_complete_answer(monkeypatch, tm
     assert result["status"] == "PARTIAL"
     assert result["task_contract"]["unresolved_explicit_parts"] == ["part_1", "part_2"]
     assert "verify nahi hui" in result["answer"]
+    assert any(p["category"] == "missing_deliverable" and p["state"] == "PROPOSED" for p in result["improvement_proposals"])
+
+
+def test_improvement_inspection_checks_project_access_before_opening_store(monkeypatch):
+    from api import agent_routes
+    from utils import improvement_runtime
+    def denied(*args):
+        raise HTTPException(status_code=404, detail="unavailable")
+    monkeypatch.setattr(agent_routes, "require_project_access", denied)
+    monkeypatch.setattr(improvement_runtime, "ImprovementStore", lambda: pytest.fail("private proposals opened without access"))
+    with pytest.raises(HTTPException) as exc:
+        agent_routes.inspect_improvement_proposals("p", "bad-token")
+    assert exc.value.status_code == 404
 
 
 def test_memory_mutations_check_project_access_first(monkeypatch):

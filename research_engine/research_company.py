@@ -87,12 +87,13 @@ def normalize_report(raw: str, source_ids) -> Dict:
         claims.append({"text": _text(row["text"]), "source_ids": ids, "kind": kind,
                        "entailment_verified": False})
     fields = ("hypothesis", "prediction", "baseline", "test", "falsification")
+    from .hypothesis_contract import complete_proposal
     for row in data["hypotheses"][:6]:
         if not isinstance(row, dict) or any(not _text(row.get(k)) for k in fields):
             issues.append("incomplete_testable_hypothesis")
             continue
         hypotheses.append({**{k: _text(row[k], 1600) for k in fields},
-                           "status": "INCONCLUSIVE", "execution": "TEST_PROPOSED"})
+                           **complete_proposal(row, allowed)})
     return {"summary": _text(data["summary"], 3000), "claims": claims,
             "hypotheses": hypotheses,
             "limitations": [_text(v, 800) for v in data["limitations"][:12] if _text(v)],
@@ -105,6 +106,7 @@ def normalize_report(raw: str, source_ids) -> Dict:
 
 
 def worker_prompt(role: str, question: str, evidence: str) -> str:
+    from .hypothesis_contract import prompt_schema
     instruction = dict(ROLES)[role]
     return (
         f"You are the {role} specialist. {instruction}\n"
@@ -119,9 +121,13 @@ def worker_prompt(role: str, question: str, evidence: str) -> str:
         "limitations, assumptions, contradictions, remaining_questions (each an array of strings). "
         "Optional tool_requests: [{tool: 'numeric', arguments: {code: 'result = x * x', inputs: {x: 3}}}]. "
         "The numeric language allows arithmetic/loops but no imports, files, network or subprocesses. "
+        "For requested code/build deliverables, validation/implementation may request isolated_build "
+        "with arguments {runtime: 'python' or 'node', files: {'main.py': 'source code'}, entrypoint: 'main.py'}. "
+        "It requires an operator-enabled local container and preinstalled libraries, has no network or host files, "
+        "and writes generated artifacts under /work. Missing executor returns BLOCKED. "
         "Use empty arrays when appropriate. Every hypothesis "
         "needs a concrete falsification condition and simpler baseline. Keep under 12000 characters.\n"
-        f"USER QUESTION:\n{question}\n\n{evidence}"
+        + prompt_schema() + f"USER QUESTION:\n{question}\n\n{evidence}"
     )
 
 
@@ -232,7 +238,7 @@ def run_company(question: str, pack, config, *, worker: Callable | None = None) 
                             raise ValueError("invalid tool request")
                         with bind(context):
                             tool_result = execute_tool(request.get("tool"), request.get("arguments"),
-                                role=role, allowed_effects={"bounded_calculation"},
+                                role=role, allowed_effects={"bounded_calculation", "return_artifact", "isolated_execution"},
                                 call_id=role + "_" + str(index))
                     except (ValueError, PermissionError):
                         tool_result = {"state": "BLOCKED", "reason": "Tool arguments or role permissions invalid.",

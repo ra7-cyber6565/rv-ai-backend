@@ -17,8 +17,15 @@ const page=fs.readFileSync(process.argv[1],"utf8");
 function body(name){const marker="function "+name+"(";const start=page.indexOf(marker);assert(start>=0);
   const tail=page.slice(start);const next=tail.indexOf("\nfunction ",marker.length);
   return next<0?tail:tail.slice(0,next);}
-const ctx={};vm.runInNewContext([body("esc"),body("htmlText"),body("companyHtml"),body("memoryHtml"),body("contractHtml")].join("\n"),ctx);
+const ctx={};vm.runInNewContext([body("esc"),body("htmlText"),body("companyHtml"),body("memoryHtml"),body("contractHtml"),body("toolArtifactHtml"),body("hypothesisPlanHtml"),body("improvementHtml")].join("\n"),ctx);
 const attack='<img src=x onerror="alert(1)">';
+const plan=ctx.hypothesisPlanHtml({test_plan:{setup:attack},mechanism:attack,missing_plan_fields:['controls'],assumptions:[],plan_completeness:'INCOMPLETE'});
+assert(!plan.includes('<img'));assert(plan.includes('&lt;img'));assert(plan.includes('controls'));assert(plan.includes('INCOMPLETE'));
+const proposals=ctx.improvementHtml({improvement_proposals:[{category:attack,state:'PROPOSED',next_action:attack}]});
+assert(!proposals.includes('<img'));assert(proposals.includes('&lt;img'));assert(proposals.includes('PROPOSED'));
+assert(ctx.toolArtifactHtml({artifact:{media_type:"application/zip",encoding:"base64",content:"UEs="}}).includes('Build files ZIP download'));
+assert.strictEqual(ctx.toolArtifactHtml({artifact:{media_type:"text/html",content:attack}}),"");
+assert.strictEqual(ctx.toolArtifactHtml({artifact:{media_type:"application/zip",encoding:"base64",content:attack}}),"");
 const memory=ctx.memoryHtml({records:[{id:attack,kind:attack,status:attack,revision:1,body:{note:attack}}]});
 assert(!memory.includes('<img'));assert(memory.includes('&lt;img'));assert(memory.includes('Sudharo'));
 const contract=ctx.contractHtml({task_contract:{assessment:"PARTIAL",requirements:[{id:"part_1",kind:"explicit_part",text:attack}],coverage:[{requirement_id:"part_1",assessment:"NOT_ASSESSED"}]}});

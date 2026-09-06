@@ -77,6 +77,14 @@ class AgentManager:
             self._active[project_id] = self._active.get(project_id, 0) + 1
         try:
             return self._research_with_runtime(question, project_id, depth_mode, custom, job_id)
+        except Exception:
+            # Store only a failure category, never the question or exception text.
+            from utils.improvement_runtime import ImprovementStore
+            try:
+                ImprovementStore().observe(project_id, job_id or uuid.uuid4().hex, failed=True)
+            except Exception:
+                pass  # Preserve the original failure; diagnostics cannot turn it into success.
+            raise
         finally:
             with self._lock:
                 self._active[project_id] -= 1
@@ -129,6 +137,11 @@ class AgentManager:
                 result["status"] = "PARTIAL"
                 result["answer"] = "Maange gaye kuch hisson ki completion verify nahi hui; coverage Process tab mein dekho.\n\n" + str(result.get("answer", ""))
             result["runtime_execution"] = store.snapshot(project_id, runtime_id)
+            from utils.improvement_runtime import ImprovementStore
+            try:
+                result["improvement_proposals"] = ImprovementStore(store).observe(project_id, runtime_id, result)
+            except Exception:
+                result["improvement_proposal_recording"] = "UNAVAILABLE"
             self._remember(project_id, result)
             return result
 

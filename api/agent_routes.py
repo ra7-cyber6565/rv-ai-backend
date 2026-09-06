@@ -30,6 +30,14 @@ class ToolRequest(BaseModel):
     call_id: str = Field(min_length=1, max_length=80)
 
 
+@router.get("/projects/{project_id}/improvement-proposals")
+def inspect_improvement_proposals(project_id: str,
+    x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
+    require_project_access(project_id, x_project_token)
+    from utils.improvement_runtime import ImprovementStore
+    return ImprovementStore().inspect(project_id)
+
+
 @router.post("/projects/{project_id}/tools/execute")
 def execute_project_tool(project_id: str, request: ToolRequest,
     x_project_token: str | None = Header(default=None, alias="X-Project-Token")):
@@ -45,7 +53,7 @@ def execute_project_tool(project_id: str, request: ToolRequest,
         store.start(project_id, run, digest([request.tool, request.arguments]), code_version(), limits)
         with bind(RunContext(store, project_id, run)):
             return execute_tool(request.tool, request.arguments, role="supervisor",
-                allowed_effects={"bounded_calculation", "return_artifact"}, call_id=request.call_id)
+                allowed_effects={"bounded_calculation", "return_artifact", "isolated_execution"}, call_id=request.call_id)
     except (ValueError, PermissionError) as exc:
         raise HTTPException(status_code=400, detail="Tool arguments or permissions invalid.") from exc
     except RuntimeBlocked as exc:

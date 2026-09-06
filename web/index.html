@@ -882,7 +882,23 @@ function contractHtml(data){
   const coverage=new Map((contract.coverage||[]).map(r=>[r.requirement_id,r.assessment]));
   const labels={SATISFIED:"Poora hua",MISSING:"Baqi hai",NOT_ASSESSED:"Completion verify nahi hui"};
   const rows=(contract.requirements||[]).filter(r=>r.kind!=="original_request").map(r=>'<li>'+esc(r.text)+' — '+esc(labels[coverage.get(r.id)]||"Completion verify nahi hui")+'</li>').join("");
-  return '<section><h3>Tumhari request ka coverage</h3><p>'+esc(contract.assessment)+'</p>'+(rows?'<ul>'+rows+'</ul>':'<p>Har hissa poora hua ya nahi, iska automatic assessment available nahi hai.</p>')+(contract.worker_requirement_gap?'<p>Maange gaye AI workers poore execute nahi hue.</p>':'')+'</section>';
+  return '<section><h3>Tumhari request ka coverage</h3><p>'+esc(contract.assessment)+'</p>'+(rows?'<ul>'+rows+'</ul>':'<p>Har hissa poora hua ya nahi, iska automatic assessment available nahi hai.</p>')+(contract.worker_requirement_gap?'<p>Maange gaye AI workers poore execute nahi hue.</p>':'')+'</section>'+improvementHtml(data);
+}
+function improvementHtml(data){
+  const proposals=Array.isArray(data.improvement_proposals)?data.improvement_proposals:[];
+  if(!proposals.length)return data.improvement_proposal_recording==='UNAVAILABLE'?'<p>Improvement record save nahi hua.</p>':"";
+  return '<details class="process"><summary>Sudhaar ke '+esc(proposals.length)+' proposals</summary><p>Observed gaps se nikle proposals. Fix tabhi verified hoga jab protected tests chalenge.</p>'+proposals.map(p=>'<p><strong>'+esc(p.category)+' — '+esc(p.state)+'</strong><br>'+esc(p.next_action)+'</p>').join('')+'</details>';
+}
+function hypothesisPlanHtml(h){
+  if(!h.test_plan)return '<p>Detailed test plan abhi available nahi hai.</p>';
+  const missing=[...(h.missing_plan_fields||[]),...(h.truncated_plan_fields||[])];
+  return '<details><summary>Test plan — '+esc(h.plan_completeness||'INCOMPLETE')+'</summary><p>Mechanism: '+esc(h.mechanism)+'<br>Assumptions: '+esc((h.assumptions||[]).join('; '))+'<br>Scope: '+esc(h.applicability_boundaries)+'</p><p>Yeh proposed plan hai; semantic adequacy aur novelty verify nahi hui.</p>'+(missing.length?'<p>Baqi / incomplete fields: '+esc(missing.join(', '))+'</p>':'')+'<pre>'+esc(JSON.stringify(h.test_plan,null,2))+'</pre></details>';
+}
+function toolArtifactHtml(tool){
+  const a=tool.artifact;if(!a||typeof a.content!=="string")return "";
+  if(a.media_type==="application/json")return '<a download="result.json" href="data:application/json;charset=utf-8,'+encodeURIComponent(a.content)+'">Calculation JSON download</a><pre>'+esc(a.content)+'</pre>';
+  if(a.media_type==="application/zip"&&a.encoding==="base64"&&a.content.length<=4000000&&/^[A-Za-z0-9+/]*={0,2}$/.test(a.content))return '<a download="build-artifacts.zip" href="data:application/zip;base64,'+a.content+'">Build files ZIP download</a>';
+  return "";
 }
 function companyHtml(data){
   const c=(data.verification||{}).research_company;
@@ -893,14 +909,14 @@ function companyHtml(data){
   for(const w of c.workers){const r=w.report||{};
     out+='<details class="process"><summary>'+esc(w.role)+' — '+esc(w.status)+'</summary><div class="plain">'+htmlText(r.summary||"Worker ki usable report nahi mili.")+'</div>';
     if(Array.isArray(r.claims))for(const claim of r.claims)out+='<p><strong>'+esc(claim.kind)+'</strong>: '+esc(claim.text)+' '+esc((claim.source_ids||[]).map(s=>'['+s+']').join(' '))+'</p>';
-    if(Array.isArray(r.hypotheses))for(const h of r.hypotheses)out+='<p><strong>TEST PROPOSED · INCONCLUSIVE</strong>: '+esc(h.hypothesis)+'</p><p>Prediction: '+esc(h.prediction)+'<br>Baseline: '+esc(h.baseline)+'<br>Test: '+esc(h.test)+'<br>Falsification: '+esc(h.falsification)+'</p>';
+    if(Array.isArray(r.hypotheses))for(const h of r.hypotheses)out+='<p><strong>TEST PROPOSED · INCONCLUSIVE</strong>: '+esc(h.hypothesis)+'</p><p>Prediction: '+esc(h.prediction)+'<br>Baseline: '+esc(h.baseline)+'<br>Test: '+esc(h.test)+'<br>Falsification: '+esc(h.falsification)+'</p>'+hypothesisPlanHtml(h);
     if(Array.isArray(r.limitations)&&r.limitations.length)out+='<p>Limits: '+esc(r.limitations.join('; '))+'</p>';
     for(const [key,label] of [["assumptions","Assumptions"],["contradictions","Contradictions"],["remaining_questions","Remaining questions"]]){
       if(Array.isArray(r[key])&&r[key].length)out+='<p>'+esc(label)+': '+esc(r[key].join('; '))+'</p>';
     }
     if(Array.isArray(r.contract_issues)&&r.contract_issues.length)out+='<p>Report gaps: '+esc(r.contract_issues.join(', '))+'</p>';
     if(w.restored_from_checkpoint)out+='<p>Saved checkpoint se restore hua; model ko dobara call nahi kiya.</p>';
-    if(Array.isArray(r.tool_results))for(const t of r.tool_results){out+='<p>Calculation: '+esc(t.state)+' — physical/clinical validation nahi.</p>';if(t.artifact&&t.artifact.media_type==="application/json"&&typeof t.artifact.content==="string"){out+='<a download="result.json" href="data:application/json;charset=utf-8,'+encodeURIComponent(t.artifact.content)+'">Calculation JSON download</a><pre>'+esc(t.artifact.content)+'</pre>';}}
+    if(Array.isArray(r.tool_results))for(const t of r.tool_results){out+='<p>Tool execution: '+esc(t.state)+' — physical/clinical validation nahi.</p>'+toolArtifactHtml(t);if(t.failure||t.reason)out+='<p>'+esc(t.failure||t.reason)+'</p>';}
     out+='</details>';
   }
   return out;

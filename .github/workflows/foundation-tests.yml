@@ -165,6 +165,16 @@ jobs:
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
 
+      - name: Validate actual isolated Python and Node builds and protected improvement trial
+        run: |
+          docker build -t infinity-executor-ci -f tests/fixtures/executor.Dockerfile tests/fixtures
+          export INFINITY_BUILD_EXECUTOR=docker
+          export INFINITY_PYTHON_IMAGE="$(docker image inspect infinity-executor-ci --format '{{.Id}}')"
+          export INFINITY_NODE_IMAGE="${INFINITY_PYTHON_IMAGE}"
+          export INFINITY_REAL_EXECUTOR_TEST=1
+          python -m unittest discover -s tests -p test_isolated_build_runtime.py -v
+          python -m unittest discover -s tests -p test_improvement_runtime.py -v
+
       - name: Upload foundation receipt
         if: always()
         uses: actions/upload-artifact@v4

@@ -22,6 +22,7 @@ class ToolSpec:
 SPECS = MappingProxyType({
     "numeric": ToolSpec("numeric", "bounded_calculation", frozenset({"validation", "implementation", "supervisor"}), frozenset({"code", "inputs"})),
     "json_artifact": ToolSpec("json_artifact", "return_artifact", frozenset({"implementation", "supervisor"}), frozenset({"data"})),
+    "isolated_build": ToolSpec("isolated_build", "isolated_execution", frozenset({"implementation", "validation", "supervisor"}), frozenset({"runtime", "files", "entrypoint"})),
 })
 
 
@@ -40,6 +41,11 @@ def execute_tool(name, arguments, *, role, allowed_effects, call_id):
 
     def run():
         check_cancelled()
+        if name == "isolated_build":
+            from utils.isolated_execution import DockerExecutor
+            from utils.research_runtime import current
+            context = current()
+            return DockerExecutor(context.store if context else None).run(**arguments)
         begin = time.time()
         record = {"tool": name, "effect": spec.effect, "started_at": begin,
             "input_sha256": digest(arguments), "python_version": platform.python_version(),
