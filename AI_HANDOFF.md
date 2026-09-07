@@ -2,40 +2,44 @@
 
 **Purpose:** This is the first file any future AI/agent must read before changing this repository. It exists to stop half-finished parallel work, stale completion claims, duplicate implementations, and branch/deployment confusion.
 
-## 1. Current integration authority
+## 1. Current integration authority — updated 2026-09-07
 
 - Repository: `ra7-cyber6565/rv-ai-backend`
-- Primary completion vehicle: **PR #79** — `Add bounded AI Company research with 4/6 specialists and chief validation`
-- Integration branch: `codex/research-company-20260905`
-- Last fully verified PR head before this handoff update: `259e396e839663215de1338435963c936321c54a`
-- Verified source tree for that head: `abd3bae7aefe422aa851aad5c918d72550096373`
-- `main` at that verification point: `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`
-- PR #79 status at that point: **OPEN / DRAFT / UNMERGED**.
+- PR #79 `Add bounded AI Company research with 4/6 specialists and chief validation` is now **MERGED**.
+- Final validated PR head before merge: `9a740b61e48f61ea8acf718fb585bf1be105f688`.
+- All five required exact-head workflows passed on that head: Foundation, AI-1, AI-2, Model Reality, Anti-confirmation.
+- Merge commit on `main`: `d6cf73fc1ead003aec6abcc085930713ac4a4388`.
+- Merge tree: `4bbaae0154f3ee508e82cea774f2032765628eb0`.
+- Railway production service `web` auto-deployed that exact merge commit successfully.
+- Railway deployment id: `decfc39e-2e34-4867-ad27-17fd07785c65`.
+- Production deployment status: **SUCCESS**; application startup completed.
+- Public production API `/api/v1/depth-modes` was queried after deploy and returned both `COMPANY` and `COMPANY_PLUS` modes.
+- Railway environment exposes the expected Gemini key variable names plus `GEMINI_ZERO_COST_CONFIRMED`; secret values were not exposed or copied.
 
-After any commit newer than the head above, do **not** inherit old green status automatically. Re-run the required exact-head gates and update this file with the new SHA and receipts.
+After any commit newer than the merge commit above, do **not** inherit this green/deployed status automatically. Re-run the required exact-head gates and re-verify production revision identity.
 
-## 2. What is already implemented in PR #79
+## 2. What is implemented and merged
 
-The existing app has been extended rather than replaced. Major implemented areas include:
+The existing app has been extended rather than replaced. Major merged areas include:
 
-- COMPANY mode: four specialist workers plus chief synthesis.
-- COMPANY_PLUS mode: six specialist workers plus chief synthesis.
-- AI-1 evidence/research governance and AI-2 quantitative validation remain integrated.
+- `COMPANY`: four specialist workers + chief synthesis.
+- `COMPANY_PLUS`: six specialist workers + chief synthesis.
+- AI-1 evidence/research governance and AI-2 quantitative validation integrated in the main research path.
 - Typed claims, hypotheses, dissent, worker IDs, timestamps, input hashes and bounded raw-draft references.
 - Detailed hypothesis/test planning including mechanisms, assumptions, variables/units, controls, confounders, uncertainty, power/stopping/replication fields where supplied/applicable.
-- Shared budgets, bounded worker concurrency and fail-closed PARTIAL behavior for missing workers/handoffs.
+- Shared budgets, bounded concurrency, fail-closed PARTIAL behavior for missing workers/handoffs.
 - Durable SQLite research stages/events/checkpoints and bounded resume/cancel behavior.
 - Source/memory invalidation and governed private memory controls.
 - Atomic application quotas/reservations for generation attempts and I/O accounting.
 - Confirmed-free provider routing remains mandatory; no paid fallback is permitted.
 - Server-owned tool roles/effects/arguments, numeric AST execution and JSON artifacts.
 - Operator-enabled isolated Python/Node builds with bounded Docker execution, ZIP artifacts, source/output hashes and isolation/resource controls.
-- Improvement proposals from observed failures/missing deliverables, with protected baseline/candidate evaluation. No automatic production rewrite/apply/merge/deploy.
+- Improvement proposals from observed failures/missing deliverables with protected baseline/candidate evaluation. No automatic production rewrite/apply/merge/deploy.
 - Stored-data preservation is default-on for verified archives, durable history, expired checkpoints, improvement proposals and unfinished reading files. Full stores pause new work instead of silently deleting retained user data.
 - Hosted/manual validation contracts, host launcher, localhost API smoke and CI-based isolated executor verification.
+- Root `AGENTS.md` and this file are the permanent continuation entrypoint for future coding agents.
 
-See the detailed ledgers/docs instead of re-implementing these features:
-
+Detailed ledgers/docs:
 - `WORK_STATUS.md`
 - `docs/INFINITY_REQUIREMENT_LEDGER.md`
 - `docs/AI_COMPANY_RESEARCH.md`
@@ -44,99 +48,83 @@ See the detailed ledgers/docs instead of re-implementing these features:
 - `docs/COMPANY_HOST_SETUP.md`
 - `docs/HOSTED_VALIDATION.md`
 
-## 3. Verified evidence on the last validated head
+## 3. Verification evidence
 
-The last validated PR #79 head reported **all five exact-head workflows PASS**.
+On exact PR head `9a740b61e48f61ea8acf718fb585bf1be105f688` all five required workflows passed.
 
-Foundation run `34093457137` recorded:
+Foundation included:
+- advanced research quality regression: PASS
+- strict zero-cost foundation gate: PASS
+- Windows company host launcher parse: PASS
+- actual isolated builds, protected improvement trials and localhost API lane: PASS
+- hosted live validation step: intentionally skipped on automatic PR run
+- foundation receipt upload: PASS
 
-- 4,197 full-suite passes.
-- 9 offline container cases explicitly skipped in the offline pass, then exercised in the mandatory real Linux/Docker lane.
-- 594 focused passes.
-- 1,047 advanced passes.
-- 42/42 actual offline API smoke checks.
-- 10/10 isolated-build tests in the mandatory Linux/Docker lane, zero skips there.
-- 7/7 protected-improvement tests in that lane, zero skips there.
-- 20/20 localhost Uvicorn/session/access smoke checks.
-- 8/8 default-on data-preservation tests.
-- Architecture/provider-bypass/domain fixture gates passed as recorded in PR #79.
+Earlier preserved Foundation evidence for the same integration lineage recorded 4,197 full-suite passes, 594 focused passes, 1,047 advanced passes, 42/42 offline API smoke, 10/10 isolated-build tests, 7/7 protected-improvement tests and 20/20 localhost Uvicorn/session/access smoke. Counts overlap and are not summed.
 
-Specialist/attestor workflows on that exact validated head also passed:
+The merged production revision is `d6cf73fc1ead003aec6abcc085930713ac4a4388`; Railway deployment `decfc39e-2e34-4867-ad27-17fd07785c65` completed successfully and Uvicorn reported application startup complete. Production `/api/v1/depth-modes` returned `COMPANY` with 4 agents and `COMPANY_PLUS` with 6 agents.
 
-- AI-1 run `34093457113`
-- AI-2 run `34093457039`
-- Model reality run `34093457071`
-- Anti-confirmation run `34093457097`
+**Important:** software CI + successful production deployment still do not prove live answer quality, scientific truth, profitability, independent replication, or universal completion.
 
-**Important:** these are software/host validation receipts. They are not proof of live model answer quality, scientific truth, profitability, production deployment, or universal completion.
+## 4. What is still NOT complete
 
-## 4. What is NOT complete yet
+Do not mark the entire app COMPLETE while these acceptance items remain unresolved:
 
-Do not mark the app COMPLETE while any of the following remains unresolved:
+1. **Real live COMPANY acceptance run on the deployed merged revision.** A bounded live superconductivity acceptance run was about to be started, but the connected Railway AI-agent tool hit its account usage limit before it could create the session/job. This is a tool-access blocker, not a successful or failed app research run.
+2. **Real COMPANY_PLUS live acceptance run** on the deployed merged revision.
+3. **Independent held-out answer-quality/extraction benchmark** with frozen grading/ground truth.
+4. **Persistent production storage** with real restart/restore/durability evidence. Current Railway web service has no attached volume according to the production service inspection on 2026-09-07.
+5. **Production-compatible isolated executor** on a supported off-laptop host with exact-revision receipts. Railway web itself is not proof of the Docker-in-Docker executor path.
+6. **Hard end-to-end research acceptance:** a demanding question must return all mandatory deliverables without being mislabeled COMPLETE when sections are missing.
+7. **Safe comparison/integration of unavailable local Windows work** (`7e36911` plus any uncommitted/untracked files) if/when those files are supplied.
+8. Any requirement still marked PARTIAL / MISSING / BLOCKED in `docs/INFINITY_REQUIREMENT_LEDGER.md`.
 
-1. Private confirmed-free model/provider configuration for the exact reviewed revision.
-2. Manual live COMPANY / COMPANY_PLUS research dispatch on that exact revision.
-3. Independent held-out answer-quality and extraction benchmark with frozen grading/ground truth.
-4. Persistent production storage with real restore/durability evidence.
-5. Production-compatible isolated executor on a supported off-laptop host with exact-revision receipts.
-6. Exact-revision production deployment and deployed HTTP/API verification.
-7. Hard end-to-end research acceptance: a demanding question must return all mandatory deliverables without being mislabeled COMPLETE when required sections are missing.
-8. Safe comparison/integration of the user's unavailable local Windows commit/work (`7e36911` plus uncommitted/untracked files) if/when those files are supplied to this workspace.
-9. Any requirement still marked PARTIAL / MISSING / BLOCKED in `docs/INFINITY_REQUIREMENT_LEDGER.md`.
-
-Current release truth from the last validated head: `HOST_VALIDATED_LIVE_NOT_VERIFIED`; `release_ready=false`.
+Current truthful release state: **MERGED + DEPLOYED + SOFTWARE/HOST VALIDATED; LIVE RESEARCH QUALITY NOT YET VERIFIED.**
 
 ## 5. Definition of DONE — mandatory
 
-No AI may say "done", "complete", "100%", "production ready", or equivalent merely because code exists or CI is green.
+No AI may say `done`, `complete`, `100%`, `production ready`, or equivalent merely because code exists, CI is green, or deployment succeeded.
 
 For this project, DONE requires all of the following on one traceable integrated revision:
 
-1. Required code is integrated in the completion branch and then merged to `main`.
-2. Exact-head required CI/workflows are green.
-3. The exact merged revision is deployed to the intended production service.
-4. Deployed revision identity is verified.
-5. Confirmed-free live model/provider configuration is verified without exposing secrets.
-6. Real COMPANY/COMPANY_PLUS live research runs complete through the public app path.
+1. Required code integrated and merged to `main`.
+2. Required exact-head CI/workflows green.
+3. Exact merged revision deployed to intended production service.
+4. Deployed revision identity verified.
+5. Confirmed-free live model/provider readiness verified without exposing secrets.
+6. Real `COMPANY` and `COMPANY_PLUS` live research runs complete through the deployed public app path.
 7. Independent held-out quality/extraction grading passes the predeclared acceptance contract.
-8. Persistent storage/restart/restore behavior is demonstrated on the production-compatible environment.
-9. Required executor/isolation path is demonstrated on its actual supported host.
+8. Persistent storage/restart/restore behavior demonstrated on a production-compatible environment.
+9. Required executor/isolation path demonstrated on its actual supported host.
 10. End-to-end hard acceptance questions return all mandatory sections; incomplete work must remain PARTIAL, never mislabeled COMPLETE.
-11. Remaining ledger items are either VERIFIED, explicitly N/A with justification, or honestly documented as accepted external limitations. No hidden MISSING/PARTIAL item may be silently ignored.
-
-Until then use precise states such as CODE COMPLETE, TESTED, HOST VALIDATED, LIVE NOT VERIFIED, DEPLOYMENT PENDING, PARTIAL, BLOCKED, or INCONCLUSIVE.
+11. Remaining ledger items are either VERIFIED, explicitly N/A with justification, or honestly documented as accepted external limitations.
 
 ## 6. Mandatory workflow for every future AI
 
 Before editing:
-
-1. Read this file completely.
-2. Read the top/current continuation in `WORK_STATUS.md`.
-3. Read `docs/INFINITY_REQUIREMENT_LEDGER.md` for current PARTIAL/MISSING/BLOCKED items.
-4. Inspect PR #79 current head/status and compare it with `main`.
-5. Inspect exact-head workflow results; never reuse a green receipt from an older SHA as proof for a newer SHA.
-6. Do not start a new feature wave merely because a new idea exists. First ask whether it closes one of the remaining acceptance blockers.
-7. Preserve other agents' branches and the user's unavailable local work. Do not reset/delete/overwrite it.
+1. Read `AGENTS.md`.
+2. Read this file completely.
+3. Read the top/current continuation in `WORK_STATUS.md`.
+4. Read `docs/INFINITY_REQUIREMENT_LEDGER.md` for PARTIAL/MISSING/BLOCKED items.
+5. Inspect current `main` SHA and exact-head workflows.
+6. Inspect Railway production revision before claiming deployment state.
+7. Do not start another broad feature wave until the remaining acceptance blockers above are closed or explicitly accepted.
+8. Preserve user/local/parallel-agent work; do not reset/delete/overwrite it.
 
 After any material change:
+1. Update this file with new SHA and verification state.
+2. Update `WORK_STATUS.md` and matching ledger rows.
+3. Re-run required exact-head gates.
+4. Record failures honestly; never weaken tests merely to obtain green CI.
+5. Re-verify deployed revision after merge/deploy.
 
-1. Update this file with the new current head SHA and verification state.
-2. Update `WORK_STATUS.md` current continuation.
-3. Update the matching rows in `docs/INFINITY_REQUIREMENT_LEDGER.md`.
-4. Update PR #79 description with exact evidence and remaining blockers.
-5. Run the required exact-head gates.
-6. Record failures as failures; do not weaken tests simply to obtain green CI.
-7. If a new head has not completed verification, explicitly mark it `VERIFICATION PENDING` rather than inheriting the prior head's PASS.
+## 7. Completion order
 
-## 7. Single-thread completion rule
+Current completion order is:
 
-PR #79 is the current completion vehicle. Avoid creating another broad AI-3/AI-4/company/reliability feature branch while PR #79 still contains unresolved acceptance work, unless isolation is technically required for a specific blocker and the new branch is explicitly planned to merge back into PR #79.
+`live COMPANY acceptance -> live COMPANY_PLUS acceptance -> independent quality benchmark -> persistent production storage/restore -> production executor receipts -> hard end-to-end acceptance -> remaining ledger closure`.
 
-New feature work must not outrank these acceptance blockers:
-
-`integration -> exact-head CI -> live confirmed-free run -> independent quality benchmark -> persistent production storage/executor -> exact-revision deploy -> end-to-end acceptance`.
-
-This ordering is intentionally strict so the project stops accumulating strong but unshipped half-completions.
+Do not restart already-merged AI Company implementation unless fixing a measured defect.
 
 ## 8. User constraints that must be preserved
 
@@ -147,7 +135,3 @@ This ordering is intentionally strict so the project stops accumulating strong b
 - Do not expose secrets in GitHub, UI, logs, APK or receipts.
 - Do not fabricate tests, metrics, live execution, scientific validation or success probabilities.
 - Human-facing answers should remain easy to understand while preserving evidence/audit detail.
-
-## 9. Why this file exists
-
-The project previously accumulated many good PRs and thousands of passing tests while the deployed app still lagged behind the intended integrated system. This handoff file makes completion state explicit and durable so a new AI does not restart finished work, confuse tests with deployment, or abandon acceptance work halfway through.
