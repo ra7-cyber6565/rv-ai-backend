@@ -8,9 +8,9 @@ kaam hai, sochna LLM ka; dono ko ek doosre ka bandhak nahi hona chahiye.
 Ye test wahi taala lagata hai:
 
     1. LLM BILKUL murda ho (har call fail) — tab bhi mode ke saare rounds
-       chalein (MAXIMUM = 3).
+       chalein (unified MAXIMUM = MARATHON ke 5 rounds).
     2. Round 2 aur 3 ki queries round 1 se ALAG hon (warna "round" ka koi
-       matlab nahi — wahi search teen baar).
+       matlab nahi — wahi search baar-baar).
     3. Round 1 mein sirf kachra mile to use "kaafi evidence" na maana jaaye.
     4. Ek round khud crash kar jaaye (connector exception) to baaki rounds
        chalte rahein, jawab phir bhi bane, status imaandaar rahe, aur raw
@@ -217,11 +217,11 @@ RAW_TOKENS = ("RuntimeError", "grpc_status", "quota_id", "retry_delay",
 
 # ── 1. LLM murda ho, phir bhi saare rounds ──────────────────────────────────
 def test_all_rounds_run_when_llm_is_dead():
-    print("\nLLM band — phir bhi MAXIMUM ke teeno round chalte hain")
+    print("\nLLM band — phir bhi unified MAXIMUM ke paanch round chalte hain")
     result, spy, fake = _run({1: JUNK_ROWS, 2: GOOD_ROWS, 3: GOOD_ROWS})
-    eq("teeno round chale", spy.rounds(), [1, 2, 3])
-    eq("coverage bhi 3 round batata hai",
-       result["coverage"]["research_rounds"], 3)
+    eq("paanch round chale", spy.rounds(), [1, 2, 3, 4, 5])
+    eq("coverage bhi 5 round batata hai",
+       result["coverage"]["research_rounds"], 5)
     check("LLM se ek bhi kaam ka jawab nahi aaya",
           result["status"] == "RESEARCH INCOMPLETE", result["status"])
     check("phir bhi round 2 ka kaam ka source pack mein pahuncha",
@@ -235,7 +235,7 @@ def test_later_rounds_use_different_queries():
     print("\nround 2/3 ki queries round 1 se alag hain")
     _, spy, _ = _run({1: JUNK_ROWS, 2: GOOD_ROWS, 3: GOOD_ROWS})
     q1, q2, q3 = (spy.queries_for(1), spy.queries_for(2), spy.queries_for(3))
-    check("teeno round ko queries mili", all([q1, q2, q3]), f"{q1}|{q2}|{q3}")
+    check("pehle teen round ko queries mili", all([q1, q2, q3]), f"{q1}|{q2}|{q3}")
     check("round 2 round 1 ki nakal nahi hai", set(q2) != set(q1), f"{q1} vs {q2}")
     check("round 3 bhi alag hai", set(q3) != set(q1) and set(q3) != set(q2),
           f"{q3}")
@@ -259,10 +259,10 @@ def test_junk_round_one_is_not_treated_as_enough():
 
 # ── 2. ek round crash — baaki zinda ─────────────────────────────────────────
 def test_crashed_round_does_not_kill_the_run():
-    print("\nround 2 crash — round 3 phir bhi chalta hai aur jawab banta hai")
+    print("\nround 2 crash — baaki Max rounds phir bhi chalte hain aur jawab banta hai")
     result, spy, _ = _run({1: GOOD_ROWS, 2: GOOD_ROWS, 3: GOOD_ROWS},
                           crash_rounds=(2,))
-    eq("crash ke baad bhi teeno round attempt hue", spy.rounds(), [1, 2, 3])
+    eq("crash ke baad bhi paanch round attempt hue", spy.rounds(), [1, 2, 3, 4, 5])
     check("jawab bana", len(result["answer"]) > 500, str(len(result["answer"])))
     check("sources bhi mile", len(result["sources"]) >= 1,
           str(len(result["sources"])))
@@ -292,9 +292,9 @@ def test_crash_warning_is_human_and_raw_text_stays_at_the_bottom():
 
 def test_every_round_crash_still_gives_an_honest_plan():
     print("\nsaare round crash — jawab, imaandaar status aur deterministic plan")
-    result, spy, _ = _run({1: GOOD_ROWS}, crash_rounds=(1, 2, 3))
-    eq("teeno round attempt hue (pehle crash par ruke nahi)", spy.rounds(),
-       [1, 2, 3])
+    result, spy, _ = _run({1: GOOD_ROWS}, crash_rounds=(1, 2, 3, 4, 5))
+    eq("paanch round attempt hue (pehle crash par ruke nahi)", spy.rounds(),
+       [1, 2, 3, 4, 5])
     eq("koi source nahi mila, aur ye chhupaya nahi gaya",
        len(result["sources"]), 0)
     eq("status imaandaar hai", result["status"], "RESEARCH INCOMPLETE")
@@ -304,8 +304,8 @@ def test_every_round_crash_still_gives_an_honest_plan():
           "agla-kadam plan" in result["answer"],
           result["answer"][:200])
     joined = " ".join(result.get("warnings", []))
-    check("teeno round ki kami warning mein hai",
-          "3 search round" in joined, joined[:300])
+    check("paanch round ki kami warning mein hai",
+          "5 search round" in joined, joined[:300])
     for token in RAW_TOKENS:
         check(f"insaani jawab mein raw '{token}' nahi",
               token not in _human_part(result["answer"]))
