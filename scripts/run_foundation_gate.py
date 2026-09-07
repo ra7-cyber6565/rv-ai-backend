@@ -157,6 +157,8 @@ class GateReceipt:
     passed: bool
     failed_stages: list[str]
     stages: list[dict]
+    ci_run_id: str = ""
+    ci_run_attempt: str = ""
 
 
 def _tail(text: str, lines: int = 80) -> list[str]:
@@ -315,6 +317,8 @@ def _write_receipt(
         failed.append("clean_repository_identity")
     receipt = GateReceipt(
         schema_version=2,
+        ci_run_id=os.getenv("GITHUB_RUN_ID", ""),
+        ci_run_attempt=os.getenv("GITHUB_RUN_ATTEMPT", ""),
         created_at_epoch=int(time.time()),
         python=sys.version.split()[0],
         repo_root=str(REPO_ROOT),

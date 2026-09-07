@@ -209,7 +209,18 @@ def _foundation_workflow_safe() -> AuditCheck:
         missing.append(
             "Node 24-compatible action major(s): " + ", ".join(legacy_actions)
         )
-    invalid_job_env = "INFINITY_DATA_ROOT: ${{ runner." in text
+    # Runner context is available to step env, but not workflow/job env.
+    # Scope this check to the repository's block-style env mappings instead
+    # of rejecting a valid step just because it uses the same variable name.
+    env_blocks = re.finditer(
+        r"(?m)^(?P<indent> *)env:\s*\n(?P<body>(?:(?P=indent) +[^\n]*\n?)*)",
+        text,
+    )
+    invalid_job_env = any(
+        len(block.group("indent")) <= 4
+        and re.search(r"\$\{\{\s*runner[.\[]", block.group("body"))
+        for block in env_blocks
+    )
     return AuditCheck(
         name="ci:foundation-workflow-valid-contexts",
         passed=bool(text) and not missing and not invalid_job_env,

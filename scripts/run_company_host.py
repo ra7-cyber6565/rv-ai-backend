@@ -306,7 +306,8 @@ def main(argv=None):
         venv_python = data_root / "host-venv" / "bin" / "python"
         if venv_python.is_file() and Path(sys.prefix).resolve() != (data_root / "host-venv").resolve():
             os.execv(str(venv_python), [str(venv_python), str(Path(__file__).resolve()), *(sys.argv[1:] if argv is None else argv)])
-        receipt = {"schema": 1, "created_at": time.time(), **inspect_host(args.expected_commit)}
+        receipt = {"schema": 1, "created_at": time.time(), "ci_run_id": os.getenv("GITHUB_RUN_ID", ""),
+                   "ci_run_attempt": os.getenv("GITHUB_RUN_ATTEMPT", ""), **inspect_host(args.expected_commit)}
         receipt.update(host_tests="NOT_TESTED", live_tests="NOT_TESTED", deployment="NOT_PERFORMED")
         if args.execute_host and receipt["host_ready"]:
             receipt["host_tests"] = run_isolation_suites()

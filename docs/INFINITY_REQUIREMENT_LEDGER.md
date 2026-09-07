@@ -6,6 +6,12 @@ research-team path in the existing application. **This ledger does not declare
 the entire specification complete.** A partial status is not an external blocker;
 remaining engineering work is named separately from unavailable live evidence.
 
+2026-09-07 continuation: default-on stored-data preservation and an opt-in
+GitHub-hosted live validation lane are implemented. The user's laptop no longer
+needs to be the test host. See `HOSTED_VALIDATION.md` for configuration, evidence
+requirements, retention scope and remaining production gaps. This does not
+remove any of the 22 requirements or count an unperformed live run as a pass.
+
 ## Current implementation — all 22 requirements
 
 The original inventory below records the first company implementation. These

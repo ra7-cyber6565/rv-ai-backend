@@ -1,0 +1,90 @@
+"""Offline authority/receipt/privacy contracts, not live provider evidence."""
+import contextlib
+import copy
+import io
+import json
+import os
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch
+from scripts import run_hosted_live_gate as gate
+
+SHA = 'a'*40
+
+def environment():
+    return dict(GITHUB_ACTIONS='true',GITHUB_EVENT_NAME='workflow_dispatch',RUNNER_ENVIRONMENT='github-hosted',
+                RUNNER_OS='Linux',GITHUB_REPOSITORY=gate.REPOSITORY,INFINITY_REPOSITORY_PRIVATE='false',
+                INFINITY_HOSTED_LIVE_REQUESTED='true',INFINITY_REVIEWED_COMMIT=SHA,GITHUB_SHA=SHA,
+                GITHUB_RUN_ID='123',GITHUB_RUN_ATTEMPT='1',GEMINI_MODEL='fixture-model')
+
+def proofs():
+    common=dict(code_revision=SHA,repository_clean=True,ci_run_id='123',ci_run_attempt='1')
+    foundation=dict(common,passed=True,offline_zero_cost=True,
+        stages=[dict(name=n,status='passed',returncode=0) for n in gate.REQUIRED_STAGES])
+    host=dict(common,host_tests={label:dict(passed=True,tests_run=n,skipped=0,exit_status=0) for label,n in [('isolated_builds',10),('protected_improvement',7)]},
+        localhost_smoke=dict(complete=True,expected_code_revision=SHA,deployed_code_revision=SHA,
+                             checks=[dict(name='fixture_'+str(i),passed=True) for i in range(20)]),
+        runtimes={language:dict(ready=True,image='sha256:'+'b'*64) for language in ['python','node']})
+    return foundation,host
+
+
+class HostedLiveGateTests(unittest.TestCase):
+    def test_selection_rejects_automatic_private_self_hosted_and_mismatched_runs(self):
+        good=environment(); identity=dict(clean=True,revision=SHA)
+        self.assertEqual(gate.selection(good,identity),[])
+        for key,value in [('GITHUB_EVENT_NAME','pull_request'),('RUNNER_ENVIRONMENT','self-hosted'),
+                          ('INFINITY_REPOSITORY_PRIVATE','true'),('INFINITY_HOSTED_LIVE_REQUESTED','false'),
+                          ('GITHUB_SHA','b'*40),('GITHUB_RUN_ID','')]:
+            with self.subTest(key=key):
+                self.assertTrue(gate.selection(dict(good,**{key:value}),identity))
+        self.assertTrue(gate.selection(good,dict(identity,clean=False)))
+
+    def test_source_and_workflow_attempt_bound_proofs(self):
+        f,h=proofs(); self.assertEqual(set(gate.validate_receipts(f,h,environment())),{'python','node'})
+        for key,value in [('code_revision','b'*40),('ci_run_id','122'),('ci_run_attempt','2'),('repository_clean',False)]:
+            for which in ('foundation','host'):
+                a,b=copy.deepcopy(f),copy.deepcopy(h)
+                (a if which=='foundation' else b)[key]=value
+                with self.subTest(key=key,which=which),self.assertRaises(gate.HostedGateBlocked):
+                    gate.validate_receipts(a,b,environment())
+
+    def test_zero_skipped_empty_and_failed_prerequisites_never_pass(self):
+        for field,value in [('tests_run',0),('tests_run',True),('skipped',1),('exit_status',1),('passed',False)]:
+            f,h=proofs();h['host_tests']['isolated_builds'][field]=value
+            with self.subTest(field=field),self.assertRaises(gate.HostedGateBlocked):
+                gate.validate_receipts(f,h,environment())
+        f,h=proofs(); f['stages']=[]
+        with self.assertRaises(gate.HostedGateBlocked):gate.validate_receipts(f,h,environment())
+        f,h=proofs();h['localhost_smoke']['checks'][0]['passed']=False
+        with self.assertRaises(gate.HostedGateBlocked):gate.validate_receipts(f,h,environment())
+
+    def test_public_summary_does_not_forward_provider_or_source_payload(self):
+        summary=gate.summarize({'COMPANY':dict(passed=False,receipt={'answer':'PRIVATE_SOURCE','secret':'PRIVATE_KEY',
+            'checks':[dict(name='worker_check',passed=False,detail='PRIVATE_SOURCE')]})})
+        self.assertNotIn('PRIVATE',json.dumps(summary))
+
+    def test_preflight_never_calls_models_and_execution_needs_both_modes(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base=Path(temp);env=dict(environment(),RUNNER_TEMP=temp,INFINITY_DATA_ROOT=str(base/'live'),INFINITY_PREREQUISITE_ROOT=str(base/'proof'))
+            (base/'proof'/'audit').mkdir(parents=True)
+            f,h=proofs()
+            for name,record in [('foundation_gate_ci.json',f),('company_host_latest.json',h)]:
+                (base/'proof'/'audit'/name).write_text(json.dumps(record))
+            with patch.dict(os.environ,env,clear=True),patch.object(gate,'repository_identity',return_value=dict(clean=True,revision=SHA)),patch.object(gate,'preflight',return_value={'ready':True}),patch.object(gate,'run_live_modes') as live,contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gate.main([]),0);live.assert_not_called()
+                live.return_value={'COMPANY':dict(passed=True,receipt={'checks':[]})}
+                self.assertEqual(gate.main(['--execute']),1)
+                live.return_value={m:dict(passed=True,receipt={'checks':[]}) for m in ['COMPANY','COMPANY_PLUS']}
+                self.assertEqual(gate.main(['--execute']),0)
+                result=json.loads((base/'live'/'audit'/'hosted_live_gate.json').read_text())
+                self.assertTrue(result['passed']);self.assertFalse(result['release_ready'])
+                self.assertFalse(result['production_deployed'])
+
+    def test_missing_eligibility_cannot_execute(self):
+        with patch.dict(os.environ,{},clear=True),patch.object(gate,'run_live_modes') as live,contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(gate.main(['--execute']),2);live.assert_not_called()
+
+
+if __name__ == '__main__':
+    unittest.main()

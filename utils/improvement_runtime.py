@@ -70,7 +70,13 @@ class ImprovementStore:
         diagnosis = diagnose_stage_failures([StageObservation(key, "FAIL", error_class=key) for key in counts])
         version = code_version()
         proposals = []
+        from utils.data_preservation import preserve_stored_data
         with self.store.transaction() as db:
+            if preserve_stored_data():
+                existing = {r[0] for r in db.execute("SELECT id FROM improvement_proposals WHERE project=?", (project,))}
+                proposed = {digest([project, run, category])[:32] for category in counts}
+                if len(existing | proposed) > 100:
+                    raise RuntimeError("Stored improvement proposal capacity reached; existing proposals retained")
             for category, number in sorted(counts.items()):
                 identity = digest([project, run, category])[:32]
                 payload = {"id": identity, "category": category, "state": "PROPOSED", "observations": number,
@@ -82,7 +88,8 @@ class ImprovementStore:
                 db.execute("INSERT OR IGNORE INTO improvement_proposals VALUES(?,?,?,?,?)",
                            (project, identity, run, time.time(), json.dumps(payload)))
                 proposals.append(json.loads(db.execute("SELECT payload FROM improvement_proposals WHERE project=? AND id=?", (project, identity)).fetchone()[0]))
-            db.execute("DELETE FROM improvement_proposals WHERE project=? AND id NOT IN (SELECT id FROM improvement_proposals WHERE project=? ORDER BY created DESC LIMIT 100)", (project, project))
+            if not preserve_stored_data():
+                db.execute("DELETE FROM improvement_proposals WHERE project=? AND id NOT IN (SELECT id FROM improvement_proposals WHERE project=? ORDER BY created DESC LIMIT 100)", (project, project))
         return proposals
 
     def inspect(self, project):

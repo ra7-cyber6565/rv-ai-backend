@@ -2,6 +2,30 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Current continuation — ChatGPT, 2026-09-07
+
+- User superseded laptop setup: no further Windows/WSL/Docker installs, no
+  deletion of existing files, and no large laptop downloads. Work continues
+  through the existing draft PR #79 and hosted CI. The original Windows main
+  at 7e36911 and its untracked/modified source remain unavailable for integration.
+- Stored-data preservation is now default-on: archive-copy cleanup, durable job
+  eviction, expired runtime pruning and proposal eviction retain existing data.
+  Full histories pause new work; unfinished reading files remain recoverable.
+  Existing explicit memory-edit/delete controls and failed-operation temporary
+  cleanup are separate. This is not a universal disk quota or unlimited storage.
+- Added an opt-in hosted COMPANY/COMPANY_PLUS live runner, requiring manual
+  dispatch, the full reviewed clean commit, same-run/attempt passing foundation,
+  actual container and localhost API receipts, and privately confirmed-free
+  credentials. Normal push/PR CI has no live model credentials or calls.
+- Local checks: twelve existing/new stdlib checks passed; two added integration
+  checks cannot import without sympy here. Architecture audit passes after
+  correcting job-versus-step runner-context detection. Final exact-head CI is
+  pending at authoring; the PR description records the eventual result.
+- `docs/HOSTED_VALIDATION.md` is the current handoff. Hosted live execution,
+  independent answer-quality comparisons, persistent production storage and
+  a production-compatible isolated executor are not verified by this change.
+  Existing Railway main has not been deployed or reconfigured.
+
 ## Current continuation — ChatGPT, 2026-09-06
 
 - Host continuation adds the private Linux/WSL preparation and validation
@@ -70,7 +94,7 @@ This file is the coordination source of truth for multi-agent work.
 
 Question -> Research Planner -> domain identification -> query expansion -> multi-source discovery -> retrieval -> document/media processing -> evidence extraction -> relevance/source-quality/contradiction checks -> multi-angle reasoning -> hypothesis generation -> criticism/falsification -> verification/math/simulation where possible -> synthesis -> human-first answer -> technical audit.
 
-Storage target: GitHub = code/version history; laptop D: = bounded fast runtime/working storage; Google Drive = temporary optional archive; TeraBox = optional later archive only after official zero-cost API approval. Remote upload must be verified before any local deletion.
+Storage target (supersedes earlier laptop setup): GitHub = code/version history and hosted verification. The user's laptop is not the required execution host. Existing stored data is retained by default, including verified archive copies; bounded stores pause admission instead of reclaiming user data. Persistent production storage remains to be provisioned and verified. Optional Drive/TeraBox adapters do not imply that an account or approved zero-cost API is connected.
 
 ## ChatGPT scope — do not shrink
 

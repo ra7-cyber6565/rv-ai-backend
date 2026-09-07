@@ -111,6 +111,21 @@ def test_order_check_fails_when_verification_moves_before_discovery(monkeypatch,
     assert result.passed is False
 
 
+def test_foundation_workflow_accepts_step_runner_env_but_rejects_job_runner_env(monkeypatch):
+    original = audit._read(".github/workflows/foundation-tests.yml")
+    assert "INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-live" in original
+    monkeypatch.setattr(audit, "_read", lambda _: original)
+    assert audit._foundation_workflow_safe().passed
+    invalid = original.replace(
+        "INFINITY_DATA_ROOT: /tmp/rv-ai-infinity-data",
+        "INFINITY_DATA_ROOT: ${{ runner.temp }}/data",
+    )
+    monkeypatch.setattr(audit, "_read", lambda _: invalid)
+    assert not audit._foundation_workflow_safe().passed
+    monkeypatch.setattr(audit, "_read", lambda _: "env:\n  BAD: ${{ runner.temp }}\n" + original)
+    assert not audit._foundation_workflow_safe().passed
+
+
 def test_required_files_check_fails_closed(monkeypatch, tmp_path):
     (tmp_path / "exists.py").write_text("pass\n", encoding="utf-8")
     monkeypatch.setattr(audit, "ROOT", tmp_path)

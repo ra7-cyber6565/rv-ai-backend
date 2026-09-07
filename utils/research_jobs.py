@@ -41,6 +41,7 @@ from typing import Any, Callable, Dict, Optional
 from utils.process_lock import ExclusiveProcessFileLock, ProcessLockError
 from utils.storage_paths import configured_root, ensure_layout
 from utils.storage_quota import assert_capacity
+from utils.data_preservation import preserve_stored_data
 
 
 def _positive_int(name: str, default: int, maximum: int) -> int:
@@ -483,6 +484,8 @@ class ResearchJobRunner:
         ``cleanup_verified_archives`` so manifest ``local_deleted`` state stays
         correct and no second deletion implementation drifts from the safety rule.
         """
+        if preserve_stored_data():
+            return False
         path = self._result_path(job)
         if not path or not os.path.exists(path):
             return True
@@ -624,6 +627,10 @@ class ResearchJobRunner:
 
         with self._lock:
             self._prune_locked()
+            if len(self._jobs) >= self.max_jobs:
+                raise RuntimeError("Stored research history capacity reached; existing results are retained. New jobs are paused.")
+            if self._inside_configured_root(self._result_dir):
+                assert_capacity(self.max_result_bytes)
             self._jobs[job_id] = job
             self._persist_locked()
             future = self._executor.submit(self._execute, job_id, custom or {}, run)
@@ -752,6 +759,8 @@ class ResearchJobRunner:
             return [j.public() for j in jobs[:limit]]
 
     def _prune_locked(self) -> None:
+        if preserve_stored_data():
+            return
         if len(self._jobs) < self.max_jobs:
             return
         finished_states = {"completed", "failed", "interrupted", "cancelled"}

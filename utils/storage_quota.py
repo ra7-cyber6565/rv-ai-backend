@@ -12,6 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from utils.data_preservation import preserve_stored_data
 from utils.archive_manifest import ArchiveManifest
 from utils.storage_paths import configured_root
 
@@ -102,8 +103,8 @@ def assert_capacity(extra_bytes: int, policy: StoragePolicy | None = None) -> di
     state = storage_pressure(extra_bytes=extra_bytes, policy=policy)
     if state["blocked"]:
         raise StorageQuotaError(
-            "Local working storage safety limit reached; archive/cleanup verified files "
-            "or increase the explicitly configured limit."
+            "Storage capacity reached; new work is paused. Existing stored data is retained. "
+            "Provision verified storage capacity before retrying."
         )
     return state
 
@@ -128,6 +129,11 @@ def cleanup_verified_archives(
     - local path must be inside configured Infinity storage root;
     - symlinks are never deleted through this cleanup path.
     """
+    if preserve_stored_data():
+        return {"target_reclaim_bytes": max(0, int(target_reclaim_bytes)),
+                "reclaimed_bytes": 0, "deleted_count": 0, "deleted": [],
+                "skipped": [{"reason": "stored_data_preservation_enabled"}],
+                "preservation_enabled": True}
     root, _ = configured_root()
     reclaimed = 0
     deleted: list[str] = []

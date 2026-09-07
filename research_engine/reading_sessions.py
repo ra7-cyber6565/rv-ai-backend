@@ -238,6 +238,11 @@ class ReadingSessionStore:
         project_dir = self._project_dir(project_id)
         project_dir.mkdir(parents=True, exist_ok=True)
         with self._thread_lock, ExclusiveProcessFileLock(str(self._lock_path(project_id))):
+            from utils.data_preservation import preserve_stored_data
+            orphans = [p for p in project_dir.glob("read_*.pdf") if not p.with_suffix(".json").exists()]
+            partials = list(project_dir.glob("read_*.pdf.copying"))
+            if preserve_stored_data() and (orphans or partials):
+                raise ReadingSessionError("Stored unfinished PDF requires recovery; new reading sessions paused and existing files retained")
             # A hard crash can occur after the atomic PDF move but before its
             # first JSON receipt. Under the project-create lock, a PDF with no
             # matching state can never be a resumable/active session; remove
@@ -250,7 +255,7 @@ class ReadingSessionStore:
             existing = sorted(project_dir.glob("read_*.json"))
             if len(existing) >= self.max_sessions:
                 raise ReadingSessionError(
-                    f"project reading-session limit reached ({self.max_sessions}); purani session ko archive/remove karna hoga"
+                    f"Project reading-session capacity reached ({self.max_sessions}); existing sessions retained. New sessions paused pending additional verified capacity."
                 )
 
             session_id = f"read_{secrets.token_urlsafe(24)}"

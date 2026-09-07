@@ -95,6 +95,8 @@ class AgentManager:
 
     def _research_with_runtime(self, question: str, project_id: str,
                               depth_mode: str, custom: Optional[Dict], job_id: Optional[str]) -> Dict:
+        from utils.storage_quota import assert_capacity
+        assert_capacity(0)  # Stop before retrieval/model calls when storage is already full.
         runtime_id = job_id if job_id and job_id != project_id and re.fullmatch(r"[a-f0-9]{32}", job_id) else uuid.uuid4().hex
         from .depth import get_depth_config
         from utils.research_runtime import RuntimeStore, RunContext, bind, digest, code_version, checkpoint

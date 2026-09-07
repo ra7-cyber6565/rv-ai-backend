@@ -195,3 +195,12 @@ def test_disabled_archive_does_not_create_retry_intent(tmp_path, monkeypatch):
     assert retry.summary()["pending"] == 0
     assert runtime.local_delete_allowed(str(local), "unused/local.bin") is True
     runtime.close()
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

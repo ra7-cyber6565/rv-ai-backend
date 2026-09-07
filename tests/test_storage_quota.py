@@ -71,3 +71,12 @@ def test_cleanup_refuses_verified_path_outside_configured_root():
         assert result["deleted_count"] == 0
         assert os.path.exists(path)
         assert any(entry["reason"] == "outside_storage_root" for entry in result["skipped"])
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

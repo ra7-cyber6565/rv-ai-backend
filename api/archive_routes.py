@@ -65,5 +65,6 @@ def cleanup_archive(
         "deleted_count": int(result.get("deleted_count", 0) or 0),
         "skipped_count": sum(reasons.values()),
         "skipped_by_reason": dict(sorted(reasons.items())),
-        "rule": "Only exact cloud-VERIFIED records inside configured storage root are eligible.",
+        "preservation_enabled": bool(result.get("preservation_enabled", False)),
+        "rule": "Stored data preservation blocks cleanup." if result.get("preservation_enabled") else "Only exact cloud-VERIFIED records inside configured storage root are eligible.",
     }

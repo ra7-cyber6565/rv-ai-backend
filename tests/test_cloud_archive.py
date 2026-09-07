@@ -61,3 +61,12 @@ def test_verification_mismatch_never_deletes_local_file():
         item = manifest.get(result["sha256"])
         assert item["status"] == "uploaded_unverified"
         assert item["verified"] is False
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

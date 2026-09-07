@@ -80,6 +80,9 @@ def _decode(value):
     return value
 
 
+from utils.data_preservation import preserve_stored_data
+
+
 class RuntimeStore:
     def __init__(self, path=None):
         if path is None:
@@ -140,7 +143,7 @@ class RuntimeStore:
             else:
                 # Expired checkpoints cannot resume after their original deadline;
                 # retain them for six further days for inspection, then prune.
-                expired = db.execute("SELECT project,run FROM runs WHERE deadline<?", (time.time()-6*86400,)).fetchall()
+                expired = [] if preserve_stored_data() else db.execute("SELECT project,run FROM runs WHERE deadline<?", (time.time()-6*86400,)).fetchall()
                 for old in expired:
                     for table in ("stages", "events", "runs"):
                         db.execute(f"DELETE FROM {table} WHERE project=? AND run=?", (old["project"], old["run"]))

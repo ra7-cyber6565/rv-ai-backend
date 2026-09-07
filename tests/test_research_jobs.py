@@ -248,3 +248,12 @@ def test_corrupt_json_is_quarantined_but_valid_write_failure_is_not(tmp_path, mo
         ResearchJobRunner(max_workers=1, max_jobs=5, store_path=str(valid), persist=True)
     assert valid.exists()
     assert not list(tmp_path.glob("valid-jobs.json.corrupt-*"))
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

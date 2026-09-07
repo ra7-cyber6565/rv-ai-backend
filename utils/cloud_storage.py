@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
+from utils.data_preservation import preserve_stored_data
 from utils.archive_manifest import ArchiveManifest
 from utils.archive_retry import ArchiveRetryQueue
 
@@ -119,7 +120,7 @@ class ArchiveCoordinator:
             pass
 
         deleted = False
-        if delete_local:
+        if delete_local and not preserve_stored_data():
             if not self.manifest.safe_to_delete_local(archive_id):
                 raise RuntimeError("Local file delete blocked: cloud copy verified nahi hai")
             os.remove(local_path)
@@ -135,6 +136,7 @@ class ArchiveCoordinator:
             "sha256": digest,
             "verified": bool(final.get("verified")),
             "local_deleted": deleted,
+            "preservation_enabled": preserve_stored_data(),
         }
 
     def retry_due(self, *, limit: int = 5) -> dict:

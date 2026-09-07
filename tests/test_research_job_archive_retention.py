@@ -116,3 +116,12 @@ def test_pruning_fails_closed_if_enabled_archive_intent_cannot_be_persisted(tmp_
     assert runner.get(first.job_id) is not None
     assert first_path.exists()
     runner.close()
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")
