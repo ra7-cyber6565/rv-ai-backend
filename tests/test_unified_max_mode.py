@@ -35,7 +35,7 @@ def test_public_ui_contract_is_chat_and_max_only():
     source = Path("main.py").read_text(encoding="utf-8")
     # The response transformer replaces the whole mode selector with exactly
     # the two public choices. Legacy backend names can still exist elsewhere.
-    assert 'r\'<div class="modes">.*?</div>\'' in source
+    assert '<div class="modes">.*?</div>' in source
     assert 'data-mode="QUICK">Chat</button>' in source
     assert 'data-mode="MAXIMUM">Max</button>' in source
     assert "Public users intentionally see only two choices: Chat and Max." in source
