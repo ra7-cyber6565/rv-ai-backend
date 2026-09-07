@@ -255,7 +255,7 @@ class ReadingSessionStore:
             existing = sorted(project_dir.glob("read_*.json"))
             if len(existing) >= self.max_sessions:
                 raise ReadingSessionError(
-                    f"Project reading-session capacity reached ({self.max_sessions}); existing sessions retained. New sessions paused pending additional verified capacity."
+                    f"Project reading-session capacity limit reached ({self.max_sessions}); existing sessions retained. New sessions paused pending additional verified capacity."
                 )
 
             session_id = f"read_{secrets.token_urlsafe(24)}"

@@ -109,16 +109,17 @@ class DataPreservationTests(unittest.TestCase):
         self.assertEqual(len(store.observe('other', 'new', failed=True)), 1)
 
     def test_unfinished_reading_files_are_preserved_and_block_additional_copies(self):
-        from research_engine.reading_sessions import ReadingSessionStore, ReadingSessionError
+        from research_engine.reading_sessions import ReadingSessionStore, ReadingSessionError, build_metadata
         store = ReadingSessionStore(self.root / 'reading')
         source = self.root / 'incoming.pdf'; source.write_bytes(b'new source')
+        metadata = build_metadata(filename='incoming.pdf', access_basis='user_owned_copy')
         for name in ('read_crashed.pdf', 'read_partial.pdf.copying'):
             with self.subTest(name=name):
                 folder = store._project_dir(name)
                 folder.mkdir(parents=True)
                 orphan = folder / name; orphan.write_bytes(b'previous unfinished document')
                 with self.assertRaisesRegex(ReadingSessionError, 'retained'):
-                    store.create(name, source, {'filename': 'incoming.pdf'})
+                    store.create(name, source, metadata)
                 self.assertEqual(orphan.read_bytes(), b'previous unfinished document')
                 self.assertFalse(list(folder.glob('read_*.json')))
         self.assertEqual(source.read_bytes(), b'new source')
