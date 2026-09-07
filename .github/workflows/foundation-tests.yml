@@ -6,6 +6,15 @@ on:
   push:
     branches: [main, chatgpt-upload-safety, chatgpt-max-maturity-wave1-20260827]
   workflow_dispatch:
+    inputs:
+      live_company:
+        description: Run confirmed-free COMPANY and COMPANY_PLUS after all offline/host checks
+        type: boolean
+        default: false
+      reviewed_commit:
+        description: Full reviewed commit SHA (required only for live_company)
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -17,7 +26,7 @@ concurrency:
 jobs:
   offline-regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: ${{ github.event_name == 'workflow_dispatch' && inputs.live_company && 150 || 45 }}
     env:
       ZERO_COST_ONLY: "true"
       RATE_LIMIT_ENABLED: "true"
@@ -29,6 +38,8 @@ jobs:
     steps:
       - name: Checkout integrated branch/PR code
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -165,11 +176,56 @@ jobs:
             --timeout-seconds 900 \
             --receipt "${INFINITY_DATA_ROOT}/audit/foundation_gate_ci.json"
 
+      - name: Parse Windows company host launcher
+        shell: pwsh
+        run: |
+          $parseErrors = $null
+          $parsedTokens = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path (Get-Location) "RUN_COMPANY_HOST.ps1"), [ref]$parsedTokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw "Company host launcher syntax failed" }
+
+      - name: Validate actual isolated builds, improvement trials and localhost API
+        run: |
+          docker build -t infinity-executor-ci -f tests/fixtures/executor.Dockerfile tests/fixtures
+          export INFINITY_BUILD_EXECUTOR=docker
+          export INFINITY_PYTHON_IMAGE="$(docker image inspect infinity-executor-ci --format '{{.Id}}')"
+          export INFINITY_NODE_IMAGE="${INFINITY_PYTHON_IMAGE}"
+          export INFINITY_REAL_EXECUTOR_TEST=1
+          python scripts/run_company_host.py --data-root "${INFINITY_DATA_ROOT}" --execute-host --check-local-api --port 8765
+
+      - name: Run opt-in hosted company live validation
+        if: ${{ success() && github.event_name == 'workflow_dispatch' && inputs.live_company }}
+        env:
+          INFINITY_HOSTED_LIVE_REQUESTED: "true"
+          INFINITY_REVIEWED_COMMIT: ${{ inputs.reviewed_commit }}
+          INFINITY_REPOSITORY_PRIVATE: ${{ github.event.repository.private }}
+          INFINITY_PREREQUISITE_ROOT: /tmp/rv-ai-infinity-data
+          INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-live
+          INFINITY_PRESERVE_STORED_DATA: "true"
+          INFINITY_MAX_LOCAL_GB: "2"
+          INFINITY_OFFLINE_TEST: "false"
+          RESEARCH_COMPANY_CONCURRENCY: "2"
+          GEMINI_API_KEY: ${{ secrets.INFINITY_LIVE_GEMINI_KEY }}
+          GEMINI_ZERO_COST_CONFIRMED: ${{ secrets.INFINITY_LIVE_ZERO_COST_CONFIRMED }}
+          GEMINI_MODEL: ${{ vars.INFINITY_LIVE_GEMINI_MODEL }}
+        run: python scripts/run_hosted_live_gate.py --execute
+
+      - name: Upload sanitized hosted live receipt
+        if: ${{ always() && github.event_name == 'workflow_dispatch' && inputs.live_company }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: hosted-live-receipt-${{ github.run_id }}
+          path: ${{ runner.temp }}/infinity-live/audit/hosted_live_gate.json
+          if-no-files-found: warn
+          retention-days: 1
+
       - name: Upload foundation receipt
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: foundation-gate-receipt-${{ github.run_id }}
-          path: /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
+          path: |
+            /tmp/rv-ai-infinity-data/audit/foundation_gate_ci.json
+            /tmp/rv-ai-infinity-data/audit/company_host_latest.json
           if-no-files-found: warn
           retention-days: 1

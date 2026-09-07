@@ -285,3 +285,12 @@ def test_resumed_vector_batches_use_stable_upsert_ids_not_random_hashes():
     ids = [call["ids"] for call in vector._pipeline.collection.upserts]
     assert ids[0] == ids[1]
     assert ids[0][0].startswith("chunk_") and len(ids[0][0]) == len("chunk_") + 32
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

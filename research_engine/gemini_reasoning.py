@@ -478,6 +478,8 @@ class GeminiReasoning:
             from .gemini_model import call_timeout as _call_timeout
             request_timeout = _call_timeout()
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
+                from utils.research_runtime import reserve_request
+                reserve_request("gemini", request_prompt, 6000)
                 self.attempts += 1
                 self.prompt_attempt_log.append({
                     "label": tag,

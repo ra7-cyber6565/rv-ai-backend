@@ -753,6 +753,11 @@ def shared(directory: Optional[str] = None) -> ConceptLedger:
     global _SHARED
     if directory:
         return ConceptLedger(directory)
+    from utils.research_runtime import current, digest
+    context = current()
+    if context:
+        # Private questions must not teach a global cross-project hint cache.
+        return ConceptLedger(os.path.join(_default_dir(), "projects", digest(context.project)))
     if _SHARED is None:
         _SHARED = ConceptLedger()
     return _SHARED

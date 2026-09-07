@@ -218,6 +218,7 @@ def test_job_result_route_enforces_quality_on_copy_after_progress_is_attached(mo
         "_authorized_job",
         lambda *args, **kwargs: {
             "job_id": "job-safe",
+            "project_id": "fixture-project",
             "status": "completed",
             "result": stored,
         },

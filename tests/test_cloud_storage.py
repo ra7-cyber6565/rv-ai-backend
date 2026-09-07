@@ -189,3 +189,12 @@ def test_same_content_can_be_verified_in_drive_then_terabox_without_manifest_col
         # Legacy hash lookup becomes intentionally ambiguous and must not silently
         # choose one cloud copy.
         assert manifest.get(drive_out["sha256"]) is None
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

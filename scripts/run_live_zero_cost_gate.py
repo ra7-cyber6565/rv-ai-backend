@@ -36,7 +36,7 @@ RAW_PUBLIC_TOKENS = (
     "traceback", "protobuf", "permissiondenied", "invalidargument",
     "generaterequestsperday", "<class", "api_key=",
 )
-LIVE_DEPTH_MODES = ("MAXIMUM", "MARATHON")
+LIVE_DEPTH_MODES = ("MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS")
 
 
 def _truthy(value: object) -> bool:
@@ -419,6 +419,41 @@ def evaluate_result(
                 "no global exhaustion or hypothesis success-probability claim",
             ),
         ])
+    if requested_mode in {"COMPANY", "COMPANY_PLUS"}:
+        company = verification.get("research_company") or {}
+        expected_workers = 4 if requested_mode == "COMPANY" else 6
+        workers = company.get("workers") or []
+        workers = [row for row in workers if isinstance(row, Mapping)]
+        ready = [row for row in workers if row.get("status") == "DRAFT_READY"]
+        def positive_count(row, name):
+            value = (row.get("accounting") or {}).get(name)
+            return type(value) is int and value > 0
+        chief = company.get("chief_execution") or {}
+        runtime = result.get("runtime_execution") or {}
+        attempts = runtime.get("reserved_http_attempts")
+        checks.extend([
+            ("company_public_runtime_executed", runtime.get("available") is True
+             and runtime.get("event_durability") == "SQLITE_TRANSACTION"
+             and runtime.get("cancelled") is False and type(attempts) is int
+             and attempts >= expected_workers + 2,
+             "public manager runtime and worker/chief attempt reservations present"),
+            ("company_workers_executed",
+             len(workers) == len(ready) == expected_workers
+             and len({row.get("worker_id") for row in workers if row.get("worker_id")}) == expected_workers
+             and all(positive_count(row, "actual_http_attempts")
+                     and positive_count(row, "successful_calls") for row in workers),
+             f"{len(ready)}/{expected_workers} complete worker receipts"),
+            ("company_usage_complete", company.get("accounting_complete") is True
+             and accounting.get("accounting_complete") is True
+             and all(row.get("accounting_complete") is True for row in workers),
+             "no missing/unknown worker usage receipts"),
+            ("company_chief_executed", {"analysis", "synthesis"}.issubset(set(chief.get("done_passes") or []))
+             and positive_count(chief, "successful_calls"),
+             "chief analysis and synthesis have execution receipts"),
+            ("company_no_false_replication", company.get("independent_scientific_replication") is False
+             and company.get("experiments_performed_by_workers") is False,
+             "text workers are not scientific or clinical replication"),
+        ])
     rows = [{"name": name, "passed": bool(passed), "detail": detail}
             for name, passed, detail in checks]
     return {
@@ -547,14 +582,21 @@ def _write_receipt_safely(path: Path, payload: Mapping[str, Any]) -> bool:
 
 
 def run_live(depth_mode: str = "MAXIMUM") -> Dict[str, Any]:
-    from research_engine.orchestrator import DeepResearchEngine
+    from research_engine.agent_manager import AgentManager
+    import uuid
 
     mode = str(depth_mode or "").upper().strip()
     if mode not in LIVE_DEPTH_MODES:
         raise ValueError("unsupported live-gate depth mode")
-    project = f"live_gate_{int(time.time())}"
-    engine = DeepResearchEngine(project_id=project, enable_kg=False, enable_memory=False)
-    return engine.research(LIVE_QUESTION, depth_mode=mode, job_id=project)
+    job = uuid.uuid4().hex
+    project = "live_gate_" + job
+    # Same manager as public research: quotas, checkpoints, governed memory and
+    # task coverage must execute in the live gate too.
+    manager = AgentManager()
+    try:
+        return manager.research(LIVE_QUESTION, project_id=project, depth_mode=mode, job_id=job)
+    finally:
+        manager.drop(project)
 
 
 def main(argv: Sequence[str] | None = None) -> int:

@@ -25,6 +25,8 @@ Do sabse important design decisions:
 from __future__ import annotations
 
 import re
+from dataclasses import replace
+from utils.research_runtime import checkpoint, check_cancelled
 from typing import Dict, List, Optional
 
 from .citation import CitationEngine
@@ -45,6 +47,7 @@ from .evidence_drafting import (
 from .epistemic_governance import build_runtime_evidence_packet
 from .experiment_intelligence import build_runtime_experiment_packet
 from .gemini_reasoning import GeminiReasoning, QuotaExhausted
+from .research_company import run_company, chief_handoff, attach_company_passes, generate_company_chief
 from .hypothesis import HypothesisEngine
 from .knowledge_graph import KnowledgeGraphAdapter
 from .knowledge_watch import KnowledgeWatch, update_from_research_run
@@ -128,6 +131,7 @@ class DeepResearchEngine:
             pass
 
     def _track(self, job_id: Optional[str], stage: str, note: str = "") -> None:
+        check_cancelled()
         if not job_id:
             return
         try:
@@ -887,7 +891,17 @@ class DeepResearchEngine:
             4-5     → analysis + critique + dedicated hypothesis + synthesis
                       (sirf CUSTOM mode, jahan user khud budget badha sakta hai)
         """
+        company = None
+        if getattr(config, "company_agents", 0):
+            self._track(job_id, "SPECIALIST_ANALYSIS",
+                        f"{config.company_agents} specialist workers: independent drafts, shared evidence")
+            company = run_company(question, pack, config)
+            memory_note = chief_handoff(company) + "\n" + memory_note
+            config = replace(config, gemini_calls=company["chief_call_budget"])
         brain = GeminiReasoning(budget=config.gemini_calls)
+        generate = brain.generate
+        if company is not None:
+            generate = lambda prompt, label="": generate_company_chief(brain, prompt, label)
         # #130 — gaane ki farmaish par "hunar kya kehta hai" wala padha hua
         # hissa. Ye poora offline hai (0 Gemini call, koi network nahi): jo
         # sources DISCOVERY me pehle se aa chuke hain, unhi me se craft ki
@@ -1103,7 +1117,7 @@ class DeepResearchEngine:
                     self._track(job_id, "HYPOTHESIS",
                                 f"{hypothesis_count} hypotheses (pehli call ke andar)")
                     prompt += self.hypotheses.prompt_appendix(hypothesis_count)
-                text = brain.generate(prompt, "analysis")
+                text = generate(prompt, "analysis")
                 if explicit_hypotheses and text:
                     body, hypothesis_part = self._split_hypotheses(text)
                     out["analysis"] = body or text
@@ -1112,8 +1126,10 @@ class DeepResearchEngine:
                     out["analysis"] = text
             else:
                 no_source_prompt = brain.prompt_no_sources(question, plan)
+                if company is not None:
+                    no_source_prompt = f"{memory_note}\n\n{no_source_prompt}"
                 no_source_prompt = f"{no_source_prompt}\n\n{evidence_first_block}"
-                out["analysis"] = brain.generate(
+                out["analysis"] = generate(
                     no_source_prompt, "no-source answer")
         except QuotaExhausted as exc:
             out["errors"].append(str(exc))
@@ -1127,7 +1143,7 @@ class DeepResearchEngine:
                 self._track(job_id, "HYPOTHESIS", "hypothesis generation (same call)")
                 prompt += self.hypotheses.prompt_appendix(hypothesis_count)
             try:
-                text = brain.generate(prompt, "critique")
+                text = generate(prompt, "critique")
             except QuotaExhausted as exc:
                 text = ""
                 out["errors"].append(str(exc))
@@ -1150,7 +1166,7 @@ class DeepResearchEngine:
                 and brain.remaining >= 2):
             self._track(job_id, "HYPOTHESIS", "dedicated hypothesis pass (alag call)")
             try:
-                out["hypothesis_raw"] = brain.generate(
+                out["hypothesis_raw"] = generate(
                     self.hypotheses.prompt(question, out["analysis"], pack, plan,
                                            contradiction_dicts,
                                            count=hypothesis_count, gate=gate),
@@ -1216,7 +1232,7 @@ class DeepResearchEngine:
                     prompt += "\n\n" + music_study.prompt_block(
                         music_guidance_pack.get("guidance") or {})
             try:
-                text = brain.generate(prompt, "synthesis")
+                text = generate(prompt, "synthesis")
             except QuotaExhausted as exc:
                 text = ""
                 out["errors"].append(str(exc))
@@ -1327,7 +1343,7 @@ class DeepResearchEngine:
             if brain.remaining >= 1:
                 def reviser(prompt: str) -> str:
                     try:
-                        return brain.generate(prompt, "craft_redraft")
+                        return generate(prompt, "craft_redraft")
                     except QuotaExhausted:
                         return ""
             # #141 — dobara likhwane ke prompt me PADHI HUI baat bhi jaani
@@ -1446,6 +1462,8 @@ class DeepResearchEngine:
                     "synthesis": bool(out["final"])}
         out["done_passes"] = [name for name in out["planned_passes"]
                               if produced.get(name)]
+        if company is not None:
+            attach_company_passes(out, company)
         return out
 
     # ── main ─────────────────────────────────────────────────────────────────
@@ -1511,7 +1529,8 @@ class DeepResearchEngine:
         doc_records, doc_note = self._document_records(question, config)
 
         # 3. discovery (hamesha — PDF ho ya na ho)
-        discovered = self._discover(question, plan, config, doc_records, job_id)
+        discovered = checkpoint("discovery", [question, plan, config, doc_records],
+                                lambda: self._discover(question, plan, config, doc_records, job_id))
         pack: EvidencePack = discovered["pack"]
         discovery_note = self.discovery.discovery_note(discovered["log"])
         if not pack.sources:
@@ -1591,8 +1610,11 @@ class DeepResearchEngine:
         # banata hai — aur jo nahi padh paye, uska honest reason bhi deta hai.
         self._track(job_id, "READING",
                     f"top {config.max_fulltext} sources ka full text padha ja raha hai")
-        reading = self.reader.enrich(pack, max_sources=config.max_fulltext,
-                                     budget_chars=config.chars_per_source * 2)
+        def read_full_text():
+            report = self.reader.enrich(pack, max_sources=config.max_fulltext,
+                                        budget_chars=config.chars_per_source * 2)
+            return report, pack
+        reading, pack = checkpoint("full_text_reading", [pack, config.max_fulltext, config.chars_per_source], read_full_text)
         if reading.get("note"):
             discovery_note = f"{discovery_note} | Reading: {reading['note']}"
         self._counts(job_id, full_text_read=reading.get("succeeded", 0))
@@ -1652,14 +1674,27 @@ class DeepResearchEngine:
 
         # 5. memory + knowledge graph hints
         memory_note = self.memory.context_note(question) if self.memory else ""
-        graph_note = self.graph.related_note(question, self.project_id)
+        from utils.research_runtime import current
+        context = current()
+        if context:
+            from utils.governed_memory import GovernedMemory
+            # Governed records supersede legacy hints on public research; source
+            # correction/delete/expiry must not be bypassed by an older cache.
+            memory_note = GovernedMemory(context.store).context(context.project, question)
+        # Legacy summaries have no consumed revision/run dependency. Keep their
+        # browseable graph, but use governed summaries in the active runtime so
+        # expired/corrected memory cannot re-enter through the legacy graph.
+        graph_note = "" if context else self.graph.related_note(question, self.project_id)
         if graph_note:
+            from .source_prompt_guard import quote_untrusted
+            graph_note = quote_untrusted(graph_note, limit=4000)
             memory_note = f"{memory_note}\n\n{graph_note}".strip()
 
         # 6. gemini passes
-        passes = self._run_passes(question, pack, plan, config, contradiction_dicts,
-                                  memory_note, job_id,
-                                  counter_search_performed=axis_counter_search)
+        check_cancelled()
+        passes = checkpoint("chief_and_lab", [question, pack, plan, config, contradiction_dicts, memory_note],
+            lambda: self._run_passes(question, pack, plan, config, contradiction_dicts,
+                                    memory_note, job_id, counter_search_performed=axis_counter_search))
         # §9 — engine ke raw error (429/protobuf/exception class) warnings mein
         # nahi jaate. Warning insaani bhasha mein, raw line report ke sabse
         # neeche. Pichhle live run mein yahi text "Seedha jawab" ke neeche
@@ -2062,6 +2097,8 @@ class DeepResearchEngine:
         # report ke text mein nahi. `verification` dict pehle se result mein
         # jaata hai, isliye naya top-level field banane ki zaroorat nahi.
         verification["claim_checks"] = claim_checks
+        if passes.get("research_company"):
+            verification["research_company"] = passes["research_company"]
         verification["evidence_first_audit"] = evidence_first_audit
         verification["evidence_first_manifest"] = (
             passes.get("evidence_first_manifest") or {})

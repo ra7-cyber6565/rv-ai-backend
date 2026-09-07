@@ -2,6 +2,62 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Current continuation — ChatGPT, 2026-09-07
+
+- User superseded laptop setup: no further Windows/WSL/Docker installs, no
+  deletion of existing files, and no large laptop downloads. Work continues
+  through the existing draft PR #79 and hosted CI. The original Windows main
+  at 7e36911 and its untracked/modified source remain unavailable for integration.
+- Stored-data preservation is now default-on: archive-copy cleanup, durable job
+  eviction, expired runtime pruning and proposal eviction retain existing data.
+  Full histories pause new work; unfinished reading files remain recoverable.
+  Existing explicit memory-edit/delete controls and failed-operation temporary
+  cleanup are separate. This is not a universal disk quota or unlimited storage.
+- Added an opt-in hosted COMPANY/COMPANY_PLUS live runner, requiring manual
+  dispatch, the full reviewed clean commit, same-run/attempt passing foundation,
+  actual container and localhost API receipts, and privately confirmed-free
+  credentials. Normal push/PR CI has no live model credentials or calls.
+- Local checks: twelve existing/new stdlib checks passed; two added integration
+  checks cannot import without sympy here. Architecture audit passes after
+  correcting job-versus-step runner-context detection. Final exact-head CI is
+  pending at authoring; the PR description records the eventual result.
+- `docs/HOSTED_VALIDATION.md` is the current handoff. Hosted live execution,
+  independent answer-quality comparisons, persistent production storage and
+  a production-compatible isolated executor are not verified by this change.
+  Existing Railway main has not been deployed or reconfigured.
+
+## Current continuation — ChatGPT, 2026-09-06
+
+- Host continuation adds the private Linux/WSL preparation and validation
+  launcher, real-host suite accounting, a zero-model localhost smoke and fresh
+  exact-revision live mode receipts. Default remains preflight-only. See
+  `docs/COMPANY_HOST_SETUP.md`. Actual Windows/WSL and live provider execution
+  remain unperformed. Railway OAuth exposed names only; a remote smoke attempt
+  was cancelled at network approval, with no alternate-route retry.
+
+- PR #79 remains the integration branch; main and other contributors' branches
+  are unchanged. Prior exact head `e3344fb7` passed all five workflows with
+  4,157 full-suite cases and 42 API smoke checks. This is software evidence.
+- This continuation adds operator-enabled local Docker Python/Node builds,
+  bounded execution/ZIP artifacts, complete hypothesis-plan fields, observed
+  failure proposals, private inspection and protected baseline/candidate trials.
+  Execution, semantic adequacy and physical/clinical proof remain separate.
+- General executor source and proposal/testing wiring are now implemented;
+  older MISSING statements below are historical. The current all-22 table is
+  `docs/INFINITY_REQUIREMENT_LEDGER.md`; setup and scope are in
+  `docs/ISOLATED_BUILDS_AND_IMPROVEMENT.md`.
+- Mandatory Foundation CI now provisions a test image and executes real Python
+  and Node builds, isolation/failure checks and protected improvement trials.
+  Use the exact final PR head and workflow receipts, not a prior revision's
+  pass or skipped offline container tests, as acceptance authority.
+- Local Docker is unavailable and local Python lacks integrated dependencies;
+  the cancelled dependency-install approval was not bypassed. Local source,
+  stdlib contract and shipped JavaScript checks are distinct from CI execution.
+- Read-only inspection found the existing Railway service on main. No deploy,
+  merge, model-key change, paid service or live research was performed. Exact-
+  revision confirmed-free model, target-host and representative quality/data
+  receipts remain external work; earlier Windows passes do not certify this head.
+
 ## Independent audit update — 2026-08-28
 
 - Production `main` audited at `8c8ee5fe8cb3b4644b52eb644904267156494300`;
@@ -38,11 +94,68 @@ This file is the coordination source of truth for multi-agent work.
 
 Question -> Research Planner -> domain identification -> query expansion -> multi-source discovery -> retrieval -> document/media processing -> evidence extraction -> relevance/source-quality/contradiction checks -> multi-angle reasoning -> hypothesis generation -> criticism/falsification -> verification/math/simulation where possible -> synthesis -> human-first answer -> technical audit.
 
-Storage target: GitHub = code/version history; laptop D: = bounded fast runtime/working storage; Google Drive = temporary optional archive; TeraBox = optional later archive only after official zero-cost API approval. Remote upload must be verified before any local deletion.
+Storage target (supersedes earlier laptop setup): GitHub = code/version history and hosted verification. The user's laptop is not the required execution host. Existing stored data is retained by default, including verified archive copies; bounded stores pause admission instead of reclaiming user data. Persistent production storage remains to be provisioned and verified. Optional Drive/TeraBox adapters do not imply that an account or approved zero-cost API is connected.
 
 ## ChatGPT scope — do not shrink
 
 ChatGPT owns final integration/reliability, independent audit of Claude work, evidence correctness at the system boundary, ₹0/provider safety, large-file/storage lifecycle, async durability, security, integrated regression and final architecture review. After foundation passes, ChatGPT also owns the Advanced Scientific Discovery Engine work listed below.
+
+## AI Company integration — ChatGPT, 2026-09-05
+
+- Continuation implementation/testing: durable SQLite stages/events and atomic application quotas,
+  same-code/input resume/cancel, source/memory invalidation, task contract and
+  typed numeric tools with downloadable receipts. Ownership: ChatGPT on isolated
+  `codex/company-reliability-20260905`, extending reviewed PR #79 head `d0def705`.
+  No other branch/PR or user Windows work is being merged or overwritten.
+- Run instructions and explicit boundaries: `docs/RELIABILITY_RUNTIME.md`.
+  Current continuation table in the requirement ledger supersedes first-wave
+  gaps that it closes. Public synchronous/chat budgets, memory correction/clear
+  controls and transitive invalidation are included. General execution backend,
+  actual provider token/billing receipts and live empirical comparisons remain open.
+- Refreshed workspace dependency install was cancelled by network approval;
+  dependency-free SQLite/process and evaluation tests run locally. Exact-head
+  full CI remains required before this continuation can be called verified.
+
+- Latest user specification: `Pasted markdown(20260905-064523).md`, 22 sections.
+  Full requirement/acceptance ledger: `docs/INFINITY_REQUIREMENT_LEDGER.md`.
+  It preserves PARTIAL/MISSING/BLOCKED items; a green software gate does not
+  close general recovery, central provider quotas, arbitrary execution or live
+  empirical validation gaps.
+- Additional integration: worker IDs/UTC timestamps/input hashes, bounded raw
+  draft artifact references, append-only in-run events, assumptions/dissent/
+  questions and separate chief receipts. Events are saved with final results;
+  mid-run crash recovery remains explicitly false.
+- Windows/Python live ₹0 gate accepts COMPANY/COMPANY_PLUS and requires actual
+  worker/chief generation plus complete accounting. Live execution remains
+  pending on a configured confirmed-free deployment.
+- Company chief generation also fails before SDK entry when no eligible free
+  model exists; the legacy no-backup route cannot bypass this company check.
+
+- Isolated branch: `codex/research-company-20260905`, based on main
+  `1d7eddaca3e5146184cfa4e1884c8dbc3564f84e`. Exact base Foundation Actions
+  run `33852832167` passed before advanced integration began.
+- COMPANY / COMPANY_PLUS connect 4 / 6 real specialist worker invocations to
+  the existing chief, evidence checks, lab and completion gates. Shared corpus,
+  separate first-pass contexts, bounded process isolation, zero-cost routing,
+  typed draft validation and aggregate usage receipts. Existing presets retain
+  their budgets. Web/API expose both new modes and worker reports.
+- Focused fixture tests have passed during development; the commit's full
+  offline gates and live confirmed-₹0 validation remain separate required
+  evidence. Do not call this empirically superior or release-ready from fixtures.
+- Initial broad local tests were blocked after an outbound Google endpoint
+  attempt. Subsequent validation uses blank credentials and an inherited
+  socket-level network denial. Clean-checkout attestors require committing
+  source edits before integrated validation.
+- See `docs/AI_COMPANY_RESEARCH.md` for exact limits, deployment considerations,
+  test scope and remaining benchmark/independent-retrieval work.
+- PR #79 first exact head passed AI-1, AI-2, model-reality and anti-confirmation
+  CI; Foundation found stale browser source-pattern assertions (4112 full-suite
+  tests passed, one failed). Checks now cover the explicit three long modes,
+  unchanged deadline/stall limits and both company + existing progress panels.
+  Local native SDK traffic is blocked by a fail-closed kernel syscall filter;
+  earlier Python-only isolation did not block that native path.
+- Existing PRs #63/#65 and other contributors' branches were not merged or
+  overwritten. No local Windows changes or external receipts were touched.
 
 ## Active foundation status
 

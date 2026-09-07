@@ -3,7 +3,7 @@ param(
     [switch]$Execute,
     [string]$DataRoot = "D:\InfinityResearchAI",
     [string]$Receipt = "",
-    [ValidateSet("MAXIMUM", "MARATHON")]
+    [ValidateSet("MAXIMUM", "MARATHON", "COMPANY", "COMPANY_PLUS")]
     [string]$DepthMode = "MAXIMUM"
 )
 

@@ -11,6 +11,7 @@ import os
 from dataclasses import dataclass
 from typing import Optional, Protocol
 
+from utils.data_preservation import preserve_stored_data
 from utils.archive_manifest import ArchiveManifest
 from utils.archive_retry import ArchiveRetryQueue
 from utils.cloud_storage import ArchiveCoordinator, RemoteObject
@@ -103,6 +104,8 @@ class ArchiveService:
 
     def delete_local_if_verified(self, reference: str) -> bool:
         """Delete only after exact manifest verification; then record deletion."""
+        if preserve_stored_data():
+            return False
         item = self.manifest.get(reference)
         if not item:
             return False

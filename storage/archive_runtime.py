@@ -18,6 +18,8 @@ absolute local paths, filenames, or raw provider errors are returned.
 """
 from __future__ import annotations
 
+from utils.data_preservation import preserve_stored_data
+
 import os
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -318,6 +320,8 @@ class ArchiveRuntime:
 
     def local_delete_allowed(self, local_path: str, remote_path: str) -> bool:
         """Fail-closed check used before lifecycle cleanup deletes local bytes."""
+        if preserve_stored_data():
+            return False
         if not self.archive_required():
             return True
         status = self._status()
@@ -412,6 +416,7 @@ class ArchiveRuntime:
         }
         return {
             "archive_required_for_local_cleanup": self.archive_required(),
+            "stored_data_preservation_enabled": preserve_stored_data(),
             "provider": provider_public,
             "manifest": {
                 "records": len(rows),

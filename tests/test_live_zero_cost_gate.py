@@ -114,6 +114,70 @@ def _marathon_result():
     return result
 
 
+@pytest.mark.parametrize("mode,count", [("COMPANY", 4), ("COMPANY_PLUS", 6)])
+def test_company_live_gate_requires_actual_workers_chief_and_complete_usage(mode, count):
+    result = _result()
+    result["coverage"]["mode"] = mode
+    result["api_accounting"] = {"accounting_complete": True}
+    result["runtime_execution"] = {"available": True, "event_durability": "SQLITE_TRANSACTION",
+                                   "cancelled": False, "reserved_http_attempts": count + 2}
+    company = {
+        "workers": [{"worker_id": str(i), "status": "DRAFT_READY", "accounting_complete": True,
+                     "accounting": {"actual_http_attempts": 1, "successful_calls": 1}} for i in range(count)],
+        "accounting_complete": True,
+        "chief_execution": {"done_passes": ["analysis", "synthesis"], "accounting": {"successful_calls": 2}},
+        "independent_scientific_replication": False,
+        "experiments_performed_by_workers": False,
+    }
+    result["verification"]["research_company"] = company
+    checked = evaluate_result(result, required_depth_mode=mode)
+    checks = {row["name"]: row["passed"] for row in checked["checks"]}
+    assert all(checks[name] for name in checks if name.startswith("company_"))
+    company["workers"][0]["accounting"]["successful_calls"] = 0
+    checks = {row["name"]: row["passed"] for row in evaluate_result(result, required_depth_mode=mode)["checks"]}
+    assert checks["company_workers_executed"] is False
+    company["workers"][0]["accounting"]["successful_calls"] = 1
+    company["chief_execution"]["done_passes"] = ["analysis"]
+    assert next(row for row in evaluate_result(result, required_depth_mode=mode)["checks"]
+                if row["name"] == "company_chief_executed")["passed"] is False
+
+
+def test_company_live_gate_rejects_missing_public_runtime_reservations():
+    result = _result()
+    result["coverage"]["mode"] = "COMPANY"
+    for runtime in ({}, {"available": True, "event_durability": "SQLITE_TRANSACTION", "cancelled": False,
+                        "reserved_http_attempts": True}):
+        result["runtime_execution"] = runtime
+        checked = evaluate_result(result, required_depth_mode="COMPANY")
+        assert next(row for row in checked["checks"] if row["name"] == "company_public_runtime_executed")["passed"] is False
+
+
+def test_live_execution_uses_public_manager_with_unique_run_scope(monkeypatch):
+    from research_engine import agent_manager
+    calls, dropped = [], []
+    class Manager:
+        def research(self, question, **kwargs):
+            calls.append(kwargs)
+            return {"fixture": True}
+        def drop(self, project):
+            dropped.append(project)
+    monkeypatch.setattr(agent_manager, "AgentManager", Manager)
+    assert live_gate.run_live("COMPANY") == {"fixture": True}
+    live_gate.run_live("COMPANY_PLUS")
+    assert len({row["job_id"] for row in calls}) == 2
+    assert [row["depth_mode"] for row in calls] == ["COMPANY", "COMPANY_PLUS"]
+    assert dropped == [row["project_id"] for row in calls]
+
+
+def test_company_live_gate_does_not_accept_four_role_headings_without_receipts():
+    result = _result()
+    result["coverage"]["mode"] = "COMPANY"
+    result["answer"] = "AI-1 AI-2 AI-3 AI-4 all completed"
+    checks = {row["name"]: row["passed"] for row in evaluate_result(result, required_depth_mode="COMPANY")["checks"]}
+    assert checks["company_workers_executed"] is False
+    assert checks["company_chief_executed"] is False
+
+
 def test_preflight_blocks_when_no_confirmed_model_layer_exists():
     report = preflight(_env())
     assert report["ready"] is False

@@ -76,3 +76,12 @@ def test_cleanup_response_is_aggregate_only_even_when_nothing_is_eligible(tmp_pa
     assert "private-name.bin" not in repr(result)
     assert "remote-name.bin" not in repr(result)
     assert local.exists()
+
+
+# This module exercises the opt-in legacy retention contract. Preservation has
+# independent default-on regression coverage in test_data_preservation.py.
+import pytest as _preservation_pytest
+
+@_preservation_pytest.fixture(autouse=True)
+def _legacy_retention_policy(monkeypatch):
+    monkeypatch.setenv("INFINITY_PRESERVE_STORED_DATA", "false")

@@ -25,6 +25,7 @@ This file performs no network call at import time.  Provider HTTP libraries are
 imported lazily inside ``generate``.
 """
 from __future__ import annotations
+from utils.research_runtime import RuntimeBlocked
 
 import os
 import re
@@ -168,6 +169,8 @@ class OpenAICompatibleFreeProvider(ReasoningProvider):
             }
             if self.name == "openrouter":
                 headers["X-Title"] = "Infinity Research AI"
+            from utils.research_runtime import reserve_request
+            reserve_request(self.name, prompt, 6000)
             response = requests.post(
                 self.endpoint,
                 headers=headers,
@@ -231,6 +234,9 @@ class OpenAICompatibleFreeProvider(ReasoningProvider):
                 kind="provider_error", human=f"{self.name} request complete nahi hui.",
                 technical=f"HTTP {status} {detail}",
             )
+        except RuntimeBlocked:
+            return ProviderResult(provider=self.name, model=self.model, attempts=0,
+                kind="application_budget", human="Shared research budget unavailable.", block_for_run=True)
         except Exception as exc:
             return ProviderResult(
                 provider=self.name, model=self.model, attempts=1,
@@ -268,6 +274,8 @@ class OllamaProvider(ReasoningProvider):
         try:
             import requests  # lazy
 
+            from utils.research_runtime import reserve_request
+            reserve_request("ollama", prompt, 6000)
             response = requests.post(
                 f"{self.base_url}/api/chat",
                 json={
@@ -275,7 +283,7 @@ class OllamaProvider(ReasoningProvider):
                     "messages": [{"role": "user", "content": prompt}],
                     "stream": False,
                     "think": False,
-                    "options": {"temperature": 0.15},
+                    "options": {"temperature": 0.15, "num_predict": 6000},
                 },
                 timeout=(3, self.timeout),
             )
@@ -298,6 +306,9 @@ class OllamaProvider(ReasoningProvider):
                        else "Local Ollama response available nahi hua."),
                 technical=f"HTTP {status} {detail}", block_for_run=status == 404,
             )
+        except RuntimeBlocked:
+            return ProviderResult(provider=self.name, model=self.model, attempts=0,
+                kind="application_budget", human="Shared research budget unavailable.", block_for_run=True)
         except Exception as exc:
             return ProviderResult(
                 provider=self.name, model=self.model, attempts=1,

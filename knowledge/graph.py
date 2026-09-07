@@ -13,6 +13,8 @@ import json
 import os
 import re
 import tempfile
+import threading
+from functools import wraps
 from typing import Dict, List
 
 
@@ -31,6 +33,15 @@ def _default_graph_file() -> str:
 
 
 GRAPH_FILE = _default_graph_file()
+_GRAPH_LOCK = threading.RLock()
+
+
+def _locked(fn):
+    @wraps(fn)
+    def call(*args, **kwargs):
+        with _GRAPH_LOCK:
+            return fn(*args, **kwargs)
+    return call
 
 _RELATION_NOTE = ("same sentence mein saath aaye — ye sirf co-occurrence hint hai, "
                   "proven rishta nahi")
@@ -126,6 +137,7 @@ def extract_relationships(text: str, entities: List[Dict]) -> List[Dict]:
     return relationships[:15]
 
 
+@_locked
 def extract_and_store(question: str, answer_text: str, project_id: str = "default") -> Dict:
     """Free/local knowledge-graph hint extraction + persistence."""
     graph = _load_graph()
@@ -188,6 +200,14 @@ def get_related_knowledge(question: str, project_id: str = "default") -> str:
              f"{(log.get('answer_summary') or '')[:150]}..."
              for log in related_logs[-3:]]
     return "Pichhle related research:\n" + "\n".join(lines)
+
+
+@_locked
+def delete_project_hints(project_id: str) -> bool:
+    graph = _load_graph()
+    for key in ("entities", "relationships", "research_log"):
+        graph[key] = [row for row in graph[key] if not isinstance(row, dict) or row.get("project_id") != project_id]
+    return _save_graph(graph)
 
 
 def get_entity_stats(project_id: str = "default") -> Dict:
