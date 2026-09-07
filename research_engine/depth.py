@@ -62,6 +62,12 @@ class DepthConfig:
     research_process_target_percent: int = 0
     # Separate first-pass model workers; the remaining budget belongs to the chief.
     company_agents: int = 0
+    # Public/configured capability and effective run-time workers are deliberately
+    # separate for unified Max. A provider outage must not erase the fact that Max
+    # includes Company+ capability, but it also must not turn the stronger core
+    # research path into a fake mandatory-worker failure when no model can run.
+    company_agents_configured: int = 0
+    company_optional: bool = False
 
     def to_dict(self) -> Dict:
         return asdict(self)
@@ -109,9 +115,11 @@ _PRESETS = {
     "MAXIMUM": MAXIMUM,
     "MARATHON": MARATHON,
     "COMPANY": DepthConfig(**{**asdict(MARATHON), "name": "COMPANY",
-                              "company_agents": 4, "gemini_calls": 8}),
+                              "company_agents": 4, "company_agents_configured": 4,
+                              "gemini_calls": 8}),
     "COMPANY_PLUS": DepthConfig(**{**asdict(MARATHON), "name": "COMPANY_PLUS",
-                                   "company_agents": 6, "gemini_calls": 10}),
+                                   "company_agents": 6, "company_agents_configured": 6,
+                                   "gemini_calls": 10}),
 }
 
 # Safety rails — CUSTOM mode mein user in limits se aage nahi ja sakta
@@ -147,6 +155,21 @@ def depth_limits() -> Dict[str, tuple]:
     return dict(_LIMITS)
 
 
+def _model_layer_usable_now() -> bool:
+    """Zero-call readiness check used only to choose an executable Max plan.
+
+    This never claims future quota or scientific quality. It answers the much
+    narrower question the Company worker already uses before dispatch: is any
+    confirmed-free reasoning model layer usable *now*? If not, unified Max keeps
+    all Marathon/core rails alive instead of manufacturing six failed workers.
+    """
+    try:
+        from utils.reasoning_status import reasoning_status
+        return bool(reasoning_status().get("has_model_layer_usable_now"))
+    except Exception:
+        return False
+
+
 def get_depth_config(mode: str = "DEEP", custom: Optional[Dict] = None) -> DepthConfig:
     """
     Mode name se config lo. CUSTOM ke liye user apne numbers de sakta hai
@@ -156,6 +179,12 @@ def get_depth_config(mode: str = "DEEP", custom: Optional[Dict] = None) -> Depth
     entrypoint. It inherits MARATHON's full-round/full-text rails and the six
     COMPANY_PLUS specialist roles; those six already contain the original four
     COMPANY roles, so the weaker four are not wastefully duplicated.
+
+    Company+ is an additive Max enhancement, not a single point of failure. If
+    no confirmed-free reasoning layer is usable at dispatch time, Max keeps the
+    same Marathon rails and the four-call chief/core reasoning budget. The six
+    configured specialist roles become effective automatically when a usable
+    confirmed-free model layer is present.
     """
     mode = (mode or "DEEP").upper()
 
@@ -173,11 +202,21 @@ def get_depth_config(mode: str = "DEEP", custom: Optional[Dict] = None) -> Depth
         return base
 
     if mode == "MAXIMUM":
-        # COMPANY_PLUS == MARATHON rails + ROLES[:6] + chief budget.  Because
+        # COMPANY_PLUS == MARATHON rails + ROLES[:6] + chief budget. Because
         # ROLES[:6] starts with the exact four COMPANY roles, this is a strict
         # capability superset without paying for duplicate first-pass workers.
         unified = DepthConfig(**asdict(_PRESETS["COMPANY_PLUS"]))
         unified.name = "MAXIMUM"
+        unified.company_optional = True
+        if not _model_layer_usable_now():
+            # Six unavailable model workers must not make Deep/Marathon/core
+            # abilities disappear. Keep the chief/core share (10 - 6 = 4) and
+            # every retrieval/full-text/red-team rail. This is a truthful
+            # degraded execution plan, not a fake successful Company run.
+            unified.company_agents = 0
+            unified.gemini_calls = max(
+                1, unified.gemini_calls - unified.company_agents_configured
+            )
         return unified
 
     preset = _PRESETS.get(mode, DEEP)
@@ -186,6 +225,27 @@ def get_depth_config(mode: str = "DEEP", custom: Optional[Dict] = None) -> Depth
 
 def quota_note(config: DepthConfig) -> str:
     """Honest quota statement jo final answer mein jaata hai."""
+    if config.company_optional and config.company_agents_configured:
+        if config.company_agents:
+            company_state = (
+                f"{config.company_agents} specialist workers + chief active; "
+                f"maximum {config.gemini_calls} logical reasoning calls total. "
+            )
+        else:
+            company_state = (
+                f"{config.company_agents_configured} specialist roles configured, "
+                "but no confirmed-free model layer is usable now; the Company "
+                f"enhancement is not faked and Marathon-strength core continues "
+                f"with maximum {config.gemini_calls} logical reasoning calls. "
+            )
+        return (
+            f"{config.name}: unified Max. " + company_state
+            + f"Up to {config.max_sources} sources, {config.max_rounds} search rounds, "
+            f"{config.max_fulltext} legally accessible full texts. "
+            "Configured worker roles are a capability superset, not independent "
+            "scientific replication. Existing confirmed-zero-cost routing applies; "
+            "available provider quota may prevent model work."
+        )
     if config.company_agents:
         return (
             f"{config.name}: {config.company_agents} specialist workers + chief; "
