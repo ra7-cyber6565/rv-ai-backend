@@ -49,8 +49,6 @@ app = FastAPI(
     version="0.2.0"
 )
 
-# Same-origin website needs no CORS grant. A separately-hosted approved frontend
-# may use exact configured origins and opaque project/job capability headers.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=CORS_ORIGINS,
@@ -75,19 +73,7 @@ _WEB_CSP = (
 
 
 def _harden_response(response, path: str):
-    """Attach privacy/security headers without exposing capability data.
-
-    `/api/v1` can contain newly-issued project/job bearer capabilities, research
-    text and private progress. Custom bearer headers are not guaranteed to get
-    Authorization-like cache treatment from every intermediary, so private API
-    responses are explicitly non-cacheable.
-
-    The shipped `/` client only needs same-origin network calls. Its CSP blocks
-    remote scripts, frames, objects, forms and unexpected network destinations.
-    Inline script/style are currently required by the deliberately small
-    single-file client; external source links are separately allowlisted to
-    http/https before the browser makes them clickable.
-    """
+    """Attach privacy/security headers without exposing capability data."""
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
@@ -109,12 +95,7 @@ def _harden_response(response, path: str):
 
 @app.middleware("http")
 async def protect_free_quota(request: Request, call_next):
-    """Bound expensive creation/upload traffic and rapid async-job polling.
-
-    Dynamic job ids are normalized to one rate bucket per client so legitimate
-    polling works while a flood of random job-id URLs cannot explode limiter
-    memory. Proxy headers remain untrusted unless explicitly enabled.
-    """
+    """Bound expensive creation/upload traffic and rapid async-job polling."""
     if rate_limit_enabled():
         limit = limit_for(request.method, request.url.path)
         if limit is not None:
@@ -137,13 +118,8 @@ async def protect_free_quota(request: Request, call_next):
     return _harden_response(response, request.url.path)
 
 
-# Added last so this pure-ASGI guard is outermost among user middleware. It
-# counts raw bytes before FastAPI/Starlette JSON or multipart parsing, closing
-# the gap where an oversized/chunked upload could spool before route-level
-# UploadFile limits ever run.
 app.add_middleware(RequestBodyLimitMiddleware)
 
-# Session is zero-model/zero-cloud and creates a random isolated project namespace.
 app.include_router(session_router, prefix="/api/v1", tags=["Session"])
 app.include_router(rag_router, prefix="/api/v1", tags=["RAG"])
 app.include_router(agent_router, prefix="/api/v1", tags=["Agents"])
@@ -153,32 +129,21 @@ app.include_router(exam_router, prefix="/api/v1", tags=["Exam Intelligence"])
 app.include_router(reading_router, prefix="/api/v1", tags=["Resumable Reading"])
 app.include_router(knowledge_router, prefix="/api/v1", tags=["Knowledge"])
 
-
 WEB_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 INDEX_HTML = os.path.join(WEB_DIR, "index.html")
 
 
 def _runtime_safety_status() -> dict:
-    """Aggregate only non-secret/public-safe operational state.
-
-    Keep /health cheap: hosting platforms may call it frequently, so it must not
-    recursively scan a large D: workspace. Detailed manifest/retry/storage
-    archive state lives at the admin-only /api/v1/archive/status endpoint.
-    """
+    """Aggregate only non-secret/public-safe operational state."""
     return {
         "zero_cost_only": ZERO_COST_STATUS.enabled,
         "release_state": RELEASE_STATE,
-        # A Git SHA is public build provenance, not a credential. Empty means
-        # the host did not provide a validated full revision, so deployment
-        # sign-off must fail closed instead of guessing which code is live.
         "build_revision": BUILD_REVISION,
         "rate_limit_enabled": rate_limit_enabled(),
         "rate_limiter": limiter.stats(),
         "project_isolation": project_access.status(),
         "reasoning_resilience": reasoning_status(),
         "cloud_archive": provider_status(),
-        # Never expose STORAGE_STATUS/storage_status() directly: internal status
-        # includes absolute filesystem paths and may include raw OS error text.
         "storage": public_storage_status(),
     }
 
@@ -186,19 +151,34 @@ def _runtime_safety_status() -> dict:
 def _website_html() -> str:
     """Return the shipped client with honest lifecycle and quality metrics.
 
-    `COMPLETE` is an internal lifecycle stage meaning the worker stopped and a
-    result is available. It is not proof that the result status is COMPLETE;
-    the final quality gate may correctly downgrade it to PARTIAL. Keep the
-    internal stage key for polling compatibility while making the user-facing
-    label describe only what is actually known.
-
-    Process coverage and semantic requested-content coverage are also different
-    measurements. Inject the distinction from their structured backend fields so
-    a 90%+ process checklist can never look like a 90% truth/answer-quality score.
-    The transform is presentation-only and never changes a backend result.
+    Public users intentionally see only two choices: Chat and Max. Max is the
+    single unified research entrypoint; legacy depth/company names stay backend
+    compatible but are not separate user decisions.
     """
     with open(INDEX_HTML, "r", encoding="utf-8") as handle:
         html = handle.read()
+
+    html = re.sub(
+        r'<div class="modes">.*?</div>',
+        '<div class="modes">\n'
+        '    <button class="on" data-mode="QUICK">Chat</button>\n'
+        '    <button data-mode="MAXIMUM">Max</button>\n'
+        '  </div>',
+        html,
+        count=1,
+        flags=re.S,
+    )
+    html = html.replace(
+        "Normal baat ke liye Chat. Sources aur cross-check ke liye Deep/Max; books, archives aur specialist lanes ke liye Marathon.",
+        "Normal baat ke liye Chat. Max ek unified full-research run hai: deep search, long research rounds, books/PDFs, specialist agents, validation, red-team aur final synthesis saath chalte hain.",
+        1,
+    )
+    html = html.replace(
+        'MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai."',
+        'MAXIMUM:"Max — unified ultra research: deep search + 5 long rounds + 6 specialist roles (4 core Company roles + 2 extra) + validation, red-team, hypotheses, experiments/backtests jab relevant hon, aur final synthesis. Available evidence/quota ke andar."',
+        1,
+    )
+
     html = re.sub(
         r'''["']?COMPLETE["']?\s*:\s*["']Research complete["']''',
         '"COMPLETE":"Research run finished"',
@@ -270,8 +250,6 @@ def health_check():
         degraded = True
     if not project_isolation.get("project_capability_tokens_ready"):
         degraded = True
-    # Hosted/free reasoning providers are not a health-failure condition because
-    # deterministic local evidence fallback remains available.
     return {
         "status": "degraded" if degraded else "healthy",
         "service": "RV AI Backend",
