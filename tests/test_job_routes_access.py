@@ -57,3 +57,19 @@ def test_valid_capability_returns_job_and_can_request_result(monkeypatch):
     got = job_routes._authorized_job("a" * 32, "private-token", include_result=True)
     assert got == item
     assert runner.calls == [("a" * 32, True)]
+
+
+def test_storage_full_reports_preserved_results_without_exposing_paths(monkeypatch):
+    from types import SimpleNamespace
+    from utils.storage_quota import StorageQuotaError
+    class FullRunner:
+        def submit(self, **kwargs):
+            raise StorageQuotaError("PRIVATE_DATA_PATH secret=not-public")
+    monkeypatch.setattr(job_routes, "require_project_access", lambda *args: None)
+    monkeypatch.setattr(job_routes, "job_access", SimpleNamespace(status=lambda: {"job_capability_tokens_ready": True}))
+    monkeypatch.setattr(job_routes, "runner", FullRunner())
+    with pytest.raises(HTTPException) as exc:
+        job_routes.start_research_job(job_routes.ResearchJobRequest(question="test"), "valid")
+    assert exc.value.status_code == 507
+    assert "safe" in exc.value.detail and "paused" in exc.value.detail
+    assert "PRIVATE" not in exc.value.detail and "secret=" not in exc.value.detail

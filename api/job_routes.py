@@ -13,6 +13,7 @@ from utils.job_access import job_access
 from utils.progress_tracker import STAGES, get_progress
 from utils.project_guard import require_project_access
 from utils.research_jobs import runner
+from utils.storage_quota import StorageQuotaError
 
 
 router = APIRouter()
@@ -154,6 +155,11 @@ def start_research_job(
             custom=_custom(request),
             run=manager.research,
         )
+    except StorageQuotaError as exc:
+        raise HTTPException(
+            status_code=507,
+            detail="Research storage capacity full hai. Purane results safe hain; naya kaam paused hai. Additional verified storage capacity chahiye.",
+        ) from exc
     except RuntimeError as exc:
         raise HTTPException(
             status_code=429,

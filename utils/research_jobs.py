@@ -40,7 +40,7 @@ from typing import Any, Callable, Dict, Optional
 
 from utils.process_lock import ExclusiveProcessFileLock, ProcessLockError
 from utils.storage_paths import configured_root, ensure_layout
-from utils.storage_quota import assert_capacity
+from utils.storage_quota import assert_capacity, StorageQuotaError
 from utils.data_preservation import preserve_stored_data
 
 
@@ -628,7 +628,7 @@ class ResearchJobRunner:
         with self._lock:
             self._prune_locked()
             if len(self._jobs) >= self.max_jobs:
-                raise RuntimeError("Stored research history capacity reached; existing results are retained. New jobs are paused.")
+                raise StorageQuotaError("Stored research history capacity reached; existing results are retained. New jobs are paused.")
             if self._inside_configured_root(self._result_dir):
                 assert_capacity(self.max_result_bytes)
             self._jobs[job_id] = job
