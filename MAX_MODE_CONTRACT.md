@@ -21,11 +21,23 @@ It must inherit the strongest useful rails already built in this repository:
 - Papers, books, datasets, patents when the question makes them relevant.
 - Legally accessible full-text reading within the configured budget.
 - Counter-evidence / red-team work.
-- Six specialist first-pass workers plus chief synthesis.
+- Six specialist first-pass workers plus chief synthesis when a confirmed-free model layer is actually usable.
 - The first four specialist roles are exactly the original Company core: `evidence`, `validation`, `mechanism`, `red_team`.
 - The two additional Company+ roles are `data_quality` and `implementation`.
 - AI-1 evidence/research governance and AI-2 validation remain downstream in the normal `AgentManager` research path.
 - Existing hypothesis, experiment/simulation, trading-model, physics, document, evidence, contradiction, verification, and synthesis lanes remain available to the same Max run when their applicability gates say they are relevant.
+
+## Additive Company power; no single point of failure
+
+Company+ availability must never disable the Marathon-strength core.
+
+Max permanently declares all six Company+ roles as part of its capability set. At execution time:
+
+- if a confirmed-free model layer is usable, all six specialist roles are activated and the remaining reasoning budget belongs to the chief;
+- if no confirmed-free model layer is usable, six fake/guaranteed-failing workers are not manufactured. Max keeps the full Marathon retrieval/full-text/round/red-team rails and the four-call core/chief reasoning share instead;
+- provider unavailability must be disclosed honestly. It must not be converted into a false claim that Company ran, and it must not make already-available deterministic/core research capabilities disappear.
+
+This is fail-soft capability orchestration, not a reduction in configured Max power.
 
 ## No pointless duplication
 
@@ -56,4 +68,4 @@ Max is strongest available research, not unlimited internet, guaranteed truth, g
 
 ## Change rule
 
-Any future change that exposes legacy modes as separate normal-user buttons, weakens `MAXIMUM` below the strongest bounded integrated configuration, or bypasses the existing AI-1/AI-2 truth gates violates this contract unless the user explicitly requests that product change.
+Any future change that exposes legacy modes as separate normal-user buttons, weakens `MAXIMUM` below the strongest bounded integrated configuration, turns optional Company availability into a failure that disables stronger core Max work, or bypasses the existing AI-1/AI-2 truth gates violates this contract unless the user explicitly requests that product change.
