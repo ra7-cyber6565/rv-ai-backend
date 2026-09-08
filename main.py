@@ -186,6 +186,10 @@ def _runtime_safety_status() -> dict:
 def _website_html() -> str:
     """Return the shipped client with honest lifecycle and quality metrics.
 
+    Public users intentionally see only two choices: Chat and Max. Max is the
+    single unified research entrypoint; legacy depth/company names stay backend
+    compatible but are not separate user decisions.
+
     `COMPLETE` is an internal lifecycle stage meaning the worker stopped and a
     result is available. It is not proof that the result status is COMPLETE;
     the final quality gate may correctly downgrade it to PARTIAL. Keep the
@@ -199,6 +203,31 @@ def _website_html() -> str:
     """
     with open(INDEX_HTML, "r", encoding="utf-8") as handle:
         html = handle.read()
+
+    # Normal users choose only between quick chat and the unified research
+    # orchestrator. Legacy mode names remain accepted by backend APIs so old
+    # clients/tests are not broken.
+    html = re.sub(
+        r'<div class="modes">.*?</div>',
+        '<div class="modes">\n'
+        '    <button class="on" data-mode="QUICK">Chat</button>\n'
+        '    <button data-mode="MAXIMUM">Max</button>\n'
+        '  </div>',
+        html,
+        count=1,
+        flags=re.S,
+    )
+    html = html.replace(
+        "Normal baat ke liye Chat. Sources aur cross-check ke liye Deep/Max; books, archives aur specialist lanes ke liye Marathon.",
+        "Normal baat ke liye Chat. Max ek unified full-research run hai: deep search, long research rounds, books/PDFs, specialist agents, validation, red-team aur final synthesis saath chalte hain.",
+        1,
+    )
+    html = html.replace(
+        'MAXIMUM:"Max — gehri available research. Isme zyada time lag sakta hai."',
+        'MAXIMUM:"Max — unified ultra research: deep search + 5 long rounds + 6 specialist roles (4 core Company roles + 2 extra) + validation, red-team, hypotheses, experiments/backtests jab relevant hon, aur final synthesis. Available evidence/quota ke andar."',
+        1,
+    )
+
     html = re.sub(
         r'''["']?COMPLETE["']?\s*:\s*["']Research complete["']''',
         '"COMPLETE":"Research run finished"',

@@ -322,21 +322,71 @@ def chief_handoff(company: Dict) -> str:
     )
 
 
+def _company_chief_router(brain):
+    """Return a fallback-capable chief brain without changing non-Company modes.
+
+    Older orchestrator code constructs the legacy ``GeminiReasoning`` class for
+    the chief. Company workers already use ``ResilientReasoning`` (Gemini key
+    rotation + configured Groq/OpenRouter/Ollama fallbacks). The old helper then
+    incorrectly accessed ``_gemini_allowed``/``fallback_providers`` on the legacy
+    object. Cache one integrated router on that object so all chief passes share
+    one budget, health state and accounting ledger. If the caller already passed
+    an integrated router (tests/newer orchestrators), use it directly.
+    """
+    if hasattr(brain, "_gemini_allowed") and hasattr(brain, "fallback_providers"):
+        return brain
+    routed = getattr(brain, "_company_chief_integrated_router", None)
+    if routed is None:
+        from .reasoning_router_integrated import ResilientReasoning
+        routed = ResilientReasoning(budget=max(1, int(getattr(brain, "budget", 1) or 1)))
+        brain._company_chief_integrated_router = routed
+    return routed
+
+
+def _sync_company_chief_router(brain, routed) -> None:
+    """Expose integrated chief accounting through the legacy orchestrator handle."""
+    if routed is brain:
+        return
+    state_fields = (
+        "calls_used", "attempts", "successes", "errors", "notes", "models_tried",
+        "switched_models", "same_model_retries", "key_switches", "pass_log",
+        "prompt_compactions", "timeout_extensions", "prompt_attempt_log", "ledger",
+        "blocked", "stopped", "keys",
+    )
+    for name in state_fields:
+        if hasattr(routed, name):
+            setattr(brain, name, getattr(routed, name))
+    # _run_passes asks these methods from its original brain after all passes.
+    # Bind the integrated implementations so provider fallbacks are counted too.
+    for name in (
+        "api_accounting", "usage_note", "failure_kind", "failure_reason",
+        "technical_details", "provider_status",
+    ):
+        method = getattr(routed, name, None)
+        if callable(method):
+            setattr(brain, name, method)
+
+
 def generate_company_chief(brain, prompt: str, label: str = "") -> str:
-    """The chief must not enter legacy SDK discovery without an eligible model."""
-    from utils.zero_cost_guard import zero_cost_enabled
+    """Run the chief on the same integrated confirmed-zero-cost router as workers."""
     from .reasoning_router_integrated import QuotaExhausted
-    eligible = zero_cost_enabled() and (
-        brain._gemini_allowed()
-        or any(provider.configured for provider in brain.fallback_providers)
+
+    routed = _company_chief_router(brain)
+    eligible = (
+        routed._gemini_allowed()
+        or any(provider.configured for provider in routed.fallback_providers)
     )
     if eligible:
-        return brain.generate(prompt, label)
-    if brain.remaining <= 0:
+        text = routed.generate(prompt, label)
+        _sync_company_chief_router(brain, routed)
+        return text
+    if routed.remaining <= 0:
+        _sync_company_chief_router(brain, routed)
         raise QuotaExhausted("company chief logical call budget exhausted")
-    brain.calls_used += 1
-    brain.pass_log.append({"label": label, "ok": False, "http_attempts": 0, "model": ""})
-    brain.errors.append("Company chief unavailable: no eligible confirmed-zero-cost model.")
+    routed.calls_used += 1
+    routed.pass_log.append({"label": label, "ok": False, "http_attempts": 0, "model": ""})
+    routed.errors.append("Company chief unavailable: no eligible confirmed-zero-cost model.")
+    _sync_company_chief_router(brain, routed)
     return ""
 
 
