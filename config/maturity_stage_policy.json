@@ -1,0 +1,43 @@
+{
+  "schema_version": 1,
+  "stages": [
+    {
+      "id": "A",
+      "name": "Software foundations",
+      "proof_kinds": ["code"]
+    },
+    {
+      "id": "B",
+      "name": "Production wiring",
+      "proof_kinds": ["production_wiring"]
+    },
+    {
+      "id": "C",
+      "name": "Adversarial and benchmark test evidence",
+      "proof_kinds": ["test"]
+    },
+    {
+      "id": "D",
+      "name": "Execution and reproducibility",
+      "proof_kinds": ["execution", "reproducibility"]
+    },
+    {
+      "id": "E",
+      "name": "Independent live hardware and operational evidence",
+      "proof_kinds": [
+        "independent_validation",
+        "persistence",
+        "runtime_observation",
+        "live_observation",
+        "hardware_observation",
+        "safety_gate"
+      ]
+    },
+    {
+      "id": "F",
+      "name": "Strict 142 capability verification",
+      "proof_kinds": []
+    }
+  ],
+  "final_stage": "F"
+}

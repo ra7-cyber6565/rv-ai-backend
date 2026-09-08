@@ -146,6 +146,23 @@ def test_current_specialized_attestors_are_explicit_and_external_boundaries_rema
         assert diversity.verifiers == ("trusted-independent-validator",)
         assert diversity.subjects == ("scientist-society-independent-validation",)
 
+    debate_tournament = _route(report, 19, ProofKind.INDEPENDENT)
+    assert debate_tournament.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+    assert debate_tournament.attestor_id == "debate-tournament-independent"
+    assert debate_tournament.external_required is True
+    assert debate_tournament.verifiers == ("trusted-independent-validator",)
+    assert debate_tournament.subjects == ("capability-19-independent-validation",)
+
+    for capability_id in (36, 37):
+        adversarial = _route(report, capability_id, ProofKind.INDEPENDENT)
+        assert adversarial.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
+        assert adversarial.attestor_id == "adversarial-independent"
+        assert adversarial.external_required is True
+        assert adversarial.verifiers == ("trusted-independent-validator",)
+        assert adversarial.subjects == (
+            f"capability-{capability_id}-independent-validation",
+        )
+
     triple = _route(report, 40, ProofKind.EXECUTION)
     assert triple.status == "SPECIALIZED_EXTERNAL_ATTESTOR"
     assert triple.attestor_id == "triple-implementation"
@@ -356,7 +373,7 @@ def test_generic_trusted_routes_are_not_misrepresented_as_specialized_attestors(
     assert runtime.external_required is True
 
     # Keep this regression on a genuinely still-unspecialized independent route.
-    independent = _route(report, 19, ProofKind.INDEPENDENT)
+    independent = _route(report, 39, ProofKind.INDEPENDENT)
     assert independent.status == "GENERIC_EXTERNAL_ROUTE"
     assert independent.attestor_id == ""
     assert independent.external_required is True
