@@ -1,14 +1,14 @@
 """Fail-closed final acceptance for explicit trading-model deliverables.
 
-The generic structured-answer gate checks headings/coverage.  A deployed Max
+The generic structured-answer gate checks headings/coverage. A deployed Max
 acceptance run showed why that is not sufficient for trading: a response can
 look structurally complete while the requested trading model, validation, or
-technical script is still absent.  This deterministic gate runs on the final
+technical script is still absent. This deterministic gate runs on the final
 ``ResearchResult.to_dict`` payload and can only downgrade completion.
 
-It does not decide whether a strategy is profitable.  It only asks whether the
+It does not decide whether a strategy is profitable. It only asks whether the
 specific deliverables requested by the user are actually present/measured by
-the existing trading contract.  A requested backtest that did not run remains a
+the existing trading contract. A requested backtest that did not run remains a
 missing deliverable; the gate never converts prose or a model claim into a test.
 """
 from __future__ import annotations
@@ -103,6 +103,30 @@ def _required_points(question: str) -> List[str]:
     return _dedupe(required)
 
 
+def _contract_partition_valid(contract: Dict[str, Any]) -> bool:
+    """Public trade record must still account for every one of the 34 checks."""
+    try:
+        points = int(contract.get("contract_points"))
+        met_count = int(contract.get("met_count"))
+        not_met_count = int(contract.get("not_met_count"))
+        not_measured_count = int(contract.get("not_measured_count"))
+    except (TypeError, ValueError):
+        return False
+    not_met = [str(v) for v in (contract.get("not_met") or [])]
+    not_measured = [str(v) for v in (contract.get("not_measured") or [])]
+    valid_ids = set(trademodel.CONTRACT_IDS)
+    bad_ids = set(not_met) | set(not_measured)
+    return bool(
+        points == trademodel.CONTRACT_POINTS
+        and met_count >= 0 and not_met_count >= 0 and not_measured_count >= 0
+        and met_count + not_met_count + not_measured_count == points
+        and len(not_met) == not_met_count
+        and len(not_measured) == not_measured_count
+        and not (set(not_met) & set(not_measured))
+        and bad_ids <= valid_ids
+    )
+
+
 def audit(result: Dict[str, Any]) -> Dict[str, Any]:
     data = result if isinstance(result, dict) else {}
     question = str(data.get("question") or "")
@@ -122,10 +146,13 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
     required = _required_points(question)
     not_met = set(str(v) for v in (contract.get("not_met") or []))
     not_measured = set(str(v) for v in (contract.get("not_measured") or []))
-    missing = []
+    missing: List[str] = []
     lane_ran = bool(contract.get("ran") is True and contract.get("asked") is True)
+    partition_valid = _contract_partition_valid(contract) if lane_ran else False
     if not lane_ran:
         missing.append("trade_contract_not_run")
+    elif not partition_valid:
+        missing.append("trade_contract_status_partition_invalid")
     else:
         for point in required:
             if point in not_met or point in not_measured:
@@ -144,6 +171,7 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
         "script_requested": script_requested,
         "script_delivered": script_delivered,
         "trade_contract_ran": lane_ran,
+        "trade_contract_partition_valid": partition_valid,
         "profitability_proven": False,
         "live_tested": bool(contract.get("live_tested") is True),
         "note": (
@@ -207,7 +235,7 @@ def enforce(result: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def install() -> None:
-    """Install after the generic structured coverage wrapper; exactly once."""
+    """Install once; wrapper order stays monotonic with other result gates."""
     from . import models
 
     cls = models.ResearchResult
