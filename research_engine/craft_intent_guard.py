@@ -96,10 +96,12 @@ def install() -> None:
 install()
 
 # ``research_engine.__init__`` imports this deterministic guard on every runtime
-# path.  Install companion acceptance boundaries here so the later orchestrator
-# imports the already-hardened functions.  They are no-network deterministic
+# path. Install companion acceptance boundaries here so the later orchestrator
+# imports the already-hardened functions. They are no-network deterministic
 # projections/normalizers and never manufacture a test result or threshold.
 from .trading_hypothesis_structure_guard import install as _install_trading_hypothesis_structure_guard
 _install_trading_hypothesis_structure_guard()
 from .company_handoff_guard import install as _install_company_handoff_guard
 _install_company_handoff_guard()
+from .trading_acceptance_guard import install as _install_trading_acceptance_guard
+_install_trading_acceptance_guard()
