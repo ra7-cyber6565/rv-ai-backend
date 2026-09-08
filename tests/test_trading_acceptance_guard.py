@@ -1,12 +1,19 @@
+from research_engine import trademodel
 from research_engine import trading_acceptance_guard as guard
 
 
 def contract(*, not_met=(), not_measured=()):
+    not_met = list(not_met)
+    not_measured = list(not_measured)
     return {
         "asked": True,
         "ran": True,
-        "not_met": list(not_met),
-        "not_measured": list(not_measured),
+        "contract_points": trademodel.CONTRACT_POINTS,
+        "met_count": trademodel.CONTRACT_POINTS - len(not_met) - len(not_measured),
+        "not_met_count": len(not_met),
+        "not_measured_count": len(not_measured),
+        "not_met": not_met,
+        "not_measured": not_measured,
         "live_tested": False,
     }
 
@@ -35,6 +42,20 @@ def test_trading_model_without_trade_contract_is_partial():
     audit = out["coverage"]["trading_acceptance"]
     assert "trade_contract_not_run" in audit["missing_contract_points"]
     assert "TRADING ACCEPTANCE GAP" in out["answer"]
+
+
+def test_malformed_trade_contract_cannot_imply_all_points_met():
+    out = guard.enforce({
+        "question": "US100 trading model banao",
+        "answer": "A model-like answer.",
+        "status": "COMPLETE",
+        "coverage": {},
+        "trade_contract": {"asked": True, "ran": True, "not_met": [], "not_measured": []},
+    })
+    audit = out["coverage"]["trading_acceptance"]
+    assert audit["trade_contract_partition_valid"] is False
+    assert "trade_contract_status_partition_invalid" in audit["missing_contract_points"]
+    assert out["status"] == "PARTIAL"
 
 
 def test_requested_walk_forward_must_be_measured_not_merely_described():
@@ -117,6 +138,7 @@ def test_complete_delivery_does_not_claim_profitability_or_live_testing():
     })
     audit = out["coverage"]["trading_acceptance"]
     assert audit["complete"] is True
+    assert audit["trade_contract_partition_valid"] is True
     assert audit["profitability_proven"] is False
     assert audit["live_tested"] is False
     assert out["status"] == "COMPLETE"
