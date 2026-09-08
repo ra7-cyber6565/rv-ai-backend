@@ -94,3 +94,10 @@ def install() -> None:
 
 
 install()
+
+# ``research_engine.__init__`` imports this deterministic guard on every runtime
+# path.  Install the companion hypothesis-schema augmentation here as the same
+# no-network acceptance boundary.  It only recognizes explicit trading/backtest
+# prose and never supplies an unstated threshold or result.
+from .trading_hypothesis_structure_guard import install as _install_trading_hypothesis_structure_guard
+_install_trading_hypothesis_structure_guard()
