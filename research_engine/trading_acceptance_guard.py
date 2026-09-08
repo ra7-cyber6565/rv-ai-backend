@@ -2,14 +2,16 @@
 
 The generic structured-answer gate checks headings/coverage. A deployed Max
 acceptance run showed why that is not sufficient for trading: a response can
-look structurally complete while the requested trading model, validation, or
-technical script is still absent. This deterministic gate runs on the final
-``ResearchResult.to_dict`` payload and can only downgrade completion.
+look structurally complete while the requested trading model, validation,
+technical script, or numeric rule provenance is still absent. This deterministic
+gate runs on the final ``ResearchResult.to_dict`` payload and can only downgrade
+completion.
 
 It does not decide whether a strategy is profitable. It only asks whether the
 specific deliverables requested by the user are actually present/measured by
 the existing trading contract. A requested backtest that did not run remains a
-missing deliverable; the gate never converts prose or a model claim into a test.
+missing deliverable; prose never becomes a test, and a hard-coded trading
+threshold never becomes evidence merely because it contains a number.
 """
 from __future__ import annotations
 
@@ -48,6 +50,38 @@ _SCRIPT_REQUEST_RE = re.compile(
     re.IGNORECASE,
 )
 _FENCED_CODE_RE = re.compile(r"```\s*([a-zA-Z0-9_+.-]*)\s*\n([\s\S]*?)```", re.MULTILINE)
+_SOURCE_CITATION_RE = re.compile(r"\[S\d+\]", re.IGNORECASE)
+_TRADING_THRESHOLD_TERM_RE = re.compile(
+    r"\b(?:rsi|adx|atr|vwap|volume|volatility|spread|slippage|commission|"
+    r"drawdown|risk(?:\s+per\s+trade)?|stop(?:[-\s]?loss)?|take[-\s]?profit|"
+    r"target|reward|r\s*:\s*r|rr|mae|mfe|imbalance|fvg|order\s+block|"
+    r"liquidity|percentile|z[-\s]?score|standard\s+deviation|std|correlation|"
+    r"entropy|mutual\s+information|probability|win\s+rate|profit\s+factor|"
+    r"sharpe|sortino|expectancy|entry|trigger|no[-\s]?trade)\b",
+    re.IGNORECASE,
+)
+_RULE_NUMBER_RE = re.compile(
+    r"(?:>=|<=|>|<|=)\s*\d+(?:\.\d+)?\s*%?"
+    r"|\b(?:above|below|over|under|at\s+least|at\s+most|minimum|maximum|"
+    r"threshold|risk\s+per\s+trade|stop(?:[-\s]?loss)?|take[-\s]?profit|target)\b"
+    r"[^\n.;]{0,36}\d+(?:\.\d+)?\s*(?:%|r\b|atr\b|points?\b|ticks?\b)?",
+    re.IGNORECASE,
+)
+_MEASURED_PROVENANCE_RE = re.compile(
+    r"\b(?:lab\s+ne\s+asli\s+me\s+naapa|lab[-\s]?measured|measured\s+(?:on|from)|"
+    r"derived\s+from|calibrated\s+(?:on|from)|estimated\s+from)\b",
+    re.IGNORECASE,
+)
+_SAMPLE_RECEIPT_RE = re.compile(
+    r"\b\d+\s*(?:trades?|bars?|samples?|observations?|windows?|days?|sessions?)\b",
+    re.IGNORECASE,
+)
+_NON_RULE_RE = re.compile(
+    r"\b(?:warning|chetavni|fail(?:ed)?|not\s+met|naapa\s+nahi|not\s+measured|"
+    r"do\s+not|mat\s+karo|daawa|claim|illustrative|example\s+only|"
+    r"to\s+be\s+estimated|not\s+tested|unknown|hypothesis\s+only)\b",
+    re.IGNORECASE,
+)
 
 
 def _dedupe(values: Iterable[Any]) -> List[str]:
@@ -83,6 +117,38 @@ def _technical_script_delivered(answer: str) -> bool:
             if programming and trading:
                 return True
     return False
+
+
+def unsupported_numeric_thresholds(answer: str) -> List[Dict[str, Any]]:
+    """Find prose decision thresholds with neither source nor measured receipt.
+
+    Code blocks are excluded: this gate audits the model's claimed rationale,
+    while code presence has its own deliverable check. A source citation on the
+    same line is only provenance presence; normal claim-entailment gates still
+    decide whether that source really supports the number.
+    """
+    prose = _FENCED_CODE_RE.sub("", str(answer or ""))
+    out: List[Dict[str, Any]] = []
+    for line_no, raw in enumerate(prose.splitlines(), 1):
+        line = raw.strip()
+        if not line or len(line) > 1400:
+            continue
+        if not _TRADING_THRESHOLD_TERM_RE.search(line) or not _RULE_NUMBER_RE.search(line):
+            continue
+        if _NON_RULE_RE.search(line):
+            continue
+        cited = bool(_SOURCE_CITATION_RE.search(line))
+        measured = bool(_MEASURED_PROVENANCE_RE.search(line) and _SAMPLE_RECEIPT_RE.search(line))
+        if cited or measured:
+            continue
+        out.append({
+            "line_no": line_no,
+            "excerpt": line[:240],
+            "reason": "numeric trading decision threshold has no same-line source citation or measured sample receipt",
+        })
+        if len(out) >= 12:
+            break
+    return out
 
 
 def _required_points(question: str) -> List[str]:
@@ -139,6 +205,8 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
             "missing_contract_points": [],
             "script_requested": False,
             "script_delivered": None,
+            "unsupported_numeric_threshold_count": 0,
+            "unsupported_numeric_thresholds": [],
             "note": "trading-model deliverable gate not required",
         }
 
@@ -158,10 +226,15 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
             if point in not_met or point in not_measured:
                 missing.append(point)
 
+    answer = str(data.get("answer") or "")
     script_requested = _technical_script_requested(question)
-    script_delivered = _technical_script_delivered(str(data.get("answer") or "")) if script_requested else None
+    script_delivered = _technical_script_delivered(answer) if script_requested else None
     if script_requested and not script_delivered:
         missing.append("technical_backtest_script")
+
+    unsupported = unsupported_numeric_thresholds(answer)
+    if unsupported:
+        missing.append("unsupported_numeric_trading_thresholds")
 
     return {
         "required": True,
@@ -172,11 +245,13 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
         "script_delivered": script_delivered,
         "trade_contract_ran": lane_ran,
         "trade_contract_partition_valid": partition_valid,
+        "unsupported_numeric_threshold_count": len(unsupported),
+        "unsupported_numeric_thresholds": unsupported,
         "profitability_proven": False,
         "live_tested": bool(contract.get("live_tested") is True),
         "note": (
-            "delivery/measurement acceptance only; a MET contract point or code block "
-            "is not proof of future profitability"
+            "delivery/provenance/measurement acceptance only; a MET contract point, "
+            "citation presence, or code block is not proof of future profitability"
         ),
     }
 
