@@ -2,6 +2,27 @@
 
 **Purpose:** This is the first file any future AI/agent must read before changing this repository. It exists to stop half-finished parallel work, stale completion claims, duplicate implementations, and branch/deployment confusion.
 
+## Active answer-acceptance repair — 2026-09-08
+
+- Branch `codex/answer-scope-20260908` is based on main
+  `831dbc7209253e58bbfa0ec79b9efe8e130bf523`; it does not change production.
+- The user's superconductivity answer exposed a source-report fallback that did
+  not distinguish 1 GPa from requested atmospheric conditions, a question quoted
+  as a mechanism, and a public PARTIAL reason referring to the original COMPLETE
+  label. Condition accounting, negative-follow-up preservation, question
+  filtering and public status wording now have regression coverage.
+- Condition mentions alone never establish scientific confirmation. This parser
+  does not certify temperature/material matching, retraction or replication.
+- Local stdlib pressure cases passed. Integrated exact-head CI is
+  **VERIFICATION PENDING** at authoring; the new PR's exact head and workflow
+  receipts are the authority. No new live research or deployment is claimed.
+- Parallel Sol PR #81 was reviewed at
+  `0a75e6a048b1f032206f3b9a8e02e907b6ad3649` (all five workflows green).
+  Its craft/trading-hypothesis files are preserved on its branch. Those results
+  do not certify this branch or the future combined revision.
+- See `docs/ANSWER_CONDITION_ACCEPTANCE.md` for the measured defects, scope and
+  remaining live acceptance work. All broader blockers in section 5 remain open.
+
 ## 1. Current integration authority — updated 2026-09-08
 
 - Repository: `ra7-cyber6565/rv-ai-backend`.

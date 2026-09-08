@@ -127,6 +127,67 @@ def test_complete_status_becomes_partial_when_mandatory_section_is_missing():
     assert response["status_reason"].startswith("Final quality gate:")
 
 
+def test_public_partial_reason_describes_the_current_status_and_missing_sections():
+    result = _complete_result()
+    result["answer"] = "## Seedha jawab\n\nA source report with incomplete comparison."
+    response = enforce_quality_release(result)
+    assert response["status"] == "PARTIAL"
+    assert "PARTIAL" in response["status_reason"]
+    assert "labelled COMPLETE" not in response["status_reason"]
+    assert "unknowns" in response["status_reason"]
+    mismatch = next(issue for issue in response["quality_gate"]["issues"]
+                    if issue["code"] == "INCOMPLETE_STATUS_MISMATCH")
+    # The original diagnostic remains available for audit; only public wording changes.
+    assert "labelled COMPLETE" in mismatch["message"]
+    assert result["status"] == "COMPLETE"
+    assert enforce_quality_release(response) == response
+
+
+def test_unresolved_requested_conditions_block_complete_even_with_all_headings():
+    result = _complete_result()
+    result["verification"]["evidence_first_audit"] = {
+        "critical_draft_enforcement": {"condition_scope": {
+            "required": True, "matching_pressure_found": False,
+            "confirmation_established": False,
+        }}
+    }
+    before = copy.deepcopy(result)
+    response = enforce_quality_release(result)
+    assert response["status"] == "PARTIAL"
+    assert response["quality_gate"]["answer_complete"] is False
+    assert response["quality_gate"]["release_ready"] is False
+    assert "CRITICAL_CONDITION_SCOPE_UNRESOLVED" in _issue_codes(response)
+    assert "experimental conditions" in response["status_reason"]
+    assert "MANDATORY_SECTION_MISSING" not in _issue_codes(response)
+    assert result == before
+
+
+def test_previous_contract_receipt_cannot_bypass_new_condition_check():
+    result = _complete_result()
+    result["quality_enforced"] = True
+    result["quality_gate"] = {"contract_version": "1.0", "answer_complete": True}
+    result["verification"]["evidence_first_audit"] = {
+        "critical_draft_enforcement": {"condition_scope": {
+            "required": True, "confirmation_established": False,
+        }}
+    }
+    response = enforce_quality_release(result)
+    assert response["status"] == "PARTIAL"
+    assert response["quality_gate"]["contract_version"] != "1.0"
+
+
+def test_unknown_confirmation_does_not_by_itself_mean_incomplete_research():
+    result = _complete_result()
+    result["verification"]["evidence_first_audit"] = {
+        "critical_draft_enforcement": {"condition_scope": {
+            "required": True, "confirmation_established": None,
+        }}
+    }
+    response = enforce_quality_release(result)
+    assert response["status"] == "COMPLETE"
+    assert "CRITICAL_CONDITION_SCOPE_UNRESOLVED" not in _issue_codes(response)
+
+
 def test_quality_release_is_idempotent():
     result = _complete_result(verified=True)
     result["quality_context"]["counter_search_performed"] = False

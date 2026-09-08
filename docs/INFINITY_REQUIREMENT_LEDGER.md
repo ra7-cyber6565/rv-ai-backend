@@ -6,6 +6,17 @@ research-team path in the existing application. **This ledger does not declare
 the entire specification complete.** A partial status is not an external blocker;
 remaining engineering work is named separately from unavailable live evidence.
 
+2026-09-08 acceptance repair (base main `831dbc7209253e58bbfa0ec79b9efe8e130bf523`):
+PRs #79/#80 are merged; their entries below are historical, not the current
+integration vehicle. The isolated `codex/answer-scope-20260908` change improves
+R06 source-condition accounting, R17 public PARTIAL reasons and R19 regression
+coverage for the user-observed superconductivity answer. Eight local stdlib
+pressure cases passed; integrated exact-head CI is **VERIFICATION PENDING** at
+authoring. The relevant PR receipts must identify the tested head. R06/R09/R18/
+R19/R21 remain PARTIAL pending semantic/independent/live acceptance. Sol's PR #81
+is preserved separately; neither branch's CI certifies the combined version.
+See `ANSWER_CONDITION_ACCEPTANCE.md` for exact scope and remaining work.
+
 2026-09-07 continuation: default-on stored-data preservation and an opt-in
 GitHub-hosted live validation lane are implemented. The user's laptop no longer
 needs to be the test host. See `HOSTED_VALIDATION.md` for configuration, evidence

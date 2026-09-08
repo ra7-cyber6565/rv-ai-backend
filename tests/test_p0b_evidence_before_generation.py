@@ -10,12 +10,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from research_engine import claim_verification as CV
 from research_engine import final_quality_gate as FQ
 from research_engine.evidence_drafting import (
+    _public_claim_sentence,
     audit_claims_against_manifest,
     build_critical_evidence_sections,
     build_evidence_draft_manifest,
     passage_sha256,
 )
 from research_engine.local_reasoning import compose as compose_offline
+from research_engine.local_reasoning import _mechanism
 from research_engine.models import EvidencePack, Passage, SourceRecord, SourceType
 from research_engine.quality_producers import quality_context
 from research_engine.synthesizer_claude import FinalSynthesizer as ClaudeFinalSynthesizer
@@ -129,6 +131,80 @@ def test_instruction_like_preselected_text_cannot_become_public_critical_prose()
     assert drafted["available"] is False
     assert drafted["direct_answer"] == ""
     assert drafted["conclusion"] == ""
+
+
+def test_pressure_mismatched_fallback_answers_the_limit_before_quoting_sources():
+    """Regression adapted from the user's answer; not a replay of their source pack."""
+    question = "Is room-temperature superconductivity proven at normal atmospheric pressure?"
+    texts = [
+        "They claimed room-temperature superconductivity with a maximum Tc of 294 K at 1 GPa. "
+        "However, independent follow-up measurements did not reproduce the reported transition.",
+        "We report room-temperature superconductivity signatures at different grain boundaries "
+        "and interfaces in ceramic samples synthesized using a solar furnace.",
+    ]
+    pack = EvidencePack(question=question, sources=[_source(f"S{i}") for i in (1, 3)])
+    pack.passages = [Passage(source_id=sid, text=text * 3, locator="abstract fixture")
+                     for sid, text in zip(("S1", "S3"), texts)]
+    manifest = build_evidence_draft_manifest(question, pack)
+    drafted = build_critical_evidence_sections(question, manifest)
+    assert drafted["available"] is True
+    assert drafted["direct_answer"].startswith("[INCONCLUSIVE]")
+    assert "[S1]" in drafted["direct_answer"] and "[S3]" in drafted["direct_answer"]
+    assert "[SOURCE-REPORTED]" in drafted["direct_answer"]
+    assert "normal atmospheric pressure verify nahi hua" in drafted["direct_answer"]
+    assert "1 standard atmosphere se alag" in drafted["direct_answer"]
+    assert drafted["conclusion"].startswith("[INCONCLUSIVE]")
+    assert "independent replication" in drafted["conclusion"]
+    scope = drafted["audit"]["condition_scope"]
+    assert scope["required"] is True
+    assert scope["matching_pressure_found"] is False
+    assert scope["confirmation_established"] is False
+    assert {row["state"] for row in scope["sources"]} == {"DIFFERENT_PRESSURE", "PRESSURE_UNSPECIFIED"}
+    assert texts[0] not in str(drafted["audit"])
+    assert "Requested pressure scope: DIFFERENT_PRESSURE" in manifest.prompt_block()
+
+
+def test_adjacent_negative_followup_is_not_discarded_for_a_more_similar_claim():
+    passage = (
+        "Room-temperature superconductivity was initially reported at 294 K and 1 GPa. "
+        "However, independent measurements failed to reproduce that reported transition."
+    )
+    sentence = _public_claim_sentence("Room-temperature superconductivity at 294 K and 1 GPa", passage)
+    assert "failed to reproduce" in sentence
+
+
+def test_question_only_passage_cannot_become_a_factual_answer():
+    passage = "What causes the observed sharp temperature-dependent resistance jump?"
+    assert _public_claim_sentence("What causes the sharp resistance jump?", passage) == ""
+
+
+def test_question_only_source_is_not_an_explanation_in_the_offline_answer():
+    question = "What causes the observed sharp temperature-dependent resistance jump?"
+    pack = EvidencePack(question=question, sources=[_source("S1", text=question)])
+    explanation = _mechanism(question, pack, "english")
+    assert question not in explanation
+    assert "do not spell out a mechanism" in explanation
+    pack.sources[0].snippet = question + " The observed resistance jump is caused by a structural transition."
+    explanation = _mechanism(question, pack, "english")
+    assert question not in explanation
+    assert "structural transition" in explanation
+
+
+def test_matching_pressure_mentions_never_count_as_scientific_confirmation():
+    question = "Is room-temperature superconductivity proven at ambient pressure?"
+    text = "Electrical resistance measurements at ambient pressure did not establish superconductivity. "
+    manifest = build_evidence_draft_manifest(question, _pack(text))
+    drafted = build_critical_evidence_sections(question, manifest)
+    scope = drafted["audit"]["condition_scope"]
+    assert scope["matching_pressure_found"] is True
+    assert scope["confirmation_established"] is None
+    assert scope["sources"][0]["scientific_confirmation"] == "NOT_ASSESSED"
+
+
+def test_no_pressure_requirement_does_not_add_a_false_condition_failure():
+    drafted = build_critical_evidence_sections(CLAIM, build_evidence_draft_manifest(CLAIM, _pack()))
+    assert drafted["audit"]["condition_scope"]["required"] is False
+    assert "[INCONCLUSIVE]" not in drafted["direct_answer"]
 
 
 def test_weak_sources_cannot_become_strong_claim_eligible():

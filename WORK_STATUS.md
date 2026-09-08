@@ -2,6 +2,25 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Current continuation — answer acceptance, 2026-09-08
+
+- Main was read at `831dbc7209253e58bbfa0ec79b9efe8e130bf523`. PRs #79 and
+  #80 are merged; older continuation entries below are historical. The permanent
+  public contract is Chat/Max, recorded in `MAX_MODE_CONTRACT.md`.
+- `codex/answer-scope-20260908` repairs measured source-condition/public-status
+  defects from the user's superconductivity answer. It retains source quotes as
+  reports, places unresolved atmospheric scope first, preserves adjacent negative
+  follow-ups, and rejects a question as a deterministic factual explanation.
+- The original pre-gate COMPLETE mismatch remains in the audit; the public
+  PARTIAL reason describes the corrected state and names missing sections.
+- Local pressure tests: 8 PASS. Integrated exact-head CI: **VERIFICATION PENDING**
+  at authoring; record final head/run receipts in this branch's PR. Live-model
+  answer quality and production deployment of these fixes: **NOT TESTED**.
+- Sol PR #81 remains separate; reviewed head `0a75e6a` has five green workflows.
+  Preserve its craft/trading-parser edits and reverify the eventual combined
+  revision. See `docs/ANSWER_CONDITION_ACCEPTANCE.md`.
+- No laptop installation, user-file deletion, model call or production change.
+
 ## Current continuation — ChatGPT, 2026-09-07
 
 - User superseded laptop setup: no further Windows/WSL/Docker installs, no
