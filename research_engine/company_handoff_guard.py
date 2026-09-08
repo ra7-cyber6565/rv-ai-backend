@@ -7,11 +7,11 @@ then (correctly) refused to mark ``specialist_handoff`` complete, leaving an
 otherwise completed six-worker/chief run at 10/11 passes.
 
 This guard keeps that fail-closed rule for genuinely oversized/unrepresentable
-reports. Before hard clipping, it builds a deterministic bounded view that keeps
-all claims/hypotheses represented, preserves their source/status/test structure,
-and records what prose was compacted. Full worker reports and hashes remain in
-the normal Company result. If even the bounded view exceeds 16k, the role stays
-in ``handoff_truncated_roles`` and completion remains PARTIAL.
+reports. Before hard clipping, it builds deterministic bounded views that keep
+all claims/hypotheses represented, preserve source/status/test structure, and
+record what prose was compacted. Full worker reports and hashes remain in the
+normal Company result. If even the compact view exceeds 16k, the role stays in
+``handoff_truncated_roles`` and completion remains PARTIAL.
 
 No provider call, retry, result fabrication, or evidence promotion occurs here.
 """
@@ -26,8 +26,6 @@ from . import research_company as _company
 from .source_prompt_guard import quote_untrusted
 
 _ROLE_LIMIT = 16000
-# A report dominated by claim prose cannot be truthfully reduced to a tiny prompt
-# and still be called a complete evidence handoff. Keep that case fail-closed.
 _MAX_COMPACTABLE_CLAIM_TEXT = 12000
 _UNKNOWN = {"", "UNKNOWN", "TO BE ESTIMATED", "NOT TESTED", "N/A", "NOT_APPLICABLE"}
 _PLAN_DETAIL_FIELDS = (
@@ -72,25 +70,17 @@ def _compact_plan(plan: Any) -> Dict[str, Any]:
     for field in _PLAN_DETAIL_FIELDS:
         value = src.get(field)
         if isinstance(value, dict) and value.get("state") == "NOT_APPLICABLE":
-            details[field] = {
-                "state": "NOT_APPLICABLE",
-                "reason": _clip(value.get("reason"), 55),
-            }
+            details[field] = {"state": "NOT_APPLICABLE", "reason": _clip(value.get("reason"), 55)}
         else:
             details[field] = _clip(value, 60)
 
-    variable_preview = []
     raw_variables = src.get("variables") if isinstance(src.get("variables"), list) else []
+    variable_preview = []
     for row in raw_variables[:4]:
-        if not isinstance(row, dict):
-            continue
-        variable_preview.append(
-            "|".join((
-                _clip(row.get("symbol"), 18),
-                _clip(row.get("unit"), 18),
-                _clip(row.get("role"), 24),
-            ))
-        )
+        if isinstance(row, dict):
+            variable_preview.append("|".join((
+                _clip(row.get("symbol"), 18), _clip(row.get("unit"), 18), _clip(row.get("role"), 24)
+            )))
 
     known_fields, unknown_fields, not_applicable_fields = [], [], []
     for name, value in src.items():
@@ -115,11 +105,9 @@ def _compact_plan(plan: Any) -> Dict[str, Any]:
 
 def _compact_hypothesis(row: Any) -> Dict[str, Any]:
     src = row if isinstance(row, dict) else {}
-    out = {
-        key: _clip(src.get(key), 100)
-        for key in ("hypothesis", "prediction", "baseline", "test", "falsification")
-    }
     assumptions = src.get("assumptions") if isinstance(src.get("assumptions"), list) else []
+    out = {key: _clip(src.get(key), 100) for key in
+           ("hypothesis", "prediction", "baseline", "test", "falsification")}
     out.update({
         "mechanism": _clip(src.get("mechanism"), 80),
         "assumption_count": len(assumptions),
@@ -186,6 +174,84 @@ def _compact_report(report: Any) -> Dict[str, Any]:
     return out
 
 
+def _ultra_hypothesis(row: Any) -> Dict[str, Any]:
+    src = row if isinstance(row, dict) else {}
+    plan = src.get("test_plan") if isinstance(src.get("test_plan"), dict) else {}
+    assumptions = src.get("assumptions") if isinstance(src.get("assumptions"), list) else []
+    raw_variables = plan.get("variables") if isinstance(plan.get("variables"), list) else []
+    variable_preview = []
+    for var in raw_variables[:4]:
+        if isinstance(var, dict):
+            variable_preview.append("|".join((
+                _clip(var.get("symbol"), 14), _clip(var.get("unit"), 14), _clip(var.get("role"), 18)
+            )))
+    known, unknown, na = [], [], []
+    for name, value in plan.items():
+        if name == "variables":
+            continue
+        bucket = known if _state(value) == "KNOWN" else na if _state(value) == "NOT_APPLICABLE" else unknown
+        bucket.append(str(name))
+    return {
+        "h": _clip(src.get("hypothesis"), 80),
+        "p": _clip(src.get("prediction"), 80),
+        "b": _clip(src.get("baseline"), 80),
+        "t": _clip(src.get("test"), 80),
+        "f": _clip(src.get("falsification"), 80),
+        "m": _clip(src.get("mechanism"), 60),
+        "a": str(len(assumptions)) + "|" + (_clip(assumptions[0], 40) if assumptions else ""),
+        "+": ",".join(str(v) for v in (src.get("supporting_source_ids") or [])[:12]),
+        "-": ",".join(str(v) for v in (src.get("opposing_source_ids") or [])[:12]),
+        "ab": _clip(src.get("applicability_boundaries"), 45),
+        "pc": _clip(src.get("plan_completeness"), 24),
+        "miss": ",".join(str(v) for v in (src.get("missing_plan_fields") or [])[:24]),
+        "trunc": ",".join(str(v) for v in (src.get("truncated_plan_fields") or [])[:24]),
+        "e": _clip(src.get("execution"), 20),
+        "s": _clip(src.get("status"), 20),
+        "plan": {
+            "d": {field: _clip(plan.get(field), 45) for field in _PLAN_DETAIL_FIELDS},
+            "v": str(len(raw_variables)) + "|" + ";".join(variable_preview),
+            "known": ",".join(known), "unknown": ",".join(unknown), "na": ",".join(na),
+        },
+    }
+
+
+def _ultra_report(report: Dict[str, Any]) -> Dict[str, Any]:
+    claims = report.get("claims") if isinstance(report.get("claims"), list) else []
+    hypotheses = report.get("hypotheses") if isinstance(report.get("hypotheses"), list) else []
+    ancillary = {name: len(report.get(name) or []) if isinstance(report.get(name), list) else 0
+                 for name in ("limitations", "assumptions", "contradictions", "remaining_questions")}
+    return {
+        "legend": {
+            "claim": "t=text,s=source ids,k=kind,ev=entailment verified",
+            "hyp": "h=hypothesis,p=prediction,b=baseline,t=test,f=falsification,m=mechanism,a=assumption count|preview,+=support,-=oppose,ab=boundaries,pc=plan completeness,e=execution,s=status",
+            "plan": "d=key detail excerpts,v=variable count|symbol|unit|role preview,known/unknown/na=field names",
+        },
+        "summary": _clip(report.get("summary"), 300),
+        "claims": [{
+            "t": _clip(row.get("text"), 120),
+            "s": ",".join(str(v) for v in (row.get("source_ids") or [])[:20]),
+            "k": _clip(row.get("kind"), 24),
+            "ev": bool(row.get("entailment_verified") is True),
+        } for row in claims[:12] if isinstance(row, dict)],
+        "claim_count": len(claims),
+        "hypotheses": [_ultra_hypothesis(row) for row in hypotheses[:6]],
+        "hypothesis_count": len(hypotheses),
+        "issues": list(report.get("contract_issues") or [])[:20],
+        "status": _clip(report.get("status"), 24),
+        "anc": ancillary,
+        "preview": {
+            name: _clip((report.get(name) or [""])[0], 50)
+            if isinstance(report.get(name), list) and report.get(name) else ""
+            for name in ("limitations", "contradictions", "remaining_questions")
+        },
+        "tools": [{
+            "state": _clip(item.get("state"), 24),
+            "reason": _clip(item.get("reason"), 60),
+        } for item in (report.get("tool_results") or [])[:2] if isinstance(item, dict)],
+        "compact": {"level": "ULTRA", "full_report_retained": True},
+    }
+
+
 def _strip_binary_artifacts(report: Any) -> Any:
     value = copy.deepcopy(report)
     if isinstance(value, dict):
@@ -200,12 +266,8 @@ def _strip_binary_artifacts(report: Any) -> Any:
 
 
 def _encode(role: str, status: str, report: Any) -> str:
-    return json.dumps(
-        {"role": role, "status": status, "report": report},
-        ensure_ascii=False,
-        separators=(",", ":"),
-        sort_keys=True,
-    )
+    return json.dumps({"role": role, "status": status, "report": report},
+                      ensure_ascii=False, separators=(",", ":"), sort_keys=True)
 
 
 def install() -> None:
@@ -217,6 +279,7 @@ def install() -> None:
     def guarded_chief_handoff(company: Dict) -> str:
         encoded = []
         compacted_roles = []
+        compact_levels: Dict[str, str] = {}
         truncated_roles = []
         blocked_reasons: Dict[str, str] = {}
         for row in company.get("workers", []):
@@ -228,15 +291,22 @@ def install() -> None:
                 if _claim_text_total(report) > _MAX_COMPACTABLE_CLAIM_TEXT:
                     blocked_reasons[role] = "claim_payload_exceeds_safe_projection"
                 else:
-                    report = _compact_report(report)
+                    original_report = report
+                    report = _compact_report(original_report)
                     text = _encode(role, status, report)
                     compacted_roles.append(role)
+                    compact_levels[role] = "STANDARD"
+                    if len(text) > _ROLE_LIMIT:
+                        report = _ultra_report(original_report)
+                        text = _encode(role, status, report)
+                        compact_levels[role] = "ULTRA"
             if len(text) > _ROLE_LIMIT:
                 truncated_roles.append(role)
             encoded.append((role, text))
 
         company["handoff_prepared"] = True
         company["handoff_compacted_roles"] = compacted_roles
+        company["handoff_compaction_levels"] = compact_levels
         company["handoff_truncated_roles"] = truncated_roles
         company["handoff_compaction_blocked_reasons"] = blocked_reasons
         company["handoff_policy"] = "STRUCTURED_BOUNDED_VIEW_THEN_HARD_FAIL"
@@ -248,8 +318,8 @@ def install() -> None:
             "and the highest-information next tests. Agreement between workers is not proof. "
             "Only actual execution receipts from the existing lab may establish TEST PERFORMED. "
             "Worker hypotheses are INCONCLUSIVE / TEST PROPOSED. Respect missing-worker gaps. "
-            "A STRUCTURED_BOUNDED_VIEW is a deterministic prompt projection; full worker reports "
-            "remain in the Company result and it must not be mistaken for independent replication.\n"
+            "STRUCTURED_BOUNDED_VIEW/ULTRA are deterministic prompt projections; full worker reports "
+            "remain in the Company result and are not independent replication.\n"
             "BEGIN_UNTRUSTED_SPECIALIST_DRAFTS\n"
             + "\n".join(quote_untrusted(text, limit=_ROLE_LIMIT) for _, text in encoded)
             + "\nEND_UNTRUSTED_SPECIALIST_DRAFTS\n"
@@ -265,10 +335,11 @@ def install() -> None:
             prior_attach(out, company)
             compacted = list(company.get("handoff_compacted_roles") or [])
             if compacted:
+                levels = company.get("handoff_compaction_levels") or {}
+                detail = ", ".join(role + "=" + str(levels.get(role) or "STANDARD") for role in compacted)
                 out.setdefault("notes", []).append(
-                    "Specialist chief handoff used a deterministic bounded structured view for: "
-                    + ", ".join(compacted)
-                    + ". Full worker reports remain retained; no test/result was invented."
+                    "Specialist chief handoff used deterministic bounded structured views for: "
+                    + detail + ". Full worker reports remain retained; no test/result was invented."
                 )
 
         guarded_attach_company_passes.__bounded_structured_handoff_guard__ = True
