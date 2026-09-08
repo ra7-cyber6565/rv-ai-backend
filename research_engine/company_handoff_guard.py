@@ -2,17 +2,16 @@
 
 The live Max acceptance run exposed a narrow failure mode: specialist reports can
 be structurally valid yet exceed the per-role 16k chief-prompt allowance because
-full hypothesis test plans are verbose.  The old path hard-clipped the JSON and
-then (correctly) refused to mark ``specialist_handoff`` complete.  That left an
+full hypothesis test plans are verbose. The old path hard-clipped the JSON and
+then (correctly) refused to mark ``specialist_handoff`` complete, leaving an
 otherwise completed six-worker/chief run at 10/11 passes.
 
 This guard keeps that fail-closed rule for genuinely oversized/unrepresentable
-reports.  Before hard clipping, however, it builds a deterministic handoff view:
-all worker roles remain present, all claims remain unchanged, every hypothesis
-keeps its core prediction/baseline/test/falsification plus compact plan state,
-and full raw/output hashes stay in the normal Company result.  Ancillary prose is
-summarised with explicit counts.  If the structured view still exceeds 16k, the
-role remains in ``handoff_truncated_roles`` and completion stays PARTIAL.
+reports. Before hard clipping, it builds a deterministic bounded view that keeps
+all claims/hypotheses represented, preserves their source/status/test structure,
+and records what prose was compacted. Full worker reports and hashes remain in
+the normal Company result. If even the bounded view exceeds 16k, the role stays
+in ``handoff_truncated_roles`` and completion remains PARTIAL.
 
 No provider call, retry, result fabrication, or evidence promotion occurs here.
 """
@@ -27,11 +26,13 @@ from . import research_company as _company
 from .source_prompt_guard import quote_untrusted
 
 _ROLE_LIMIT = 16000
+# A report dominated by claim prose cannot be truthfully reduced to a tiny prompt
+# and still be called a complete evidence handoff. Keep that case fail-closed.
+_MAX_COMPACTABLE_CLAIM_TEXT = 12000
 _UNKNOWN = {"", "UNKNOWN", "TO BE ESTIMATED", "NOT TESTED", "N/A", "NOT_APPLICABLE"}
 _PLAN_DETAIL_FIELDS = (
-    "test_type", "setup", "target_system_sample", "inputs_data_source",
-    "controls", "primary_outcome", "decision_threshold", "falsification",
-    "analysis_method", "uncertainty_method", "stopping_rule",
+    "test_type", "target_system_sample", "primary_outcome",
+    "decision_threshold", "falsification", "analysis_method", "stopping_rule",
 )
 
 
@@ -47,6 +48,24 @@ def _state(value: Any) -> str:
     return "UNKNOWN" if text.upper() in _UNKNOWN else "KNOWN"
 
 
+def _claim_text_total(report: Dict[str, Any]) -> int:
+    total = 0
+    for row in report.get("claims", []) if isinstance(report.get("claims"), list) else []:
+        if isinstance(row, dict):
+            total += len(str(row.get("text") or ""))
+    return total
+
+
+def _compact_claim(row: Any) -> Dict[str, Any]:
+    src = row if isinstance(row, dict) else {}
+    return {
+        "text": _clip(src.get("text"), 180),
+        "source_ids": list(src.get("source_ids") or [])[:20],
+        "kind": _clip(src.get("kind"), 30),
+        "entailment_verified": bool(src.get("entailment_verified") is True),
+    }
+
+
 def _compact_plan(plan: Any) -> Dict[str, Any]:
     src = plan if isinstance(plan, dict) else {}
     details: Dict[str, Any] = {}
@@ -55,91 +74,103 @@ def _compact_plan(plan: Any) -> Dict[str, Any]:
         if isinstance(value, dict) and value.get("state") == "NOT_APPLICABLE":
             details[field] = {
                 "state": "NOT_APPLICABLE",
-                "reason": _clip(value.get("reason"), 80),
+                "reason": _clip(value.get("reason"), 55),
             }
         else:
-            details[field] = _clip(value, 90)
+            details[field] = _clip(value, 60)
 
-    variables = []
-    for row in src.get("variables", []) if isinstance(src.get("variables"), list) else []:
+    variable_preview = []
+    raw_variables = src.get("variables") if isinstance(src.get("variables"), list) else []
+    for row in raw_variables[:4]:
         if not isinstance(row, dict):
             continue
-        variables.append({
-            "symbol": _clip(row.get("symbol"), 30),
-            "unit": _clip(row.get("unit"), 30),
-            "role": _clip(row.get("role"), 30),
-            "definition": _clip(row.get("definition"), 60),
-        })
-        if len(variables) >= 12:
-            break
+        variable_preview.append(
+            "|".join((
+                _clip(row.get("symbol"), 18),
+                _clip(row.get("unit"), 18),
+                _clip(row.get("role"), 24),
+            ))
+        )
 
-    field_states = {
-        str(name): _state(value)
-        for name, value in src.items()
-        if name != "variables"
-    }
+    known_fields, unknown_fields, not_applicable_fields = [], [], []
+    for name, value in src.items():
+        if name == "variables":
+            continue
+        state = _state(value)
+        if state == "KNOWN":
+            known_fields.append(str(name))
+        elif state == "NOT_APPLICABLE":
+            not_applicable_fields.append(str(name))
+        else:
+            unknown_fields.append(str(name))
     return {
         "details": details,
-        "variables": variables,
-        "field_states": field_states,
+        "variables_count": len(raw_variables),
+        "variables_preview_symbol_unit_role": variable_preview,
+        "known_fields": known_fields,
+        "unknown_fields": unknown_fields,
+        "not_applicable_fields": not_applicable_fields,
     }
 
 
 def _compact_hypothesis(row: Any) -> Dict[str, Any]:
     src = row if isinstance(row, dict) else {}
     out = {
-        key: _clip(src.get(key), 160)
+        key: _clip(src.get(key), 100)
         for key in ("hypothesis", "prediction", "baseline", "test", "falsification")
     }
+    assumptions = src.get("assumptions") if isinstance(src.get("assumptions"), list) else []
     out.update({
-        "mechanism": _clip(src.get("mechanism"), 120),
-        "assumptions": [_clip(v, 70) for v in (src.get("assumptions") or [])[:8]
-                        if isinstance(v, str)],
+        "mechanism": _clip(src.get("mechanism"), 80),
+        "assumption_count": len(assumptions),
+        "assumption_preview": [_clip(v, 50) for v in assumptions[:2] if isinstance(v, str)],
         "supporting_source_ids": list(src.get("supporting_source_ids") or [])[:12],
         "opposing_source_ids": list(src.get("opposing_source_ids") or [])[:12],
-        "applicability_boundaries": _clip(src.get("applicability_boundaries"), 100),
-        "plan_completeness": _clip(src.get("plan_completeness"), 40),
-        "missing_plan_fields": list(src.get("missing_plan_fields") or [])[:32],
-        "truncated_plan_fields": list(src.get("truncated_plan_fields") or [])[:32],
-        "semantic_plan_validation": _clip(src.get("semantic_plan_validation"), 40),
-        "execution": _clip(src.get("execution"), 40),
-        "status": _clip(src.get("status"), 40),
+        "applicability_boundaries": _clip(src.get("applicability_boundaries"), 60),
+        "plan_completeness": _clip(src.get("plan_completeness"), 32),
+        "missing_plan_fields": list(src.get("missing_plan_fields") or [])[:24],
+        "truncated_plan_fields": list(src.get("truncated_plan_fields") or [])[:24],
+        "execution": _clip(src.get("execution"), 32),
+        "status": _clip(src.get("status"), 32),
         "test_plan": _compact_plan(src.get("test_plan")),
     })
     novelty = src.get("novelty")
     if isinstance(novelty, dict):
         out["novelty"] = {
-            "assessment": _clip(novelty.get("assessment"), 50),
-            "search_scope_note": _clip(novelty.get("search_scope_note"), 100),
+            "assessment": _clip(novelty.get("assessment"), 40),
+            "search_scope_note": _clip(novelty.get("search_scope_note"), 60),
         }
     return out
 
 
 def _compact_report(report: Any) -> Dict[str, Any]:
     src = report if isinstance(report, dict) else {}
+    claims = src.get("claims") if isinstance(src.get("claims"), list) else []
+    hypotheses = src.get("hypotheses") if isinstance(src.get("hypotheses"), list) else []
     out: Dict[str, Any] = {
-        "summary": _clip(src.get("summary"), 800),
-        # Claims stay intact.  If claims themselves are pathological/oversized,
-        # the 16k gate still fails closed instead of hiding evidence text loss.
-        "claims": copy.deepcopy(src.get("claims") or []),
-        "hypotheses": [_compact_hypothesis(row) for row in (src.get("hypotheses") or [])[:6]],
-        "contract_issues": list(src.get("contract_issues") or [])[:32],
-        "status": _clip(src.get("status"), 40),
+        "summary": _clip(src.get("summary"), 500),
+        "claims": [_compact_claim(row) for row in claims[:12]],
+        "claim_count": len(claims),
+        "hypotheses": [_compact_hypothesis(row) for row in hypotheses[:6]],
+        "hypothesis_count": len(hypotheses),
+        "contract_issues": list(src.get("contract_issues") or [])[:24],
+        "status": _clip(src.get("status"), 32),
         "experiments_performed": bool(src.get("experiments_performed") is True),
     }
     ancillary_counts: Dict[str, int] = {}
     for name in ("limitations", "assumptions", "contradictions", "remaining_questions"):
         values = src.get(name) if isinstance(src.get(name), list) else []
         ancillary_counts[name] = len(values)
-        out[name] = [_clip(v, 100) for v in values[:4] if isinstance(v, str)]
+        out[name + "_preview"] = [_clip(v, 80) for v in values[:2] if isinstance(v, str)]
+
     tools = []
     for item in src.get("tool_results", []) if isinstance(src.get("tool_results"), list) else []:
         if not isinstance(item, dict):
             continue
         artifact = item.get("artifact") if isinstance(item.get("artifact"), dict) else {}
         tools.append({
-            "state": _clip(item.get("state"), 40),
-            "reason": _clip(item.get("reason"), 120),
+            "state": _clip(item.get("state"), 32),
+            "reason": _clip(item.get("reason"), 80),
             "physical_experiment": bool(item.get("physical_experiment") is True),
             "artifact": {key: artifact.get(key) for key in
                          ("sha256", "kind", "encoding", "filename") if key in artifact},
@@ -148,6 +179,8 @@ def _compact_report(report: Any) -> Dict[str, Any]:
     out["handoff_compaction"] = {
         "policy": "STRUCTURED_BOUNDED_VIEW",
         "ancillary_counts": ancillary_counts,
+        "all_claims_represented": len(claims) <= 12,
+        "all_hypotheses_represented": len(hypotheses) <= 6,
         "full_worker_report_retained_outside_chief_prompt": True,
     }
     return out
@@ -185,15 +218,19 @@ def install() -> None:
         encoded = []
         compacted_roles = []
         truncated_roles = []
+        blocked_reasons: Dict[str, str] = {}
         for row in company.get("workers", []):
             role = str(row.get("role") or "unknown")
             status = str(row.get("status") or "FAILED")
             report = _strip_binary_artifacts(row.get("report"))
             text = _encode(role, status, report)
             if len(text) > _ROLE_LIMIT and isinstance(report, dict):
-                report = _compact_report(report)
-                text = _encode(role, status, report)
-                compacted_roles.append(role)
+                if _claim_text_total(report) > _MAX_COMPACTABLE_CLAIM_TEXT:
+                    blocked_reasons[role] = "claim_payload_exceeds_safe_projection"
+                else:
+                    report = _compact_report(report)
+                    text = _encode(role, status, report)
+                    compacted_roles.append(role)
             if len(text) > _ROLE_LIMIT:
                 truncated_roles.append(role)
             encoded.append((role, text))
@@ -201,6 +238,7 @@ def install() -> None:
         company["handoff_prepared"] = True
         company["handoff_compacted_roles"] = compacted_roles
         company["handoff_truncated_roles"] = truncated_roles
+        company["handoff_compaction_blocked_reasons"] = blocked_reasons
         company["handoff_policy"] = "STRUCTURED_BOUNDED_VIEW_THEN_HARD_FAIL"
         return (
             "CHIEF RESEARCH DIRECTOR: Compare the following specialist drafts against the ORIGINAL "
