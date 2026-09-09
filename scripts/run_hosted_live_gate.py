@@ -1,7 +1,8 @@
-"""Opt-in company validation on a standard public GitHub-hosted runner.
+"""Opt-in company + PR #81 trading validation on a public GitHub-hosted runner.
 
 Default is preflight only. This runner neither deploys nor connects to a laptop.
-It accepts fixed reviewed-code receipts, never arbitrary commands or questions.
+It accepts fixed reviewed-code receipts and fixed release questions, never
+arbitrary commands or questions.
 """
 from __future__ import annotations
 import argparse
@@ -18,6 +19,7 @@ if str(ROOT) not in sys.path:
 from utils.release_identity import repository_identity, normalize_git_revision
 from scripts.run_company_host import run_live_modes, write_json
 from scripts.run_live_zero_cost_gate import preflight
+from scripts.run_pr81_trading_live_acceptance import run_trading_live
 
 REPOSITORY = "ra7-cyber6565/rv-ai-backend"
 REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_smoke",
@@ -113,7 +115,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
-    report = {"schema": 1, "created_at_epoch": int(time.time()), "passed": False,
+    report = {"schema": 2, "created_at_epoch": int(time.time()), "passed": False,
               "live_test_performed": False, "quality_benchmark": "NOT_TESTED",
               "production_deployed": False, "release_ready": False,
               "contains_credentials_or_source_text": False}
@@ -153,7 +155,24 @@ def main(argv=None):
             report["live_test_performed"] = True
             results = run_live_modes(raw_root, identity["revision"])
             report["modes"] = summarize(results)
-            report["passed"] = set(results) == {"COMPANY", "COMPANY_PLUS"} and all(r.get("passed") is True for r in results.values())
+            company_passed = (
+                set(results) == {"COMPANY", "COMPANY_PLUS"}
+                and all(r.get("passed") is True for r in results.values())
+            )
+            # Do not spend another six-worker Max allocation after an earlier
+            # company release gate already failed.
+            if company_passed:
+                trading = run_trading_live()
+            else:
+                trading = {
+                    "passed": False,
+                    "checks": [{"name": "company_prerequisite", "passed": False}],
+                    "summary": {"depth_mode": "MAXIMUM", "status": "NOT_RUN"},
+                    "contains_answer_or_source_text": False,
+                    "contains_credentials": False,
+                }
+            report["trading_max"] = trading
+            report["passed"] = company_passed and trading.get("passed") is True
             report["state"] = "LIVE_GATES_PASSED" if report["passed"] else "LIVE_GATES_FAILED"
         write_json(destination, report)
         print(json.dumps(report, indent=2))
