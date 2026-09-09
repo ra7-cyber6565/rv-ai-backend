@@ -1,5 +1,49 @@
 # Infinity Research AI — AI Handoff / Continuation Authority
 
+## Active continuation — fixed Max trading acceptance, 2026-09-09
+
+Hosting/migration is deferred at the user's request. This continuation changes
+the review branch only. The existing backup/deployment hold still applies.
+
+Reviewed Sol PR #81 head: a0d57ec8f0b3ab027d9bfaa508bf51f2a93c2844.
+Its Foundation run 34323490047 failed two tests: the hosted fixture did not mock
+the new trading lane, and a ticker-counter assertion used an unwrapped imported
+function. Its four other workflows passed. This branch does not inherit those
+results, nor the earlier integrated head's five green workflows.
+
+The fixed public AgentManager/Max trading lane is now integrated with this
+branch's existing coverage.trading_acceptance contract. The divergent
+Sol task_contract.trade_acceptance schema is not assumed to exist here.
+The evaluator recomputes the actual answer audit and requires six distinct
+expected roles/worker IDs, positive call accounting, complete capture, public
+durable-runtime receipts and a chief synthesis. Analysis fallback must preserve
+its missing-pass/PARTIAL state. A status-only or stale audit cannot pass.
+
+Requested Python and Pine scripts are checked separately. Python must parse and
+contain program structure; a prose promise, comments, string literal, invalid
+syntax or wrong-language fence is not delivery. This does not certify that a
+backtest implements correct market logic. The existing conservative numeric
+guard remains; an entire ticker line is not discarded when it also contains a
+real threshold. Unbound sample-count prose is still not measured evidence.
+
+Hosted preflight cannot call the trading lane; failed COMPANY/COMPANY_PLUS
+prerequisites skip it. The final live receipt requires the named trading checks,
+and allowlists public fields instead of forwarding free-form provider/status
+content. Live PASS here means execution/fail-closed invariants only:
+backtest_execution_verified=false and independent_quality_verified=false
+remain explicit.
+
+TEST PERFORMED locally: 75 targeted pytest cases and 24 subtests passed with
+normal package bootstrap and inherited dependencies. Native connect/send calls
+were denied for the test process and children; no live model/API test ran.
+An initial child test failed because its dependency path was not inherited;
+correcting the test environment, without changing that test, produced the pass.
+
+Current combined head: **VERIFICATION PENDING** at authoring. PR #82's exact-head
+five workflow results are authoritative. Live dispatch, independent held-out
+quality, real backtest/source entailment, production storage/executor, deployment
+and unavailable Windows changes remain open. No overall DONE claim is made.
+
 ## Current integration candidate — 2026-09-09
 
 This entry supersedes older snapshot-only statements below. PR #82 now includes

@@ -15,6 +15,7 @@ threshold never becomes evidence merely because it contains a number.
 """
 from __future__ import annotations
 
+import ast
 import re
 from typing import Any, Dict, Iterable, List
 
@@ -87,8 +88,8 @@ def _technical_script_requested(question: str) -> bool:
     return bool(_SCRIPT_REQUEST_RE.search(str(question or "")))
 
 
-def _technical_script_delivered(answer: str) -> bool:
-    """Conservative code-presence check; never executes or judges profitability."""
+def _technical_script_delivered(answer: str, kind: str = "") -> bool:
+    """Check language and Python syntax, not execution or backtest correctness."""
     for match in _FENCED_CODE_RE.finditer(str(answer or "")):
         lang = (match.group(1) or "").strip().lower()
         body = (match.group(2) or "").strip()
@@ -96,9 +97,21 @@ def _technical_script_delivered(answer: str) -> bool:
             continue
         lower = body.lower()
         if lang in {"pine", "pinescript"} or "//@version=" in lower:
+            if kind == "python":
+                continue
             if "strategy(" in lower or "indicator(" in lower:
                 return True
         if lang in {"python", "py"} or re.search(r"\b(?:import|def)\s+", body):
+            if kind == "pine":
+                continue
+            try:
+                tree = ast.parse(body)
+            except (SyntaxError, ValueError, RecursionError):
+                continue
+            if not any(isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                        ast.For, ast.While, ast.ClassDef))
+                       for node in ast.walk(tree)):
+                continue
             programming = bool(re.search(r"\b(?:import|def|class|for|while)\b", lower))
             trading = bool(re.search(
                 r"\b(?:backtest|entry|position|trade|pnl|returns?|stop|target|slippage|commission)\b",
@@ -226,7 +239,15 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
 
     answer = str(data.get("answer") or "")
     script_requested = _technical_script_requested(question)
-    script_delivered = _technical_script_delivered(answer) if script_requested else None
+    script_kinds = []
+    if script_requested:
+        if re.search(r"\bpython\b", question, re.IGNORECASE):
+            script_kinds.append("python")
+        if re.search(r"\bpine(?:\s*script)?\b|\btradingview\b", question, re.IGNORECASE):
+            script_kinds.append("pine")
+    script_delivered = (all(_technical_script_delivered(answer, kind)
+                            for kind in (script_kinds or [""]))
+                        if script_requested else None)
     if script_requested and not script_delivered:
         missing.append("technical_backtest_script")
 
@@ -240,6 +261,7 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
         "required_contract_points": required,
         "missing_contract_points": _dedupe(missing),
         "script_requested": script_requested,
+        "script_kinds": script_kinds,
         "script_delivered": script_delivered,
         "trade_contract_ran": lane_ran,
         "trade_contract_partition_valid": partition_valid,

@@ -1,7 +1,8 @@
-"""Opt-in company validation on a standard public GitHub-hosted runner.
+"""Opt-in company + PR #81 trading validation on a public GitHub-hosted runner.
 
 Default is preflight only. This runner neither deploys nor connects to a laptop.
-It accepts fixed reviewed-code receipts, never arbitrary commands or questions.
+It accepts fixed reviewed-code receipts and fixed release questions, never
+arbitrary commands or questions.
 """
 from __future__ import annotations
 import argparse
@@ -18,6 +19,7 @@ if str(ROOT) not in sys.path:
 from utils.release_identity import repository_identity, normalize_git_revision
 from scripts.run_company_host import run_live_modes, write_json
 from scripts.run_live_zero_cost_gate import preflight
+from scripts.run_pr81_trading_live_acceptance import run_trading_live
 
 REPOSITORY = "ra7-cyber6565/rv-ai-backend"
 REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_smoke",
@@ -109,11 +111,62 @@ def summarize(results):
     return public
 
 
+REQUIRED_TRADING_CHECKS = {
+    "fixed_question_executed", "technical_script_not_creative", "trade_acceptance_active",
+    "python_script_kind_detected", "python_script_delivered", "requested_trade_points_registered",
+    "trade_contract_partition_valid", "threshold_provenance_ran", "unsupported_thresholds_fail_closed",
+    "missing_deliverables_fail_closed", "max_six_specialists_executed", "public_runtime_executed",
+    "chief_execution_observed", "specialist_handoff_semantics", "no_false_scientific_replication",
+}
+
+
+def summarize_trading(record):
+    """Allowlist the live receipt; a bare passed flag cannot certify the lane."""
+    record = record if isinstance(record, dict) else {}
+    checks = record.get("checks")
+    valid = isinstance(checks, list) and len(checks) == len(REQUIRED_TRADING_CHECKS)
+    by_name = {}
+    if valid:
+        for row in checks:
+            if not isinstance(row, dict) or type(row.get("name")) is not str:
+                valid = False
+                break
+            name = row["name"]
+            if name not in REQUIRED_TRADING_CHECKS or name in by_name or type(row.get("passed")) is not bool:
+                valid = False
+                break
+            by_name[name] = row["passed"]
+    valid = valid and set(by_name) == REQUIRED_TRADING_CHECKS and record.get("schema") == 2
+    rows = [{"name": name, "passed": valid and by_name.get(name) is True}
+            for name in sorted(REQUIRED_TRADING_CHECKS)]
+    raw = record.get("summary")
+    raw = raw if isinstance(raw, dict) else {}
+    summary = {"depth_mode": "MAXIMUM"}
+    for key in ("status", "task_assessment"):
+        value = raw.get(key)
+        summary[key] = value if type(value) is str and value in {
+            "COMPLETE", "PARTIAL", "BLOCKED", "FAILED", "INCONCLUSIVE", "NOT_RUN"
+        } else "UNKNOWN"
+    for key in ("trade_gap_count", "unsupported_threshold_count", "requested_trade_point_count",
+                "company_requested_workers", "company_ready_workers"):
+        value = raw.get(key)
+        summary[key] = value if type(value) is int and 0 <= value <= 1_000_000 else 0
+    for key in ("handoff_prepared", "handoff_truncated", "handoff_consumer_observed",
+                "specialist_handoff_missing"):
+        summary[key] = raw.get(key) is True
+    digest = raw.get("answer_sha256")
+    summary["answer_sha256"] = digest if type(digest) is str and re.fullmatch(r"[a-f0-9]{64}", digest) else ""
+    return {"schema": 2, "passed": record.get("passed") is True and all(row["passed"] for row in rows),
+            "checks": rows, "summary": summary, "contains_answer_or_source_text": False,
+            "contains_credentials": False, "backtest_execution_verified": False,
+            "independent_quality_verified": False}
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
-    report = {"schema": 1, "created_at_epoch": int(time.time()), "passed": False,
+    report = {"schema": 2, "created_at_epoch": int(time.time()), "passed": False,
               "live_test_performed": False, "quality_benchmark": "NOT_TESTED",
               "production_deployed": False, "release_ready": False,
               "contains_credentials_or_source_text": False}
@@ -153,7 +206,24 @@ def main(argv=None):
             report["live_test_performed"] = True
             results = run_live_modes(raw_root, identity["revision"])
             report["modes"] = summarize(results)
-            report["passed"] = set(results) == {"COMPANY", "COMPANY_PLUS"} and all(r.get("passed") is True for r in results.values())
+            company_passed = (
+                set(results) == {"COMPANY", "COMPANY_PLUS"}
+                and all(r.get("passed") is True for r in results.values())
+            )
+            # Do not spend another six-worker Max allocation after an earlier
+            # company release gate already failed.
+            if company_passed:
+                trading = summarize_trading(run_trading_live())
+            else:
+                trading = {
+                    "passed": False,
+                    "checks": [{"name": "company_prerequisite", "passed": False}],
+                    "summary": {"depth_mode": "MAXIMUM", "status": "NOT_RUN"},
+                    "contains_answer_or_source_text": False,
+                    "contains_credentials": False,
+                }
+            report["trading_max"] = trading
+            report["passed"] = company_passed and trading.get("passed") is True
             report["state"] = "LIVE_GATES_PASSED" if report["passed"] else "LIVE_GATES_FAILED"
         write_json(destination, report)
         print(json.dumps(report, indent=2))

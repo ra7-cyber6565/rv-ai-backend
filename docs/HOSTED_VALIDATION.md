@@ -10,8 +10,10 @@ Normal Foundation CI installs dependencies on a GitHub runner, runs the offline
 suite, executes real Python/Node containers and protected improvement trials,
 and starts the actual API for a localhost smoke check. These jobs do not need
 laptop installations. The optional final live step invokes the existing public
-agent manager in COMPANY and COMPANY_PLUS modes, sequentially. It stops when a
-mode fails and retains an honest failure receipt.
+agent manager in COMPANY and COMPANY_PLUS modes, sequentially, then the fixed
+US100/XAUUSD MAXIMUM trading acceptance lane. Failed company prerequisites skip
+that extra allocation. The lane validates runtime/delivery/fail-closed behavior;
+it does not certify historical backtest correctness or independent quality.
 
 The optional step requires all of the following:
 
@@ -43,7 +45,8 @@ flag is an operator assertion, not a provider billing audit. If free eligibility
 cannot be established, leave it unset and the live step remains blocked.
 
 Open **Actions → Foundation tests → Run workflow** and select
-`codex/research-company-20260905`. Use the full reviewed commit SHA, not the
+the current reviewed PR branch (`codex/answer-scope-20260908` for PR #82).
+Use the full reviewed commit SHA, not the
 short display hash, and enable `live_company`. Review the branch code before
 providing credentials. No merge or Railway deployment is part of this action.
 
@@ -65,7 +68,8 @@ GitHub Actions is a test host, not a permanent research archive or 24-hour app
 host. Use only the fixed public gate campaign here; do not place a user's sole
 copy of research data in this ephemeral workspace.
 
-`LIVE_GATES_PASSED` requires both modes to pass their existing strict gates.
+`LIVE_GATES_PASSED` requires both company modes and the fixed trading Max lane
+to pass their respective strict gates. Inspect trading_max as well as modes.
 Even then, `release_ready=false`, `quality_benchmark=NOT_TESTED`, and
 `production_deployed=false`. Offline fixture tests of this runner are not
 evidence that live models ran. The exact PR head and Actions receipts are the

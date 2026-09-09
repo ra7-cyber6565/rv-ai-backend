@@ -180,3 +180,27 @@ def test_enforcement_is_idempotent_and_does_not_mutate_original():
     first = guard.enforce(data)
     assert data == before
     assert guard.enforce(first) == first
+
+
+@pytest.mark.parametrize("body", [
+    "def backtest(rows)\n    return rows\n" + "# entry position trade\n" * 8,
+    "# import pandas\n# def backtest():\n" + "# entry position trade\n" * 8,
+    "description = 'for entry position trade backtest'\n" * 8,
+])
+def test_python_deliverable_requires_parseable_program_not_comments_or_strings(body):
+    fence = chr(96) * 3
+    assert guard._technical_script_delivered(fence + "python\n" + body + "\n" + fence, "python") is False
+
+
+def test_requested_python_cannot_be_satisfied_by_pine():
+    fence = chr(96) * 3
+    answer = fence + 'pine\n//@version=5\nstrategy("fixture")\n' + "// entry rule\n" * 12 + fence
+    out = guard.enforce({"question": "US100 trading model with Python backtest script",
+                         "answer": answer, "status": "COMPLETE", "trade_contract": contract()})
+    assert out["status"] == "PARTIAL"
+    assert out["coverage"]["trading_acceptance"]["script_delivered"] is False
+
+
+def test_ticker_digits_do_not_mask_a_real_threshold_with_the_same_number():
+    assert guard.unsupported_numeric_thresholds("US100 entry rule: wait for a signal.") == []
+    assert guard.unsupported_numeric_thresholds("US100 entry threshold > 100.")
