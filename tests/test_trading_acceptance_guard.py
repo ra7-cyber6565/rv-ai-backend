@@ -80,6 +80,18 @@ def test_untraceable_actionable_threshold_blocks_acceptance():
     assert "unsupported_numeric_thresholds" in assessed["trade_acceptance"]["gaps"]
 
 
+def test_instrument_symbol_digits_are_not_thresholds():
+    audit = audit_thresholds(
+        "US100 trading model banao",
+        "US100 entry rule: Proposed, not validated: long if RSI > 55",
+    )
+
+    assert audit.get("ticker_digits_excluded") == 1
+    assert audit["actionable_numeric_thresholds"] == 1
+    assert audit["provisional_count"] == 1
+    assert audit["unsupported_count"] == 0
+
+
 def test_user_supplied_or_explicitly_provisional_threshold_is_not_fake_grounding():
     supplied = audit_thresholds(
         "US100 model banao; long if RSI > 55",
