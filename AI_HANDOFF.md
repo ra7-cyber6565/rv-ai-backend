@@ -1,5 +1,44 @@
 # Infinity Research AI — AI Handoff / Continuation Authority
 
+## Current integration candidate — 2026-09-09
+
+This entry supersedes older snapshot-only statements below. PR #82 now includes
+reviewed Sol PR #81 head `1666028619b99d4b6dfeb904102aa5327800a7c6`, with its
+active branch preserved. Its two Foundation failures were reproduced from
+source/CI: an over-24k worker fixture and role identity lost behind sorted JSON.
+
+- Handoff uses explicit lossless shared hypothesis fields; reconstruction is
+  checked against the entire normalized report. Claims, opposing evidence,
+  variable definitions and falsification details are not shortened to certify
+  completion. Distinct oversized plans still block the handoff pass. Binary
+  download bytes remain in original tool artifacts, as before.
+- The valid-worker fixture is now between 16k and 24k; a separate oversized
+  worker case verifies rejection. Role/status precede the bounded report.
+- Sol's trading-deliverable guard is integrated. Unbound "calibrated from N
+  samples" prose does not count as an execution receipt. Duplicate/malformed
+  34-point partitions fail closed; repeated serialization keeps a stable audit.
+- TEST PERFORMED: 53 targeted pytest cases passed with normal package bootstrap
+  using available local dependencies (not the earlier module-isolated runner).
+  This covers company, trading acceptance, technical script intent and plan
+  missingness. No model or scientific experiment ran in these tests.
+- Parent PR #82 head `32a8a63` passed all five workflows: 4,233 full-suite tests,
+  42 offline API checks, 10 actual isolated-build cases, 7 protected-improvement
+  cases and 20 localhost smoke checks. Its host readiness needed one bounded
+  retry; cause of the initial failure is UNKNOWN. Those receipts certify only
+  that parent's tree, not this new candidate.
+- New combined head: **VERIFICATION PENDING** at authoring. The PR's exact-head
+  workflow receipts govern merging. Recheck current main and Sol before merge.
+- Railway read-only refresh: deployment `3d003d52-e234-473f-bc9d-f5adec492bfc`
+  is SUCCESS for main `831dbc7209253e58bbfa0ec79b9efe8e130bf523`. Six unrelated
+  staged environment changes exist; this work does not apply that patch.
+  Candidate deployment identity and live Max answer remain **NOT VERIFIED**.
+- Numeric provenance still needs actual source entailment / structured receipt
+  binding; code presence is not executable-backtest correctness. Lossless
+  serialization is not proof the model understood every detail. Independent
+  held-out quality, persistent production storage/executor and unavailable
+  Windows changes remain open. The entire project is not DONE.
+
+
 **Purpose:** This is the first file any future AI/agent must read before changing this repository. It exists to stop half-finished parallel work, stale completion claims, duplicate implementations, and branch/deployment confusion.
 
 ## Active answer-acceptance repair — 2026-09-08
