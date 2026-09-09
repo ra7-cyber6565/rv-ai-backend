@@ -107,3 +107,6 @@ _install_company_handoff_guard()
 
 from .trading_acceptance_guard import install as _install_trading_acceptance_guard
 _install_trading_acceptance_guard()
+
+from .trading_threshold_token_guard import install as _install_trading_threshold_token_guard
+_install_trading_threshold_token_guard()
