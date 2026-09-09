@@ -18,8 +18,21 @@
   receipts are the authority. No new live research or deployment is claimed.
 - Parallel Sol PR #81 was reviewed at
   `0a75e6a048b1f032206f3b9a8e02e907b6ad3649` (all five workflows green).
-  Its craft/trading-hypothesis files are preserved on its branch. Those results
-  do not certify this branch or the future combined revision.
+  PR #82 now incorporates that exact snapshot and adds edge-case repairs:
+  technical character-count/conversation-log scripts remain technical, and
+  UNKNOWN success/failure or explicitly missing baselines stay missing.
+  Thirteen module-isolated craft/trading tests passed; app bootstrap/API were
+  not exercised locally. The combined exact-head CI remains the authority.
+  Sol's active branch has not been modified. Recheck newer Sol changes before
+  integration; do not treat this reviewed snapshot as all of his future work.
+- 2026-09-09 refresh: Sol head `1666028619b99d4b6dfeb904102aa5327800a7c6`
+  has two Foundation failures (oversized worker fixture and role identity lost
+  during clipped handoff). Its newer handoff/trading-acceptance wave is not in
+  this reviewed snapshot. See the acceptance document before combining it.
+- Initial PR #82 head `8e69f04746b447bf21c9ba355c373a70fc27bfd1` had
+  4,219 passing tests and one stale contract-version assertion failure. The
+  assertion now pins 1.1; old contract receipts must remain invalidated. The
+  candidate needs a fresh full gate, not an inherited PASS.
 - See `docs/ANSWER_CONDITION_ACCEPTANCE.md` for the measured defects, scope and
   remaining live acceptance work. All broader blockers in section 5 remain open.
 

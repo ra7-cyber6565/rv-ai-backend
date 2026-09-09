@@ -16,9 +16,17 @@ This file is the coordination source of truth for multi-agent work.
 - Local pressure tests: 8 PASS. Integrated exact-head CI: **VERIFICATION PENDING**
   at authoring; record final head/run receipts in this branch's PR. Live-model
   answer quality and production deployment of these fixes: **NOT TESTED**.
-- Sol PR #81 remains separate; reviewed head `0a75e6a` has five green workflows.
-  Preserve its craft/trading-parser edits and reverify the eventual combined
-  revision. See `docs/ANSWER_CONDITION_ACCEPTANCE.md`.
+- Sol PR #81 head `0a75e6a` has five green workflows. PR #82 incorporates that
+  exact snapshot plus measured edge-case repairs; Sol's active branch remains
+  untouched. Character counting/conversation logs must not become dialogue;
+  UNKNOWN success/failure and absent baselines must not populate test plans.
+  Thirteen local module-isolated cases passed; this excludes app bootstrap/API.
+  Reverify the combined exact head. See `docs/ANSWER_CONDITION_ACCEPTANCE.md`.
+- 2026-09-09 refresh: newer Sol head `1666028` has two failing Foundation cases;
+  its later handoff/trading-acceptance additions are not imported into this
+  snapshot. PR #82 initial head `8e69f04` had one stale 1.0-version assertion
+  failure with 4,219 other cases passing; assertion updated to required 1.1.
+  Final candidate verification remains pending until its own workflows finish.
 - No laptop installation, user-file deletion, model call or production change.
 
 ## Current continuation — ChatGPT, 2026-09-07

@@ -482,7 +482,8 @@ class _ResultObject:
 
 def test_public_convenience_api_accepts_model_like_objects_and_returns_dict():
     output = evaluate_final_quality(_ResultObject(_perfect_result()), _contract())
-    assert output["contract_version"] == "1.0"
+    # Contract 1.1 adds requested-condition enforcement and invalidates old receipts.
+    assert output["contract_version"] == "1.1"
     assert output["score"] == 100
     assert output["release_ready"] is True
     assert output["issues"] == []

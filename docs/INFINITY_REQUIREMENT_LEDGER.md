@@ -13,8 +13,14 @@ R06 source-condition accounting, R17 public PARTIAL reasons and R19 regression
 coverage for the user-observed superconductivity answer. Eight local stdlib
 pressure cases passed; integrated exact-head CI is **VERIFICATION PENDING** at
 authoring. The relevant PR receipts must identify the tested head. R06/R09/R18/
-R19/R21 remain PARTIAL pending semantic/independent/live acceptance. Sol's PR #81
-is preserved separately; neither branch's CI certifies the combined version.
+R19/R21 remain PARTIAL pending semantic/independent/live acceptance. PR #82 also
+incorporates Sol PR #81 snapshot `0a75e6a` and repairs measured intent/UNKNOWN-plan
+edge cases for R02/R09; 13 module-isolated cases passed locally. Sol's active
+branch is unchanged; neither prior branch's CI certifies the combined version.
+The 2026-09-09 refresh found newer Sol head `1666028` with two Foundation
+failures; that later handoff/acceptance wave is not in this snapshot. PR #82's
+first gate found a stale 1.0-version assertion (4,219 passed, one failed); the
+candidate pins 1.1 and requires a fresh full pass.
 See `ANSWER_CONDITION_ACCEPTANCE.md` for exact scope and remaining work.
 
 2026-09-07 continuation: default-on stored-data preservation and an opt-in
