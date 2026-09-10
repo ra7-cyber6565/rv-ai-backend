@@ -1,5 +1,44 @@
 # Infinity Research AI — Master Work Status
 
+## Active continuation — live setup diagnostics, 2026-09-10
+
+The user saved live settings after screenshots established that GitHub had no
+repository secrets/variables. Reviewed Sol 6b90ab5c (only a dispatch coordination
+file since 18a14f6a). Retried manual run 34430949370, attempt 2, job 102729707636.
+All three live inputs were now present. The run stopped before model execution
+with confirmed_free_model_or_storage_not_ready. Its public receipt cannot
+identify which readiness dimension failed. The model field was masked in logs;
+neither its exact value nor the confirmation value was inferred from masking.
+Storage passed the preceding host test; live-stage storage readiness is UNKNOWN.
+No provider access, quota, scientific result or six-worker execution was tested.
+
+This repair checks the four required live configuration conditions using only
+stdlib and fixed booleans/codes, before dependency installation on opt-in live
+runs. A settings failure skips the otherwise-always Foundation stage as well.
+Ordinary PR validation still runs normally. The full live gate now records
+allowlisted settings/readiness dimensions and blocker codes, without raw
+credentials, model values, source text, arbitrary blocker text or private paths.
+No setting or free-usage confirmation is automatically filled or relaxed.
+A SETTINGS_PRESENT result does not verify provider access or billing state.
+
+Parent PR #82 head 83b8c8e6 passed all five workflows (4,289 pytest cases,
+51 subtests, 42 offline API checks, 10 builds/7 improvement cases and 20 API
+smoke checks). Those results do not certify this new diagnostic change.
+Local diagnostic verification: 23 tests and 24 subtests passed with native
+outbound network operations denied, including isolated stdlib CLI execution.
+New candidate: VERIFICATION PENDING; PR #82's exact-head CI receipts govern.
+
+After CI, dispatch Foundation tests on codex/answer-scope-20260908 using
+live_company=true and reviewed_commit=<current full PR #82 head>. The GitHub
+connector supports failed-run retries but not new workflow dispatch. The Sol
+push dispatcher was reviewed, not imported or modified. New diagnostic output
+is not available by rerunning an old commit. If manual dispatch needs user
+interaction, give the exact branch and SHA after the candidate is verified.
+Hosting remains deferred; keep the backup/deployment hold and draft status.
+Independent quality, storage restore, production executor and all earlier
+unverified acceptance items remain open. Do not claim the whole app DONE.
+
+
 ## Active continuation — fixed Max trading acceptance, 2026-09-09
 
 Hosting/migration is deferred at the user's request. This continuation changes

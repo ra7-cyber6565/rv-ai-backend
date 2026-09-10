@@ -20,6 +20,7 @@ from utils.release_identity import repository_identity, normalize_git_revision
 from scripts.run_company_host import run_live_modes, write_json
 from scripts.run_live_zero_cost_gate import preflight
 from scripts.run_pr81_trading_live_acceptance import run_trading_live
+from scripts.check_hosted_live_settings import inspect_settings
 
 REPOSITORY = "ra7-cyber6565/rv-ai-backend"
 REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_smoke",
@@ -29,6 +30,42 @@ REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_sm
 
 class HostedGateBlocked(RuntimeError):
     pass
+
+
+def summarize_preflight(record):
+    """Expose readiness dimensions, never arbitrary blocker text or paths."""
+    raw = record if isinstance(record, dict) else {}
+    messages = {
+        "ZERO_COST_ONLY must be true": "zero_cost_only_required",
+        "INFINITY_DATA_ROOT must be explicit": "storage_root_missing",
+        "INFINITY_DATA_ROOT must be an absolute path": "storage_root_not_absolute",
+        "INFINITY_DATA_ROOT cannot be a filesystem root": "storage_root_unsafe",
+        "INFINITY_DATA_ROOT must be outside the Git repository": "storage_root_inside_repository",
+        "runtime storage is below the configured minimum free space": "storage_free_space_insufficient",
+        "runtime storage is unavailable or unwritable": "storage_unavailable",
+        "no confirmed/free model layer is usable now": "model_layer_not_usable",
+        "Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)": "gemini_zero_cost_confirmation_required",
+        "GROQ_API_KEY (GROQ_ZERO_COST_CONFIRMED missing/false)": "groq_zero_cost_confirmation_required",
+        "OPENROUTER_API_KEY (OPENROUTER_MODEL is not free-only)": "openrouter_free_model_required",
+        "OLLAMA_BASE_URL (ZERO_COST_ONLY permits localhost only)": "local_ollama_required",
+        "OPENAI_API_KEY": "paid_provider_blocked",
+        "ANTHROPIC_API_KEY": "paid_provider_blocked",
+    }
+    blockers = raw.get("blockers")
+    codes = []
+    for item in blockers if isinstance(blockers, list) else []:
+        code = messages.get(item, "unclassified_preflight_blocker") if type(item) is str else "unclassified_preflight_blocker"
+        if code not in codes:
+            codes.append(code)
+    out = {key: raw.get(key) is True for key in (
+        "ready", "zero_cost_only", "storage_validated"
+    )}
+    out["storage_ready"] = raw.get("storage_ready") if type(raw.get("storage_ready")) is bool else None
+    for key in ("model_layers_configured", "model_layers_usable_now"):
+        value = raw.get(key)
+        out[key] = value if type(value) is int and 0 <= value <= 100 else 0
+    out["blocker_codes"] = codes
+    return out
 
 
 def read_record(path, limit=8_000_000):
@@ -192,6 +229,7 @@ def main(argv=None):
                                    read_record(proof_root / "audit" / "company_host_latest.json", 256000), os.environ)
         # No private .env is loaded here. The workflow scopes dedicated credentials
         # to this final step; no credentials are supplied to dependency installation.
+        report["settings"] = inspect_settings(os.environ)
         if not os.environ.get("GEMINI_MODEL", "").strip():
             raise HostedGateBlocked("explicit_model_identifier_required")
         os.environ.update(INFINITY_PRESERVE_STORED_DATA="true", INFINITY_BUILD_EXECUTOR="docker",
@@ -199,6 +237,7 @@ def main(argv=None):
         from utils.storage_paths import configure_process_storage
         configure_process_storage()
         ready = preflight(os.environ, validate_storage=True)
+        report["preflight"] = summarize_preflight(ready)
         if not ready["ready"]:
             raise HostedGateBlocked("confirmed_free_model_or_storage_not_ready")
         report["state"] = "PREFLIGHT_READY"

@@ -94,6 +94,44 @@ class HostedLiveGateTests(unittest.TestCase):
         with patch.dict(os.environ,{},clear=True),patch.object(gate,'run_live_modes') as live,contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(gate.main(['--execute']),2);live.assert_not_called()
 
+    def test_preflight_diagnostics_allowlist_blockers_and_reject_private_payloads(self):
+        self.assertIsNone(gate.summarize_preflight({})['storage_ready'])
+        result = gate.summarize_preflight({
+            "ready": False, "storage_validated": True, "storage_ready": True,
+            "model_layers_configured": True, "model_layers_usable_now": "PRIVATE_KEY",
+            "blockers": ["Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)",
+                         "runtime storage is unavailable or unwritable", "PRIVATE_KEY", {"secret": "PRIVATE_SOURCE"}],
+            "path": "PRIVATE_PATH",
+        })
+        self.assertNotIn("PRIVATE", json.dumps(result))
+        self.assertEqual(result["model_layers_configured"], 0)
+        self.assertEqual(result["model_layers_usable_now"], 0)
+        self.assertEqual(result["blocker_codes"], ["gemini_zero_cost_confirmation_required",
+                         "storage_unavailable", "unclassified_preflight_blocker"])
+
+    def test_blocked_preflight_persists_specific_settings_and_storage_without_models(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            env = dict(environment(), RUNNER_TEMP=temp, INFINITY_DATA_ROOT=str(base/'live'),
+                       INFINITY_PREREQUISITE_ROOT=str(base/'proof'), ZERO_COST_ONLY='true',
+                       GEMINI_API_KEY='PRIVATE_TEST_KEY', GEMINI_ZERO_COST_CONFIRMED="'true'")
+            (base/'proof'/'audit').mkdir(parents=True)
+            f, h = proofs()
+            for name, record in [('foundation_gate_ci.json', f), ('company_host_latest.json', h)]:
+                (base/'proof'/'audit'/name).write_text(json.dumps(record))
+            readiness = dict(ready=False, storage_validated=True, storage_ready=True,
+                             blockers=['Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)'])
+            output = io.StringIO()
+            with patch.dict(os.environ, env, clear=True), patch.object(gate, 'repository_identity', return_value=dict(clean=True, revision=SHA)), patch.object(gate, 'preflight', return_value=readiness), patch.object(gate, 'run_live_modes') as live, patch.object(gate, 'run_trading_live') as trading, contextlib.redirect_stdout(output):
+                self.assertEqual(gate.main(['--execute']), 2)
+            live.assert_not_called(); trading.assert_not_called()
+            result = json.loads((base/'live'/'audit'/'hosted_live_gate.json').read_text())
+            self.assertFalse(result['live_test_performed'])
+            self.assertFalse(result['settings']['checks']['gemini_confirmation_flag_accepted'])
+            self.assertTrue(result['preflight']['storage_ready'])
+            self.assertEqual(result['preflight']['blocker_codes'], ['gemini_zero_cost_confirmation_required'])
+            self.assertNotIn('PRIVATE', output.getvalue())
+
     def test_trading_receipt_is_allowlisted_and_cannot_self_certify(self):
         good = {"schema": 2, "passed": True, "checks": [
             {"name": name, "passed": True, "detail": "PRIVATE_SOURCE"}

@@ -41,6 +41,15 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check opt-in live settings without provider calls
+        id: live_settings
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.live_company }}
+        env:
+          GEMINI_API_KEY: ${{ secrets.INFINITY_LIVE_GEMINI_KEY }}
+          GEMINI_ZERO_COST_CONFIRMED: ${{ secrets.INFINITY_LIVE_ZERO_COST_CONFIRMED }}
+          GEMINI_MODEL: ${{ vars.INFINITY_LIVE_GEMINI_MODEL }}
+        run: python3 scripts/check_hosted_live_settings.py
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -170,7 +179,7 @@ jobs:
             tests/test_source_integrity.py
 
       - name: Run strict zero-cost foundation gate
-        if: always()
+        if: ${{ always() && steps.live_settings.outcome != 'failure' }}
         run: |
           python scripts/run_foundation_gate.py \
             --timeout-seconds 900 \
