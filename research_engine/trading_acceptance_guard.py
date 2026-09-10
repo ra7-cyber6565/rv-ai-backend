@@ -243,7 +243,8 @@ def audit(result: Dict[str, Any]) -> Dict[str, Any]:
     if script_requested:
         if re.search(r"\bpython\b", question, re.IGNORECASE):
             script_kinds.append("python")
-        if re.search(r"\bpine(?:\s*script)?\b|\btradingview\b", question, re.IGNORECASE):
+        # TradingView may name the input CSV/feed rather than an output language.
+        if re.search(r"\bpine(?:\s*script)?\b|\bpinescript\b", question, re.IGNORECASE):
             script_kinds.append("pine")
     script_delivered = (all(_technical_script_delivered(answer, kind)
                             for kind in (script_kinds or [""]))

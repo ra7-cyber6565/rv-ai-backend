@@ -204,3 +204,20 @@ def test_requested_python_cannot_be_satisfied_by_pine():
 def test_ticker_digits_do_not_mask_a_real_threshold_with_the_same_number():
     assert guard.unsupported_numeric_thresholds("US100 entry rule: wait for a signal.") == []
     assert guard.unsupported_numeric_thresholds("US100 entry threshold > 100.")
+
+
+def test_tradingview_input_does_not_invent_a_pine_deliverable():
+    fence = chr(96) * 3
+    body = "\n".join([
+        "def backtest(rows, commission):", "    pnl = []",
+        "    for previous, current in zip(rows, rows[1:]):",
+        "        pnl.append(current['close'] - previous['close'] - commission)",
+        "    return pnl",
+    ])
+    out = guard.enforce({
+        "question": "US100 trading model banao; Python backtest script for a TradingView CSV",
+        "answer": fence + "python\n" + body + "\n" + fence,
+        "status": "COMPLETE", "trade_contract": contract(),
+    })
+    assert out["coverage"]["trading_acceptance"]["script_kinds"] == ["python"]
+    assert out["coverage"]["trading_acceptance"]["script_delivered"] is True

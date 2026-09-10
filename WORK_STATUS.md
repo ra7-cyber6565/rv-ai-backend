@@ -7,8 +7,9 @@ the review branch only. The existing backup/deployment hold still applies.
 
 Reviewed Sol PR #81 head: a0d57ec8f0b3ab027d9bfaa508bf51f2a93c2844.
 Its Foundation run 34323490047 failed two tests: the hosted fixture did not mock
-the new trading lane, and a ticker-counter assertion used an unwrapped imported
-function. Its four other workflows passed. This branch does not inherit those
+the new trading lane, and the ticker filter removed only unsupported numbers,
+leaving ticker digits that inherited a PROPOSED label. Its four other workflows
+passed. This branch does not inherit those
 results, nor the earlier integrated head's five green workflows.
 
 The fixed public AgentManager/Max trading lane is now integrated with this
@@ -38,6 +39,14 @@ normal package bootstrap and inherited dependencies. Native connect/send calls
 were denied for the test process and children; no live model/API test ran.
 An initial child test failed because its dependency path was not inherited;
 correcting the test environment, without changing that test, produced the pass.
+
+The 2026-09-10 refresh reviewed Sol 06fb5555: its hosted mock repair is already
+covered here; its ticker postprocessor targets the divergent audit schema.
+The integrated rule matcher does not discard an entire ticker/threshold line.
+Parent 02bde00a passed all five workflows: 4,288 pytest cases, 51 subtests,
+42 offline API checks, real 10-build/7-improvement suites (zero skips), and API
+smoke. Live was skipped. Final review also corrected a new routing edge case:
+TradingView CSV input does not add an unrequested Pine deliverable to Python.
 
 Current combined head: **VERIFICATION PENDING** at authoring. PR #82's exact-head
 five workflow results are authoritative. Live dispatch, independent held-out
