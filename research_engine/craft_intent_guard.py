@@ -101,3 +101,10 @@ install()
 # prose and never supplies an unstated threshold or result.
 from .trading_hypothesis_structure_guard import install as _install_trading_hypothesis_structure_guard
 _install_trading_hypothesis_structure_guard()
+
+# The same package-import boundary installs a deterministic chief-handoff guard.
+# It structurally compacts verbose specialist drafts instead of clipping raw JSON
+# and then falsely declaring the handoff incomplete. Full reports remain in the
+# research-company audit record; actual missing/corrupt handoffs still fail closed.
+from .company_handoff_guard import install as _install_company_handoff_guard
+_install_company_handoff_guard()
