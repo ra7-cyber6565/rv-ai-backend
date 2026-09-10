@@ -12,6 +12,7 @@ from typing import Dict, Iterable, List, Tuple
 
 from utils.research_runtime import digest
 from .requested import parse_requests, creative_brief
+from .trading_threshold_guard import assess as assess_trading_thresholds
 
 
 # Parser signal -> measured quality-ledger key.  These are deliberately the
@@ -170,6 +171,25 @@ def assess_contract(contract, result):
             "measured_keys": list(evidence_keys),
         })
 
+    # Trading rules need a second, orthogonal truth boundary.  A numeric entry,
+    # stop, target, sizing or filter value may be useful as a parameter to test,
+    # but it cannot silently look measured/established when it has no source,
+    # user-constraint or provisional label.  The receipt stores hashes/counts,
+    # not the answer text itself.
+    threshold_provenance = assess_trading_thresholds(
+        str(contract.get("objective") or ""), result
+    )
+    if threshold_provenance.get("active"):
+        coverage.append({
+            "requirement_id": "trading_numeric_threshold_provenance",
+            "assessment": (
+                "SATISFIED" if threshold_provenance.get("passed") is True
+                else "MISSING"
+            ),
+            "output_reference": "trading_numeric_threshold_provenance",
+            "measured_keys": ["trading_numeric_threshold_provenance"],
+        })
+
     company = (result.get("verification") or {}).get("research_company") or {}
     required = contract["explicit_min_workers"]
     worker_gap = bool(required and company.get("completed_workers", 0) < required)
@@ -179,6 +199,7 @@ def assess_contract(contract, result):
     missing = [r["requirement_id"] for r in coverage if r["assessment"] == "MISSING"]
     return {**contract, "coverage": coverage, "worker_requirement_gap": worker_gap,
             "unresolved_explicit_parts": unresolved_parts, "known_missing_deliverables": missing,
+            "trading_numeric_threshold_provenance": threshold_provenance,
             "assessment": "PARTIAL" if worker_gap or unresolved_parts or missing or contract["unparsed_numbered_parts"] else "REQUIRES_COVERAGE_REVIEW",
             "task_completion_is_claim_truth": False,
             "coverage_evidence_policy": "measured ledger evidence only; no answer-text keyword completion"}
