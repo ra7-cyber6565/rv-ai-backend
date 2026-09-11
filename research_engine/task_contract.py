@@ -33,6 +33,19 @@ _SEMANTIC_PART_KEYS: Tuple[Tuple[str, str], ...] = (
     ("wants_source_depth", "source_depth"),
 )
 
+# requested.py deliberately recognizes generic "test plan/protocol/design" as
+# experiment-design intent.  In a tightly-coupled phrase such as
+# "falsification test plan", though, that generic match is only the wording of
+# the falsification deliverable, not proof that the user asked for a second,
+# independent experiment-design artifact.  Keep this disambiguation local to
+# the positional-part bridge so the shared parser and every existing caller
+# retain their historical behaviour.
+_FALSIFICATION_TEST_PLAN_RE = re.compile(
+    r"\bfalsif\w*[^\n.।]{0,32}\btest\s*(?:plan|protocol|design)\b",
+    re.IGNORECASE,
+)
+_EXPLICIT_EXPERIMENT_RE = re.compile(r"\bexperiment\w*\b|प्रयोग", re.IGNORECASE)
+
 
 def compile_contract(question, mode, custom=None):
     requests = parse_requests(question)
@@ -113,12 +126,28 @@ def _semantic_keys_for_part(text: str) -> List[str]:
     to build the quality contract.  A part that cannot be mapped stays
     NOT_ASSESSED; it is never promoted from surface wording alone.
     """
+    raw_text = str(text or "")
     try:
-        parsed = parse_requests(str(text or "")) or {}
+        parsed = parse_requests(raw_text) or {}
     except Exception:
         return []
+
+    # A phrase like "falsification test plan" is one deliverable.  The shared
+    # parser also raises wants_experiment_design because of its generic "test
+    # plan" pattern; requiring a second experiment-design ledger row here would
+    # manufacture a requirement the explicit bullet did not independently ask
+    # for.  If "experiment" is actually written, preserve both requirements.
+    suppress_experiment_alias = bool(
+        parsed.get("wants_experiment_design") is True
+        and parsed.get("wants_falsification") is True
+        and _FALSIFICATION_TEST_PLAN_RE.search(raw_text)
+        and not _EXPLICIT_EXPERIMENT_RE.search(raw_text)
+    )
+
     keys: List[str] = []
     for signal, ledger_key in _SEMANTIC_PART_KEYS:
+        if signal == "wants_experiment_design" and suppress_experiment_alias:
+            continue
         if parsed.get(signal) is True and ledger_key not in keys:
             keys.append(ledger_key)
     return keys
