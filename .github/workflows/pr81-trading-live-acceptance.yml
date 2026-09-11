@@ -1,0 +1,97 @@
+name: PR81 Trading Live Acceptance
+
+on:
+  push:
+    branches: [fix/live-trading-acceptance-20260908]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr81-trading-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-trading-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ZERO_COST_ONLY: "true"
+      GEMINI_API_KEY: ${{ secrets.INFINITY_LIVE_GEMINI_KEY }}
+      GEMINI_ZERO_COST_CONFIRMED: ${{ secrets.INFINITY_LIVE_ZERO_COST_CONFIRMED }}
+      GEMINI_MODEL: ${{ vars.INFINITY_LIVE_GEMINI_MODEL }}
+      INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-pr81-live
+      INFINITY_PRESERVE_STORED_DATA: "true"
+      INFINITY_MAX_LOCAL_GB: "2"
+      INFINITY_OFFLINE_TEST: "false"
+      CLOUD_ARCHIVE_PROVIDER: "none"
+      RESEARCH_COMPANY_CONCURRENCY: "2"
+    steps:
+      - name: Checkout exact acceptance revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify branch and clean committed checkout
+        run: |
+          test "$GITHUB_REPOSITORY" = "ra7-cyber6565/rv-ai-backend"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$GITHUB_REF_NAME" = "fix/live-trading-acceptance-20260908"
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          test -n "$GITHUB_SHA"
+
+      - name: Confirm strict zero-cost live preflight
+        run: |
+          python - <<'PY'
+          import json, os
+          from scripts.run_live_zero_cost_gate import preflight
+          report = preflight(os.environ, validate_storage=True)
+          safe = {
+              "ready": report.get("ready") is True,
+              "zero_cost_only": report.get("zero_cost_only") is True,
+              "model_layers_usable_now": int(report.get("model_layers_usable_now") or 0),
+              "storage_ready": report.get("storage_ready") is True,
+              "blockers": list(report.get("blockers") or []),
+              "credentials_exposed": False,
+          }
+          print(json.dumps(safe, indent=2))
+          if not safe["ready"]:
+              raise SystemExit(2)
+          PY
+
+      - name: Prepare immutable isolated executor image
+        run: |
+          docker build -t infinity-executor-pr81 -f tests/fixtures/executor.Dockerfile tests/fixtures
+          IMAGE_ID="$(docker image inspect infinity-executor-pr81 --format '{{.Id}}')"
+          case "$IMAGE_ID" in sha256:*) ;; *) echo "immutable image id missing"; exit 2;; esac
+          echo "INFINITY_BUILD_EXECUTOR=docker" >> "$GITHUB_ENV"
+          echo "INFINITY_PYTHON_IMAGE=$IMAGE_ID" >> "$GITHUB_ENV"
+          echo "INFINITY_NODE_IMAGE=$IMAGE_ID" >> "$GITHUB_ENV"
+
+      - name: Run fixed Max trading live acceptance
+        run: |
+          python scripts/run_pr81_trading_live_acceptance.py \
+            --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
+
+      - name: Upload sanitized acceptance receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr81-trading-live-${{ github.run_id }}
+          path: ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_acceptance.json
+          if-no-files-found: warn
+          retention-days: 1
