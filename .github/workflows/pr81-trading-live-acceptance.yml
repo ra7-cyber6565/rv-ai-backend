@@ -21,7 +21,6 @@ jobs:
       GEMINI_API_KEY: ${{ secrets.INFINITY_LIVE_GEMINI_KEY }}
       GEMINI_ZERO_COST_CONFIRMED: ${{ secrets.INFINITY_LIVE_ZERO_COST_CONFIRMED }}
       GEMINI_MODEL: ${{ vars.INFINITY_LIVE_GEMINI_MODEL }}
-      INFINITY_DATA_ROOT: ${{ runner.temp }}/infinity-pr81-live
       INFINITY_PRESERVE_STORED_DATA: "true"
       INFINITY_MAX_LOCAL_GB: "2"
       INFINITY_OFFLINE_TEST: "false"
@@ -38,6 +37,9 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
+
+      - name: Set isolated runner data root
+        run: echo "INFINITY_DATA_ROOT=${RUNNER_TEMP}/infinity-pr81-live" >> "$GITHUB_ENV"
 
       - name: Install dependencies
         run: |
