@@ -89,6 +89,15 @@ jobs:
           python scripts/run_pr81_trading_live_acceptance.py \
             --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
 
+      # Existing one-call diagnostic is deliberately failure-only. It never
+      # prints credentials, prompt/response text or raw provider exceptions,
+      # and performs no retry/model/key fallback. This distinguishes a provider
+      # transport/model problem from a downstream worker/report contract defect
+      # without weakening the acceptance gate or spending calls on green runs.
+      - name: Diagnose configured live model after acceptance failure
+        if: failure()
+        run: python scripts/diagnose_live_model_request.py --prompt-chars 12000
+
       - name: Upload sanitized acceptance receipt
         if: always()
         uses: actions/upload-artifact@v4
