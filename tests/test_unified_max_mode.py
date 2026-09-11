@@ -72,6 +72,15 @@ def test_public_ui_contract_is_chat_and_max_only():
     assert "Public users intentionally see only two choices: Chat and Max." in source
 
 
+def test_public_ui_defaults_to_unified_max_without_removing_chat():
+    source = Path("main.py").read_text(encoding="utf-8")
+    assert '<button data-mode="QUICK">Chat</button>' in source
+    assert '<button class="on" data-mode="MAXIMUM">Max</button>' in source
+    assert "'let mode=\"QUICK\",busy=false,sessionPromise=null;'" in source
+    assert "'let mode=\"MAXIMUM\",busy=false,sessionPromise=null;'" in source
+    assert "Max is selected by default; Chat remains an" in source
+
+
 def test_unified_max_contract_is_durable_for_future_agents():
     text = Path("MAX_MODE_CONTRACT.md").read_text(encoding="utf-8")
     assert "exactly two research choices" in text
