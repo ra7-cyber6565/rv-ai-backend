@@ -150,6 +150,11 @@ def _emit(
     return int(exit_code)
 
 
+def _probe_exit_code(out: Mapping[str, Any]) -> int:
+    """Single source of truth for the one-call live probe pass condition."""
+    return 0 if out.get("response_received") and out.get("text_ok") else 1
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Exactly one safe Gemini request diagnostic; no retry/fallback."
@@ -211,9 +216,9 @@ def main(argv: Optional[list[str]] = None) -> int:
         "active_key": pool.label(),
     }
     out.update(diagnose_request(model_name, prompt_chars=args.prompt_chars))
-    passed = bool(out.get("response_received") and out.get("text_ok"))
-    out["passed"] = passed
-    return _emit(out, exit_code=0 if passed else 1, receipt=receipt)
+    exit_code = _probe_exit_code(out)
+    out["passed"] = exit_code == 0
+    return _emit(out, exit_code=exit_code, receipt=receipt)
 
 
 if __name__ == "__main__":
