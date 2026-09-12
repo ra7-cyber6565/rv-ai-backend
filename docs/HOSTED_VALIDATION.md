@@ -79,6 +79,16 @@ arbitrary exception/function names. Missing Git inventory omits locations.
 The hosted boundary revalidates child diagnostics. These fields locate a
 failure for review; they do not independently establish its root cause.
 
+Returned-but-incomplete research now retains an allowlisted summary as well:
+requested_depth_mode and reported_depth_mode, result/discovery status, source
+and hypothesis counts, provider error categories, missing passes, bounded
+worker status/error/call counters and chief execution passes/counters. Missing
+or invalid counters remain null. The child and hosted boundary both validate
+company diagnostics; the host excludes model labels, arbitrary identifiers,
+worker IDs, answer hashes and raw text. These fields never make a failed gate
+pass. Executed mode comes from ResearchResult.mode, not coverage.mode; missing
+canonical mode or conflicting legacy coverage.mode fails the mode check.
+
 `LIVE_GATES_PASSED` requires both company modes and the fixed trading Max lane
 to pass their respective strict gates. Inspect trading_max as well as modes.
 Even then, `release_ready=false`, `quality_benchmark=NOT_TESTED`, and

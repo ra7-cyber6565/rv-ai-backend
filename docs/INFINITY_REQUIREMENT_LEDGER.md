@@ -1,5 +1,56 @@
 # Infinity implementation and acceptance ledger
 
+## Active continuation — returned live result mode and diagnostics, 2026-09-12
+
+Manual Foundation run 34685219540 (attempt 1, job 103530935660) tested
+9dd87ae42627e211c4852e1440fdcfeae391459f. Settings, full regression and real
+host prerequisites passed: 4,311 pytest cases, 9 skips, 1 warning, 51 subtests.
+Live COMPANY returned a structured research result, then failed acceptance:
+depth_mode_matches, status_complete, three_hypotheses, advanced_discovery,
+tournament_ready, honest_evidence_label, company_workers_executed and
+company_chief_executed were false. COMPANY_PLUS was skipped and trading_max
+was NOT_RUN. Other boolean values masked by GitHub remain unknown. This run
+contains no live_execution exception receipt and does not prove provider,
+worker/chief, scientific or independent answer-quality success.
+
+Measured defect: the gate looked for coverage.mode, but ResearchResult.to_dict()
+and the orchestrator serialize the executed mode in top-level mode. This repair
+uses that canonical field and rejects absent/malformed modes or contradictory
+legacy coverage.mode. Requested and reported modes remain separate. It does
+not waive incomplete worker/chief, hypothesis, evidence or status checks.
+
+The hosted publisher previously discarded the structured result summary.
+It now preserves strictly allowlisted status/mode, evidence/hypothesis counts,
+provider failure categories, missing reasoning/company passes and up to six
+worker execution receipts plus chief pass/call counters. Unknown counters are
+null, not invented zeroes. Lists are bounded and hosted publication revalidates
+the child summary. No raw answer/source/error text, model labels, worker IDs,
+private paths or arbitrary identifier strings are forwarded. These diagnostics
+do not repair or establish the still-unknown causes of worker/chief failures.
+
+TEST PERFORMED: 72 focused tests and 24 subtests passed under native outbound
+connect/send denial. Real ResearchResult serialization is tested through the
+child evaluator and hosted publisher, including false mode claims, failed
+workers/chief, hostile summary metadata and missing counts. The new candidate
+is VERIFICATION PENDING at authoring; consult PR #82 exact-head CI and receipts.
+A fresh live dispatch on the newly reviewed head is required after CI. Old
+runs cannot test this repair. Keep the existing confirmed-free settings; no
+new key change is justified by the returned-result failure alone.
+
+Sol was refreshed at fde80d1ae556d97fd31b5e86a69a98dd97e4ebf1. Its two stale
+assertions are fixed and all five CI workflows passed (Foundation 34692874979).
+Separate live run 34692872605, job 103551141652, passed the single-model probe
+step (generation_calls=1, retry_calls=0, fallback_calls=0), then failed fixed
+Max trading with trading_max_live_execution_or_evaluation_failed. Underlying
+exception location remains UNKNOWN on that branch. This supersedes the older
+Sol authentication blocker for that later attempt; it is not full research
+acceptance. Later Sol workflows/features were reviewed, not imported wholesale.
+
+Main remains 831dbc7209253e58bbfa0ec79b9efe8e130bf523. PR #82 remains draft.
+The user's laptop/data and other branch are preserved. Hosting is deferred;
+backup/restore, live integrated acceptance and independent quality gaps remain.
+No complete-app, deployment, backtest or scientific success is claimed.
+
 ## Latest external validation refresh — 2026-09-12
 
 Before publishing this diagnostic repair, PR #82 was still at c320d59a and main

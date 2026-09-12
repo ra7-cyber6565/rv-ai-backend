@@ -23,6 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.release_identity import repository_identity
+from utils.live_result_summary import PASSES, company_execution_summary, mode_name
 
 LIVE_QUESTION = (
     "Kya room-temperature superconductivity practically possible hai? Ambient "
@@ -191,6 +192,12 @@ def evaluate_result(
     if requested_mode and requested_mode not in LIVE_DEPTH_MODES:
         raise ValueError("unsupported live-gate depth mode")
     coverage = result.get("coverage") or {}
+    # ResearchResult.to_dict() puts mode at the top level. Source coverage is
+    # not the authority for the executed mode; reject conflicting legacy data.
+    reported_mode = mode_name(result.get("mode"))
+    legacy_mode_consistent = (
+        "mode" not in coverage or mode_name(coverage.get("mode")) == reported_mode
+    )
     verification = result.get("verification") or {}
     claim_checks = verification.get("claim_checks") or {}
     discovery = result.get("discovery") or {}
@@ -355,11 +362,10 @@ def evaluate_result(
          str(discovery.get("human_review_required"))),
     ]
     if requested_mode:
-        reported_mode = str(coverage.get("mode") or "").upper().strip()
         checks.insert(0, (
             "depth_mode_matches",
-            reported_mode == requested_mode,
-            f"requested={requested_mode}, reported={reported_mode or 'missing'}",
+            reported_mode == requested_mode and legacy_mode_consistent,
+            f"requested={requested_mode}, reported={reported_mode}, legacy_consistent={legacy_mode_consistent}",
         ))
 
     process_percent = float(
@@ -460,7 +466,10 @@ def evaluate_result(
         "passed": all(row["passed"] for row in rows),
         "checks": rows,
         "summary": {
-            "depth_mode": requested_mode or str(coverage.get("mode") or ""),
+            "depth_mode": reported_mode,
+            "requested_depth_mode": requested_mode,
+            "reported_depth_mode": reported_mode,
+            "company": company_execution_summary(verification.get("research_company")),
             "status": str(result.get("status") or ""),
             "sources": len(sources),
             "on_topic_sources": int(coverage.get("on_topic_sources") or 0),
@@ -524,8 +533,8 @@ def evaluate_result(
                 name for name in (
                     _safe_identifier(item) for item in (result.get("missing_passes") or [])
                 )
-                if name in {"analysis", "critique", "hypothesis", "synthesis"}
-            ][:4],
+                if name in PASSES
+            ][:16],
         },
     }
 

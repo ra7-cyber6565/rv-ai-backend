@@ -22,6 +22,7 @@ from scripts.run_live_zero_cost_gate import preflight
 from scripts.run_pr81_trading_live_acceptance import run_trading_live
 from scripts.check_hosted_live_settings import inspect_settings
 from utils.live_failure_diagnostics import FAILURE_CODES, exception_diagnostics, sanitize_diagnostics
+from utils.live_result_summary import sanitize_result_summary
 
 REPOSITORY = "ra7-cyber6565/rv-ai-backend"
 REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_smoke",
@@ -151,6 +152,8 @@ def summarize(results):
             public[mode]["failure_code"] = failure_code
         if "diagnostics" in receipt:
             public[mode]["diagnostics"] = sanitize_diagnostics(receipt["diagnostics"])
+        if "summary" in receipt:
+            public[mode]["summary"] = sanitize_result_summary(receipt["summary"])
     return public
 
 

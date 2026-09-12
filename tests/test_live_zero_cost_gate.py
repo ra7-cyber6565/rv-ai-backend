@@ -40,10 +40,10 @@ def _env(**updates):
 def _result():
     return {
         "status": "COMPLETE",
+        "mode": "MAXIMUM",
         "answer": "Human-first cited answer [S1] without provider diagnostics.",
         "sources": [{"source_id": "S1"}, {"source_id": "S2"}, {"source_id": "S3"}],
         "coverage": {
-            "mode": "MAXIMUM",
             "on_topic_sources": 3,
             "full_text_sources_read": 1,
         },
@@ -87,7 +87,7 @@ def _result():
 
 def _marathon_result():
     result = _result()
-    result["coverage"]["mode"] = "MARATHON"
+    result["mode"] = "MARATHON"
     result["research_assurance"] = {
         "active": True,
         "mode": "MARATHON",
@@ -117,7 +117,7 @@ def _marathon_result():
 @pytest.mark.parametrize("mode,count", [("COMPANY", 4), ("COMPANY_PLUS", 6)])
 def test_company_live_gate_requires_actual_workers_chief_and_complete_usage(mode, count):
     result = _result()
-    result["coverage"]["mode"] = mode
+    result["mode"] = mode
     result["api_accounting"] = {"accounting_complete": True}
     result["runtime_execution"] = {"available": True, "event_durability": "SQLITE_TRANSACTION",
                                    "cancelled": False, "reserved_http_attempts": count + 2}
@@ -144,7 +144,7 @@ def test_company_live_gate_requires_actual_workers_chief_and_complete_usage(mode
 
 def test_company_live_gate_rejects_missing_public_runtime_reservations():
     result = _result()
-    result["coverage"]["mode"] = "COMPANY"
+    result["mode"] = "COMPANY"
     for runtime in ({}, {"available": True, "event_durability": "SQLITE_TRANSACTION", "cancelled": False,
                         "reserved_http_attempts": True}):
         result["runtime_execution"] = runtime
@@ -171,7 +171,7 @@ def test_live_execution_uses_public_manager_with_unique_run_scope(monkeypatch):
 
 def test_company_live_gate_does_not_accept_four_role_headings_without_receipts():
     result = _result()
-    result["coverage"]["mode"] = "COMPANY"
+    result["mode"] = "COMPANY"
     result["answer"] = "AI-1 AI-2 AI-3 AI-4 all completed"
     checks = {row["name"]: row["passed"] for row in evaluate_result(result, required_depth_mode="COMPANY")["checks"]}
     assert checks["company_workers_executed"] is False
