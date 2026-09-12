@@ -3,15 +3,17 @@
 This script exists because a full live research gate is expensive in free-tier
 quota and its public receipt intentionally hides provider bodies. It performs
 exactly one synthetic generation request against GEMINI_MODEL, never rotates to
-another model/key, never retries, and prints only coarse metadata:
+another model/key, never retries, and emits only coarse metadata:
 
 - configured model name and prompt character count;
 - whether a provider response arrived;
 - whether usable text existed and its length;
 - normalized failure kind / exception class / finish reason.
 
-It never prints credentials, prompt text, response text, raw exception messages,
-source content or URLs.
+It never emits credentials, prompt text, response text, raw exception messages,
+source content or URLs. When ``--receipt`` is supplied, the exact same sanitized
+report is atomically persisted so a failed auth/model preflight still leaves a
+machine-readable acceptance artifact.
 """
 from __future__ import annotations
 
@@ -20,7 +22,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, Mapping, Optional
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -115,12 +117,50 @@ def diagnose_request(
     return out
 
 
+def _public_report(payload: Mapping[str, Any]) -> Dict[str, Any]:
+    """Normalize receipt invariants without copying any private provider data."""
+    out = dict(payload)
+    out["contains_prompt_or_response_text"] = False
+    out["contains_credentials"] = False
+    return out
+
+
+def _write_receipt(path: Path, payload: Mapping[str, Any]) -> None:
+    """Atomically persist the already-sanitized diagnostic receipt."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    safe = _public_report(payload)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
+        json.dumps(safe, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    os.replace(tmp, path)
+
+
+def _emit(
+    payload: Mapping[str, Any],
+    *,
+    exit_code: int,
+    receipt: Optional[Path],
+) -> int:
+    safe = _public_report(payload)
+    if receipt is not None:
+        _write_receipt(receipt, safe)
+    print(json.dumps(safe, ensure_ascii=False, indent=2))
+    return int(exit_code)
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     parser = argparse.ArgumentParser(
         description="Exactly one safe Gemini request diagnostic; no retry/fallback."
     )
     parser.add_argument("--prompt-chars", type=int, default=50000)
+    parser.add_argument(
+        "--receipt",
+        help="optional sanitized JSON receipt path; written even on safe failure",
+    )
     args = parser.parse_args(argv)
+    receipt = Path(args.receipt).resolve() if args.receipt else None
 
     load_local_env()
     from utils.zero_cost_guard import inspect_zero_cost_config
@@ -131,33 +171,49 @@ def main(argv: Optional[list[str]] = None) -> int:
     model_name = str(os.getenv("GEMINI_MODEL", "") or "").strip()
     pool = KeyPool()
     if not zero.enabled:
-        print(json.dumps({
-            "ready": False,
-            "generation_calls": 0,
-            "blocker": "ZERO_COST_ONLY must be true",
-        }, indent=2))
-        return 2
+        return _emit(
+            {
+                "ready": False,
+                "passed": False,
+                "generation_calls": 0,
+                "blocker": "ZERO_COST_ONLY must be true",
+            },
+            exit_code=2,
+            receipt=receipt,
+        )
     if zero.blocked_keys:
-        print(json.dumps({
-            "ready": False,
-            "generation_calls": 0,
-            "blocker": "zero-cost confirmation/configuration is incomplete",
-        }, indent=2))
-        return 2
+        return _emit(
+            {
+                "ready": False,
+                "passed": False,
+                "generation_calls": 0,
+                "blocker": "zero-cost confirmation/configuration is incomplete",
+            },
+            exit_code=2,
+            receipt=receipt,
+        )
     if not pool.has_key() or not model_name:
-        print(json.dumps({
-            "ready": False,
-            "generation_calls": 0,
-            "blocker": "Gemini key or GEMINI_MODEL is missing",
-        }, indent=2))
-        return 2
+        return _emit(
+            {
+                "ready": False,
+                "passed": False,
+                "generation_calls": 0,
+                "blocker": "Gemini key or GEMINI_MODEL is missing",
+            },
+            exit_code=2,
+            receipt=receipt,
+        )
 
     import google.generativeai as genai
     configure(genai, pool.active())
-    out = {"ready": True, "active_key": pool.label()}
+    out: Dict[str, Any] = {
+        "ready": True,
+        "active_key": pool.label(),
+    }
     out.update(diagnose_request(model_name, prompt_chars=args.prompt_chars))
-    print(json.dumps(out, ensure_ascii=False, indent=2))
-    return 0 if out.get("response_received") and out.get("text_ok") else 1
+    passed = bool(out.get("response_received") and out.get("text_ok"))
+    out["passed"] = passed
+    return _emit(out, exit_code=0 if passed else 1, receipt=receipt)
 
 
 if __name__ == "__main__":
