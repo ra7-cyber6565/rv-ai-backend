@@ -1,5 +1,59 @@
 # Infinity Research AI — AI Handoff / Continuation Authority
 
+## Latest external validation refresh — 2026-09-12
+
+Before publishing this diagnostic repair, PR #82 was still at c320d59a and main
+was unchanged at 831dbc72. Sol PR #81 had advanced to
+911a485d0a98d0a1a9490bff7e1f5ba496a83544. Its Foundation run 34669389151
+failed two source-text assertions in test_pr81_live_workflow_fail_fast.py
+(4,243 passed, 9 skipped, 27 subtests); its four other standard workflows passed.
+Those failures concern changed CLI line wrapping/return spelling and are not
+evidence that the live probe ran more than once.
+
+Sol live run 34669386254, job 103487717856, reached the one-request model probe:
+generation_calls=1, retry_calls=0, fallback_calls=0, response_received=false,
+request_error_kind=auth_failure, request_exception_class=Unauthenticated.
+This is observed failed credential authentication on that separate revision.
+It does not prove the cause of PR #82's earlier opaque COMPANY exception.
+No secret/model values were recovered. Valid current provider access remains
+an external blocker; do not burn another full research allocation without
+addressing it. The new Sol workflow/coverage/credential/handoff changes have
+not been imported wholesale into PR #82 or certified by its tests.
+
+## Active continuation — live execution failure diagnostics, 2026-09-10
+
+Manual Foundation run 34452317616 tested PR #82 head
+c320d59a61f3c5946b18ae08d3f61e35960f3cc3. Attempt 1 stopped at the early
+confirmation check. After the user updated their private setting, attempt 2
+(job 102791866672) passed settings, advanced regression, Foundation and actual
+host build/improvement/API prerequisites. Full pytest: 4,305 passed, 9 skipped,
+1 warning, 51 subtests. The live receipt then reported LIVE_GATES_FAILED:
+COMPANY had live_execution=false; COMPANY_PLUS did not run and trading_max
+was NOT_RUN. This is an attempted live execution, not successful model/worker
+proof. The exception type and location were discarded by the old failure path,
+so the underlying cause is UNKNOWN. Some log booleans are GitHub-masked; their
+values were not inferred or recovered. No scientific or quality result exists.
+
+This repair retains fixed failure codes and bounded error categories plus
+Git-tracked public Python module/line locations through both child and hosted
+receipts. It excludes exception messages, arbitrary class/function names,
+private paths, locals, source text and provider payloads. At most three chained
+errors and eight frames per error survive. Missing Git inventory omits locations.
+Hosted publication revalidates the child fields. This improves diagnosis; it
+does not fix an unknown root cause, alter model routing or weaken acceptance.
+
+TEST PERFORMED: 57 focused tests and 24 subtests passed with native outbound
+connect/send operations denied, including actual raised failures, chained/private
+traceback data, hostile receipt fields, bounded cycles and persisted failure
+diagnostics. The current candidate is VERIFICATION PENDING at authoring; use
+PR #82 exact-head CI. New diagnostics require a fresh manual dispatch on the
+new reviewed head after CI; retrying the old run still tests c320d59a.
+
+Main remains 831dbc7209253e58bbfa0ec79b9efe8e130bf523. Sol remains reviewed at
+828ae2ee74344f077b380cdafc23e854a63f7e10. Neither branch was overwritten.
+Hosting/migration stays deferred, with the backup/deployment hold intact.
+All live success, independent quality and production acceptance gaps remain.
+
 ## Active continuation — live setup diagnostics, 2026-09-10
 
 The user saved live settings after screenshots established that GitHub had no

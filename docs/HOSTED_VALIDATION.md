@@ -25,7 +25,9 @@ The optional step requires all of the following:
 - An explicit model identifier and dedicated private provider credentials that
   satisfy the application's confirmed-free eligibility guard.
 
-Credentials are supplied only to the final live step. A push, PR, rerun of a
+Credentials are scoped to the stdlib-only no-network settings check and the
+final live step; dependency installation and regression tests do not receive
+them. A push, PR, rerun of a
 normal offline workflow or missing prerequisite cannot start this live lane.
 The runner executes fixed gate questions; it has no arbitrary-command or
 user-question workflow input. Checkout does not persist GitHub credentials.
@@ -56,7 +58,9 @@ branch. If the browser displays only the default-branch form and does not show
 these inputs, do not treat a run without them as live validation. An authorized
 operator can use GitHub's documented dispatch API/CLI with the branch `ref`
 and both inputs from an already configured environment. This implementation
-has not verified that browser form or performed a manual live dispatch.
+was manually dispatched on PR #82 head c320d59a61f3c5946b18ae08d3f61e35960f3cc3
+in run 34452317616. Attempt 2 passed setup/prerequisites but failed COMPANY
+execution. That failure does not validate a newer candidate or provider access.
 
 ## Receipts and interpretation
 
@@ -67,6 +71,13 @@ retention is one day. Raw live files remain in the disposable hosted workspace.
 GitHub Actions is a test host, not a permanent research archive or 24-hour app
 host. Use only the fixed public gate campaign here; do not place a user's sole
 copy of research data in this ephemeral workspace.
+
+Failure receipts also carry fixed failure codes and bounded error categories,
+with module names and line numbers from Git-tracked public Python code only.
+They omit raw messages, private filenames, locals, source/provider payloads and
+arbitrary exception/function names. Missing Git inventory omits locations.
+The hosted boundary revalidates child diagnostics. These fields locate a
+failure for review; they do not independently establish its root cause.
 
 `LIVE_GATES_PASSED` requires both company modes and the fixed trading Max lane
 to pass their respective strict gates. Inspect trading_max as well as modes.

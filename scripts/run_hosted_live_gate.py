@@ -21,6 +21,7 @@ from scripts.run_company_host import run_live_modes, write_json
 from scripts.run_live_zero_cost_gate import preflight
 from scripts.run_pr81_trading_live_acceptance import run_trading_live
 from scripts.check_hosted_live_settings import inspect_settings
+from utils.live_failure_diagnostics import FAILURE_CODES, exception_diagnostics, sanitize_diagnostics
 
 REPOSITORY = "ra7-cyber6565/rv-ai-backend"
 REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_smoke",
@@ -145,6 +146,11 @@ def summarize(results):
                   if isinstance(c, dict) and re.fullmatch(r"[a-z0-9_]{1,100}", str(c.get("name", "")))]
         public[mode] = {"passed": row.get("passed") is True, "checks": checks,
                         "depth_mode": mode}
+        failure_code = receipt.get("failure_code")
+        if type(failure_code) is str and failure_code in FAILURE_CODES:
+            public[mode]["failure_code"] = failure_code
+        if "diagnostics" in receipt:
+            public[mode]["diagnostics"] = sanitize_diagnostics(receipt["diagnostics"])
     return public
 
 
@@ -269,6 +275,8 @@ def main(argv=None):
         return 0 if not args.execute or report["passed"] else 1
     except Exception as exc:
         report.update(state="BLOCKED", failure_code=str(exc) if isinstance(exc, HostedGateBlocked) else "hosted_operation_failed")
+        if not isinstance(exc, HostedGateBlocked):
+            report["diagnostics"] = exception_diagnostics(exc)
         if destination is not None:
             try:
                 write_json(destination, report)

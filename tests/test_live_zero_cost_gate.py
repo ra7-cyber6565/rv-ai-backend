@@ -300,6 +300,9 @@ def test_live_exception_writes_sanitized_failure_receipt(tmp_path, monkeypatch, 
     assert return_code == 1
     assert body["passed"] is False
     assert body["failure_code"] == "live_research_execution_failed"
+    assert body["diagnostics"]["errors"][0]["kind"] == "runtime_error"
+    assert any(frame["module"] == "scripts.run_live_zero_cost_gate"
+               for frame in body["diagnostics"]["errors"][0]["frames"])
     assert body["contains_answer_or_source_text"] is False
     assert body["contains_credentials"] is False
     assert body["repository_clean"] is True

@@ -549,8 +549,10 @@ def _failure_receipt(
     ready: Mapping[str, Any],
     started: float,
     failure_code: str,
+    error: BaseException | None = None,
 ) -> Dict[str, Any]:
     """Build a useful failure receipt without raw exception/provider content."""
+    from utils.live_failure_diagnostics import exception_diagnostics
     return {
         "schema_version": 2,
         "created_at_epoch": int(time.time()),
@@ -567,6 +569,7 @@ def _failure_receipt(
         }],
         "summary": {"status": "FAILED_SAFELY"},
         "failure_code": failure_code,
+        "diagnostics": exception_diagnostics(error),
         "contains_answer_or_source_text": False,
         "contains_credentials": False,
     }
@@ -644,11 +647,12 @@ def main(argv: Sequence[str] | None = None) -> int:
     path = _receipt_path(args.receipt, os.environ)
     try:
         result = run_live(args.depth_mode)
-    except Exception:  # noqa: BLE001 - raw provider exceptions must stay private
+    except Exception as exc:  # noqa: BLE001 - raw provider exceptions must stay private
         receipt = _failure_receipt(
             ready=ready,
             started=started,
             failure_code="live_research_execution_failed",
+            error=exc,
         )
         _write_receipt_safely(path, receipt)
         print("[FAIL] live_execution: research/provider call failed; raw error hidden.")
@@ -660,11 +664,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             result,
             required_depth_mode=args.depth_mode,
         )
-    except Exception:  # noqa: BLE001 - never leak unexpected result content
+    except Exception as exc:  # noqa: BLE001 - never leak unexpected result content
         receipt = _failure_receipt(
             ready=ready,
             started=started,
             failure_code="live_result_evaluation_failed",
+            error=exc,
         )
         _write_receipt_safely(path, receipt)
         print("[FAIL] live_evaluation: result validation failed; raw error hidden.")

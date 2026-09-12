@@ -89,6 +89,15 @@ class HostedLiveGateTests(unittest.TestCase):
                 trading.return_value={'schema':2,'passed':False,'checks':[
                     dict(name=name,passed=False) for name in gate.REQUIRED_TRADING_CHECKS]}
                 self.assertEqual(gate.main(['--execute']),1)
+                trading.side_effect=ValueError('PRIVATE_PROVIDER_BODY')
+                self.assertEqual(gate.main(['--execute']),2)
+                failed=json.loads((base/'live'/'audit'/'hosted_live_gate.json').read_text())
+                self.assertFalse(failed['passed'])
+                self.assertEqual(failed['failure_code'],'hosted_operation_failed')
+                self.assertEqual(failed['diagnostics']['errors'][0]['kind'],'value_error')
+                self.assertTrue(any(frame['module']=='scripts.run_hosted_live_gate'
+                                    for frame in failed['diagnostics']['errors'][0]['frames']))
+                self.assertNotIn('PRIVATE',json.dumps(failed))
 
     def test_missing_eligibility_cannot_execute(self):
         with patch.dict(os.environ,{},clear=True),patch.object(gate,'run_live_modes') as live,contextlib.redirect_stdout(io.StringIO()):
