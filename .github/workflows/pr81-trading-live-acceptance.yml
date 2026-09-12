@@ -83,9 +83,7 @@ jobs:
       # real gate, while the always() artifact step still has evidence to upload.
       - name: Validate configured live model with one safe call
         run: |
-          python scripts/diagnose_live_model_request.py \
-            --prompt-chars 12000 \
-            --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
+          python scripts/diagnose_live_model_request.py --prompt-chars 12000 --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
 
       - name: Prepare immutable isolated executor image
         run: |
