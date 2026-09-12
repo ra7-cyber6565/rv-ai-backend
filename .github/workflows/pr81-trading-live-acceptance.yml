@@ -78,10 +78,14 @@ jobs:
       # Validate the configured live model before spending time building the
       # isolated executor or running the full Max research job. This performs
       # exactly one synthetic request, with no retry/key/model fallback, and
-      # prints only normalized metadata. A missing/rejected credential or
-      # unusable model therefore fails fast without weakening the real gate.
+      # persists the same public-safe metadata on failure. A missing/rejected
+      # credential or unusable model therefore fails fast without weakening the
+      # real gate, while the always() artifact step still has evidence to upload.
       - name: Validate configured live model with one safe call
-        run: python scripts/diagnose_live_model_request.py --prompt-chars 12000
+        run: |
+          python scripts/diagnose_live_model_request.py \
+            --prompt-chars 12000 \
+            --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
 
       - name: Prepare immutable isolated executor image
         run: |
@@ -103,5 +107,5 @@ jobs:
         with:
           name: pr81-trading-live-${{ github.run_id }}
           path: ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_acceptance.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 1
