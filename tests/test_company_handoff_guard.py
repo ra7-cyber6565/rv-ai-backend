@@ -16,10 +16,13 @@ def _accounting():
 
 
 def _verbose_report():
-    long_claim = "measured worker claim with source context " * 80
-    long_hyp = "testable mechanism with explicit baseline and falsifier " * 45
+    # Oversized because the same semantic units repeat, but small enough after
+    # exact-duplicate removal to fit the canonical per-role handoff bound. This
+    # fixture distinguishes real lossless compaction from unique-content clipping.
+    long_claim = "measured worker claim with source context " * 20
+    long_hyp = "testable mechanism with explicit baseline and falsifier " * 8
     return {
-        "summary": "bounded summary " * 220,
+        "summary": "bounded summary " * 30,
         "claims": [
             {"text": long_claim, "source_ids": ["S1", "S2"],
              "kind": "SOURCE_REPORTED", "entailment_verified": False}
@@ -31,10 +34,10 @@ def _verbose_report():
              "falsification": long_hyp}
             for _ in range(5)
         ],
-        "limitations": [("limitation " * 90) for _ in range(9)],
-        "assumptions": [("assumption " * 90) for _ in range(9)],
-        "contradictions": [("contradiction " * 90) for _ in range(9)],
-        "remaining_questions": [("remaining question " * 90) for _ in range(9)],
+        "limitations": [("limitation " * 20) for _ in range(9)],
+        "assumptions": [("assumption " * 20) for _ in range(9)],
+        "contradictions": [("contradiction " * 20) for _ in range(9)],
+        "remaining_questions": [("remaining question " * 20) for _ in range(9)],
         "contract_issues": [],
         "tool_results": [],
         "status": "DRAFT_READY",
