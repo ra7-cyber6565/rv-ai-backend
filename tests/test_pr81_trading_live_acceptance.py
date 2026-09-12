@@ -123,6 +123,20 @@ def test_complete_measured_envelope_passes_and_receipt_is_sanitized():
     assert len(report["summary"]["answer_sha256"]) == 64
 
 
+def test_complete_handoff_does_not_require_structured_compaction():
+    result = _result()
+    company = result["verification"]["research_company"]
+    company["handoff_structured_compaction"] = False
+    company["handoff_compacted_roles"] = []
+
+    report = evaluate_result(result)
+
+    assert report["passed"] is True
+    assert "specialist_handoff_complete" not in _failed_checks(report)
+    assert report["summary"]["handoff_compacted_roles"] == 0
+    assert report["summary"]["handoff_truncated_roles"] == 0
+
+
 def test_creative_misclassification_fails_even_if_everything_else_passes():
     result = _result()
     result["task_contract"]["task_types"].append("creative")
