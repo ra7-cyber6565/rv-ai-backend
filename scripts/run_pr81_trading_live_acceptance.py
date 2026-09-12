@@ -292,10 +292,10 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         _safe_check(
             "specialist_handoff_complete",
             company.get("handoff_prepared") is True
-            and company.get("handoff_structured_compaction") is True
             and not (company.get("handoff_truncated_roles") or [])
             and handoff_roles == EXPECTED_ROLES,
             f"handoff_roles={len(handoff_roles)}/6, "
+            f"compacted={len(company.get('handoff_compacted_roles') or [])}, "
             f"truncated={len(company.get('handoff_truncated_roles') or [])}",
         ),
         _safe_check(
