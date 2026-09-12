@@ -95,15 +95,29 @@ jobs:
           echo "INFINITY_NODE_IMAGE=$IMAGE_ID" >> "$GITHUB_ENV"
 
       - name: Run fixed Max trading live acceptance
+        id: max_acceptance
         run: |
           python scripts/run_pr81_trading_live_acceptance.py \
             --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
 
-      - name: Upload sanitized acceptance receipt
+      # Failure-only structural diagnostic. It reuses the exact same acceptance
+      # run/evaluator functions and records only exception type/family and
+      # public-repository frame coordinates. No message/prompt/answer/source or
+      # credential text is emitted. The real acceptance above remains the gate.
+      - name: Diagnose failed Max stage without raw text
+        if: failure() && steps.max_acceptance.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          python scripts/diagnose_pr81_trading_failure.py \
+            --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_diagnostic.json"
+
+      - name: Upload sanitized acceptance receipts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: pr81-trading-live-${{ github.run_id }}
-          path: ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_acceptance.json
+          path: |
+            ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_acceptance.json
+            ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_diagnostic.json
           if-no-files-found: error
           retention-days: 1
