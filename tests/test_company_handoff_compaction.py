@@ -73,10 +73,17 @@ def test_duplicate_overflow_compacts_without_dropping_unique_reasoning():
     assert result["handoff_truncated_roles"] == []
     assert result["handoff_structured_compaction"] is True
     assert all(role in handoff for role, _ in company.ROLES[:4])
-    assert all(
-        result["handoff_omitted_counts"][role]["claims"] == 9
+    expected_claim_omissions = {role: 9 for role, _ in company.ROLES[:4]}
+    actual_claim_omissions = {
+        role: result["handoff_omitted_counts"].get(role, {}).get("claims")
         for role, _ in company.ROLES[:4]
-    )
+    }
+    assert actual_claim_omissions == expected_claim_omissions, {
+        "actual_claim_omissions": actual_claim_omissions,
+        "all_omitted_counts": result["handoff_omitted_counts"],
+        "compacted_roles": result["handoff_compacted_roles"],
+        "truncated_roles": result["handoff_truncated_roles"],
+    }
 
     passes = _analysis_passes()
     company.attach_company_passes(passes, result)
@@ -99,7 +106,11 @@ def test_unique_overflow_remains_fail_closed_instead_of_fake_compaction():
 
     company.chief_handoff(result)
 
-    assert result["handoff_compacted_roles"] == []
+    assert result["handoff_compacted_roles"] == [], {
+        "compacted_roles": result["handoff_compacted_roles"],
+        "truncated_roles": result["handoff_truncated_roles"],
+        "all_omitted_counts": result["handoff_omitted_counts"],
+    }
     assert len(result["handoff_truncated_roles"]) == 4
     assert result["handoff_structured_compaction"] is False
     assert all(
