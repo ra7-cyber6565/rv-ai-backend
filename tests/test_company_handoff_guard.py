@@ -59,7 +59,7 @@ def _company(report=None):
     }
 
 
-def test_verbose_worker_reports_are_structurally_compacted_not_false_failed():
+def test_verbose_worker_reports_are_losslessly_compacted_not_false_failed():
     company = _company()
     prompt = chief_handoff(company)
 
@@ -71,11 +71,12 @@ def test_verbose_worker_reports_are_structurally_compacted_not_false_failed():
     assert company["handoff_worker_roles"] == [
         "evidence", "validation", "mechanism", "red_team"
     ]
-    # Every semantic category remains represented; omitted full-detail counts
-    # are explicit instead of silently pretending the chief saw the full report.
+    # The canonical path keeps every semantic category represented while only
+    # removing exact duplicate reasoning units. Full worker reports remain in
+    # the research-company audit result.
     for token in (
         '"claims"', '"hypotheses"', '"limitations"', '"assumptions"',
-        '"contradictions"', '"remaining_questions"', '"handoff_compaction"',
+        '"contradictions"', '"remaining_questions"',
     ):
         assert token in prompt
     assert all(
