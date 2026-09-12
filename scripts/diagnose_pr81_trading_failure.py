@@ -12,11 +12,14 @@ import argparse
 import json
 import os
 from pathlib import Path
+import sys
 import time
 import traceback
 from typing import Any, Dict, Mapping, Sequence
 
 ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts import run_pr81_trading_live_acceptance as acceptance
 from utils.release_identity import repository_identity
