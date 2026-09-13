@@ -1,5 +1,30 @@
 # Hosted validation and retained research data
 
+## Small model check when live capacity is uncertain
+
+Foundation tests has an independent manual `model_probe_only` input. Select
+`codex/answer-scope-20260908`, check only that box, leave `live_company` false,
+and supply the full reviewed current PR #82 commit in `reviewed_commit`.
+Wait for that commit's normal five CI checks before dispatching the probe.
+Existing `INFINITY_LIVE_GEMINI_MODEL`, `INFINITY_LIVE_GEMINI_KEY`, and
+`INFINITY_LIVE_ZERO_COST_CONFIRMED` settings are used without changing them.
+
+The job uses only Python's standard library and a clean reviewed checkout.
+It attempts at most one fixed short REST request, limits output to 256 tokens,
+reads at most 65,537 response bytes, and has a 30-second socket timeout.
+It does not retry, follow redirects, switch keys/models, or start research.
+Selecting both live options blocks before network access. Normal PR CI is
+unchanged; the probe dispatch intentionally skips the offline/full-research job.
+
+Open the `model-probe` job log. `MODEL_RESPONSE_RECEIVED` means this small
+request produced nonempty text. `MODEL_RESPONSE_EMPTY` means no usable text;
+`MODEL_REQUEST_FAILED` includes only a coarse error category and HTTP status.
+`BLOCKED` means selection/settings failed before any generation attempt.
+A generic 429 does not prove a daily cap. This check does not establish app/SDK
+compatibility, enough quota for Company/Max, answer quality or release readiness.
+No credentials, raw model label, response or provider message are published.
+The separate existing request-size diagnostic is not run by this small check.
+
 This continues the existing Infinity Research AI application in PR #79. It
 does not create another app. The user's Windows checkout, existing files and
 Railway production configuration are not changed by hosted testing.

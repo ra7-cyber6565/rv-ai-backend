@@ -1,5 +1,45 @@
 # Infinity Research AI — Master Work Status
 
+## Active continuation — one small hosted model check, 2026-09-13
+
+The user reports INFINITY_LIVE_GEMINI_MODEL=gemini-3.8-flash. Their AI Studio
+screenshot shows the selected Default Gemini Project as Free tier and this
+model's limits as 5 RPM, 250K TPM and 20 RPD. The displayed 6 RPM / 26 RPD are
+28-day historical peaks, not current usage or remaining capacity. The secret's
+project association, current quota and successful model access remain UNKNOWN.
+Gemma's larger 14.4K RPD does not remove its displayed 16K TPM bottleneck.
+No model/key setting was changed or inferred from redacted logs.
+
+Measured validation gap: Foundation could run the entire live campaign, but
+could not dispatch a small provider-only check and stop. It now offers the
+manual model_probe_only input. That job checks a clean, matching reviewed SHA,
+public GitHub-hosted execution and existing confirmed-free settings, sends at
+most one small generateContent REST request to the exact configured model,
+and stops. Both live options selected together are blocked before any request.
+No SDK/dependency installation, retries, redirects, model/key fallback, research
+allocation, merge, deployment or laptop operation occurs in this probe job.
+The normal offline and full live validation lanes remain separate.
+
+The probe uses a fixed short prompt, output cap 256 tokens, bounded response
+read and a 30-second socket timeout. Public logs contain fixed states, counts,
+HTTP status and Git/run identity; no key/model value, answer, provider message
+or arbitrary exception metadata. A generic 429 stays quota_or_rate_limit unless
+explicit quota IDs distinguish daily from minute limits. Even a response PASS
+is only this one REST request: remaining quota, SDK/company/Max acceptance,
+independent quality and production readiness are not established.
+
+TEST PERFORMED: 62 focused tests and 24 subtests passed under native outbound
+connect/send denial. In-memory transport tests cover one-call behavior,
+redirect/retry refusal, timeout, privacy, missing/free/SHA/manual guards,
+response bounds and separate workflow routing. This is NOT a live result.
+The parent 2b8cf4d0 passed all five workflows (Foundation 34731364332,
+4,342 pytest cases and 51 subtests); this new candidate is VERIFICATION PENDING
+until its own PR #82 checks finish. Main and Sol's branch are preserved.
+After that verification, dispatch Foundation on codex/answer-scope-20260908
+with model_probe_only=true, live_company=false, and the current full PR SHA.
+The connector cannot start a new workflow dispatch; give the user that exact
+one-time UI action. Full live and retained-data backup/deployment holds remain.
+
 ## Active continuation — measured quota failure and shared model cooldown, 2026-09-13
 
 Manual Foundation run 34699631516 (#1617, attempt 1, job 103568982413) tested
