@@ -1,5 +1,30 @@
 # Hosted validation and retained research data
 
+## Small model check when live capacity is uncertain
+
+Foundation tests has an independent manual `model_probe_only` input. Select
+`codex/answer-scope-20260908`, check only that box, leave `live_company` false,
+and supply the full reviewed current PR #82 commit in `reviewed_commit`.
+Wait for that commit's normal five CI checks before dispatching the probe.
+Existing `INFINITY_LIVE_GEMINI_MODEL`, `INFINITY_LIVE_GEMINI_KEY`, and
+`INFINITY_LIVE_ZERO_COST_CONFIRMED` settings are used without changing them.
+
+The job uses only Python's standard library and a clean reviewed checkout.
+It attempts at most one fixed short REST request, limits output to 256 tokens,
+reads at most 65,537 response bytes, and has a 30-second socket timeout.
+It does not retry, follow redirects, switch keys/models, or start research.
+Selecting both live options blocks before network access. Normal PR CI is
+unchanged; the probe dispatch intentionally skips the offline/full-research job.
+
+Open the `model-probe` job log. `MODEL_RESPONSE_RECEIVED` means this small
+request produced nonempty text. `MODEL_RESPONSE_EMPTY` means no usable text;
+`MODEL_REQUEST_FAILED` includes only a coarse error category and HTTP status.
+`BLOCKED` means selection/settings failed before any generation attempt.
+A generic 429 does not prove a daily cap. This check does not establish app/SDK
+compatibility, enough quota for Company/Max, answer quality or release readiness.
+No credentials, raw model label, response or provider message are published.
+The separate existing request-size diagnostic is not run by this small check.
+
 This continues the existing Infinity Research AI application in PR #79. It
 does not create another app. The user's Windows checkout, existing files and
 Railway production configuration are not changed by hosted testing.
@@ -10,8 +35,10 @@ Normal Foundation CI installs dependencies on a GitHub runner, runs the offline
 suite, executes real Python/Node containers and protected improvement trials,
 and starts the actual API for a localhost smoke check. These jobs do not need
 laptop installations. The optional final live step invokes the existing public
-agent manager in COMPANY and COMPANY_PLUS modes, sequentially. It stops when a
-mode fails and retains an honest failure receipt.
+agent manager in COMPANY and COMPANY_PLUS modes, sequentially, then the fixed
+US100/XAUUSD MAXIMUM trading acceptance lane. Failed company prerequisites skip
+that extra allocation. The lane validates runtime/delivery/fail-closed behavior;
+it does not certify historical backtest correctness or independent quality.
 
 The optional step requires all of the following:
 
@@ -23,7 +50,9 @@ The optional step requires all of the following:
 - An explicit model identifier and dedicated private provider credentials that
   satisfy the application's confirmed-free eligibility guard.
 
-Credentials are supplied only to the final live step. A push, PR, rerun of a
+Credentials are scoped to the stdlib-only no-network settings check and the
+final live step; dependency installation and regression tests do not receive
+them. A push, PR, rerun of a
 normal offline workflow or missing prerequisite cannot start this live lane.
 The runner executes fixed gate questions; it has no arbitrary-command or
 user-question workflow input. Checkout does not persist GitHub credentials.
@@ -43,7 +72,8 @@ flag is an operator assertion, not a provider billing audit. If free eligibility
 cannot be established, leave it unset and the live step remains blocked.
 
 Open **Actions → Foundation tests → Run workflow** and select
-`codex/research-company-20260905`. Use the full reviewed commit SHA, not the
+the current reviewed PR branch (`codex/answer-scope-20260908` for PR #82).
+Use the full reviewed commit SHA, not the
 short display hash, and enable `live_company`. Review the branch code before
 providing credentials. No merge or Railway deployment is part of this action.
 
@@ -53,7 +83,31 @@ branch. If the browser displays only the default-branch form and does not show
 these inputs, do not treat a run without them as live validation. An authorized
 operator can use GitHub's documented dispatch API/CLI with the branch `ref`
 and both inputs from an already configured environment. This implementation
-has not verified that browser form or performed a manual live dispatch.
+was manually dispatched on PR #82 head c320d59a61f3c5946b18ae08d3f61e35960f3cc3
+in run 34452317616. Attempt 2 passed setup/prerequisites but failed COMPANY
+execution. That failure does not validate a newer candidate or provider access.
+
+## Quota failure and retry coordination
+
+Run 34699631516 returned RESEARCH INCOMPLETE with daily_quota/rate_limit and
+model_not_found classifications: 22 recorded worker/chief model attempts,
+zero successful calls and zero hypotheses. This is not a reason to repeatedly
+redispatch a full company campaign. Check the same Google project's current
+[AI Studio rate limits](https://aistudio.google.com/rate-limit) first; the
+[official guide](https://ai.google.dev/gemini-api/docs/rate-limits) explains that
+limits apply per Google project, not per API key. Actual remaining capacity is
+private/UNKNOWN; a new key does not itself establish additional capacity.
+
+Workers and chief now share model/credential cooldown observations through the
+existing SQLite run. Holds are confined to that app tenant/run; no other model,
+credential or provider is inferred unavailable from a model-specific failure.
+Daily/model-not-found/auth holds expire with the bounded run, and rate-limit
+holds expire after the provider delay or existing retry backoff. In-flight
+attempts admitted before an observation may finish. Skips record attempt=0 and
+origin=shared_run_cooldown rather than inventing failed HTTP calls. Runtime
+events contain fixed provider/kind fields, not credentials or model labels.
+This saves repeated calls; it does not raise quota, complete missing research,
+change free-provider eligibility or prove real-world answer quality.
 
 ## Receipts and interpretation
 
@@ -65,7 +119,25 @@ GitHub Actions is a test host, not a permanent research archive or 24-hour app
 host. Use only the fixed public gate campaign here; do not place a user's sole
 copy of research data in this ephemeral workspace.
 
-`LIVE_GATES_PASSED` requires both modes to pass their existing strict gates.
+Failure receipts also carry fixed failure codes and bounded error categories,
+with module names and line numbers from Git-tracked public Python code only.
+They omit raw messages, private filenames, locals, source/provider payloads and
+arbitrary exception/function names. Missing Git inventory omits locations.
+The hosted boundary revalidates child diagnostics. These fields locate a
+failure for review; they do not independently establish its root cause.
+
+Returned-but-incomplete research now retains an allowlisted summary as well:
+requested_depth_mode and reported_depth_mode, result/discovery status, source
+and hypothesis counts, provider error categories, missing passes, bounded
+worker status/error/call counters and chief execution passes/counters. Missing
+or invalid counters remain null. The child and hosted boundary both validate
+company diagnostics; the host excludes model labels, arbitrary identifiers,
+worker IDs, answer hashes and raw text. These fields never make a failed gate
+pass. Executed mode comes from ResearchResult.mode, not coverage.mode; missing
+canonical mode or conflicting legacy coverage.mode fails the mode check.
+
+`LIVE_GATES_PASSED` requires both company modes and the fixed trading Max lane
+to pass their respective strict gates. Inspect trading_max as well as modes.
 Even then, `release_ready=false`, `quality_benchmark=NOT_TESTED`, and
 `production_deployed=false`. Offline fixture tests of this runner are not
 evidence that live models ran. The exact PR head and Actions receipts are the
