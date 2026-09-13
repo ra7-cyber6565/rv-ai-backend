@@ -100,15 +100,16 @@ jobs:
           python scripts/run_pr81_trading_live_acceptance.py \
             --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
 
-      # Failure-only structural diagnostic. It reuses the exact same acceptance
-      # run/evaluator functions and records only exception type/family and
-      # public-repository frame coordinates. No message/prompt/answer/source or
-      # credential text is emitted. The real acceptance above remains the gate.
-      - name: Diagnose failed Max stage without raw text
+      # Failure-only receipt postmortem. It MUST NOT call the provider, manager,
+      # acceptance runner, or evaluator again. It only revalidates the sanitized
+      # receipt written by the original failed Max run and emits a smaller bounded
+      # summary. The real acceptance above remains the only research execution.
+      - name: Diagnose failed Max stage without second research run
         if: failure() && steps.max_acceptance.outcome == 'failure'
         continue-on-error: true
         run: |
           python scripts/diagnose_pr81_trading_failure.py \
+            --acceptance-receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json" \
             --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_diagnostic.json"
 
       - name: Upload sanitized acceptance receipts
