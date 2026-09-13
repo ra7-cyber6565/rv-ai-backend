@@ -197,3 +197,122 @@ def test_shared_failure_origin_survives_safe_hosted_report(ctx):
         "kind": "daily_quota", "attempt": 0, "origin": "shared_run_cooldown",
     }
     assert "PRIVATE" not in json.dumps(public)
+
+
+def simulated_clock(monkeypatch):
+    clock = [runtime.time.time()]
+    sleeps = []
+    monkeypatch.setattr(runtime.time, "time", lambda: clock[0])
+    def sleep(seconds):
+        assert 0 < seconds <= 6
+        sleeps.append(seconds)
+        clock[0] += seconds
+    monkeypatch.setattr(runtime.time, "sleep", sleep)
+    return clock, sleeps
+
+
+def test_chief_waits_for_sibling_minute_hold_then_gets_output(ctx, monkeypatch):
+    clock, sleeps = simulated_clock(monkeypatch)
+    scope = model_cooldown_scopes("gemini", KEY, "model-a")
+    ctx.store.remember_model_failure(ctx.project, ctx.run, "gemini", scope, "rate_limit", 21)
+    brain = scripted_brain({"model-a": "recovered draft"})
+    fresh = RunContext(RuntimeStore(ctx.store.path), ctx.project, ctx.run)
+    with bind(fresh):
+        assert brain.generate("question", "chief") == "recovered draft"
+    assert sum(sleeps) == pytest.approx(21)
+    assert brain.attempts == brain.successes == 1
+    assert brain.same_model_retries == brain.switched_models == 0
+    assert brain.cooldown_recovery_cycles == 1
+    assert ctx.store.snapshot(ctx.project, ctx.run)["reserved_http_attempts"] == 1
+
+
+def test_real_rate_error_waits_once_and_retry_is_counted_only_on_admission(ctx, monkeypatch):
+    _, sleeps = simulated_clock(monkeypatch)
+    brain = scripted_brain({"model-a": "unused"})
+    calls = []
+    def generate(prompt, **kwargs):
+        calls.append(kwargs)
+        if len(calls) == 1:
+            raise RuntimeError("429 requests per minute; retry after 21s")
+        return SimpleNamespace(text="recovered draft")
+    brain._model.generate_content = generate
+    with bind(ctx):
+        assert brain.generate("question", "worker") == "recovered draft"
+    assert len(calls) == brain.attempts == 2
+    assert brain.same_model_retries == 1 and brain.cooldown_recovery_cycles == 1
+    assert sum(sleeps) == pytest.approx(21)
+    assert all(c["request_options"]["retry"] is None for c in calls)
+
+
+def test_recovery_does_not_retry_forever_or_claim_success(ctx, monkeypatch):
+    _, sleeps = simulated_clock(monkeypatch)
+    brain = scripted_brain({"model-a": RuntimeError("429 per minute; retry after 21s")})
+    with bind(ctx):
+        assert brain.generate("question", "worker") == ""
+    assert brain.attempts == 2 and brain.successes == 0
+    assert brain.cooldown_recovery_cycles == 1
+    assert sum(sleeps) == pytest.approx(21)
+
+
+def test_deadline_refuses_wait_without_spending_an_attempt(ctx, monkeypatch):
+    clock, sleeps = simulated_clock(monkeypatch)
+    scoped = RunContext(ctx.store, ctx.project, ctx.run, deadline=clock[0] + 10)
+    scope = model_cooldown_scopes("gemini", KEY, "model-a")
+    ctx.store.remember_model_failure(ctx.project, ctx.run, "gemini", scope, "rate_limit", 21)
+    brain = scripted_brain({"model-a": "must not run"})
+    with bind(scoped):
+        assert brain.generate("question", "worker") == ""
+    assert brain.attempts == brain.same_model_retries == 0 and not sleeps
+
+
+def test_cancel_interrupts_wait_before_generation(ctx, monkeypatch):
+    _, _ = simulated_clock(monkeypatch)
+    monkeypatch.setattr(runtime.time, "sleep", lambda seconds: ctx.store.cancel(ctx.project, ctx.run))
+    with bind(ctx), pytest.raises(ResearchCancelled):
+        runtime.wait_for_model_retry(21)
+    assert ctx.store.snapshot(ctx.project, ctx.run)["reserved_http_attempts"] == 0
+
+
+def test_recovery_respects_original_request_budget(ctx, monkeypatch):
+    _, _ = simulated_clock(monkeypatch)
+    ctx.store.start("limited", "run", "input", "v1", dict(LIMITS, http=1))
+    scoped = RunContext(ctx.store, "limited", "run")
+    brain = scripted_brain({"model-a": RuntimeError("429 per minute; retry after 21s")})
+    with bind(scoped), pytest.raises(runtime.RuntimeBlocked, match="budget exhausted"):
+        brain.generate("question", "worker")
+    assert brain.attempts == 1 and brain.same_model_retries == 0
+    assert ctx.store.snapshot("limited", "run")["reserved_http_attempts"] == 1
+
+
+def test_provider_timeout_is_clipped_to_worker_deadline(ctx, monkeypatch):
+    clock, _ = simulated_clock(monkeypatch)
+    scoped = RunContext(ctx.store, ctx.project, ctx.run, deadline=clock[0] + 12)
+    brain = scripted_brain({"model-a": "unused"})
+    options = []
+    def generate(prompt, **kwargs):
+        options.append(kwargs["request_options"])
+        return SimpleNamespace(text="draft")
+    brain._model.generate_content = generate
+    with bind(scoped):
+        assert brain.generate("question", "worker") == "draft"
+    assert 0 < options[0]["timeout"] <= 12
+
+
+def test_parent_passes_a_bounded_deadline_without_mutating_payload(ctx, monkeypatch):
+    from research_engine import research_company as company
+    clock, _ = simulated_clock(monkeypatch)
+    payload = {"runtime_context": ctx.wire(), "role": "evidence"}
+    captured = []
+    def run(*args, **kwargs):
+        captured.append(json.loads(kwargs["input"]))
+        return SimpleNamespace(returncode=0, stdout='{"answer":"draft"}')
+    monkeypatch.setattr(company.subprocess, "run", run)
+    assert company.process_worker(payload, timeout=30)["answer"] == "draft"
+    assert "deadline" not in payload["runtime_context"]
+    assert captured[0]["runtime_context"]["deadline"] == clock[0] + 29
+
+
+@pytest.mark.parametrize("deadline", [float("nan"), float("inf"), True, "tomorrow", -1])
+def test_invalid_operation_deadlines_fail_closed(ctx, deadline):
+    with pytest.raises(runtime.RuntimeBlocked):
+        RunContext(ctx.store, ctx.project, ctx.run, deadline=deadline)

@@ -29,8 +29,9 @@ class ResearchCancelled(RuntimeBlocked):
 
 class ModelCooldownActive(RuntimeBlocked):
     """A prior attempt in this run already established temporary unavailability."""
-    def __init__(self, kind):
+    def __init__(self, kind, retry_after=0):
         self.kind = kind
+        self.retry_after = max(0.0, float(retry_after))
         super().__init__("shared run model cooldown: " + kind)
 
 
@@ -193,6 +194,12 @@ class RuntimeStore:
         with self.db() as db:
             self._check(db.execute("SELECT * FROM runs WHERE project=? AND run=?", (project, run)).fetchone())
 
+    def remaining_seconds(self, project, run):
+        with self.db() as db:
+            row = db.execute("SELECT * FROM runs WHERE project=? AND run=?", (project, run)).fetchone()
+            self._check(row)
+            return max(0.0, row["deadline"] - time.time())
+
     def cancel(self, project, run):
         with self.transaction() as db:
             db.execute("UPDATE runs SET cancelled=1 WHERE project=? AND run=?", (project, run))
@@ -248,7 +255,7 @@ class RuntimeStore:
             self._check(row)
             blocked = None
             if cooldown_scopes:
-                blocked = db.execute("""SELECT kind FROM model_cooldowns
+                blocked = db.execute("""SELECT kind,until FROM model_cooldowns
                     WHERE project=? AND run=? AND provider=? AND scope IN (?,?) AND until>?
                     ORDER BY CASE WHEN kind='auth_failure' THEN 0 ELSE 1 END, until DESC LIMIT 1""",
                     (project, run, provider, *cooldown_scopes, time.time())).fetchone()
@@ -273,7 +280,7 @@ class RuntimeStore:
                 self._event(db, project, run, "REQUEST_RESERVED", {"provider": provider,
                     "input_bytes": size, "max_output_tokens": max_output_tokens})
         if blocked:
-            raise ModelCooldownActive(blocked["kind"])
+            raise ModelCooldownActive(blocked["kind"], blocked["until"] - time.time())
 
     def claim(self, project, run, stage, fingerprint, owner, *, replay_safe):
         with self.transaction() as db:
@@ -346,9 +353,18 @@ class RunContext:
     store: RuntimeStore
     project: str
     run: str
+    deadline: float | None = None
+
+    def __post_init__(self):
+        if self.deadline is not None and (type(self.deadline) not in (int, float)
+                or not math.isfinite(self.deadline) or self.deadline <= 0):
+            raise RuntimeBlocked("invalid operation deadline")
 
     def wire(self):
-        return {"path": self.store.path, "project": self.project, "run": self.run}
+        result = {"path": self.store.path, "project": self.project, "run": self.run}
+        if self.deadline is not None:
+            result["deadline"] = self.deadline
+        return result
 
 
 def current():
@@ -368,11 +384,43 @@ def check_cancelled():
     ctx = current()
     if ctx:
         ctx.store.check(ctx.project, ctx.run)
+        if ctx.deadline is not None and time.time() >= ctx.deadline:
+            raise RuntimeBlocked("operation elapsed-time budget exhausted")
+
+
+def remaining_seconds():
+    ctx = current()
+    if ctx is None:
+        return None
+    check_cancelled()
+    remaining = ctx.store.remaining_seconds(ctx.project, ctx.run)
+    if ctx.deadline is not None:
+        remaining = min(remaining, max(0.0, ctx.deadline - time.time()))
+    return remaining
+
+
+def wait_for_model_retry(delay):
+    """Cancellable wait within the existing run/worker deadline, no reservation."""
+    if current() is None or not math.isfinite(delay) or delay < 0:
+        return False
+    remaining = remaining_seconds()
+    if delay >= remaining:
+        return False
+    until = time.time() + delay
+    while True:
+        check_cancelled()
+        left = until - time.time()
+        if left <= 0:
+            break
+        time.sleep(min(0.25, left))
+    check_cancelled()
+    return True
 
 
 def reserve_request(provider, prompt, max_output_tokens=6000, *, cooldown_scopes=()):
     ctx = current()
     if ctx:
+        check_cancelled()
         ctx.store.reserve(ctx.project, ctx.run, provider, prompt, max_output_tokens,
                           cooldown_scopes=cooldown_scopes)
 

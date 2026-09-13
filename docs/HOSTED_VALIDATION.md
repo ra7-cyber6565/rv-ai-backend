@@ -1,5 +1,32 @@
 # Hosted validation and retained research data
 
+## Latest failed campaign and bounded recovery
+
+Run 34766377117 on 3d0d45bc15724f27e4da128667fab75bfcbcf689 passed offline/host
+checks but failed COMPANY: one of four worker drafts ready, 10 recorded model
+attempts with one success, chief zero attempts, rate_limit, and zero full-text
+reads. The remaining live modes did not run. The prior single small REST response
+is not a full research result.
+
+The repair preserves healthy fallback preference and permits one bounded
+rate-limit recovery cycle after all alternatives have failed. Waiting checks
+cancellation and the original run/worker deadline, charges no HTTP reservation,
+and never increases application budgets. Request timeout is clipped to the
+operation's remaining time. Daily/auth/missing-model holds are not waited out.
+Retries count admitted reattempts only; `cooldown_recovery_cycles` is separate.
+This does not establish the provider's exact current RPM/TPM/RPD or reserve
+capacity against unrelated processes, API keys or services.
+
+The public result summary now includes safe `reading` counters and fixed
+`failure_counts`. Old missing fields remain unknown. Zero reads in the old run
+cannot retrospectively be attributed to a particular download, processing or
+access failure. The new diagnostics do not weaken the full-text gate.
+
+After the new exact-head CI passes, use the existing full live dispatch, with
+`model_probe_only=false`, `live_company=true` and the new reviewed SHA. Inspect
+the new receipt for actual recovery, workers/chief and reading outcomes before
+claiming these external failures resolved. Retained-data deployment hold stays.
+
 ## Small model check when live capacity is uncertain
 
 Foundation tests has an independent manual `model_probe_only` input. Select

@@ -2248,10 +2248,13 @@ class DeepResearchEngine:
             "failed": reading.get("failed", 0),
             "skipped_over_budget": reading.get("skipped", 0),
             "chars_read": reading.get("chars_read", 0),
+            "capped": reading.get("capped"),
+            "copyright_blocked": reading.get("copyright_blocked"),
             "note": reading.get("note", ""),
             "per_source": [
                 {"source_id": e.get("source_id", ""), "read": bool(e.get("ok")),
-                 "chars": e.get("chars", 0), "reason": e.get("reason", "")}
+                 "chars": e.get("chars", 0), "reason": e.get("reason", ""),
+                 "failure_code": e.get("failure_code", "unknown")}
                 for e in reading.get("entries", [])
             ],
         }

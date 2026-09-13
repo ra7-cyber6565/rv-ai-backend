@@ -1,5 +1,59 @@
 # Infinity implementation and acceptance ledger
 
+## Active continuation — temporary rate-limit recovery and reading diagnostics, 2026-09-13
+
+Manual Foundation 34766377117 (#1631, attempt 1, job 103747972419) tested
+3d0d45bc15724f27e4da128667fab75bfcbcf689. All offline/host prerequisites passed:
+4,381 tests, 9 skips, 1 warning, 51 subtests; localhost smoke passed. Live COMPANY
+FAILED with RESEARCH INCOMPLETE / NO_TESTABLE_HYPOTHESES and rate_limit.
+The app reported 15 sources/citations, 40 on-topic sources, zero full-text reads
+and zero hypotheses. Validation was DRAFT_READY (1 attempt/1 success); evidence,
+mechanism and red-team failed (6, 2 and 1 attempts). Chief had zero attempts.
+Total recorded attempts were 10 with 1 success. Masked booleans remain UNKNOWN.
+COMPANY_PLUS was skipped and trading_max NOT_RUN. The small earlier REST probe
+34756490569 passed, but it did not predict this larger campaign's success.
+
+Measured scheduling defect: after all alternatives failed or were temporarily
+held, the chief immediately returned empty instead of allowing an observed
+minute cooldown to expire. Now healthy fallbacks are still tried first; after
+an unsuccessful cycle, one bounded recovery cycle may wait for the earliest
+observed rate-limit expiry, with cancellation checks and original run/worker
+deadlines. Daily quota, missing-model and auth holds do not cause waits.
+A recovery cannot enlarge the original call/input/output budgets. Workers pass
+an operation deadline inside the existing 180-second hard process timeout,
+leaving one second for their receipt; provider timeout is clipped accordingly.
+No fixed provider RPM/TPM quota is invented, and no sustained capacity is claimed.
+
+The red-team receipt also counted a retry despite just one actual attempt.
+Retries/model switches are now counted only after actual request admission.
+Recovery-cycle counts survive worker/chief/public summaries. This does not
+manufacture HTTP success or complete missing passes.
+
+Reading cause in the old public receipt is UNKNOWN. The existing pipeline now
+assigns fixed failure codes at network-disabled, route, download, empty-extract,
+processing, insufficient-text and unexpected-failure stages. Safe reading counts
+and bounded failure-code tallies survive child/host publication; URLs, source
+text, notes and raw exceptions do not. Missing counters stay null. This improves
+diagnosis; it does not establish successful full-text reading or bypass access
+restrictions. Reading/claim/evidence gates remain mandatory.
+
+TEST PERFORMED: 165 focused tests and 24 subtests passed with native outbound
+connect/send denied. Real SQLite plus simulated-clock/model fixtures verify
+chief recovery after a sibling hold, one bounded retry, immediate healthy
+fallback, deadline/cancellation/budget enforcement, clipped timeouts, and safe
+reading diagnostics through child/host. These are offline results, not a new
+live success. New candidate VERIFICATION PENDING until its own five PR #82
+checks complete; consult that PR for current exact-head evidence.
+
+Sol was reviewed at 3db9aee58f66b9f36ae94594034fcf932eb668c7 (five CI checks pass).
+Its second-research diagnostic is fixed; separate live 34743270788 still failed:
+6 workers FAILED (4 no_model_output, 2 worker_deadline), 16 recorded attempts,
+0 successes, with only 4 workers' accounting complete. Exact reviewed-function
+fixtures found malformed-count exceptions, nonfinite elapsed values, and stale
+receipt acceptance in its postmortem (diagnostic integrity, not demonstrated
+release bypass). Those weaker diagnostics were not imported. Main and Sol's
+branch are unchanged; PR #82 stays draft and backup/deployment hold remains.
+
 ## Active continuation — one small hosted model check, 2026-09-13
 
 The user reports INFINITY_LIVE_GEMINI_MODEL=gemini-3.8-flash. Their AI Studio

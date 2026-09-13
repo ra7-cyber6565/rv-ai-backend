@@ -33,7 +33,7 @@ ROLES = (
 )
 _KINDS = {"SOURCE_REPORTED", "INFERENCE", "HYPOTHESIS", "SPECULATION", "UNKNOWN"}
 _COUNTS = ("logical_reasoning_calls", "actual_http_attempts", "successful_calls",
-           "failed_http_attempts", "same_model_retries", "model_switches",
+           "failed_http_attempts", "same_model_retries", "model_switches", "cooldown_recovery_cycles",
            "key_switches", "provider_fallbacks", "passes_requested",
            "passes_with_output", "passes_empty")
 
@@ -147,6 +147,15 @@ def _safe_accounting(raw) -> Dict:
 def process_worker(payload: Dict, timeout: float = 180) -> Dict:
     """A killed worker can have spent calls; missing accounting must stay UNKNOWN."""
     try:
+        payload = dict(payload)
+        if isinstance(payload.get("runtime_context"), dict):
+            wire = dict(payload["runtime_context"])
+            # Leave one second inside the existing hard process deadline for
+            # serializing the receipt. This never enlarges the run deadline.
+            deadline = time.time() + max(0, timeout - 1)
+            if wire.get("deadline") is not None:
+                deadline = min(deadline, wire["deadline"])
+            payload["runtime_context"] = dict(wire, deadline=deadline)
         completed = subprocess.run(
             [sys.executable, "-m", "research_engine.company_worker"],
             input=json.dumps(payload, ensure_ascii=False), capture_output=True,
@@ -349,7 +358,7 @@ def _sync_company_chief_router(brain, routed) -> None:
         return
     state_fields = (
         "calls_used", "attempts", "successes", "errors", "notes", "models_tried",
-        "switched_models", "same_model_retries", "key_switches", "pass_log",
+        "switched_models", "same_model_retries", "cooldown_recovery_cycles", "key_switches", "pass_log",
         "prompt_compactions", "timeout_extensions", "prompt_attempt_log", "ledger",
         "blocked", "stopped", "keys",
     )

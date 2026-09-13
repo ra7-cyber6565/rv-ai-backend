@@ -10,6 +10,66 @@ from scripts.run_live_zero_cost_gate import evaluate_result
 from utils.live_result_summary import sanitize_result_summary
 
 
+def test_reading_failures_survive_child_and_host_without_private_reasons():
+    from research_engine.content_fetcher import ContentFetcher
+    from research_engine.models import SourceRecord
+    source = SourceRecord(source_id="S1", title="PRIVATE_TITLE", url="https://example.org/doc.pdf")
+    entry = ContentFetcher(allow_network=False).read_source(source, "PRIVATE_QUESTION")
+    assert entry["failure_code"] == "network_disabled"
+    result = returned_result()
+    result["coverage"]["reading"] = {
+        "attempted": 2, "succeeded": 0, "failed": 2, "chars_read": 0,
+        "per_source": [
+            {"source_id": "PRIVATE", "read": False, "failure_code": entry["failure_code"],
+             "reason": "PRIVATE_KEY_AND_URL"},
+            {"read": False, "failure_code": "PRIVATE_ERROR", "reason": "PRIVATE_MESSAGE"},
+        ],
+    }
+    child = evaluate_result(result, required_depth_mode="COMPANY")
+    public = summarize({"COMPANY": {"passed": False, "receipt": child}})["COMPANY"]
+    reading = public["summary"]["reading"]
+    assert reading["failure_counts"] == {"network_disabled": 1, "unknown": 1}
+    assert reading["attempted"] == reading["failed"] == 2
+    assert reading["succeeded"] == 0
+    assert reading["capped"] is None
+    assert "PRIVATE" not in json.dumps(public)
+    assert public["passed"] is False
+
+
+def test_reading_summary_is_bounded_idempotent_and_keeps_missing_values_unknown():
+    from utils.live_result_summary import reading_summary
+    raw = {"attempted": True, "failed": "PRIVATE", "succeeded": -1,
+           "per_source": [{"read": False, "failure_code": "download_failed"}] * 70}
+    report = reading_summary(raw)
+    assert report["attempted"] is report["failed"] is report["succeeded"] is None
+    assert report["entries_truncated"] is True
+    assert report["failure_counts"] == {"download_failed": 64}
+    assert reading_summary(report) == report
+
+
+@pytest.mark.parametrize("stage,code", [
+    ("route", "route_unavailable"), ("download", "download_failed"),
+    ("processor", "processing_failed"), ("short", "insufficient_text"),
+])
+def test_reading_failure_code_comes_from_failed_stage(stage, code, monkeypatch):
+    from types import SimpleNamespace
+    from research_engine.content_fetcher import ContentFetcher
+    from research_engine.models import SourceRecord
+    reader = ContentFetcher(allow_network=True)
+    source = SourceRecord(source_id="S1", title="Fixture", url="https://example.org/doc.txt")
+    monkeypatch.setattr(reader, "resolve", lambda source: {
+        "ok": stage != "route", "reason": "PRIVATE_ROUTE", "url": source.url, "kind": "txt",
+    })
+    monkeypatch.setattr(reader, "_download", lambda *args: {
+        "ok": stage != "download", "error": "PRIVATE_DOWNLOAD", "path": "/unused", "bytes": 20,
+    })
+    monkeypatch.setattr(reader, "_processor", lambda: SimpleNamespace(process=lambda *args, **kwargs: {
+        "ok": stage != "processor", "error": "PRIVATE_PROCESSOR", "text": "short",
+    }))
+    entry = reader.read_source(source, "question")
+    assert entry["ok"] is False and entry["failure_code"] == code
+
+
 def returned_result(mode="COMPANY"):
     return ResearchResult(
         mode=mode, status="RESEARCH INCOMPLETE", hypotheses=[],

@@ -203,6 +203,7 @@ class GeminiReasoning:
         self.models_tried: List[str] = []
         self.switched_models = 0             # doosre model par kitni baar gaye
         self.same_model_retries = 0          # WAHI model, dobara (asli retry)
+        self.cooldown_recovery_cycles = 0
         # Provider-bound prompt content kabhi audit mein nahi jaata — sirf safe
         # size metadata, taaki live request-limit failures diagnose ho saken.
         self.prompt_compactions = 0
@@ -429,7 +430,7 @@ class GeminiReasoning:
                 return ""
         return ""
 
-    def _one_key_cycle(self, prompt: str, tag: str):
+    def _one_key_cycle(self, prompt: str, tag: str, *, _recover=True, _history=None):
         """
         EK key par poora model-cycle. Lautata hai `(text, key_level_failure)`.
 
@@ -438,6 +439,8 @@ class GeminiReasoning:
         Sirf us halat mein doosri key try karna samajhdaari hai.
         """
         key_level = False
+        history = [] if _history is None else _history
+        recovery_times = {}
         first_model = self.model_name
         try:
             self.model()                        # lazy resolve, taaki naam asli ho
@@ -486,11 +489,16 @@ class GeminiReasoning:
                         return "", True
                     if v.kind == DAILY_QUOTA:
                         key_level = True
+                    if v.kind == RATE_LIMIT:
+                        recovery_times[name] = time.time() + cooldown.retry_after
+                    else:
+                        recovery_times.pop(name, None)
                     break
-                if model_index and attempt == 0:
-                    # Count a switch only when the next model is admitted for
-                    # a real attempt, not when a sibling's cooldown skips it.
+                if name in history:
+                    self.same_model_retries += 1
+                if history and name != history[-1]:
                     self.switched_models += 1
+                history.append(name)
                 self.attempts += 1
                 self.prompt_attempt_log.append({
                     "label": tag,
@@ -506,6 +514,10 @@ class GeminiReasoning:
                     # website par aakhir mein "server se baat nahi ho paayi"
                     # aata tha).
                     from .gemini_model import generate as _generate
+                    from utils.research_runtime import remaining_seconds
+                    left = remaining_seconds()
+                    if left is not None:
+                        request_timeout = min(request_timeout, left)
                     response = _generate(
                         self._model, request_prompt, timeout=request_timeout
                     )
@@ -529,6 +541,10 @@ class GeminiReasoning:
                     delay = v.retry_after or _BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS)-1)]
                     remember_model_failure("gemini", scopes, v.kind,
                                            retry_after=delay if v.kind == RATE_LIMIT else 0)
+                    if v.kind == RATE_LIMIT:
+                        recovery_times[name] = time.time() + delay
+                    else:
+                        recovery_times.pop(name, None)
                     self.ledger.add(name, tag, v, attempt=attempt + 1)
                     self.errors.append(
                         f"{tag} failed (model={name}, try={attempt + 1}, "
@@ -549,7 +565,6 @@ class GeminiReasoning:
                                 request_prompt = compact_prompt
                                 compacted_for_model = True
                                 self.prompt_compactions += 1
-                                self.same_model_retries += 1
                                 self.notes.append(
                                     f"{tag}: '{name}' ki large request "
                                     f"({v.kind}) ke baad source IDs/rules bachakar "
@@ -571,7 +586,6 @@ class GeminiReasoning:
                             )
                             timeout_extended = True
                             self.timeout_extensions += 1
-                            self.same_model_retries += 1
                             self.notes.append(
                                 f"{tag}: compact primary timeout ke baad "
                                 f"{request_timeout}s ka ek bounded recovery attempt")
@@ -611,9 +625,19 @@ class GeminiReasoning:
                         # §14 — ASLI retry yahi hai: wahi model, dobara. Isse
                         # alag se ginna zaroori hai, warna model fallback bhi
                         # "retry" ban kar hisaab jhootha kar deta hai.
-                        self.same_model_retries += 1
                         continue
                     break                       # is model par bas — agla model
+        # Try healthy fallbacks first. If the whole cycle produced no output,
+        # one bounded recovery cycle may wait for an observed minute cooldown.
+        # A temporary hold must not leave the chief with zero attempts forever.
+        if _recover and recovery_times:
+            from utils.research_runtime import wait_for_model_retry
+            if wait_for_model_retry(max(0.0, min(recovery_times.values()) - time.time())):
+                self.cooldown_recovery_cycles += 1
+                self._build(first_model)
+                text, recovered_key_level = self._one_key_cycle(
+                    prompt, tag, _recover=False, _history=history)
+                return text, key_level or recovered_key_level
         return "", key_level
 
     # ── §14: pass-level sach (maanga vs mila) ────────────────────────────────
@@ -700,6 +724,7 @@ class GeminiReasoning:
             # `failed_http_attempts` hai)
             "failed_attempts": failed_http,
             "same_model_retries": self.same_model_retries,
+            "cooldown_recovery_cycles": self.cooldown_recovery_cycles,
             # `retries` ab SIRF asli retry hai (pehle isme model switch bhi
             # ghusa hua tha)
             "retries": self.same_model_retries,

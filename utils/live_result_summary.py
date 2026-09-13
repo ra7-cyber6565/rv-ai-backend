@@ -15,7 +15,7 @@ PASSES = {"analysis", "critique", "hypothesis", "synthesis", "specialist_handoff
 }
 COUNTERS = (
     "logical_reasoning_calls", "actual_http_attempts", "successful_calls",
-    "failed_http_attempts", "same_model_retries", "model_switches",
+    "failed_http_attempts", "same_model_retries", "model_switches", "cooldown_recovery_cycles",
     "key_switches", "provider_fallbacks", "passes_requested", "passes_with_output", "passes_empty",
 )
 
@@ -49,6 +49,38 @@ def _passes(value):
 def _accounting(value):
     raw = _mapping(value)
     return {key: _count(raw.get(key)) for key in COUNTERS}
+
+
+READING_FAILURE_CODES = {
+    "network_disabled", "route_unavailable", "download_failed", "empty_extract",
+    "processing_failed", "insufficient_text", "unexpected_failure", "unknown",
+}
+
+
+def reading_summary(value):
+    """Fixed failure codes and counts only; never source URLs or reason text."""
+    raw = _mapping(value)
+    out = {key: _count(raw.get(key)) for key in (
+        "attempted", "succeeded", "failed", "skipped_over_budget", "chars_read",
+        "capped", "copyright_blocked",
+    )}
+    failures = {}
+    rows = raw.get("per_source")
+    if isinstance(rows, list):
+        for row in rows[:64]:
+            row = _mapping(row)
+            if row.get("read") is False:
+                code = _enum(row.get("failure_code"), READING_FAILURE_CODES, "unknown")
+                failures[code] = failures.get(code, 0) + 1
+        truncated = len(rows) > 64
+    else:
+        for key, count in _mapping(raw.get("failure_counts")).items():
+            if type(key) is str and key in READING_FAILURE_CODES:
+                failures[key] = _count(count)
+        truncated = raw.get("entries_truncated") is True
+    out["failure_counts"] = failures
+    out["entries_truncated"] = truncated
+    return out
 
 
 def company_execution_summary(value):
@@ -108,4 +140,5 @@ def sanitize_result_summary(value):
     out["failure_events_truncated"] = len(events) > 12 or raw.get("failure_events_truncated") is True
     out["missing_passes"] = _passes(raw.get("missing_passes"))
     out["company"] = company_execution_summary(raw.get("company"))
+    out["reading"] = reading_summary(raw.get("reading"))
     return out

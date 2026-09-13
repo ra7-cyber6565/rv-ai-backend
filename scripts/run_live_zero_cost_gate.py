@@ -23,7 +23,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from utils.release_identity import repository_identity
-from utils.live_result_summary import PASSES, company_execution_summary, mode_name
+from utils.live_result_summary import PASSES, company_execution_summary, mode_name, reading_summary
 
 LIVE_QUESTION = (
     "Kya room-temperature superconductivity practically possible hai? Ambient "
@@ -476,6 +476,7 @@ def evaluate_result(
             "sources": len(sources),
             "on_topic_sources": int(coverage.get("on_topic_sources") or 0),
             "full_text_sources_read": int(coverage.get("full_text_sources_read") or 0),
+            "reading": reading_summary(coverage.get("reading")),
             "citations": len(result.get("citations") or []),
             "hypotheses": len(hypotheses),
             # P0-C stores only structural evidence counters/booleans. No source
