@@ -51,13 +51,20 @@ def _entries(env: Mapping[str, str] | None = None) -> List[tuple[str, str]]:
 
     Private helper only: callers that expose status must discard values and use
     :func:`describe` instead.
+
+    Every supported credential variable is normalized through the same bounded
+    splitter. Historically only the ``*_KEYS`` list variables were split, so a
+    CI/hosting secret accidentally pasted into ``GEMINI_API_KEY`` as two lines
+    or comma-separated values became one invalid HTTP header value. Treating the
+    scalar aliases consistently preserves the normal one-key case while making
+    accidental multi-key formatting a safe rotation pool instead of a provider
+    transport failure.
     """
     src = env if env is not None else os.environ
     out: List[tuple[str, str]] = []
 
     def take(name: str, raw: object) -> None:
-        value = str(raw or "").strip()
-        if value:
+        for value in _split_list(str(raw or "")):
             out.append((name, value))
 
     take(_PRIMARY, src.get(_PRIMARY))
@@ -67,8 +74,7 @@ def _entries(env: Mapping[str, str] | None = None) -> List[tuple[str, str]]:
     take(f"{_PRIMARY}_BACKUP", src.get(f"{_PRIMARY}_BACKUP"))
     take(f"{_PRIMARY}_FALLBACK", src.get(f"{_PRIMARY}_FALLBACK"))
     for name in _LIST_VARS:
-        for value in _split_list(str(src.get(name, "") or "")):
-            take(name, value)
+        take(name, src.get(name, ""))
     return out
 
 

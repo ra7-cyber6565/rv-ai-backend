@@ -50,6 +50,7 @@ from __future__ import annotations
 
 from . import domain_detection_guard as _domain_detection_guard  # noqa: F401
 from . import domain_focus_guard as _domain_focus_guard  # noqa: F401
+from . import craft_intent_guard as _craft_intent_guard  # noqa: F401
 
 from . import gemini_reasoning as _gemini_reasoning
 from .reasoning_router_integrated import ResilientReasoning as _ResilientReasoning

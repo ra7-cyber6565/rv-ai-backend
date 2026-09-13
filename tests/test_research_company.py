@@ -85,17 +85,23 @@ def test_incomplete_hypothesis_is_recorded_as_gap():
     assert "incomplete_testable_hypothesis" in result["contract_issues"]
 
 
-def test_overlong_handoff_keeps_every_role_and_blocks_complete_review():
+def test_overlong_handoff_keeps_every_role_and_uses_structured_compaction():
     verbose = report(claims=[{"text": "Measured description " * 90, "source_ids": ["S1"],
                               "kind": "SOURCE_REPORTED"} for _ in range(10)])
     result = company.run_company("Q", packet(), get_depth_config("COMPANY"), worker=lambda p: envelope(verbose))
     handoff = company.chief_handoff(result)
-    assert len(result["handoff_truncated_roles"]) == 4
+    assert len(result["handoff_compacted_roles"]) == 4
+    assert result["handoff_truncated_roles"] == []
+    assert result["handoff_structured_compaction"] is True
     assert all(role in handoff for role, _ in company.ROLES[:4])
-    passes = {"planned_passes": [], "done_passes": [], "notes": [], "api_accounting": {}}
+    assert all(
+        result["handoff_omitted_counts"][role]["claims"] > 0
+        for role, _ in company.ROLES[:4]
+    )
+    passes = {"planned_passes": ["analysis"], "done_passes": ["analysis"], "notes": [], "api_accounting": {}}
     company.attach_company_passes(passes, result)
     assert "specialist_handoff" in passes["planned_passes"]
-    assert "specialist_handoff" not in passes["done_passes"]
+    assert "specialist_handoff" in passes["done_passes"]
 
 
 def test_timeout_keeps_usage_unknown_and_completion_gate_open():
