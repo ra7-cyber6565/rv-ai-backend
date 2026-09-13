@@ -3,6 +3,8 @@
 The safe one-call model diagnostic must run after the strict zero-cost/storage
 preflight but before Docker build and the expensive fixed Max research run. This
 keeps invalid/rejected live credentials fail-fast without weakening acceptance.
+The failure-only postmortem must reuse the original sanitized receipt and never
+launch a second research/model run.
 """
 from pathlib import Path
 
@@ -30,3 +32,18 @@ def test_live_probe_remains_single_call_no_fallback_contract():
     assert '"retry_calls": 0' in diagnostic
     assert '"fallback_calls": 0' in diagnostic
     assert "return 0 if out.get(\"response_received\") and out.get(\"text_ok\") else 1" in diagnostic
+
+
+def test_failure_postmortem_reuses_original_receipt_and_cannot_rerun_max():
+    workflow = WORKFLOW.read_text(encoding="utf-8")
+    diagnostic = (ROOT / "scripts" / "diagnose_pr81_trading_failure.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "Diagnose failed Max stage without second research run" in workflow
+    assert "--acceptance-receipt" in workflow
+    assert "additional_research_calls\": 0" in diagnostic
+    assert "additional_model_calls\": 0" in diagnostic
+    assert "run_live(" not in diagnostic
+    assert "AgentManager" not in diagnostic
+    assert "evaluate_result(" not in diagnostic
