@@ -85,6 +85,11 @@ REQUIRED_EXPERIMENT_SPEC = {
     "replication_plan",
     "cost_and_safety",
 }
+_SAFE_WORKER_ERRORS = {
+    "", "worker_deadline", "worker_process_failed", "no_model_output",
+    "worker_unavailable", "invalid_worker_report",
+}
+_SAFE_WORKER_STATUSES = {"FAILED", "PARTIAL", "DRAFT_READY"}
 
 
 def _positive_int(value: object) -> bool:
@@ -160,6 +165,51 @@ def _implementation_execution(company: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _worker_diagnostics(company: Mapping[str, Any]) -> Dict[str, Any]:
+    """Same-run worker telemetry using only fixed enums, booleans and counters.
+
+    Never copy exception/provider text, prompts, answers, sources, URLs, paths or
+    credentials into the public acceptance receipt. Unknown/free-form values are
+    collapsed to ``other`` so a model/provider cannot smuggle content through the
+    diagnostic surface.
+    """
+    workers = [
+        row for row in (company.get("workers") or [])
+        if isinstance(row, Mapping)
+    ]
+    status_counts: Dict[str, int] = {}
+    error_counts: Dict[str, int] = {}
+    attempts = successes = complete = reports = captured = 0
+    elapsed = []
+    for row in workers:
+        status = str(row.get("status") or "FAILED")
+        status = status if status in _SAFE_WORKER_STATUSES else "other"
+        status_counts[status] = status_counts.get(status, 0) + 1
+        error = str(row.get("error") or "")
+        error = error if error in _SAFE_WORKER_ERRORS else "other"
+        error_counts[error or "none"] = error_counts.get(error or "none", 0) + 1
+        accounting = row.get("accounting") if isinstance(row.get("accounting"), Mapping) else {}
+        attempts += max(0, int(accounting.get("actual_http_attempts") or 0))
+        successes += max(0, int(accounting.get("successful_calls") or 0))
+        complete += int(row.get("accounting_complete") is True)
+        reports += int(isinstance(row.get("report"), Mapping))
+        captured += int(row.get("provider_output_capture_complete") is True)
+        value = row.get("elapsed_seconds")
+        if isinstance(value, (int, float)) and value >= 0:
+            elapsed.append(float(value))
+    return {
+        "status_counts": dict(sorted(status_counts.items())),
+        "error_counts": dict(sorted(error_counts.items())),
+        "accounting_complete_workers": complete,
+        "provider_http_attempts": attempts,
+        "provider_successful_calls": successes,
+        "workers_with_validated_report": reports,
+        "workers_with_complete_output_capture": captured,
+        "max_worker_elapsed_seconds": round(max(elapsed), 3) if elapsed else 0.0,
+        "contains_private_text": False,
+    }
+
+
 def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     """Evaluate only machine-readable evidence; never answer keyword overlap."""
     coverage = result.get("coverage") or {}
@@ -190,6 +240,7 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         if value
     }
     implementation = _implementation_execution(company)
+    worker_diagnostics = _worker_diagnostics(company)
 
     hypothesis_complete = []
     hypothesis_missing_counts = []
@@ -351,6 +402,7 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "first_three_experiment_missing_counts": hypothesis_missing_counts,
             "company_workers": len(workers),
             "company_ready_workers": len(ready_workers),
+            "worker_diagnostics": worker_diagnostics,
             "handoff_compacted_roles": len(
                 company.get("handoff_compacted_roles") or []
             ),
