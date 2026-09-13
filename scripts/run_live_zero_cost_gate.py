@@ -232,6 +232,8 @@ def evaluate_result(
         if kind:
             failure_events.append({
                 "model": model, "label": label, "kind": kind, "attempt": attempt,
+                **({"origin": "shared_run_cooldown"}
+                   if event.get("origin") == "shared_run_cooldown" else {}),
             })
     primary_failure_kind = _safe_identifier(
         accounting.get("primary_failure_kind"), default=""

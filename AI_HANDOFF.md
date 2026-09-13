@@ -1,5 +1,79 @@
 # Infinity Research AI — AI Handoff / Continuation Authority
 
+## Active continuation — measured quota failure and shared model cooldown, 2026-09-13
+
+Manual Foundation run 34699631516 (#1617, attempt 1, job 103568982413) tested
+9ca19e5c854f4de3febc203760f9d20a3ada6658. Settings, regression and actual host
+checks passed (4,326 pytest cases, 9 skips, 1 warning, 51 subtests). Live COMPANY
+returned RESEARCH INCOMPLETE / NO_TESTABLE_HYPOTHESES. Requested and reported
+modes both say COMPANY. The report counted 12 sources, 16 full-text reads,
+12 citations and zero hypotheses. It reported daily_quota as primary failure,
+with model_not_found and rate_limit in later events. No secret/model values
+or masked booleans were reconstructed.
+
+All four workers failed with no_model_output. Their recorded HTTP attempts
+were 5, 5, 4 and 4; chief recorded 4. Successful calls were zero throughout:
+22 recorded model attempts, no successful model output. Worker/chief passes
+were missing. COMPANY_PLUS was skipped; trading_max was NOT_RUN. This is
+observed quota/rate failure reporting, not a provider dashboard quota audit or
+an answer-quality/clinical/trading result. Actual model-specific limits and
+remaining capacity are UNKNOWN until checked privately in AI Studio.
+
+Measured code gap: worker processes and the chief did not share per-model
+failure memory. This repair stores bounded-run cooldowns in the existing
+private runtime SQLite database, atomically checks them before reserving each
+Gemini request, and shares observations across worker processes and chief.
+Daily quota/model-not-found holds last only through the current run deadline;
+rate-limit holds use the provider retry delay or the existing bounded retry
+backoff. Auth failure is credential-wide; other failures are model-specific.
+Scopes include the app tenant/run/provider and opaque credential/model hashes.
+Other runs, tenants, providers, credentials and healthy models are not disabled
+by these new holds. Mapping API keys to Google projects is UNKNOWN and is not
+guessed; different keys may still share the same external project quota.
+
+Already-admitted concurrent calls may finish; this does not promise one global
+attempt per failed model. Skipped requests consume no new HTTP/input/output
+reservation, retry/success count or false model-switch count. Their ledger
+origin is shared_run_cooldown with attempt=0, and public summaries distinguish
+skips from provider failures. No raw key, model name, prompt or response enters
+cooldown events. Content/input/unknown failures do not create shared holds.
+Existing cancellation, budgets, retention/preservation and free-only gates stay
+in force. No successful research, extra quota or paid fallback is fabricated.
+
+TEST PERFORMED: 153 focused tests and 24 subtests passed under native outbound
+connect/send denial. Real SQLite and subprocess tests reproduce failure sharing:
+a first scripted worker makes two failed model calls, three later worker
+processes plus chief make zero additional calls to those unavailable models.
+Separate tests preserve healthy fallback output, retry-delay recovery,
+credential/tenant/run isolation, cancellation, and private/public diagnostics.
+These are controlled offline fixtures, not a new live success result.
+
+Sol review refreshed on 2026-09-13 at
+9d0eda2e0070f98f973c78ae896b226f0219c501. All five standard CI workflows
+passed (Foundation 34700584352). Latest separate live run 34700581432, job
+103571502561, failed the single-model probe: generation_calls=1, retry_calls=0,
+fallback_calls=0, response_received=false, request_error_kind=daily_quota,
+request_exception_class=ResourceExhausted. The Max stage did not execute.
+This is the latest observed capacity failure; current private dashboard
+capacity is still UNKNOWN. A prior successful probe does not prove continuing
+capacity for a full company run.
+
+Its new failure diagnostic calls acceptance.run_live() again after a failed
+Max run, creating a second research allocation. It also trusts any path under
+the repository and arbitrary exception/function names as public metadata.
+Those changes are NOT imported. PR #82 already records bounded Git-tracked
+exception coordinates from the original failing operation. Preserve Sol's
+branch; do not certify its diagnostic rerun as the original failed run.
+
+New candidate: VERIFICATION PENDING at authoring; PR #82 exact-head CI is the
+authority after publication. Do not repeat the full live campaign until usable
+confirmed-free model capacity is available. Current user action needed only
+after code verification: inspect the same Google project's AI Studio Rate Limit
+dashboard (RPM/TPM/RPD); do not paste API keys or set up paid billing. The official
+rate-limit documentation says limits are per Google project, not per API key.
+Hosting remains deferred. Main is 831dbc7209253e58bbfa0ec79b9efe8e130bf523;
+PR #82 remains draft under the retained-data backup/restore deployment hold.
+
 ## Active continuation — returned live result mode and diagnostics, 2026-09-12
 
 Manual Foundation run 34685219540 (attempt 1, job 103530935660) tested

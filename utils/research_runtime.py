@@ -11,6 +11,7 @@ import contextvars
 import dataclasses
 import hashlib
 import json
+import math
 import os
 import sqlite3
 import time
@@ -24,6 +25,28 @@ class RuntimeBlocked(RuntimeError):
 
 class ResearchCancelled(RuntimeBlocked):
     pass
+
+
+class ModelCooldownActive(RuntimeBlocked):
+    """A prior attempt in this run already established temporary unavailability."""
+    def __init__(self, kind):
+        self.kind = kind
+        super().__init__("shared run model cooldown: " + kind)
+
+
+def model_cooldown_scopes(provider, credential, model):
+    # Opaque scopes stay private in SQLite; never put keys/model names in events.
+    if not isinstance(credential, str) or not credential:
+        return ()
+    model = str(model).removeprefix("models/")
+    return (digest(["credential", provider, credential]),
+            digest(["model", provider, credential, model]))
+
+
+def _valid_cooldown_scopes(scopes):
+    return (isinstance(scopes, tuple) and len(scopes) == 2
+            and all(type(s) is str and len(s) == 64
+                    and all(c in "0123456789abcdef" for c in s) for s in scopes))
 
 
 def digest(value):
@@ -108,6 +131,10 @@ class RuntimeStore:
                 provider TEXT, window INTEGER, http INTEGER,
                 input_bytes INTEGER, output_tokens INTEGER,
                 PRIMARY KEY(provider,window));
+              CREATE TABLE IF NOT EXISTS model_cooldowns (
+                project TEXT, run TEXT, provider TEXT, scope TEXT,
+                kind TEXT, until REAL,
+                PRIMARY KEY(project,run,provider,scope));
             """)
 
     @contextlib.contextmanager
@@ -145,7 +172,7 @@ class RuntimeStore:
                 # retain them for six further days for inspection, then prune.
                 expired = [] if preserve_stored_data() else db.execute("SELECT project,run FROM runs WHERE deadline<?", (time.time()-6*86400,)).fetchall()
                 for old in expired:
-                    for table in ("stages", "events", "runs"):
+                    for table in ("stages", "events", "model_cooldowns", "runs"):
                         db.execute(f"DELETE FROM {table} WHERE project=? AND run=?", (old["project"], old["run"]))
                 if db.execute("SELECT count(*) FROM runs").fetchone()[0] >= 2000:
                     raise RuntimeBlocked("runtime retention capacity reached")
@@ -179,10 +206,33 @@ class RuntimeStore:
         db.execute("INSERT INTO events(project,run,at,kind,detail) VALUES(?,?,?,?,?)",
                    (project, run, time.time(), kind, text))
 
-    def reserve(self, project, run, provider, prompt, max_output_tokens):
+    def remember_model_failure(self, project, run, provider, scopes, kind, retry_after=0):
+        if kind not in {"daily_quota", "model_not_found", "auth_failure", "rate_limit"}:
+            return
+        if not _valid_cooldown_scopes(scopes):
+            return
+        if kind == "rate_limit" and (type(retry_after) not in (int, float)
+                or not math.isfinite(retry_after) or retry_after <= 0):
+            return
+        with self.transaction() as db:
+            row = db.execute("SELECT * FROM runs WHERE project=? AND run=?", (project, run)).fetchone()
+            self._check(row)
+            until = row["deadline"]
+            if kind == "rate_limit":
+                until = min(until, time.time() + retry_after)
+            scope = scopes[0] if kind == "auth_failure" else scopes[1]
+            db.execute("""INSERT INTO model_cooldowns VALUES(?,?,?,?,?,?)
+                ON CONFLICT(project,run,provider,scope) DO UPDATE SET
+                kind=CASE WHEN excluded.until>=until THEN excluded.kind ELSE kind END,
+                until=max(until,excluded.until)""", (project, run, provider, scope, kind, until))
+            self._event(db, project, run, "MODEL_COOLDOWN_RECORDED", {"provider": provider, "kind": kind})
+
+    def reserve(self, project, run, provider, prompt, max_output_tokens, *, cooldown_scopes=()):
         size = len(prompt.encode("utf-8"))
         if type(max_output_tokens) is not int or max_output_tokens < 0:
             raise ValueError("invalid output-token reservation")
+        if cooldown_scopes and not _valid_cooldown_scopes(cooldown_scopes):
+            raise ValueError("invalid model cooldown scope")
         # Operator ceilings are shared across projects, keys, processes and retries.
         def setting(name, default):
             value = int(os.getenv(name, str(default)))
@@ -196,22 +246,34 @@ class RuntimeStore:
         with self.transaction() as db:
             row = db.execute("SELECT * FROM runs WHERE project=? AND run=?", (project, run)).fetchone()
             self._check(row)
-            limits = json.loads(row["limits"])
-            amounts = (1, size, max_output_tokens)
-            fields = ("http", "input_bytes", "output_tokens")
-            if any(row[k] + v > limits[k] for k, v in zip(fields, amounts)):
-                raise RuntimeBlocked("research call/input/output budget exhausted")
-            usage = db.execute("SELECT * FROM provider_usage WHERE provider=? AND window=?", (provider, window)).fetchone()
-            if usage and any(usage[k] + v > cap for k, v, cap in zip(fields, amounts, caps)):
-                raise RuntimeBlocked("shared provider application budget exhausted")
-            if any(v > cap for v, cap in zip(amounts, caps)):
-                raise RuntimeBlocked("request exceeds provider application ceiling")
-            db.execute("UPDATE runs SET http=http+1,input_bytes=input_bytes+?,output_tokens=output_tokens+? WHERE project=? AND run=?",
-                       (size, max_output_tokens, project, run))
-            db.execute("INSERT INTO provider_usage VALUES(?,?,?,?,?) ON CONFLICT(provider,window) DO UPDATE SET http=http+1,input_bytes=input_bytes+excluded.input_bytes,output_tokens=output_tokens+excluded.output_tokens",
-                       (provider, window, 1, size, max_output_tokens))
-            self._event(db, project, run, "REQUEST_RESERVED", {"provider": provider,
-                "input_bytes": size, "max_output_tokens": max_output_tokens})
+            blocked = None
+            if cooldown_scopes:
+                blocked = db.execute("""SELECT kind FROM model_cooldowns
+                    WHERE project=? AND run=? AND provider=? AND scope IN (?,?) AND until>?
+                    ORDER BY CASE WHEN kind='auth_failure' THEN 0 ELSE 1 END, until DESC LIMIT 1""",
+                    (project, run, provider, *cooldown_scopes, time.time())).fetchone()
+            if blocked:
+                self._event(db, project, run, "MODEL_COOLDOWN_SKIPPED",
+                            {"provider": provider, "kind": blocked["kind"]})
+            else:
+                limits = json.loads(row["limits"])
+                amounts = (1, size, max_output_tokens)
+                fields = ("http", "input_bytes", "output_tokens")
+                if any(row[k] + v > limits[k] for k, v in zip(fields, amounts)):
+                    raise RuntimeBlocked("research call/input/output budget exhausted")
+                usage = db.execute("SELECT * FROM provider_usage WHERE provider=? AND window=?", (provider, window)).fetchone()
+                if usage and any(usage[k] + v > cap for k, v, cap in zip(fields, amounts, caps)):
+                    raise RuntimeBlocked("shared provider application budget exhausted")
+                if any(v > cap for v, cap in zip(amounts, caps)):
+                    raise RuntimeBlocked("request exceeds provider application ceiling")
+                db.execute("UPDATE runs SET http=http+1,input_bytes=input_bytes+?,output_tokens=output_tokens+? WHERE project=? AND run=?",
+                           (size, max_output_tokens, project, run))
+                db.execute("INSERT INTO provider_usage VALUES(?,?,?,?,?) ON CONFLICT(provider,window) DO UPDATE SET http=http+1,input_bytes=input_bytes+excluded.input_bytes,output_tokens=output_tokens+excluded.output_tokens",
+                           (provider, window, 1, size, max_output_tokens))
+                self._event(db, project, run, "REQUEST_RESERVED", {"provider": provider,
+                    "input_bytes": size, "max_output_tokens": max_output_tokens})
+        if blocked:
+            raise ModelCooldownActive(blocked["kind"])
 
     def claim(self, project, run, stage, fingerprint, owner, *, replay_safe):
         with self.transaction() as db:
@@ -308,10 +370,17 @@ def check_cancelled():
         ctx.store.check(ctx.project, ctx.run)
 
 
-def reserve_request(provider, prompt, max_output_tokens=6000):
+def reserve_request(provider, prompt, max_output_tokens=6000, *, cooldown_scopes=()):
     ctx = current()
     if ctx:
-        ctx.store.reserve(ctx.project, ctx.run, provider, prompt, max_output_tokens)
+        ctx.store.reserve(ctx.project, ctx.run, provider, prompt, max_output_tokens,
+                          cooldown_scopes=cooldown_scopes)
+
+
+def remember_model_failure(provider, scopes, kind, retry_after=0):
+    ctx = current()
+    if ctx and scopes:
+        ctx.store.remember_model_failure(ctx.project, ctx.run, provider, scopes, kind, retry_after)
 
 
 def checkpoint(stage, inputs, action, *, replay_safe=True, with_receipt=False):

@@ -23,7 +23,7 @@ from .explain_style import style_block
 from .key_pool import KeyPool
 from .model_errors import (
     AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, REQUEST_TIMEOUT,
-    SERVER, FailureLedger,
+    SERVER, RATE_LIMIT, ErrorVerdict, FailureLedger,
 )
 from .model_errors import classify as classify_error
 from .models import EvidencePack
@@ -464,22 +464,33 @@ class GeminiReasoning:
                     self.errors.append(f"{tag}: model '{name}' banaya nahi ja saka: "
                                        f"{type(exc).__name__}: {exc}")
                     continue
-            if model_index:
-                # §14 — switch YAHAN gina jaata hai: jab hum sach mein agle model
-                # par aa gaye aur uspar attempt karne wale hain. Pehle ye sirf
-                # SAFAL hone par ginta tha, isliye "dono model fail" wale run
-                # mein switch 0 dikhta tha — jabki switch hua tha. Aur ye ginti
-                # `same_model_retries` se bilkul alag hai: model badalna retry
-                # nahi hai.
-                self.switched_models += 1
             request_prompt = prompt
             compacted_for_model = False
             timeout_extended = False
             from .gemini_model import call_timeout as _call_timeout
             request_timeout = _call_timeout()
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
-                from utils.research_runtime import reserve_request
-                reserve_request("gemini", request_prompt, 6000)
+                from utils.research_runtime import (current, model_cooldown_scopes,
+                    ModelCooldownActive, reserve_request, remember_model_failure)
+                scopes = model_cooldown_scopes("gemini", self.keys.active(), name) if current() else ()
+                try:
+                    reserve_request("gemini", request_prompt, 6000, cooldown_scopes=scopes)
+                except ModelCooldownActive as cooldown:
+                    # A sibling already observed this failure. No HTTP attempt,
+                    # reservation or success is invented for the skipped call.
+                    v = ErrorVerdict(kind=cooldown.kind, detail="shared_run_cooldown")
+                    self.ledger.add(name, tag, v, attempt=0)
+                    self.ledger.events[-1]["origin"] = "shared_run_cooldown"
+                    self.notes.append(f"{tag}: shared run cooldown ({v.kind}); model request skipped")
+                    if v.kind == AUTH:
+                        return "", True
+                    if v.kind == DAILY_QUOTA:
+                        key_level = True
+                    break
+                if model_index and attempt == 0:
+                    # Count a switch only when the next model is admitted for
+                    # a real attempt, not when a sibling's cooldown skips it.
+                    self.switched_models += 1
                 self.attempts += 1
                 self.prompt_attempt_log.append({
                     "label": tag,
@@ -513,6 +524,11 @@ class GeminiReasoning:
                     return text, False
                 except Exception as exc:        # noqa: BLE001
                     v = classify_error(exc)
+                    # Model/key scope prevents one unavailable model from
+                    # disabling other models or another user's credentials.
+                    delay = v.retry_after or _BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS)-1)]
+                    remember_model_failure("gemini", scopes, v.kind,
+                                           retry_after=delay if v.kind == RATE_LIMIT else 0)
                     self.ledger.add(name, tag, v, attempt=attempt + 1)
                     self.errors.append(
                         f"{tag} failed (model={name}, try={attempt + 1}, "
@@ -691,11 +707,8 @@ class GeminiReasoning:
             "model_switches": self.switched_models,
             # §8 — free key ka hisaab. `key_switches` ko kabhi "retry" mat
             # padho: nayi key par jaana pehli koshish hoti hai, dobari nahi.
-            # Isliye identity ab ye hai:
-            #   actual_http_attempts
-            #     == (1 + key_switches) + same_model_retries + model_switches
-            # Ek hi key wale setup mein key_switches = 0, yaani purana formula
-            # jaisa ka waisa.
+            # HTTP attempts are counted at admission. Skipped cooldowns and
+            # logical passes cannot be used to infer an extra HTTP attempt.
             "keys_available": self.keys.count,
             "key_switches": self.key_switches,
             "active_key": self.keys.label(),      # sirf label — value kabhi nahi
@@ -709,6 +722,8 @@ class GeminiReasoning:
                     "label": str(row.get("label") or ""),
                     "kind": str(row.get("kind") or ""),
                     "attempt": int(row.get("attempt") or 0),
+                    **({"origin": "shared_run_cooldown"}
+                       if row.get("origin") == "shared_run_cooldown" else {}),
                 }
                 for row in self.ledger.events[:20]
                 if isinstance(row, dict)

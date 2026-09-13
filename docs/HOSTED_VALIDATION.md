@@ -62,6 +62,28 @@ was manually dispatched on PR #82 head c320d59a61f3c5946b18ae08d3f61e35960f3cc3
 in run 34452317616. Attempt 2 passed setup/prerequisites but failed COMPANY
 execution. That failure does not validate a newer candidate or provider access.
 
+## Quota failure and retry coordination
+
+Run 34699631516 returned RESEARCH INCOMPLETE with daily_quota/rate_limit and
+model_not_found classifications: 22 recorded worker/chief model attempts,
+zero successful calls and zero hypotheses. This is not a reason to repeatedly
+redispatch a full company campaign. Check the same Google project's current
+[AI Studio rate limits](https://aistudio.google.com/rate-limit) first; the
+[official guide](https://ai.google.dev/gemini-api/docs/rate-limits) explains that
+limits apply per Google project, not per API key. Actual remaining capacity is
+private/UNKNOWN; a new key does not itself establish additional capacity.
+
+Workers and chief now share model/credential cooldown observations through the
+existing SQLite run. Holds are confined to that app tenant/run; no other model,
+credential or provider is inferred unavailable from a model-specific failure.
+Daily/model-not-found/auth holds expire with the bounded run, and rate-limit
+holds expire after the provider delay or existing retry backoff. In-flight
+attempts admitted before an observation may finish. Skips record attempt=0 and
+origin=shared_run_cooldown rather than inventing failed HTTP calls. Runtime
+events contain fixed provider/kind fields, not credentials or model labels.
+This saves repeated calls; it does not raise quota, complete missing research,
+change free-provider eligibility or prove real-world answer quality.
+
 ## Receipts and interpretation
 
 Only the sanitized `hosted_live_gate.json` is uploaded from the live directory.

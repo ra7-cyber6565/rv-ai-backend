@@ -102,6 +102,8 @@ def sanitize_result_summary(value):
     out["failure_events"] = [{
         "kind": _enum(_mapping(row).get("kind"), set(KINDS), "unknown"),
         "attempt": _count(_mapping(row).get("attempt")),
+        **({"origin": "shared_run_cooldown"}
+           if _mapping(row).get("origin") == "shared_run_cooldown" else {}),
     } for row in events[:12]]
     out["failure_events_truncated"] = len(events) > 12 or raw.get("failure_events_truncated") is True
     out["missing_passes"] = _passes(raw.get("missing_passes"))
