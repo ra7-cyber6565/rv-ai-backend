@@ -22,18 +22,23 @@ def test_legacy_root_keeps_all_storage_unified(tmp_path):
 def test_split_roots_keep_durable_state_off_runtime_cache(tmp_path):
     durable = tmp_path / "durable"
     ephemeral = tmp_path / "ephemeral"
-    layout = storage_paths.ensure_layout(
-        {
-            "INFINITY_DURABLE_ROOT": str(durable),
-            "INFINITY_EPHEMERAL_ROOT": str(ephemeral),
-        }
-    )
+    env = {
+        "INFINITY_DURABLE_ROOT": str(durable),
+        "INFINITY_EPHEMERAL_ROOT": str(ephemeral),
+    }
+    layout = storage_paths.ensure_layout(env)
 
     assert layout["split"] == "true"
     for name in storage_paths.DURABLE_SUBDIRS:
         assert _same(layout[name], durable / name)
     for name in storage_paths.EPHEMERAL_SUBDIRS:
         assert _same(layout[name], ephemeral / name)
+
+    # Existing persistence/quota callers use configured_root(); under a split it
+    # must still recognize the explicit durable root, not the ephemeral cache.
+    configured, explicit = storage_paths.configured_root(env)
+    assert explicit is True
+    assert _same(configured, durable)
 
 
 def test_split_process_env_routes_models_and_temp_to_ephemeral(tmp_path, monkeypatch):
