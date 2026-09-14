@@ -1,0 +1,124 @@
+name: PR81 Trading Live Acceptance
+
+on:
+  push:
+    branches: [fix/live-trading-acceptance-20260908]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr81-trading-live-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-trading-acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      ZERO_COST_ONLY: "true"
+      GEMINI_API_KEY: ${{ secrets.INFINITY_LIVE_GEMINI_KEY }}
+      GEMINI_ZERO_COST_CONFIRMED: ${{ secrets.INFINITY_LIVE_ZERO_COST_CONFIRMED }}
+      GEMINI_MODEL: ${{ vars.INFINITY_LIVE_GEMINI_MODEL }}
+      INFINITY_PRESERVE_STORED_DATA: "true"
+      INFINITY_MAX_LOCAL_GB: "2"
+      INFINITY_OFFLINE_TEST: "false"
+      CLOUD_ARCHIVE_PROVIDER: "none"
+      RESEARCH_COMPANY_CONCURRENCY: "2"
+    steps:
+      - name: Checkout exact acceptance revision
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Set isolated runner data root
+        run: echo "INFINITY_DATA_ROOT=${RUNNER_TEMP}/infinity-pr81-live" >> "$GITHUB_ENV"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify branch and clean committed checkout
+        run: |
+          test "$GITHUB_REPOSITORY" = "ra7-cyber6565/rv-ai-backend"
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            test "$GITHUB_REF_NAME" = "fix/live-trading-acceptance-20260908"
+          fi
+          git diff --quiet
+          git diff --cached --quiet
+          test -n "$GITHUB_SHA"
+
+      - name: Confirm strict zero-cost live preflight
+        run: |
+          python - <<'PY'
+          import json, os
+          from scripts.run_live_zero_cost_gate import preflight
+          report = preflight(os.environ, validate_storage=True)
+          safe = {
+              "ready": report.get("ready") is True,
+              "zero_cost_only": report.get("zero_cost_only") is True,
+              "model_layers_usable_now": int(report.get("model_layers_usable_now") or 0),
+              "storage_ready": report.get("storage_ready") is True,
+              "blockers": list(report.get("blockers") or []),
+              "credentials_exposed": False,
+          }
+          print(json.dumps(safe, indent=2))
+          if not safe["ready"]:
+              raise SystemExit(2)
+          PY
+
+      # Validate the configured live model before spending time building the
+      # isolated executor or running the full Max research job. This performs
+      # exactly one synthetic request, with no retry/key/model fallback, and
+      # persists the same public-safe metadata on failure. A missing/rejected
+      # credential or unusable model therefore fails fast without weakening the
+      # real gate, while the always() artifact step still has evidence to upload.
+      - name: Validate configured live model with one safe call
+        run: |
+          python scripts/diagnose_live_model_request.py --prompt-chars 12000 --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
+
+      - name: Prepare immutable isolated executor image
+        run: |
+          docker build -t infinity-executor-pr81 -f tests/fixtures/executor.Dockerfile tests/fixtures
+          IMAGE_ID="$(docker image inspect infinity-executor-pr81 --format '{{.Id}}')"
+          case "$IMAGE_ID" in sha256:*) ;; *) echo "immutable image id missing"; exit 2;; esac
+          echo "INFINITY_BUILD_EXECUTOR=docker" >> "$GITHUB_ENV"
+          echo "INFINITY_PYTHON_IMAGE=$IMAGE_ID" >> "$GITHUB_ENV"
+          echo "INFINITY_NODE_IMAGE=$IMAGE_ID" >> "$GITHUB_ENV"
+
+      - name: Run fixed Max trading live acceptance
+        id: max_acceptance
+        run: |
+          python scripts/run_pr81_trading_live_acceptance.py \
+            --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json"
+
+      # Failure-only receipt postmortem. It MUST NOT call the provider, manager,
+      # acceptance runner, or evaluator again. It only revalidates the sanitized
+      # receipt written by the original failed Max run and emits a smaller bounded
+      # summary. The real acceptance above remains the only research execution.
+      - name: Diagnose failed Max stage without second research run
+        if: failure() && steps.max_acceptance.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          python scripts/diagnose_pr81_trading_failure.py \
+            --acceptance-receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_acceptance.json" \
+            --receipt "${INFINITY_DATA_ROOT}/audit/pr81_trading_live_diagnostic.json"
+
+      - name: Upload sanitized acceptance receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr81-trading-live-${{ github.run_id }}
+          path: |
+            ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_acceptance.json
+            ${{ runner.temp }}/infinity-pr81-live/audit/pr81_trading_live_diagnostic.json
+          if-no-files-found: error
+          retention-days: 1

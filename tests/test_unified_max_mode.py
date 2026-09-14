@@ -29,7 +29,7 @@ def _assert_marathon_strength(maximum, marathon):
     assert maximum.use_red_team is True
 
 
-def test_maximum_activates_full_company_plus_when_model_layer_is_usable(monkeypatch):
+def test_maximum_activates_full_company_plus_and_round2_when_model_layer_is_usable(monkeypatch):
     _set_model_ready(monkeypatch, True)
     maximum = get_depth_config("MAXIMUM")
     marathon = get_depth_config("MARATHON")
@@ -39,7 +39,12 @@ def test_maximum_activates_full_company_plus_when_model_layer_is_usable(monkeypa
     assert maximum.company_optional is True
     assert maximum.company_agents_configured == 6
     assert maximum.company_agents == 6
-    assert maximum.gemini_calls == company_plus.gemini_calls == 10
+    assert maximum.company_cross_review_agents == 6
+    # COMPANY_PLUS preserves its legacy 6+4 budget. Public Max adds a bounded
+    # six-call peer-review round while keeping the same four-call chief share.
+    assert company_plus.gemini_calls == 10
+    assert maximum.gemini_calls == 16
+    assert maximum.to_dict()["company_cross_review_agents"] == 6
 
 
 def test_maximum_keeps_marathon_core_when_company_models_are_unavailable(monkeypatch):
@@ -51,8 +56,8 @@ def test_maximum_keeps_marathon_core_when_company_models_are_unavailable(monkeyp
     assert maximum.company_optional is True
     assert maximum.company_agents_configured == 6
     assert maximum.company_agents == 0
-    # Six impossible worker calls are removed, but the four-call Marathon/chief
-    # reasoning share survives. Missing Company must never erase core Max power.
+    assert maximum.company_cross_review_agents == 0
+    # Impossible worker/review calls are absent; Marathon/core reasoning remains.
     assert maximum.gemini_calls == marathon.gemini_calls == 4
 
 
@@ -70,6 +75,15 @@ def test_public_ui_contract_is_chat_and_max_only():
     assert 'data-mode="QUICK">Chat</button>' in source
     assert 'data-mode="MAXIMUM">Max</button>' in source
     assert "Public users intentionally see only two choices: Chat and Max." in source
+
+
+def test_public_ui_defaults_to_unified_max_without_removing_chat():
+    source = Path("main.py").read_text(encoding="utf-8")
+    assert '<button data-mode="QUICK">Chat</button>' in source
+    assert '<button class="on" data-mode="MAXIMUM">Max</button>' in source
+    assert "'let mode=\"QUICK\",busy=false,sessionPromise=null;'" in source
+    assert "'let mode=\"MAXIMUM\",busy=false,sessionPromise=null;'" in source
+    assert "Max is selected by default; Chat remains an" in source
 
 
 def test_unified_max_contract_is_durable_for_future_agents():
