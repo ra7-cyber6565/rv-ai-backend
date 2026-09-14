@@ -1617,7 +1617,7 @@ class DeepResearchEngine:
         reading, pack = checkpoint("full_text_reading", [pack, config.max_fulltext, config.chars_per_source], read_full_text)
         if reading.get("note"):
             discovery_note = f"{discovery_note} | Reading: {reading['note']}"
-        self._counts(job_id, full_text_read=reading.get("succeeded", 0))
+        self._counts(job_id, full_text_read=pack.full_text_read_count)
         if reading.get("attempted") and not reading.get("succeeded"):
             warnings.append(
                 "Kisi bhi source ka full text nahi mil paya — jawab sirf "
@@ -2902,8 +2902,8 @@ class DeepResearchEngine:
         # topic ka nahi tha, par confidence note usme se kuch nahi kehta tha.
         parts.append(pack.relevance_note())
         if pack.full_text_read_count < 1:
-            parts.append("Kisi source ka poora text nahi padha ja saka — ye jawab "
-                         "abstract/snippet level ka hai.")
+            parts.append("Kisi source ka poora text padhne ki pushti nahi hui — "
+                         "ye jawab uplabdh passages/sections par aadharit hai.")
         # Budget (config.gemini_calls) ke bajaye ASLI planned passes se compare
         # karo: 2-call mode mein critique plan hi nahi hota, use "nahi chala"
         # batana galat hai.

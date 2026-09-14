@@ -187,6 +187,27 @@ def test_malformed_report_is_partial_not_success():
     assert all(r["error"] == "invalid_worker_report" for r in result["workers"])
 
 
+@pytest.mark.parametrize("answer,expected", [
+    ("PRIVATE_BAD_JSON", "invalid_json"),
+    (report(summary=""), "missing_summary"),
+    (report(limitations="PRIVATE_INVALID_FIELD"), "invalid_report_schema"),
+])
+def test_report_rejection_reason_survives_publication_without_draft_text(answer, expected):
+    from research_engine.models import ResearchResult
+    from scripts.run_live_zero_cost_gate import evaluate_result
+    from scripts.run_hosted_live_gate import summarize
+    result = company.run_company("Q", packet(), get_depth_config("COMPANY"),
+                                 worker=lambda p: envelope(answer))
+    assert result["completed_workers"] == 0
+    assert all(row["report_validation_issue"] == expected for row in result["workers"])
+    raw = ResearchResult(mode="COMPANY", status="PARTIAL", coverage={"company": result}).to_dict()
+    receipt = evaluate_result(raw, required_depth_mode="COMPANY")
+    public = summarize({"COMPANY": {"passed": False, "receipt": receipt}})
+    assert all(row["report_validation_issue"] == expected
+               for row in public["COMPANY"]["summary"]["company"]["workers"])
+    assert "PRIVATE" not in json.dumps(public)
+
+
 def test_real_chief_pipeline_receives_drafts_preserves_lab_and_accounts_workers(monkeypatch):
     from research_engine import orchestrator as core
     from research_engine.reasoning_router_integrated import ResilientReasoning

@@ -1,5 +1,73 @@
 # Infinity implementation and acceptance ledger
 
+## Active continuation — OA routes and truthful reading scope, 2026-09-14
+
+Manual Foundation 34811552300 (#1633, attempt 1, job 103873756416) completed
+FAILED on 6123ccef457d2fa913e8cbd0f387834b2451a055. Offline prerequisites passed:
+4,400 tests, 9 skips, 1 warning, 51 subtests, actual host suites and localhost
+smoke. COMPANY reported RESEARCH INCOMPLETE / NO_TESTABLE_HYPOTHESES;
+15 sources/citations, 40 on-topic sources, zero full-text reads/hypotheses.
+All 16 reading attempts failed at route_unavailable; 24 were over budget,
+zero characters were read, capped/copyright_blocked were zero. This identifies
+routing failure, not download or extraction failure. Exact source URLs were
+not retained in this public receipt, so the missing route for each is UNKNOWN.
+
+Workers: evidence 12 attempts/0 successes, validation 8/0, mechanism 1/1,
+red-team 4/0. Mechanism output failed report validation; the precise rejection
+cause is UNKNOWN in this old receipt. Chief made 3 attempts/0 successes and
+one cooldown recovery cycle. Evidence, validation and red-team each recorded
+one recovery cycle; mechanism recorded zero. Total recorded attempts: 28,
+one successful provider output, zero completed worker drafts. Daily quota is
+the primary reported failure; rate_limit/model_not_found also appear. The
+recovery code executed, but did not establish usable model output or sustainable
+quota. Counts from different runs are not a controlled before/after experiment.
+COMPANY_PLUS was skipped and fixed Max trading NOT_RUN. Masked values remain
+UNKNOWN; no secret/model value was reconstructed.
+
+Measured source-code defect: OpenAlex preserved the DOI but discarded its
+provider-reported OA copies; Semantic Scholar did not request openAccessPdf.
+The repair retains up to eight OA copy URLs separately from canonical citation
+identity, and tries them through the existing URL/licence/host routing rules.
+No new provider calls occur during route selection; no generic scraping,
+paywall bypass or reading-success claim is added. OpenAlex per-location is_oa
+and Semantic Scholar isOpenAccess must be explicitly true before retaining
+those locations. DOI identity and unread state survive round-trip serialization.
+This restores usable routes in controlled provider fixtures; it does not prove
+that every source in #1633 had an accessible copy or that downloads now succeed.
+
+Independent offline audit reproduced three false whole-source counts: abstract,
+claims-only and 3-of-30-page records with positive processed characters all
+counted as complete reads. Counters now require the existing FULL TEXT ACCESSED
+label plus processing evidence (the existing explicit uploaded-document contract
+is preserved). Unknown legacy depth stays unconfirmed. Selected pages and
+licence-capped reads no longer inflate the reading headline; progress and hosted
+full-text acceptance use the same stricter count. Useful excerpts/sections remain
+available, without being mislabeled as only metadata or as a complete document.
+This honors recorded scope; unreported extraction/OCR gaps still need independent
+validation. The overcounting defect did not cause #1633's zero reading result.
+
+Worker report rejection now preserves only fixed invalid_json/missing_summary/
+invalid_report_schema/invalid_report codes through child/host publication. Raw
+model text and exception details are excluded; required schema fields are not
+relaxed and rejected output does not become a successful draft.
+
+TEST PERFORMED: 376 focused tests and 24 subtests passed under native outbound
+connect/send denial. Tests cover provider-to-reader OA handoff, citation identity,
+private/restricted URLs, original book licence, bounded candidate lists,
+reading-scope counts/notes, actual hosted acceptance, public worker diagnostics,
+network safety, company and existing evidence guards. The positive legacy
+full-read fixture was updated to record the same explicit read_level as real
+ContentFetcher; top-label and negative assertions were preserved. New candidate
+VERIFICATION PENDING until its own five PR #82 workflows pass; that PR is the
+authority for final commit/tree identity and exact-head evidence.
+
+Main remains 831dbc7209253e58bbfa0ec79b9efe8e130bf523; Sol PR #81 remains
+3db9aee58f66b9f36ae94594034fcf932eb668c7, unchanged by this work. Draft and
+retained-data backup/deployment hold remain. Do not repeat a full live campaign
+merely because CI passes: current usable confirmed-free quota must be established.
+Next live result must show actual reading, valid worker reports and chief output.
+No overall app, independent-quality or production-completion claim is made.
+
 ## Active continuation — temporary rate-limit recovery and reading diagnostics, 2026-09-13
 
 Manual Foundation 34766377117 (#1631, attempt 1, job 103747972419) tested

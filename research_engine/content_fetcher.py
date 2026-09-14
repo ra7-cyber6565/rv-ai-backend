@@ -51,6 +51,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import replace
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, quote
 
@@ -224,6 +225,17 @@ class ContentFetcher:
                     "copyright_stance": stance,
                     "read_ceiling": stance.get("read_ceiling") or "",
                     "summary_lane": bool(stance.get("summary_lane"))}
+
+        # Keep citation identity intact while trying explicitly reported OA
+        # copies. Each candidate still passes the same URL/licence/host rules.
+        hints = source.full_text_urls if isinstance(source.full_text_urls, list) else []
+        for hint in hints[:8]:
+            if not isinstance(hint, str) or not hint or hint == url or len(hint) > 2048:
+                continue
+            candidate = replace(source, url=hint, full_text_urls=[])
+            route = self.resolve(candidate)
+            if route.get("ok") or route.get("needs_lookup"):
+                return route
 
         # 1. Wikimedia text projects — official action API se saaf plaintext.
         #    Wikipedia ke saath Wikisource/Wikibooks bhi, kyunki extract JSON ka
@@ -825,7 +837,16 @@ class ContentFetcher:
         # full-text banne se roka. Unhe "full text padha gaya" me ginna wahi
         # purani beimaani hoti, isliye ginti alag hai.
         capped = int(report.get("capped") or 0)
-        full_read = max(0, int(report.get("succeeded") or 0) - capped)
+        # A successful extraction can cover only selected pages. Keep those
+        # reads useful, but do not call the entire source read in the headline.
+        sections = sum(
+            1 for entry in report.get("entries", [])
+            if entry.get("ok") and entry.get("streamed")
+            and (entry.get("read_level") or "full_text") == "full_text"
+            and 0 < int((entry.get("selection") or {}).get("pages_kept") or 0)
+            < int((entry.get("selection") or {}).get("pages_total") or 0)
+        )
+        full_read = max(0, int(report.get("succeeded") or 0) - capped - sections)
         bits = [f"{full_read}/{report['attempted']} sources ka full text "
                 f"padha gaya (~{report['chars_read']:,} chars)"]
         if capped:

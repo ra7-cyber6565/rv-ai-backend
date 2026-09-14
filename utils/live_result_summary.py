@@ -102,6 +102,9 @@ def company_execution_summary(value):
                 "", "worker_deadline", "worker_process_failed", "no_model_output",
                 "worker_unavailable", "invalid_worker_report",
             }),
+            "report_validation_issue": _enum(_mapping(row).get("report_validation_issue"), {
+                "invalid_json", "missing_summary", "invalid_report_schema", "invalid_report",
+            }),
             "accounting_complete": _boolean(_mapping(row).get("accounting_complete")),
             "provider_output_capture_complete": _boolean(_mapping(row).get("provider_output_capture_complete")),
             "accounting": _accounting(_mapping(row).get("accounting")),

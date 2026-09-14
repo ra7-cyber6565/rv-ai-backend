@@ -262,8 +262,10 @@ class EvidenceEngine:
                     f"(average match {pack.avg_relevance:.2f}, "
                     f"{pack.on_topic_count} source topic ke)")
         if pack.full_text_read_count < 1:
-            return ("kisi bhi source ka poora text nahi pada ja saka — sirf "
-                    "title/abstract par 'verified' kehna galat hoga")
+            return ("kisi bhi source ka poora text nahi gina gaya "
+                    "(poori reading ki pushti nahi hui) — "
+                    "uplabdh passages/sections ko poori reading maan kar "
+                    "'verified' kehna galat hoga")
         if check_reasoning and not pack.reasoning_complete:
             return (f"reasoning adhoora raha "
                     f"({pack.reasoning_done}/{pack.reasoning_planned} pass poore)")

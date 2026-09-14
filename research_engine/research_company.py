@@ -238,7 +238,18 @@ def run_company(question: str, pack, config, *, worker: Callable | None = None) 
                     artifacts.setdefault(raw_hash, {"schema_version": 1, "sha256": raw_hash,
                         "kind": "UNTRUSTED_MODEL_DRAFT", "content": raw_text})
                 receipt["error"] = "invalid_worker_report"
-                report = normalize_report(raw.get("answer", ""), source_ids)
+                try:
+                    report = normalize_report(raw.get("answer", ""), source_ids)
+                except json.JSONDecodeError:
+                    receipt["report_validation_issue"] = "invalid_json"
+                    raise
+                except ValueError as exc:
+                    # Only our fixed parser verdicts may cross the receipt;
+                    # never publish raw draft text or arbitrary error details.
+                    receipt["report_validation_issue"] = (
+                        str(exc) if str(exc) in {"missing_summary", "invalid_report_schema"}
+                        else "invalid_report")
+                    raise
                 from .tool_registry import execute_tool
                 tool_results = []
                 for index, request in enumerate(report.pop("tool_requests", [])):
