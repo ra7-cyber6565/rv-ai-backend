@@ -50,13 +50,30 @@ def _absolute(raw: str) -> str:
     return os.path.abspath(os.path.expanduser(raw))
 
 
-def configured_root(env: Mapping[str, str] | None = None) -> tuple[str, bool]:
-    """Return the legacy unified ``(path, explicitly_configured)`` root."""
+def _legacy_configured_root(
+    env: Mapping[str, str] | None = None,
+) -> tuple[str, bool]:
     source = env if env is not None else os.environ
     raw = _clean(source.get("INFINITY_DATA_ROOT")) or _clean(source.get("INFINITY_WORK_ROOT"))
     if raw:
         return _absolute(raw), True
     return str(REPO_ROOT / "runtime_data"), False
+
+
+def configured_root(env: Mapping[str, str] | None = None) -> tuple[str, bool]:
+    """Return the app's persistence-bearing root for legacy callers.
+
+    Historically this function exposed the one unified data root. Existing
+    persistence/quota guards still call it, so when split storage is enabled it
+    must resolve to the durable root rather than the ephemeral runtime root.
+    With no split variable configured, behavior is byte-for-byte compatible
+    with the old ``INFINITY_DATA_ROOT`` / ``INFINITY_WORK_ROOT`` resolution.
+    """
+    source = env if env is not None else os.environ
+    durable_raw = _clean(source.get("INFINITY_DURABLE_ROOT"))
+    if durable_raw:
+        return _absolute(durable_raw), True
+    return _legacy_configured_root(source)
 
 
 def configured_storage_roots(
@@ -69,7 +86,7 @@ def configured_storage_roots(
     Thus existing laptop/cloud configurations are unchanged until they opt in.
     """
     source = env if env is not None else os.environ
-    legacy_root, legacy_explicit = configured_root(source)
+    legacy_root, legacy_explicit = _legacy_configured_root(source)
 
     durable_raw = _clean(source.get("INFINITY_DURABLE_ROOT"))
     ephemeral_raw = _clean(source.get("INFINITY_EPHEMERAL_ROOT"))
