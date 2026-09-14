@@ -299,6 +299,28 @@ class OpenAlexConnector(BaseConnector):
     source_type = SourceType.PAPER
 
     @staticmethod
+    def _oa_urls(item: dict) -> List[str]:
+        """Retain bounded provider-declared open copies, without fetching them."""
+        best = item.get("best_oa_location")
+        locations = item.get("locations")
+        locations = locations[:24] if isinstance(locations, list) else []
+        locations = ([best] if isinstance(best, dict) else []) + locations
+        urls = []
+        for location in locations:
+            if not isinstance(location, dict) or location.get("is_oa") is not True:
+                continue
+            for name in ("pdf_url", "landing_page_url"):
+                value = location.get(name)
+                if isinstance(value, str) and 0 < len(value) <= 2048 and value not in urls:
+                    urls.append(value)
+        access = item.get("open_access")
+        if isinstance(access, dict) and access.get("is_oa") is True:
+            value = access.get("oa_url")
+            if isinstance(value, str) and 0 < len(value) <= 2048 and value not in urls:
+                urls.insert(0, value)
+        return urls[:8]
+
+    @staticmethod
     def _abstract(inverted: Optional[dict]) -> str:
         if not inverted:
             return ""
@@ -337,6 +359,7 @@ class OpenAlexConnector(BaseConnector):
                 peer_reviewed=peer,
                 citation_count=item.get("cited_by_count"),
                 full_text_available=bool((item.get("open_access") or {}).get("is_oa")),
+                full_text_urls=self._oa_urls(item),
                 # Spec Section 7: OpenAlex ka `type` sirf form batata hai
                 # (article/review/editorial), design nahi — isliye pehle usse
                 # try karo, na mile to abstract mein likha design dekho.
@@ -378,7 +401,7 @@ class SemanticScholarConnector(BaseConnector):
                 "query": query,
                 "limit": max_results,
                 "fields": "title,abstract,url,year,authors,venue,externalIds,"
-                          "citationCount,publicationTypes,isOpenAccess",
+                          "citationCount,publicationTypes,isOpenAccess,openAccessPdf",
             },
             # key ho to bhejo; na ho to header hi nahi lagta (base None/"" chhod deta hai)
             headers={"x-api-key": key} if key else None,
@@ -397,6 +420,10 @@ class SemanticScholarConnector(BaseConnector):
             )
             title = self._clean(item.get("title"))
             abstract = self._clean(item.get("abstract"))
+            oa_pdf = item.get("openAccessPdf")
+            oa_url = oa_pdf.get("url") if isinstance(oa_pdf, dict) else None
+            oa_urls = ([oa_url] if item.get("isOpenAccess") is True
+                       and isinstance(oa_url, str) and 0 < len(oa_url) <= 2048 else [])
             out.append(SourceRecord(
                 title=title,
                 url=self._clean(item.get("url")),
@@ -410,6 +437,7 @@ class SemanticScholarConnector(BaseConnector):
                 peer_reviewed=peer,
                 citation_count=item.get("citationCount"),
                 full_text_available=bool(item.get("isOpenAccess")),
+                full_text_urls=oa_urls,
                 # Spec Section 7 — S2 ke publicationTypes camelCase mein aate
                 # hain ("MetaAnalysis"), quality_signals unhe handle karta hai
                 methodology=(methodology_from_pubtypes(pub_types)

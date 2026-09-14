@@ -509,6 +509,8 @@ def test_capped_read_is_not_reported_as_full_text():
     source = pack.sources[0]
     assert source.full_text_available is False
     assert "abstract" in source.read_note
+    assert pack.full_text_read_count == 0
+    assert pack.coverage_report()["full_text_sources_read"] == 0
     note = CFM.ContentFetcher.reading_note(report)
     assert note.startswith("0/1")
     assert "licence ceiling" in note

@@ -320,9 +320,15 @@ class FailureLedger:
         if not self.events:
             return ""
         by_kind: Dict[str, int] = {}
+        shared_skips = 0
         for e in self.events:
+            if e.get("origin") == "shared_run_cooldown":
+                shared_skips += 1
+                continue
             by_kind[e["kind"]] = by_kind.get(e["kind"], 0) + 1
         bits = [f"{HUMAN.get(k, k)} ×{n}" for k, n in by_kind.items()]
+        if shared_skips:
+            bits.append(f"{shared_skips} request(s) shared run cooldown ki wajah se bheji nahi gayi")
         note = "; ".join(bits)
         if self.disabled:
             note += (" | is run mein band kiye gaye model: "
