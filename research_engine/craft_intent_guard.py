@@ -96,15 +96,21 @@ def install() -> None:
 install()
 
 # ``research_engine.__init__`` imports this deterministic guard on every runtime
-# path.  Install the companion hypothesis-schema augmentation here as the same
-# no-network acceptance boundary.  It only recognizes explicit trading/backtest
+# path. Install the companion hypothesis-schema augmentation here as the same
+# no-network acceptance boundary. It only recognizes explicit trading/backtest
 # prose and never supplies an unstated threshold or result.
 from .trading_hypothesis_structure_guard import install as _install_trading_hypothesis_structure_guard
 _install_trading_hypothesis_structure_guard()
 
-# The same package-import boundary installs a deterministic chief-handoff guard.
-# It structurally compacts verbose specialist drafts instead of clipping raw JSON
-# and then falsely declaring the handoff incomplete. Full reports remain in the
-# research-company audit record; actual missing/corrupt handoffs still fail closed.
+# The same package-import boundary installs the deterministic canonical
+# chief-handoff compatibility facade. It delegates compaction to
+# ``research_company`` rather than maintaining a second implementation.
 from .company_handoff_guard import install as _install_company_handoff_guard
 _install_company_handoff_guard()
+
+# Round-2 collaboration was the remaining Company integration gap. This wiring
+# reuses the existing Round-1 workers, ScientistSociety and chief path; it does
+# not create a parallel agent engine. Unified Max reserves a bounded second pass
+# and fails closed if peer review cannot complete.
+from .company_cross_review_wiring import install as _install_company_cross_review_wiring
+_install_company_cross_review_wiring()
