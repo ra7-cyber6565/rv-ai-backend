@@ -1,19 +1,20 @@
 """Central storage layout for Infinity Research AI.
 
-The laptop can keep heavy runtime data off C: by setting either:
+Laptop/backward-compatible setup can keep using either::
 
     INFINITY_DATA_ROOT=D:\\InfinityResearchAI
-
-or the older compatible variable:
-
     INFINITY_WORK_ROOT=D:\\InfinityResearchAI
 
-When an explicit root is configured, this module fails closed if it is missing
-or unwritable. It does not silently fall back to the system drive.
+Those legacy variables still put *all* app data under one root, exactly as
+before. Cloud deployments can optionally split durable state from large,
+rebuildable runtime data::
 
-Cloud deployments may leave both variables empty; in that case a repository-
-local ``runtime_data`` folder is used. This fallback is for development/cloud
-containers only, not the recommended laptop setup.
+    INFINITY_DURABLE_ROOT=/data
+    INFINITY_EPHEMERAL_ROOT=/tmp/infinity_ai
+
+This lets a small persistent volume hold research state while model/cache/temp
+files remain on ephemeral container storage. An explicitly configured root
+fails closed if it is missing or unwritable; no silent fallback drive is used.
 """
 from __future__ import annotations
 
@@ -24,30 +25,64 @@ from typing import Mapping
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SUBDIRS = (
+DURABLE_SUBDIRS = (
     "archive",
-    "cache",
     "knowledge",
-    "logs",
-    "models",
     "research_memory",
-    "temp",
     "uploads",
     "vector_db",
 )
+EPHEMERAL_SUBDIRS = (
+    "cache",
+    "logs",
+    "models",
+    "temp",
+)
+# Kept for callers/tests that import the old aggregate constant.
+SUBDIRS = DURABLE_SUBDIRS + EPHEMERAL_SUBDIRS
 
 
 def _clean(raw: object) -> str:
     return str(raw or "").strip()
 
 
+def _absolute(raw: str) -> str:
+    return os.path.abspath(os.path.expanduser(raw))
+
+
 def configured_root(env: Mapping[str, str] | None = None) -> tuple[str, bool]:
-    """Return ``(path, explicitly_configured)``."""
+    """Return the legacy unified ``(path, explicitly_configured)`` root."""
     source = env if env is not None else os.environ
     raw = _clean(source.get("INFINITY_DATA_ROOT")) or _clean(source.get("INFINITY_WORK_ROOT"))
     if raw:
-        return os.path.abspath(os.path.expanduser(raw)), True
+        return _absolute(raw), True
     return str(REPO_ROOT / "runtime_data"), False
+
+
+def configured_storage_roots(
+    env: Mapping[str, str] | None = None,
+) -> dict[str, object]:
+    """Resolve durable/ephemeral roots while preserving legacy behavior.
+
+    New split variables take precedence only for their own storage class. If a
+    split variable is absent, that class falls back to the legacy unified root.
+    Thus existing laptop/cloud configurations are unchanged until they opt in.
+    """
+    source = env if env is not None else os.environ
+    legacy_root, legacy_explicit = configured_root(source)
+
+    durable_raw = _clean(source.get("INFINITY_DURABLE_ROOT"))
+    ephemeral_raw = _clean(source.get("INFINITY_EPHEMERAL_ROOT"))
+
+    durable_root = _absolute(durable_raw) if durable_raw else legacy_root
+    ephemeral_root = _absolute(ephemeral_raw) if ephemeral_raw else legacy_root
+    return {
+        "durable_root": durable_root,
+        "ephemeral_root": ephemeral_root,
+        "durable_explicit": bool(durable_raw) or legacy_explicit,
+        "ephemeral_explicit": bool(ephemeral_raw) or legacy_explicit,
+        "split": durable_root != ephemeral_root,
+    }
 
 
 def _probe_writable(root: str) -> None:
@@ -65,11 +100,30 @@ def _probe_writable(root: str) -> None:
 
 
 def ensure_layout(env: Mapping[str, str] | None = None) -> dict[str, str]:
-    root, explicit = configured_root(env)
-    _probe_writable(root)
-    paths = {"root": root, "explicit": str(explicit).lower()}
-    for name in SUBDIRS:
-        folder = Path(root) / name
+    roots = configured_storage_roots(env)
+    durable_root = str(roots["durable_root"])
+    ephemeral_root = str(roots["ephemeral_root"])
+    _probe_writable(durable_root)
+    if ephemeral_root != durable_root:
+        _probe_writable(ephemeral_root)
+
+    paths = {
+        # ``root``/``explicit`` remain for backward compatibility. In split
+        # mode, root intentionally means the persistence-bearing durable root.
+        "root": durable_root,
+        "explicit": str(bool(roots["durable_explicit"])).lower(),
+        "durable_root": durable_root,
+        "ephemeral_root": ephemeral_root,
+        "durable_explicit": str(bool(roots["durable_explicit"])).lower(),
+        "ephemeral_explicit": str(bool(roots["ephemeral_explicit"])).lower(),
+        "split": str(bool(roots["split"])).lower(),
+    }
+    for name in DURABLE_SUBDIRS:
+        folder = Path(durable_root) / name
+        folder.mkdir(parents=True, exist_ok=True)
+        paths[name] = str(folder)
+    for name in EPHEMERAL_SUBDIRS:
+        folder = Path(ephemeral_root) / name
         folder.mkdir(parents=True, exist_ok=True)
         paths[name] = str(folder)
     return paths
@@ -81,59 +135,86 @@ def _set_path_env(name: str, value: str, *, force: bool) -> None:
 
 
 def configure_process_storage() -> dict[str, object]:
-    """Configure model/cache/temp/database locations before heavy imports.
+    """Configure app state plus third-party cache/temp locations.
 
-    If the user explicitly selected D: (or another root), model downloads,
-    ChromaDB, research memory, knowledge metadata and temp/cache paths are
-    redirected there. Explicit selection wins over stale cache variables so the
-    app cannot quietly keep filling C:.
+    Legacy unified roots still force every path under that root. With the new
+    split variables, app-owned durable state follows ``INFINITY_DURABLE_ROOT``
+    while large rebuildable model/cache/temp data follows
+    ``INFINITY_EPHEMERAL_ROOT``.
     """
     layout = ensure_layout()
-    root, explicit = configured_root()
+    roots = configured_storage_roots()
+    durable_root = str(roots["durable_root"])
+    ephemeral_root = str(roots["ephemeral_root"])
+    durable_explicit = bool(roots["durable_explicit"])
+    ephemeral_explicit = bool(roots["ephemeral_explicit"])
 
-    # App-owned locations.
-    _set_path_env("KNOWLEDGE_GRAPH_FILE", str(Path(layout["knowledge"]) / "knowledge_graph.json"), force=explicit)
-    _set_path_env("KNOWLEDGE_STORE_FILE", str(Path(layout["knowledge"]) / "knowledge_store.json"), force=explicit)
-    _set_path_env("RESEARCH_MEMORY_DIR", layout["research_memory"], force=explicit)
-    _set_path_env("CHROMA_DB_DIR", layout["vector_db"], force=explicit)
-    _set_path_env("INFINITY_ARCHIVE_DIR", layout["archive"], force=explicit)
+    # App-owned durable locations.
+    _set_path_env("KNOWLEDGE_GRAPH_FILE", str(Path(layout["knowledge"]) / "knowledge_graph.json"), force=durable_explicit)
+    _set_path_env("KNOWLEDGE_STORE_FILE", str(Path(layout["knowledge"]) / "knowledge_store.json"), force=durable_explicit)
+    _set_path_env("RESEARCH_MEMORY_DIR", layout["research_memory"], force=durable_explicit)
+    _set_path_env("CHROMA_DB_DIR", layout["vector_db"], force=durable_explicit)
+    _set_path_env("INFINITY_ARCHIVE_DIR", layout["archive"], force=durable_explicit)
 
-    # Heavy third-party caches/models.
+    # Heavy third-party caches/models stay rebuildable/ephemeral when split.
     cache_root = Path(layout["cache"])
     model_root = Path(layout["models"])
-    _set_path_env("HF_HOME", str(model_root / "huggingface"), force=explicit)
-    _set_path_env("HUGGINGFACE_HUB_CACHE", str(model_root / "huggingface" / "hub"), force=explicit)
-    _set_path_env("TRANSFORMERS_CACHE", str(model_root / "transformers"), force=explicit)
-    _set_path_env("SENTENCE_TRANSFORMERS_HOME", str(model_root / "sentence_transformers"), force=explicit)
-    _set_path_env("TORCH_HOME", str(model_root / "torch"), force=explicit)
-    _set_path_env("XDG_CACHE_HOME", str(cache_root), force=explicit)
+    _set_path_env("HF_HOME", str(model_root / "huggingface"), force=ephemeral_explicit)
+    _set_path_env("HUGGINGFACE_HUB_CACHE", str(model_root / "huggingface" / "hub"), force=ephemeral_explicit)
+    _set_path_env("TRANSFORMERS_CACHE", str(model_root / "transformers"), force=ephemeral_explicit)
+    _set_path_env("SENTENCE_TRANSFORMERS_HOME", str(model_root / "sentence_transformers"), force=ephemeral_explicit)
+    _set_path_env("TORCH_HOME", str(model_root / "torch"), force=ephemeral_explicit)
+    _set_path_env("XDG_CACHE_HOME", str(cache_root), force=ephemeral_explicit)
 
     # Python/OS temp files. Set all common variants for Windows/Linux tools.
     for temp_name in ("TMP", "TEMP", "TMPDIR"):
-        _set_path_env(temp_name, layout["temp"], force=explicit)
+        _set_path_env(temp_name, layout["temp"], force=ephemeral_explicit)
 
-    usage = shutil.disk_usage(root)
+    durable_usage = shutil.disk_usage(durable_root)
+    ephemeral_usage = shutil.disk_usage(ephemeral_root)
     return {
-        "root": root,
-        "explicit": explicit,
-        "paths": {k: v for k, v in layout.items() if k not in {"root", "explicit"}},
-        "disk_total_bytes": usage.total,
-        "disk_free_bytes": usage.free,
+        "root": durable_root,
+        "explicit": durable_explicit,
+        "durable_root": durable_root,
+        "ephemeral_root": ephemeral_root,
+        "split": bool(roots["split"]),
+        "paths": {
+            k: v
+            for k, v in layout.items()
+            if k
+            not in {
+                "root",
+                "explicit",
+                "durable_root",
+                "ephemeral_root",
+                "durable_explicit",
+                "ephemeral_explicit",
+                "split",
+            }
+        },
+        "disk_total_bytes": durable_usage.total,
+        "disk_free_bytes": durable_usage.free,
+        "ephemeral_disk_total_bytes": ephemeral_usage.total,
+        "ephemeral_disk_free_bytes": ephemeral_usage.free,
     }
 
 
 def storage_status() -> dict[str, object]:
-    """Internal detailed storage status.
-
-    This deliberately includes the absolute root and diagnostic error text for
-    local logs/debugging. Do not expose this mapping directly from a public API;
-    use :func:`public_storage_status` instead.
-    """
-    root, explicit = configured_root()
-    status: dict[str, object] = {"root": root, "explicit": explicit, "available": False}
+    """Internal detailed storage status for durable and ephemeral roots."""
+    roots = configured_storage_roots()
+    durable_root = str(roots["durable_root"])
+    ephemeral_root = str(roots["ephemeral_root"])
+    status: dict[str, object] = {
+        "root": durable_root,
+        "explicit": bool(roots["durable_explicit"]),
+        "ephemeral_root": ephemeral_root,
+        "split": bool(roots["split"]),
+        "available": False,
+        "ephemeral_available": False,
+    }
     try:
-        _probe_writable(root)
-        usage = shutil.disk_usage(root)
+        _probe_writable(durable_root)
+        usage = shutil.disk_usage(durable_root)
         status.update({
             "available": True,
             "disk_total_bytes": usage.total,
@@ -141,25 +222,28 @@ def storage_status() -> dict[str, object]:
         })
     except Exception as exc:  # noqa: BLE001
         status["error"] = f"{type(exc).__name__}: {exc}"
+
+    try:
+        _probe_writable(ephemeral_root)
+        usage = shutil.disk_usage(ephemeral_root)
+        status.update({
+            "ephemeral_available": True,
+            "ephemeral_disk_total_bytes": usage.total,
+            "ephemeral_disk_free_bytes": usage.free,
+        })
+    except Exception as exc:  # noqa: BLE001
+        status["ephemeral_error"] = f"{type(exc).__name__}: {exc}"
     return status
 
 
 def public_storage_status(status: Mapping[str, object] | None = None) -> dict[str, object]:
-    """Return public-safe storage health without filesystem-path disclosure.
-
-    ``storage_status()`` is intentionally useful for local diagnostics and can
-    contain an absolute Windows/Linux path plus raw exception text. Public
-    ``/health``/``/api`` responses must not leak those details. This helper keeps
-    only aggregate capacity/readiness fields and replaces raw errors with a stable
-    coarse code.
-
-    ``status`` may be supplied by tests/callers to sanitize an already-collected
-    internal mapping without probing the disk again.
-    """
+    """Return public-safe storage health without filesystem-path disclosure."""
     raw = dict(status) if status is not None else storage_status()
     out: dict[str, object] = {
         "available": bool(raw.get("available")),
         "explicit_root_configured": bool(raw.get("explicit")),
+        "split_storage": bool(raw.get("split")),
+        "ephemeral_available": bool(raw.get("ephemeral_available", raw.get("available"))),
     }
     total = raw.get("disk_total_bytes")
     free = raw.get("disk_free_bytes")
@@ -171,4 +255,6 @@ def public_storage_status(status: Mapping[str, object] | None = None) -> dict[st
         out["disk_free_percent"] = round((free / total) * 100, 1)
     if not out["available"]:
         out["error"] = "storage_unavailable"
+    if not out["ephemeral_available"]:
+        out["ephemeral_error"] = "ephemeral_storage_unavailable"
     return out
