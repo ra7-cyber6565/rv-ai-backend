@@ -55,6 +55,38 @@ In split mode Hugging Face, Transformers, sentence-transformers, Torch, XDG
 cache, and OS temp locations follow the ephemeral root. Existing persistence
 quota guards still resolve the configured durable root.
 
+## Small-volume quota policy
+
+Laptop installs retain the historical quota defaults (`INFINITY_MAX_LOCAL_GB`
+50GB and `INFINITY_MIN_FREE_GB` 5GB unless explicitly changed). A sub-GB cloud
+volume must not use those defaults because the free-space reserve alone can be
+larger than the whole volume.
+
+For constrained volumes, use the optional MB overrides:
+
+```text
+INFINITY_MAX_LOCAL_MB=<maximum app-owned durable bytes in MB>
+INFINITY_MIN_FREE_MB=<minimum filesystem free reserve in MB>
+```
+
+Each MB variable overrides only its matching GB setting. Invalid MB values fall
+back to the historical GB policy instead of silently creating an unsafe tiny
+budget.
+
+For a verified 0.5GB persistent volume, a conservative starting configuration
+is:
+
+```text
+INFINITY_MAX_LOCAL_MB=350
+INFINITY_MIN_FREE_MB=64
+```
+
+Treat those numbers as a safety starting point, not as a provider guarantee.
+Measure real durable growth (jobs/results, vector DB, knowledge, uploads) and
+reduce the app budget if provider/runtime overhead requires more headroom. Never
+raise the budget above the provider's actual mounted capacity merely to bypass a
+quota failure.
+
 ## Pre-deploy safety gate
 
 Before changing production, record all of the following:
@@ -82,6 +114,13 @@ Example layout (paths are illustrative; use the host's real mount path):
 persistent volume -> /data
 INFINITY_DURABLE_ROOT=/data
 INFINITY_EPHEMERAL_ROOT=/tmp/infinity_ai
+```
+
+For a verified 0.5GB mount, pair it with the small-volume quota controls above:
+
+```text
+INFINITY_MAX_LOCAL_MB=350
+INFINITY_MIN_FREE_MB=64
 ```
 
 Do not simultaneously set a legacy `INFINITY_DATA_ROOT` to the persistent
