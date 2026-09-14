@@ -254,13 +254,18 @@ def storage_status() -> dict[str, object]:
 
 
 def public_storage_status(status: Mapping[str, object] | None = None) -> dict[str, object]:
-    """Return public-safe storage health without filesystem-path disclosure."""
+    """Return public-safe storage health without filesystem-path disclosure.
+
+    Legacy/unified storage keeps the historical response shape exactly. The
+    split-storage extension is additive only when split mode is actually active,
+    so old exact-shape callers do not regress merely because the implementation
+    learned about an optional ephemeral root.
+    """
     raw = dict(status) if status is not None else storage_status()
+    split = bool(raw.get("split"))
     out: dict[str, object] = {
         "available": bool(raw.get("available")),
         "explicit_root_configured": bool(raw.get("explicit")),
-        "split_storage": bool(raw.get("split")),
-        "ephemeral_available": bool(raw.get("ephemeral_available", raw.get("available"))),
     }
     total = raw.get("disk_total_bytes")
     free = raw.get("disk_free_bytes")
@@ -272,6 +277,24 @@ def public_storage_status(status: Mapping[str, object] | None = None) -> dict[st
         out["disk_free_percent"] = round((free / total) * 100, 1)
     if not out["available"]:
         out["error"] = "storage_unavailable"
-    if not out["ephemeral_available"]:
-        out["ephemeral_error"] = "ephemeral_storage_unavailable"
+
+    if split:
+        ephemeral_available = bool(raw.get("ephemeral_available", raw.get("available")))
+        out["split_storage"] = True
+        out["ephemeral_available"] = ephemeral_available
+        ephemeral_total = raw.get("ephemeral_disk_total_bytes")
+        ephemeral_free = raw.get("ephemeral_disk_free_bytes")
+        if isinstance(ephemeral_total, int) and ephemeral_total >= 0:
+            out["ephemeral_disk_total_bytes"] = ephemeral_total
+        if isinstance(ephemeral_free, int) and ephemeral_free >= 0:
+            out["ephemeral_disk_free_bytes"] = ephemeral_free
+        if (
+            isinstance(ephemeral_total, int)
+            and ephemeral_total > 0
+            and isinstance(ephemeral_free, int)
+            and ephemeral_free >= 0
+        ):
+            out["ephemeral_disk_free_percent"] = round((ephemeral_free / ephemeral_total) * 100, 1)
+        if not ephemeral_available:
+            out["ephemeral_error"] = "ephemeral_storage_unavailable"
     return out
