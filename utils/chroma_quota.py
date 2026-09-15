@@ -97,6 +97,17 @@ class QuotaBoundCollection:
             uris=uris,
         )
 
+    def update(self, ids, embeddings=None, metadatas=None, documents=None, images=None, uris=None):
+        self._guard(ids=ids, embeddings=embeddings, metadatas=metadatas, documents=documents)
+        return self._collection.update(
+            ids=ids,
+            embeddings=embeddings,
+            metadatas=metadatas,
+            documents=documents,
+            images=images,
+            uris=uris,
+        )
+
 
 class QuotaBoundClient:
     """Delegate Chroma client behavior while wrapping every collection writer."""
