@@ -76,9 +76,14 @@ def _embed_texts(texts):
 def get_client():
     global _client
     if _client is None:
+        from utils.chroma_quota import QuotaBoundClient
+
         db_path = os.getenv("CHROMA_DB_DIR", "./chroma_db")
         os.makedirs(db_path, exist_ok=True)
-        _client = chromadb.PersistentClient(path=db_path)
+        _client = QuotaBoundClient(
+            chromadb.PersistentClient(path=db_path),
+            db_path,
+        )
     return _client
 
 

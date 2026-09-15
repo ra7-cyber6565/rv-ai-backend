@@ -1,5 +1,8 @@
 from pathlib import Path
 import importlib
+import os
+import subprocess
+import sys
 
 from research_engine.depth import get_depth_config
 from research_engine.research_company import ROLES
@@ -70,6 +73,45 @@ def test_public_ui_contract_is_chat_and_max_only():
     assert 'data-mode="QUICK">Chat</button>' in source
     assert 'data-mode="MAXIMUM">Max</button>' in source
     assert "Public users intentionally see only two choices: Chat and Max." in source
+
+
+def test_actual_served_html_exposes_exactly_chat_and_max(tmp_path):
+    """Execute the real server-side HTML transform in an isolated process."""
+    env = os.environ.copy()
+    for name in (
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GEMINI_API_KEY",
+        "GEMINI_API_KEYS",
+        "GEMINI_API_KEY_BACKUP",
+        "GEMINI_API_KEY_FALLBACK",
+        "GROQ_API_KEY",
+        "OPENROUTER_API_KEY",
+    ):
+        env.pop(name, None)
+    env["ZERO_COST_ONLY"] = "true"
+    env["INFINITY_DURABLE_ROOT"] = str(tmp_path / "durable")
+    env["INFINITY_EPHEMERAL_ROOT"] = str(tmp_path / "ephemeral")
+    code = r'''
+import re
+import main
+html = main._website_html()
+block = re.search(r'<div class="modes">(.*?)</div>', html, re.S)
+assert block, "served mode selector missing"
+modes = re.findall(r'data-mode="([^"]+)"', block.group(1))
+assert modes == ["QUICK", "MAXIMUM"], modes
+for legacy in ("DEEP", "MARATHON", "COMPANY", "COMPANY_PLUS", "CUSTOM"):
+    assert f'data-mode="{legacy}"' not in block.group(1)
+'''
+    result = subprocess.run(
+        [sys.executable, "-c", code],
+        cwd=str(Path.cwd()),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=45,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
 
 
 def test_unified_max_contract_is_durable_for_future_agents():

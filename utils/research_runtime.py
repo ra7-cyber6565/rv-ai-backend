@@ -17,6 +17,13 @@ import time
 import uuid
 from pathlib import Path
 
+from utils.durable_write_guard import guard_durable_write
+from utils.storage_quota import StorageQuotaError
+
+
+_SQLITE_SCHEMA_RESERVE = 1024 * 1024
+_SQLITE_TRANSACTION_RESERVE = 256 * 1024
+
 
 class RuntimeBlocked(RuntimeError):
     pass
@@ -90,6 +97,7 @@ class RuntimeStore:
             path = Path(ensure_layout()["research_memory"]) / "research_runtime.sqlite3"
         self.path = str(Path(path).resolve())
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
+        self._guard_storage(_SQLITE_SCHEMA_RESERVE)
         with self.db() as db:
             db.executescript("""
               CREATE TABLE IF NOT EXISTS runs (
@@ -110,6 +118,14 @@ class RuntimeStore:
                 PRIMARY KEY(provider,window));
             """)
 
+    def _guard_storage(self, extra_bytes: int) -> None:
+        try:
+            guard_durable_write(self.path, max(0, int(extra_bytes)))
+        except StorageQuotaError as exc:
+            raise RuntimeBlocked(
+                "durable research storage capacity reached; existing checkpoints retained"
+            ) from exc
+
     @contextlib.contextmanager
     def db(self):
         db = sqlite3.connect(self.path, timeout=15, isolation_level=None)
@@ -123,6 +139,7 @@ class RuntimeStore:
 
     @contextlib.contextmanager
     def transaction(self):
+        self._guard_storage(_SQLITE_TRANSACTION_RESERVE)
         with self.db() as db:
             db.execute("BEGIN IMMEDIATE")
             try:
@@ -236,14 +253,19 @@ class RuntimeStore:
 
     def finish(self, project, run, stage, owner, value):
         payload = json.dumps(_encode(value), ensure_ascii=False, allow_nan=False)
-        if len(payload.encode()) > 16000000:
+        payload_bytes = len(payload.encode())
+        if payload_bytes > 16000000:
             raise RuntimeBlocked("checkpoint exceeds 16 MB stage limit")
+        # SQLite WAL/page growth can exceed logical payload size. Reserve double
+        # the payload before opening the write transaction; the transaction also
+        # keeps a small fixed headroom for row/event metadata.
+        self._guard_storage(max(_SQLITE_TRANSACTION_RESERVE, payload_bytes * 2))
         with self.transaction() as db:
             self._check(db.execute("SELECT * FROM runs WHERE project=? AND run=?", (project, run)).fetchone())
             cap = max(0, int(os.environ.get("RESEARCH_CHECKPOINT_BYTES", "268435456")))
             used = db.execute("SELECT COALESCE(SUM(length(CAST(payload AS BLOB))),0) FROM stages").fetchone()[0]
             old = db.execute("SELECT length(CAST(payload AS BLOB)) FROM stages WHERE project=? AND run=? AND stage=?", (project, run, stage)).fetchone()
-            if used - (old[0] if old else 0) + len(payload.encode()) > cap:
+            if used - (old[0] if old else 0) + payload_bytes > cap:
                 raise RuntimeBlocked("shared checkpoint payload capacity reached")
             changed = db.execute("UPDATE stages SET state='COMPLETED',payload=?,sha=?,updated=? WHERE project=? AND run=? AND stage=? AND owner=? AND state='RUNNING'",
                 (payload, hashlib.sha256(payload.encode()).hexdigest(), time.time(), project, run, stage, owner)).rowcount
