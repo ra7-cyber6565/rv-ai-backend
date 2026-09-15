@@ -16,9 +16,9 @@ jobs:
     timeout-minutes: 35
     env:
       BASE_URL: https://web-production-0dd45.up.railway.app
-      STATE_FILE: ${{ runner.temp }}/persistence-private-state.json
-      BEFORE_RECEIPT: ${{ runner.temp }}/persistence-before.json
-      AFTER_RECEIPT: ${{ runner.temp }}/persistence-after.json
+      STATE_FILE: /tmp/persistence-private-state.json
+      BEFORE_RECEIPT: /tmp/persistence-before.json
+      AFTER_RECEIPT: /tmp/persistence-after.json
     steps:
       - name: Checkout acceptance harness
         uses: actions/checkout@v4
@@ -74,7 +74,7 @@ jobs:
         with:
           name: persistence-restart-sanitized-receipts
           path: |
-            ${{ runner.temp }}/persistence-before.json
-            ${{ runner.temp }}/persistence-after.json
+            /tmp/persistence-before.json
+            /tmp/persistence-after.json
           if-no-files-found: ignore
           retention-days: 7
