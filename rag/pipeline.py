@@ -3,6 +3,7 @@ import chromadb
 from dotenv import load_dotenv
 import os
 import re
+from pathlib import Path
 
 load_dotenv()
 
@@ -31,6 +32,24 @@ class _ChromaEmbeddingAdapter:
         return np.asarray(self(texts), dtype=float)
 
 
+def _route_chroma_model_cache(embedding_function) -> None:
+    """Keep Chroma's rebuildable ONNX model off a small durable volume.
+
+    chromadb 0.5.23 hard-codes its model below ``Path.home()/.cache/chroma``
+    instead of reading XDG_CACHE_HOME. Our storage bootstrap already points
+    XDG_CACHE_HOME at the ephemeral cache root in split deployments, so apply
+    that intent explicitly to the Chroma embedding instance. Normal laptop
+    installs without XDG_CACHE_HOME retain Chroma's own default unchanged.
+    """
+    cache_root = str(os.getenv("XDG_CACHE_HOME") or "").strip()
+    if not cache_root or not hasattr(embedding_function, "DOWNLOAD_PATH"):
+        return
+    model_name = str(getattr(embedding_function, "MODEL_NAME", "all-MiniLM-L6-v2"))
+    embedding_function.DOWNLOAD_PATH = (
+        Path(cache_root) / "chroma" / "onnx_models" / model_name
+    )
+
+
 def get_embedding_model():
     """Return cached local ONNX all-MiniLM-L6-v2 with legacy encode support.
 
@@ -44,6 +63,7 @@ def get_embedding_model():
         embedding_function = DefaultEmbeddingFunction()
         if embedding_function is None:
             raise RuntimeError("local embedding backend unavailable")
+        _route_chroma_model_cache(embedding_function)
         _embedding_model = _ChromaEmbeddingAdapter(embedding_function)
     return _embedding_model
 
