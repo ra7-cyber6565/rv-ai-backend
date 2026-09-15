@@ -22,9 +22,9 @@ jobs:
       SERVICE_ID: 3593244e-5f06-42a3-987b-addf4440833e
     steps:
       - name: Select Railway auth without exposing credentials
-        shell: bash
+        shell: sh
         run: |
-          set -euo pipefail
+          set -eu
           if [ -n "${PROJECT_TOKEN:-}" ]; then
             echo "AUTH_KIND=project" >> "$GITHUB_ENV"
             echo "RAILWAY_TOKEN=$PROJECT_TOKEN" >> "$GITHUB_ENV"
@@ -39,11 +39,11 @@ jobs:
           fi
 
       - name: Verify Railway identity
-        shell: bash
+        shell: sh
         run: railway whoami
 
       - name: List current project volumes
-        shell: bash
+        shell: sh
         run: |
-          set -euo pipefail
+          set -eu
           railway volume list --project "$PROJECT_ID" --environment "$ENVIRONMENT_ID" --json
