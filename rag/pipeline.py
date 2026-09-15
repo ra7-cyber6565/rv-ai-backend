@@ -11,8 +11,28 @@ _embedding_model = None
 _client = None
 
 
+class _ChromaEmbeddingAdapter:
+    """Small compatibility layer around Chroma's local embedding callable.
+
+    New RAG code calls the embedding function directly. Older VectorSearch code
+    legitimately uses the SentenceTransformer-shaped ``encode(...).tolist()``
+    contract. Keeping both surfaces lets us remove PyTorch without silently
+    breaking document ingestion or forcing two embedding implementations.
+    """
+
+    def __init__(self, embedding_function):
+        self._embedding_function = embedding_function
+
+    def __call__(self, texts):
+        return self._embedding_function(list(texts))
+
+    def encode(self, texts):
+        import numpy as np
+        return np.asarray(self(texts), dtype=float)
+
+
 def get_embedding_model():
-    """Return Chroma's local ONNX all-MiniLM-L6-v2 embedding function.
+    """Return cached local ONNX all-MiniLM-L6-v2 with legacy encode support.
 
     chromadb==0.5.23 ships this backend itself. Keeping it lazy preserves fast
     web boot and avoids importing/installing the much heavier PyTorch-based
@@ -21,9 +41,10 @@ def get_embedding_model():
     global _embedding_model
     if _embedding_model is None:
         from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
-        _embedding_model = DefaultEmbeddingFunction()
-        if _embedding_model is None:
+        embedding_function = DefaultEmbeddingFunction()
+        if embedding_function is None:
             raise RuntimeError("local embedding backend unavailable")
+        _embedding_model = _ChromaEmbeddingAdapter(embedding_function)
     return _embedding_model
 
 
