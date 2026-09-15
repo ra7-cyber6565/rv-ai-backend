@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import subprocess
+import sys
+
 from tools import run_maximum_live_acceptance as pinned
 
 
@@ -33,3 +36,14 @@ def test_pinned_entrypoint_forwards_exact_revision_without_network(monkeypatch):
     args = seen["argv"]
     index = args.index("--expected-build-revision")
     assert args[index + 1] == sha.lower()
+
+
+def test_pinned_entrypoint_is_directly_executable_from_repo_root():
+    result = subprocess.run(
+        [sys.executable, "tools/run_maximum_live_acceptance.py", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=15,
+    )
+    assert result.returncode == 0, result.stderr or result.stdout
+    assert "--expected-build-revision" in result.stdout
