@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-_HEAVY = ("chromadb", "sentence-transformers", "sentence_transformers", "torch")
+_HEAVY = ("chromadb",)
 
 
 def _read(*parts: str) -> str:
@@ -50,14 +50,42 @@ def _index() -> str:
 
 # ---------------------------------------------------------------- slim install
 
-def test_slim_list_drops_the_two_heavy_packages_and_nothing_else():
-    """Backup host 512 MB par hai. chromadb/torch wahan OOM karte hain, isliye
-    slim list se sirf yehi do nikalte hain — baaki ek bhi package nahi."""
+def test_slim_list_drops_only_chromadb_and_nothing_else():
+    """Backup host 512 MB par hai. Local vector stack wahan fit nahi hota,
+    isliye current base list se sirf chromadb nikalta hai — baaki kuch nahi."""
     base = _pins(_read("requirements.txt"))
     slim = _pins(_read("requirements-slim.txt"))
     missing = sorted(set(base) - set(slim))
-    assert missing == ["chromadb", "sentence-transformers"]
+    assert missing == ["chromadb"]
     assert not set(slim) - set(base)          # slim me koi naya package nahi
+
+
+def test_primary_rag_uses_chroma_onnx_without_sentence_transformers():
+    """Primary PDF search ko PyTorch stack hataane ke baad bhi embeddings milen.
+
+    Chroma 0.5.23 ka DefaultEmbeddingFunction local ONNX MiniLM backend deta hai;
+    direct sentence-transformers dependency/import wapas aaya to image phir
+    multi-GB ho sakti hai, isliye contract dono jagah pin karta hai.
+    """
+    base = _pins(_read("requirements.txt"))
+    rag = _read("rag", "pipeline.py")
+    assert "sentence-transformers" not in base
+    assert "DefaultEmbeddingFunction" in rag
+    assert "from sentence_transformers" not in rag
+    assert "SentenceTransformer(" not in rag
+
+
+def test_chroma_embedding_adapter_calls_the_cached_callable(monkeypatch):
+    """Regression proof bina model/network download ke: RAG embedding helper
+    Chroma-style callable ko documents deta hai aur vectors unchanged lautata hai."""
+    from rag import pipeline
+
+    class FakeEmbeddingFunction:
+        def __call__(self, texts):
+            return [[float(len(text))] for text in texts]
+
+    monkeypatch.setattr(pipeline, "get_embedding_model", lambda: FakeEmbeddingFunction())
+    assert pipeline._embed_texts(["a", "abcd"]) == [[1.0], [4.0]]
 
 
 def test_slim_list_keeps_every_pin_identical_to_the_base_file():
@@ -90,7 +118,7 @@ def test_slim_header_states_the_lost_feature_in_plain_words():
 
 class _NoRag:
     """`from rag import pipeline` ko us host jaisa fail karata hai jahan
-    chromadb/sentence-transformers install hi nahi hue."""
+    chromadb/local vector stack install hi nahi hua."""
 
     def __enter__(self):
         self._had = "rag" in sys.modules
