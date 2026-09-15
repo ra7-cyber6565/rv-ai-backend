@@ -3,6 +3,7 @@ import chromadb
 from dotenv import load_dotenv
 import os
 import re
+from pathlib import Path
 
 load_dotenv()
 
@@ -11,24 +12,82 @@ _embedding_model = None
 _client = None
 
 
+class _ChromaEmbeddingAdapter:
+    """Small compatibility layer around Chroma's local embedding callable.
+
+    New RAG code calls the embedding function directly. Older VectorSearch code
+    legitimately uses the SentenceTransformer-shaped ``encode(...).tolist()``
+    contract. Keeping both surfaces lets us remove PyTorch without silently
+    breaking document ingestion or forcing two embedding implementations.
+    """
+
+    def __init__(self, embedding_function):
+        self._embedding_function = embedding_function
+
+    def __call__(self, texts):
+        return self._embedding_function(list(texts))
+
+    def encode(self, texts):
+        import numpy as np
+        return np.asarray(self(texts), dtype=float)
+
+
+def _route_chroma_model_cache(embedding_function) -> None:
+    """Keep Chroma's rebuildable ONNX model off a small durable volume.
+
+    chromadb 0.5.23 hard-codes its model below ``Path.home()/.cache/chroma``
+    instead of reading XDG_CACHE_HOME. Our storage bootstrap already points
+    XDG_CACHE_HOME at the ephemeral cache root in split deployments, so apply
+    that intent explicitly to the Chroma embedding instance. Normal laptop
+    installs without XDG_CACHE_HOME retain Chroma's own default unchanged.
+    """
+    cache_root = str(os.getenv("XDG_CACHE_HOME") or "").strip()
+    if not cache_root or not hasattr(embedding_function, "DOWNLOAD_PATH"):
+        return
+    model_name = str(getattr(embedding_function, "MODEL_NAME", "all-MiniLM-L6-v2"))
+    embedding_function.DOWNLOAD_PATH = (
+        Path(cache_root) / "chroma" / "onnx_models" / model_name
+    )
+
+
 def get_embedding_model():
+    """Return cached local ONNX all-MiniLM-L6-v2 with legacy encode support.
+
+    chromadb==0.5.23 ships this backend itself. Keeping it lazy preserves fast
+    web boot and avoids importing/installing the much heavier PyTorch-based
+    sentence-transformers stack just to generate the same MiniLM-family vectors.
+    """
     global _embedding_model
     if _embedding_model is None:
-        from sentence_transformers import SentenceTransformer
-        cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
-        _embedding_model = SentenceTransformer(
-            "all-MiniLM-L6-v2",
-            cache_folder=cache_folder,
-        )
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+        embedding_function = DefaultEmbeddingFunction()
+        if embedding_function is None:
+            raise RuntimeError("local embedding backend unavailable")
+        _route_chroma_model_cache(embedding_function)
+        _embedding_model = _ChromaEmbeddingAdapter(embedding_function)
     return _embedding_model
+
+
+def _embed_texts(texts):
+    """Generate embeddings through the cached Chroma embedding callable."""
+    return get_embedding_model()(list(texts))
 
 
 def get_client():
     global _client
     if _client is None:
+        from chromadb.config import Settings
+        from utils.chroma_quota import QuotaBoundClient
+
         db_path = os.getenv("CHROMA_DB_DIR", "./chroma_db")
         os.makedirs(db_path, exist_ok=True)
-        _client = chromadb.PersistentClient(path=db_path)
+        _client = QuotaBoundClient(
+            chromadb.PersistentClient(
+                path=db_path,
+                settings=Settings(anonymized_telemetry=False),
+            ),
+            db_path,
+        )
     return _client
 
 
@@ -83,7 +142,7 @@ def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
     if not chunks:
         return {"chunks": 0}
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
-    embeddings = get_embedding_model().encode(chunks).tolist()
+    embeddings = _embed_texts(chunks)
     collection.add(
         documents=chunks,
         embeddings=embeddings,
@@ -128,7 +187,7 @@ def ask_question(question: str, project_id: str) -> dict:
     """
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
 
-    q_embedding = get_embedding_model().encode([question]).tolist()
+    q_embedding = _embed_texts([question])
     results = collection.query(query_embeddings=q_embedding, n_results=5)
     documents = (results.get("documents") or [[]])[0] or []
     metadatas = (results.get("metadatas") or [[]])[0] or []
@@ -211,7 +270,7 @@ def split_text(text: str, chunk_size: int = 500) -> list:
 def get_context_only(question: str, project_id: str, n_results: int = 8) -> dict:
     """Sirf relevant documents dhoondo, koi reasoning provider call NAHI."""
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
-    q_embedding = get_embedding_model().encode([question]).tolist()
+    q_embedding = _embed_texts([question])
     results = collection.query(query_embeddings=q_embedding, n_results=n_results)
 
     documents = (results.get("documents") or [[]])[0] or []

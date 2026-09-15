@@ -3,29 +3,30 @@
 #     pip install -r requirements-slim.txt
 #
 # Yeh `requirements.txt` ki JAGAH nahi leta. Poora (primary) host — jaise Railway
-# — hamesha `requirements.txt` hi use karega, aur usme kuch nahi badla gaya.
-# Yeh file sirf UN hosts ke liye hai jahan 512 MB RAM aur chhota build space hai.
+# — hamesha `requirements.txt` hi use karega. Yeh file sirf UN hosts ke liye hai
+# jahan 512 MB RAM aur chhota build space hai.
 #
 # Kya nikaala gaya aur KYUN
 # ------------------------
-#   chromadb              ~200 MB
-#   sentence-transformers  torch ke saath ~900 MB, aur MiniLM model load hote hi
-#                          ~300 MB RAM
+#   chromadb              local vector database + ONNX embedding runtime
 #
-# Yeh dono sirf EK lane chalate hain: tumhaari apni upload ki hui PDF/notes ka
-# vector search (`rag/pipeline.py`). Poora research pipeline — search, relevance,
-# facet gate, claim verification, hypothesis, audit — inke bina bilkul waisa hi
-# chalta hai, kyunki `research_engine/vector_search.py` inhe LAZY import karta
-# hai aur na milne par khaali context deta hai (koi crash nahi, koi jhootha
-# jawab nahi).
+# Primary requirements ab alag `sentence-transformers`/PyTorch stack install
+# nahi karte. Primary PDF/notes vector search Chroma ke built-in local ONNX
+# all-MiniLM-L6-v2 embedding function se chalta hai. Slim backup par `chromadb`
+# khud hi hata hua hai, isliye user-uploaded PDF vector search wahan available
+# nahi hota.
+#
+# Poora research pipeline — web search, relevance, facet gate, claim
+# verification, hypothesis, audit — chromadb ke bina chalta rehta hai, kyunki
+# `research_engine/vector_search.py` RAG ko lazy import karta hai aur unavailable
+# hone par khaali context deta hai (koi crash nahi, koi jhootha jawab nahi).
 #
 # Iska seedha matlab, saaf-saaf: is host par tumhaari khud ki upload ki hui PDF
-# se search BAND rahegi. Baaki sab chalega. Yeh feature "hataya" nahi gaya —
-# primary host par jaisa hai waisa hi hai; yeh sirf chhote backup host ki
-# imaandaar seema hai.
+# se search BAND rahegi. Baaki sab chalega. Yeh feature primary host se nahi
+# hataya gaya; sirf chhote backup host ki imaandaar seema hai.
 #
-# Version pins base file se HUBAHU same rakhe gaye hain, taaki dono host ek hi
-# code par ek hi tarah chalein.
+# Jo packages dono files me hain unke version pins HUBAHU same rakhe gaye hain,
+# taaki dono host ek hi code par ek hi tarah chalein.
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
