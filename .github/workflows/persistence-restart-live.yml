@@ -1,0 +1,80 @@
+name: Live persistence restart acceptance
+
+on:
+  push:
+    branches:
+      - test/persistence-acceptance-harness
+    paths:
+      - .persistence-live-trigger
+
+permissions:
+  contents: read
+
+jobs:
+  live-persistence-restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      BASE_URL: https://web-production-0dd45.up.railway.app
+      STATE_FILE: /tmp/persistence-private-state.json
+      BEFORE_RECEIPT: /tmp/persistence-before.json
+      AFTER_RECEIPT: /tmp/persistence-after.json
+    steps:
+      - name: Checkout acceptance harness
+        uses: actions/checkout@v4
+
+      - name: Phase 1 - create completed durable job
+        run: |
+          python tools/persistence_acceptance.py before-restart \
+            --base-url "$BASE_URL" \
+            --state-file "$STATE_FILE" \
+            --receipt-file "$BEFORE_RECEIPT" \
+            --depth-mode QUICK \
+            --timeout-seconds 900 \
+            --poll-seconds 3
+          echo "PHASE1_COMPLETE__TRIGGER_CONTROLLED_RAILWAY_REDEPLOY_NOW"
+          cat "$BEFORE_RECEIPT"
+
+      - name: Controlled restart coordination window
+        run: |
+          echo "Private state stays only on this runner; capability token is never uploaded."
+          sleep 300
+
+      - name: Wait for service health after restart
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request
+          url = os.environ['BASE_URL'].rstrip('/') + '/health'
+          deadline = time.monotonic() + 600
+          last = None
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen(url, timeout=20) as r:
+                      body = json.loads(r.read().decode('utf-8'))
+                      if r.status == 200 and isinstance(body, dict):
+                          print('SERVICE_HEALTH_RECOVERED', body.get('status'), body.get('build_revision'))
+                          raise SystemExit(0)
+              except Exception as exc:
+                  last = repr(exc)
+              time.sleep(5)
+          raise SystemExit('service did not recover before timeout; last=' + str(last))
+          PY
+
+      - name: Phase 2 - verify same job, token and result
+        run: |
+          python tools/persistence_acceptance.py after-restart \
+            --base-url "$BASE_URL" \
+            --state-file "$STATE_FILE" \
+            --receipt-file "$AFTER_RECEIPT"
+          cat "$AFTER_RECEIPT"
+
+      - name: Upload sanitized receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: persistence-restart-sanitized-receipts
+          path: |
+            /tmp/persistence-before.json
+            /tmp/persistence-after.json
+          if-no-files-found: ignore
+          retention-days: 7

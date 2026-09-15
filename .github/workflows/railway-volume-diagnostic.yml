@@ -1,0 +1,49 @@
+name: Railway zero-cost volume diagnostic
+
+on:
+  push:
+    branches:
+      - test/persistence-acceptance-harness
+    paths:
+      - .railway-volume-trigger
+
+permissions:
+  contents: read
+
+jobs:
+  volume-diagnostic:
+    runs-on: ubuntu-latest
+    container: ghcr.io/railwayapp/cli:latest
+    env:
+      PROJECT_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+      API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      PROJECT_ID: 568ca4c8-f937-4c7c-9d3d-6c9bf422887c
+      ENVIRONMENT_ID: a911dd49-980f-4722-a6d8-b6c176d1c439
+      SERVICE_ID: 3593244e-5f06-42a3-987b-addf4440833e
+    steps:
+      - name: Select Railway auth without exposing credentials
+        shell: sh
+        run: |
+          set -eu
+          if [ -n "${PROJECT_TOKEN:-}" ]; then
+            echo "AUTH_KIND=project" >> "$GITHUB_ENV"
+            echo "RAILWAY_TOKEN=$PROJECT_TOKEN" >> "$GITHUB_ENV"
+            echo "Railway CI credential available: project-scoped"
+          elif [ -n "${API_TOKEN:-}" ]; then
+            echo "AUTH_KIND=api" >> "$GITHUB_ENV"
+            echo "RAILWAY_API_TOKEN=$API_TOKEN" >> "$GITHUB_ENV"
+            echo "Railway CI credential available: account/workspace-scoped"
+          else
+            echo "NO_RAILWAY_CI_TOKEN"
+            exit 3
+          fi
+
+      - name: Verify Railway identity
+        shell: sh
+        run: railway whoami
+
+      - name: List current project volumes
+        shell: sh
+        run: |
+          set -eu
+          railway volume list --project "$PROJECT_ID" --environment "$ENVIRONMENT_ID" --json
