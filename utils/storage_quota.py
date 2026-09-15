@@ -1,8 +1,12 @@
 """Bounded local workspace policy for Infinity Research AI.
 
-The goal is simple: D: is a fast working area, not an endlessly growing archive.
-This module never deletes arbitrary files. Cleanup is allowed only for files that
-ArchiveManifest has already marked VERIFIED in cloud storage.
+The goal is simple: local storage is a fast working area, not an endlessly
+growing archive. Laptop installs keep the historical GB-sized defaults. Small
+cloud volumes can opt into explicit MB-sized safety budgets without weakening
+the existing defaults.
+
+This module never deletes arbitrary files. Cleanup is allowed only for files
+that ArchiveManifest has already marked VERIFIED in cloud storage.
 """
 from __future__ import annotations
 
@@ -17,6 +21,7 @@ from utils.archive_manifest import ArchiveManifest
 from utils.storage_paths import configured_root
 
 
+_MB = 1024 ** 2
 _GB = 1024 ** 3
 
 
@@ -33,6 +38,23 @@ def _float_env(name: str, default: float, *, minimum: float, maximum: float) -> 
     return max(minimum, min(maximum, value))
 
 
+def _optional_float_env(name: str, *, minimum: float, maximum: float) -> float | None:
+    """Return a bounded optional numeric env value, or None when absent/invalid.
+
+    Optional MB overrides are deliberately fail-closed to the historical GB
+    policy when malformed instead of silently turning an invalid value into a
+    tiny storage budget.
+    """
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return None
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    return max(minimum, min(maximum, value))
+
+
 @dataclass(frozen=True)
 class StoragePolicy:
     max_local_bytes: int
@@ -40,9 +62,38 @@ class StoragePolicy:
 
     @classmethod
     def from_env(cls) -> "StoragePolicy":
-        max_gb = _float_env("INFINITY_MAX_LOCAL_GB", 50.0, minimum=1.0, maximum=500.0)
-        min_free_gb = _float_env("INFINITY_MIN_FREE_GB", 5.0, minimum=1.0, maximum=100.0)
-        return cls(int(max_gb * _GB), int(min_free_gb * _GB))
+        """Build the storage policy while preserving historical defaults.
+
+        Existing installations continue to use GB variables/defaults:
+        ``INFINITY_MAX_LOCAL_GB`` (50GB) and ``INFINITY_MIN_FREE_GB`` (5GB).
+        Constrained persistent volumes can opt into MB precision with
+        ``INFINITY_MAX_LOCAL_MB`` and/or ``INFINITY_MIN_FREE_MB``. Each MB
+        override takes precedence only for its corresponding setting.
+        """
+        max_mb = _optional_float_env(
+            "INFINITY_MAX_LOCAL_MB",
+            minimum=16.0,
+            maximum=500.0 * 1024.0,
+        )
+        min_free_mb = _optional_float_env(
+            "INFINITY_MIN_FREE_MB",
+            minimum=16.0,
+            maximum=100.0 * 1024.0,
+        )
+
+        if max_mb is None:
+            max_gb = _float_env("INFINITY_MAX_LOCAL_GB", 50.0, minimum=1.0, maximum=500.0)
+            max_local_bytes = int(max_gb * _GB)
+        else:
+            max_local_bytes = int(max_mb * _MB)
+
+        if min_free_mb is None:
+            min_free_gb = _float_env("INFINITY_MIN_FREE_GB", 5.0, minimum=1.0, maximum=100.0)
+            min_free_bytes = int(min_free_gb * _GB)
+        else:
+            min_free_bytes = int(min_free_mb * _MB)
+
+        return cls(max_local_bytes, min_free_bytes)
 
 
 def folder_size_bytes(root: str) -> int:

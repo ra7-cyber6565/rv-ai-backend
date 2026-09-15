@@ -30,6 +30,40 @@ def test_assert_capacity_blocks_when_app_limit_would_be_exceeded():
                 assert_capacity(10, policy=policy)
 
 
+def test_storage_policy_mb_overrides_support_sub_gb_volumes():
+    with patch.dict(
+        os.environ,
+        {
+            "INFINITY_MAX_LOCAL_GB": "50",
+            "INFINITY_MIN_FREE_GB": "5",
+            "INFINITY_MAX_LOCAL_MB": "350",
+            "INFINITY_MIN_FREE_MB": "64",
+        },
+        clear=True,
+    ):
+        policy = StoragePolicy.from_env()
+
+    assert policy.max_local_bytes == 350 * 1024**2
+    assert policy.min_free_bytes == 64 * 1024**2
+
+
+def test_invalid_mb_overrides_fall_back_to_historical_gb_policy():
+    with patch.dict(
+        os.environ,
+        {
+            "INFINITY_MAX_LOCAL_GB": "2",
+            "INFINITY_MIN_FREE_GB": "1",
+            "INFINITY_MAX_LOCAL_MB": "not-a-number",
+            "INFINITY_MIN_FREE_MB": "not-a-number",
+        },
+        clear=True,
+    ):
+        policy = StoragePolicy.from_env()
+
+    assert policy.max_local_bytes == 2 * 1024**3
+    assert policy.min_free_bytes == 1 * 1024**3
+
+
 def test_cleanup_deletes_only_verified_file_inside_root():
     with tempfile.TemporaryDirectory() as root:
         verified = os.path.join(root, "verified.bin")
