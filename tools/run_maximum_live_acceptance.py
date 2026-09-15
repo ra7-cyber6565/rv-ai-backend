@@ -11,8 +11,17 @@ from __future__ import annotations
 import argparse
 import re
 import sys
+from pathlib import Path
 
-from tools import maximum_live_acceptance as core
+
+# `python tools/run_maximum_live_acceptance.py ...` puts `tools/`, not the repo
+# root, at sys.path[0]. Add the parent explicitly so direct production execution
+# and package-style pytest imports resolve the exact same core module.
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools import maximum_live_acceptance as core  # noqa: E402
 
 
 _FULL_SHA = re.compile(r"^[0-9a-fA-F]{40}$")
