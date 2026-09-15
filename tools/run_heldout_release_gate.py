@@ -58,7 +58,9 @@ def main(argv: list[str] | None = None) -> int:
             draws=args.draws,
         )
         _write(args.receipt_file, receipt)
-    except HeldoutGateError as exc:
+    except (HeldoutGateError, ValueError) as exc:
+        # The paired evaluator uses fixed ValueError messages for malformed
+        # pairing/provenance. Never print JSON rows, answers or provider bodies.
         print(f"HELDOUT_RELEASE_INVALID: {exc}", file=sys.stderr)
         return 4
     decision = receipt["decision"]
