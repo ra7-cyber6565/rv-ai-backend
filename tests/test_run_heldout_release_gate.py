@@ -118,7 +118,12 @@ class HeldoutReleaseGateCliTests(unittest.TestCase):
             self.assertEqual(stderr.getvalue(), "")
             saved = receipt.read_text(encoding="utf-8")
             self.assertNotIn("raw-row-must-not-appear", saved)
-            self.assertEqual(json.loads(saved)["decision"], "PASS")
+            parsed = json.loads(saved)
+            self.assertEqual(parsed["decision"], "PASS")
+            expected_candidate_file = hashlib.sha256(paths["candidate"].read_bytes()).hexdigest()
+            self.assertEqual(
+                parsed["input_artifacts_sha256"]["candidate"], expected_candidate_file)
+            self.assertRegex(parsed["receipt_sha256"], r"^[0-9a-f]{64}$")
 
     def test_bad_frozen_policy_hash_returns_invalid_without_receipt(self):
         with tempfile.TemporaryDirectory() as temp:
