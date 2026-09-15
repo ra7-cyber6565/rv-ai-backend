@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 
 def test_durable_guard_enforces_only_inside_explicit_root(monkeypatch, tmp_path):
     from utils import durable_write_guard as guard
@@ -24,7 +22,7 @@ def test_durable_guard_enforces_only_inside_explicit_root(monkeypatch, tmp_path)
     assert calls == [1234]
 
 
-def test_chroma_wrapper_guards_add_and_upsert_but_not_reads(monkeypatch, tmp_path):
+def test_chroma_wrapper_guards_all_vector_mutations_but_not_reads(monkeypatch, tmp_path):
     from utils import chroma_quota
 
     guarded = []
@@ -46,6 +44,10 @@ def test_chroma_wrapper_guards_add_and_upsert_but_not_reads(monkeypatch, tmp_pat
             self.calls.append(("upsert", kwargs))
             return "upserted"
 
+        def update(self, **kwargs):
+            self.calls.append(("update", kwargs))
+            return "updated"
+
         def query(self, **kwargs):
             self.calls.append(("query", kwargs))
             return {"ids": [["x"]]}
@@ -55,11 +57,12 @@ def test_chroma_wrapper_guards_add_and_upsert_but_not_reads(monkeypatch, tmp_pat
 
     assert wrapped.add(ids=["1"], embeddings=[[1.0, 2.0]], metadatas=[{"a": 1}], documents=["hello"]) == "added"
     assert wrapped.upsert(ids=["1"], embeddings=[[3.0, 4.0]], metadatas=[{"a": 2}], documents=["world"]) == "upserted"
+    assert wrapped.update(ids=["1"], embeddings=[[5.0, 6.0]], metadatas=[{"a": 3}], documents=["new"]) == "updated"
     assert wrapped.query(query_embeddings=[[1.0, 2.0]], n_results=1) == {"ids": [["x"]]}
 
-    assert len(guarded) == 2
+    assert len(guarded) == 3
     assert all(size >= 4 * 1024 * 1024 for _path, size in guarded)
-    assert [name for name, _payload in inner.calls] == ["add", "upsert", "query"]
+    assert [name for name, _payload in inner.calls] == ["add", "upsert", "update", "query"]
 
 
 def test_quota_bound_client_wraps_every_collection_factory(tmp_path):
