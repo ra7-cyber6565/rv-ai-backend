@@ -174,11 +174,13 @@ def configure_process_storage() -> dict[str, object]:
     _set_path_env("INFINITY_ARCHIVE_DIR", layout["archive"], force=durable_explicit)
 
     # Heavy third-party caches/models stay rebuildable/ephemeral when split.
+    # Transformers now uses HF_HOME/HUGGINGFACE_HUB_CACHE; exporting the legacy
+    # TRANSFORMERS_CACHE variable itself triggers a deprecation warning in newer
+    # Transformers releases, so the app deliberately no longer creates it.
     cache_root = Path(layout["cache"])
     model_root = Path(layout["models"])
     _set_path_env("HF_HOME", str(model_root / "huggingface"), force=ephemeral_explicit)
     _set_path_env("HUGGINGFACE_HUB_CACHE", str(model_root / "huggingface" / "hub"), force=ephemeral_explicit)
-    _set_path_env("TRANSFORMERS_CACHE", str(model_root / "transformers"), force=ephemeral_explicit)
     _set_path_env("SENTENCE_TRANSFORMERS_HOME", str(model_root / "sentence_transformers"), force=ephemeral_explicit)
     _set_path_env("TORCH_HOME", str(model_root / "torch"), force=ephemeral_explicit)
     _set_path_env("XDG_CACHE_HOME", str(cache_root), force=ephemeral_explicit)
