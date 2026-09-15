@@ -12,15 +12,24 @@ _client = None
 
 
 def get_embedding_model():
+    """Return Chroma's local ONNX all-MiniLM-L6-v2 embedding function.
+
+    chromadb==0.5.23 ships this backend itself. Keeping it lazy preserves fast
+    web boot and avoids importing/installing the much heavier PyTorch-based
+    sentence-transformers stack just to generate the same MiniLM-family vectors.
+    """
     global _embedding_model
     if _embedding_model is None:
-        from sentence_transformers import SentenceTransformer
-        cache_folder = os.getenv("SENTENCE_TRANSFORMERS_HOME") or None
-        _embedding_model = SentenceTransformer(
-            "all-MiniLM-L6-v2",
-            cache_folder=cache_folder,
-        )
+        from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+        _embedding_model = DefaultEmbeddingFunction()
+        if _embedding_model is None:
+            raise RuntimeError("local embedding backend unavailable")
     return _embedding_model
+
+
+def _embed_texts(texts):
+    """Generate embeddings through the cached Chroma embedding callable."""
+    return get_embedding_model()(list(texts))
 
 
 def get_client():
@@ -83,7 +92,7 @@ def ingest_pdf(pdf_bytes: bytes, filename: str, project_id: str) -> dict:
     if not chunks:
         return {"chunks": 0}
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
-    embeddings = get_embedding_model().encode(chunks).tolist()
+    embeddings = _embed_texts(chunks)
     collection.add(
         documents=chunks,
         embeddings=embeddings,
@@ -128,7 +137,7 @@ def ask_question(question: str, project_id: str) -> dict:
     """
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
 
-    q_embedding = get_embedding_model().encode([question]).tolist()
+    q_embedding = _embed_texts([question])
     results = collection.query(query_embeddings=q_embedding, n_results=5)
     documents = (results.get("documents") or [[]])[0] or []
     metadatas = (results.get("metadatas") or [[]])[0] or []
@@ -211,7 +220,7 @@ def split_text(text: str, chunk_size: int = 500) -> list:
 def get_context_only(question: str, project_id: str, n_results: int = 8) -> dict:
     """Sirf relevant documents dhoondo, koi reasoning provider call NAHI."""
     collection = get_client().get_or_create_collection(name=f"project_{project_id}")
-    q_embedding = get_embedding_model().encode([question]).tolist()
+    q_embedding = _embed_texts([question])
     results = collection.query(query_embeddings=q_embedding, n_results=n_results)
 
     documents = (results.get("documents") or [[]])[0] or []
