@@ -23,6 +23,8 @@ import shutil
 from pathlib import Path
 from typing import Mapping
 
+from .railway_volume_status import railway_runtime_volume_status
+
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 DURABLE_SUBDIRS = (
@@ -231,6 +233,9 @@ def storage_status() -> dict[str, object]:
         "available": False,
         "ephemeral_available": False,
     }
+    status.update(
+        railway_runtime_volume_status(os.environ, durable_root=durable_root)
+    )
     try:
         _probe_writable(durable_root)
         usage = shutil.disk_usage(durable_root)
@@ -299,4 +304,15 @@ def public_storage_status(status: Mapping[str, object] | None = None) -> dict[st
             out["ephemeral_disk_free_percent"] = round((ephemeral_free / ephemeral_total) * 100, 1)
         if not ephemeral_available:
             out["ephemeral_error"] = "ephemeral_storage_unavailable"
+
+    # Railway exposes volume name/mount variables only at runtime when a Volume
+    # is attached. Publish booleans only: never leak the volume name or path.
+    # This is an attachment/mount attestation, not a restart-persistence proof.
+    if raw.get("railway_runtime") is True:
+        out["railway_runtime"] = True
+        out["railway_volume_attached"] = bool(raw.get("railway_volume_attached"))
+        out["railway_volume_mount_matches_durable_root"] = bool(
+            raw.get("railway_volume_mount_matches_durable_root")
+        )
+        out["persistent_volume_ready"] = bool(raw.get("persistent_volume_ready"))
     return out
