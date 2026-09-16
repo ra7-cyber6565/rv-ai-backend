@@ -1,0 +1,124 @@
+name: Temporary PR82 safe integration
+
+on:
+  push:
+    branches:
+      - integration/review-pr82-on-current-stack
+    paths:
+      - .github/workflows/temp-pr82-merge-diagnostic.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/review-pr82-on-current-stack
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Persist deterministic Python 3.12 missing-rag test harness
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("tests/test_vector_ingest_hygiene.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
+    class _NoRag:
+        def find_module(self, name, path=None):
+            return self if name == "rag" or name.startswith("rag.") else None
+
+        def load_module(self, name):
+            raise ImportError("No module named 'chromadb'")
+
+    hook = _NoRag()
+    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
+    sys.meta_path.insert(0, hook)
+    try:
+        vs = VectorSearch()
+        report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
+    finally:
+        sys.meta_path.remove(hook)
+        for name in ("rag", "rag.pipeline"):
+            module = saved[name]
+            if module is not None:
+                sys.modules[name] = module
+'''
+          new = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
+    # Python 3.12 no longer makes the legacy find_module/load_module shim a
+    # reliable way to simulate a missing package.  Put a non-package `rag`
+    # module in sys.modules instead: `from rag import pipeline` must then fail
+    # deterministically without importing Chroma or touching the network.
+    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
+    sys.modules["rag"] = types.ModuleType("rag")
+    try:
+        vs = VectorSearch()
+        report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
+    finally:
+        sys.modules.pop("rag.pipeline", None)
+        sys.modules.pop("rag", None)
+        for name in ("rag", "rag.pipeline"):
+            module = saved[name]
+            if module is not None:
+                sys.modules[name] = module
+'''
+          if old not in text:
+              raise SystemExit("expected missing-rag test anchor not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          if ! git diff --quiet -- tests/test_vector_ingest_hygiene.py; then
+            git add tests/test_vector_ingest_hygiene.py
+            git commit -m "test: make missing-rag simulation deterministic"
+            git push origin HEAD:integration/review-pr82-on-current-stack
+          fi
+      - name: Create clean local validation merge of historical PR82 head
+        shell: bash
+        run: |
+          git fetch origin codex/answer-scope-20260908
+          git merge --no-commit --no-ff origin/codex/answer-scope-20260908
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge: integrate validated PR82 fixes into current stack"
+          test -z "$(git status --porcelain)"
+      - name: Install repository and test dependencies
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q pytest
+      - name: Run focused isolation regressions
+        run: python -m pytest -q tests/test_repo_hygiene.py tests/test_vector_ingest_hygiene.py
+      - name: Run full pytest regression before any push
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q --tb=short -ra 2>&1 | tee integration-pytest.log
+      - name: Upload pytest diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr82-integration-pytest-${{ github.run_id }}
+          path: integration-pytest.log
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Run legacy strict research-engine regression
+        shell: bash
+        run: |
+          set -o pipefail
+          python test_research_engine.py 2>&1 | tee integration-legacy.log
+      - name: Upload legacy diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr82-integration-legacy-${{ github.run_id }}
+          path: integration-legacy.log
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Push validated integration merge only after all gates pass
+        shell: bash
+        run: git push origin HEAD:integration/review-pr82-on-current-stack
