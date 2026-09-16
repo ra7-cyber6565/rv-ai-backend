@@ -1,5 +1,5 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "recorded_date": "2026-09-16",
   "repository": "ra7-cyber6565/rv-ai-backend",
   "production_branch": "main",
@@ -104,6 +104,22 @@
         "model_reality": 482,
         "all_success": true
       }
+    },
+    {
+      "pr": 98,
+      "head": "68497e104fb6b42663f13d02705c23c5027cf47f",
+      "base": "test/heldout-campaign-capture",
+      "mergeable": true,
+      "purpose": "Expose path-free Railway runtime volume attachment and durable-root mount attestation",
+      "ci": {
+        "foundation": 1680,
+        "ai1": 315,
+        "ai2": 309,
+        "anti_confirmation": 461,
+        "model_reality": 484,
+        "all_success": true
+      },
+      "truth_boundary": "persistent_volume_ready is runtime attachment/mount attestation only, not restart persistence proof"
     }
   ],
   "persistence_harness": {
@@ -121,10 +137,11 @@
     },
     "latest_empirical_restart_result": "FAIL before volume attachment: same completed job returned 404 after redeploy"
   },
-  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95],
+  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95, 98],
   "persistence_harness_merge": "PR #85 is independent of the stacked feature chain and may be merged separately only under explicit production authorization.",
   "live_acceptance_after_volume_and_deploy": [
     "Verify Railway service reports a real attached volume mounted at /data",
+    "If PR #98 is deployed, require public health storage.persistent_volume_ready=true while keeping the restart proof separate",
     "Run persistence phase 1 on one completed job and save private same-job token/state",
     "Perform controlled redeploy only under explicit production authorization",
     "Run persistence phase 2 using same job ID and same token; require identical semantic digest",
@@ -135,6 +152,7 @@
   ],
   "truth_boundaries": [
     "No attached Railway volume means persistence is not fixed.",
+    "Runtime Railway volume markers prove attachment/mount intent for a container start, not state survival across redeploys.",
     "CI success does not prove hosted six-worker execution.",
     "Held-out gate infrastructure does not prove a real quality win until an actual frozen campaign is graded.",
     "ONNX code validation does not prove production image size until a real production build is measured.",
