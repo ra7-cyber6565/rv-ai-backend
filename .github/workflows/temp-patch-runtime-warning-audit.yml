@@ -1,0 +1,45 @@
+name: Temporary runtime-warning audit patch
+
+on:
+  push:
+    branches:
+      - fix/runtime-warning-hygiene
+    paths:
+      - .github/workflows/temp-patch-runtime-warning-audit.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/runtime-warning-hygiene
+      - name: Teach dependency audit about Chroma's PostHog compatibility pin
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("test_research_engine.py")
+          text = path.read_text(encoding="utf-8")
+          old = '        "pymupdf": "fitz", "chromadb": "chromadb",\n        "sentence-transformers": "sentence_transformers",'
+          new = '        "pymupdf": "fitz", "chromadb": "chromadb",\n        "posthog": "",  # Chroma 0.5.23 telemetry compatibility pin\n        "sentence-transformers": "sentence_transformers",'
+          if old not in text:
+              raise SystemExit("expected dependency-audit mapping anchor not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+      - name: Commit surgical audit fix
+        shell: bash
+        run: |
+          if git diff --quiet -- test_research_engine.py; then
+            echo "No change needed."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add test_research_engine.py
+          git commit -m "test: recognize Chroma PostHog compatibility pin"
+          git push origin HEAD:fix/runtime-warning-hygiene
