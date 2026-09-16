@@ -174,11 +174,8 @@ def test_a_database_write_failure_hides_the_path_but_admits_the_failure():
 
 
 def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
-    # Python 3.12 no longer gives the old ``find_module`` test hook reliable
-    # control over imports.  Put a real module object named ``rag`` in
-    # sys.modules, but deliberately make it a non-package with no ``pipeline``.
-    # ``from rag import pipeline`` must then fail before Chroma can import or
-    # download anything, which is exactly the missing-package condition wanted.
+    # Use a non-package rag stub so from rag import pipeline fails
+    # deterministically on Python 3.12 without importing Chroma.
     saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
     sys.modules["rag"] = types.ModuleType("rag")
     try:
@@ -193,9 +190,8 @@ def test_a_missing_vector_database_says_available_nahi_without_the_import_text()
                 sys.modules[name] = module
     assert report["ok"] is False
     assert report["reason_code"] == VEC_DB_MISSING
-    assert "available nahi" in report["error"]     # purana contract kayam
+    assert "available nahi" in report["error"]
     _assert_user_safe(report["error"])
-
 
 def test_an_empty_file_is_not_blamed_on_the_database():
     vs = VectorSearch()
