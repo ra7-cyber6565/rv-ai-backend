@@ -47,6 +47,7 @@ def test_split_process_env_routes_models_and_temp_to_ephemeral(tmp_path, monkeyp
 
     monkeypatch.delenv("INFINITY_DATA_ROOT", raising=False)
     monkeypatch.delenv("INFINITY_WORK_ROOT", raising=False)
+    monkeypatch.delenv("TRANSFORMERS_CACHE", raising=False)
     monkeypatch.setenv("INFINITY_DURABLE_ROOT", str(durable))
     monkeypatch.setenv("INFINITY_EPHEMERAL_ROOT", str(ephemeral))
 
@@ -58,6 +59,11 @@ def test_split_process_env_routes_models_and_temp_to_ephemeral(tmp_path, monkeyp
     assert _same(storage_paths.os.environ["RESEARCH_MEMORY_DIR"], durable / "research_memory")
     assert _same(storage_paths.os.environ["CHROMA_DB_DIR"], durable / "vector_db")
     assert _same(storage_paths.os.environ["HF_HOME"], ephemeral / "models" / "huggingface")
+    assert _same(
+        storage_paths.os.environ["HUGGINGFACE_HUB_CACHE"],
+        ephemeral / "models" / "huggingface" / "hub",
+    )
+    assert "TRANSFORMERS_CACHE" not in storage_paths.os.environ
     assert _same(storage_paths.os.environ["TMPDIR"], ephemeral / "temp")
 
 

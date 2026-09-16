@@ -1312,6 +1312,7 @@ def _check_package_surface():
         "fastapi": "fastapi", "uvicorn": "", "python-multipart": "",
         "python-dotenv": "dotenv", "pydantic": "pydantic",
         "pymupdf": "fitz", "chromadb": "chromadb",
+        "posthog": "",  # Chroma 0.5.23 telemetry compatibility pin
         "sentence-transformers": "sentence_transformers",
         "google-generativeai": "generativeai", "requests": "requests",
         "tavily-python": "tavily", "ddgs": "ddgs",
