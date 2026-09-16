@@ -17,6 +17,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: fix/railway-volume-runtime-attestation
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - name: Wire Railway volume attestation into storage health
         shell: bash
         run: |
@@ -33,54 +36,63 @@ jobs:
                   raise SystemExit("storage import anchor not found")
               text = text.replace(import_anchor, import_anchor + "\n" + import_line, 1)
 
-          status_anchor = '''    status: dict[str, object] = {
-        "root": durable_root,
-        "explicit": bool(roots["durable_explicit"]),
-        "ephemeral_root": ephemeral_root,
-        "split": bool(roots["split"]),
-        "available": False,
-        "ephemeral_available": False,
-    }
-'''
-          status_insert = status_anchor + '''    status.update(
-        railway_runtime_volume_status(os.environ, durable_root=durable_root)
-    )
-'''
-          if "railway_runtime_volume_status(os.environ, durable_root=durable_root)" not in text:
+          status_anchor = "\n".join([
+              "    status: dict[str, object] = {",
+              "        \"root\": durable_root,",
+              "        \"explicit\": bool(roots[\"durable_explicit\"]),",
+              "        \"ephemeral_root\": ephemeral_root,",
+              "        \"split\": bool(roots[\"split\"]),",
+              "        \"available\": False,",
+              "        \"ephemeral_available\": False,",
+              "    }",
+              "",
+          ])
+          status_insert = status_anchor + "\n".join([
+              "    status.update(",
+              "        railway_runtime_volume_status(os.environ, durable_root=durable_root)",
+              "    )",
+              "",
+          ])
+          marker = "railway_runtime_volume_status(os.environ, durable_root=durable_root)"
+          if marker not in text:
               if status_anchor not in text:
                   raise SystemExit("storage status anchor not found")
               text = text.replace(status_anchor, status_insert, 1)
 
-          public_anchor = '''        if not ephemeral_available:
-            out["ephemeral_error"] = "ephemeral_storage_unavailable"
-    return out
-'''
-          public_insert = '''        if not ephemeral_available:
-            out["ephemeral_error"] = "ephemeral_storage_unavailable"
-
-    # Railway exposes volume name/mount variables only at runtime when a Volume
-    # is attached.  Publish booleans only: never leak the volume name or path.
-    # This is an attachment/mount attestation, not a restart-persistence proof.
-    if raw.get("railway_runtime") is True:
-        out["railway_runtime"] = True
-        out["railway_volume_attached"] = bool(raw.get("railway_volume_attached"))
-        out["railway_volume_mount_matches_durable_root"] = bool(
-            raw.get("railway_volume_mount_matches_durable_root")
-        )
-        out["persistent_volume_ready"] = bool(raw.get("persistent_volume_ready"))
-    return out
-'''
-          if 'out["persistent_volume_ready"]' not in text:
+          public_anchor = "\n".join([
+              "        if not ephemeral_available:",
+              "            out[\"ephemeral_error\"] = \"ephemeral_storage_unavailable\"",
+              "    return out",
+              "",
+          ])
+          public_insert = "\n".join([
+              "        if not ephemeral_available:",
+              "            out[\"ephemeral_error\"] = \"ephemeral_storage_unavailable\"",
+              "",
+              "    # Railway exposes volume name/mount variables only at runtime when a Volume",
+              "    # is attached. Publish booleans only: never leak the volume name or path.",
+              "    # This is an attachment/mount attestation, not a restart-persistence proof.",
+              "    if raw.get(\"railway_runtime\") is True:",
+              "        out[\"railway_runtime\"] = True",
+              "        out[\"railway_volume_attached\"] = bool(raw.get(\"railway_volume_attached\"))",
+              "        out[\"railway_volume_mount_matches_durable_root\"] = bool(",
+              "            raw.get(\"railway_volume_mount_matches_durable_root\")",
+              "        )",
+              "        out[\"persistent_volume_ready\"] = bool(raw.get(\"persistent_volume_ready\"))",
+              "    return out",
+              "",
+          ])
+          if 'out[\"persistent_volume_ready\"]' not in text:
               if public_anchor not in text:
                   raise SystemExit("public storage anchor not found")
               text = text.replace(public_anchor, public_insert, 1)
 
           path.write_text(text, encoding="utf-8")
           PY
+      - name: Install focused test dependency
+        run: python -m pip install -q pytest
       - name: Run focused tests
-        shell: bash
-        run: |
-          python -m pytest -q tests/test_railway_volume_status.py tests/test_storage_path_split.py
+        run: python -m pytest -q tests/test_railway_volume_status.py tests/test_storage_path_split.py
       - name: Commit surgical storage health wiring
         shell: bash
         run: |
