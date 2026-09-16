@@ -182,15 +182,17 @@ def test_a_missing_vector_database_says_available_nahi_without_the_import_text()
             raise ImportError("No module named 'chromadb'")
 
     hook = _NoRag()
-    saved = sys.modules.pop("rag", None)
+    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
     sys.meta_path.insert(0, hook)
     try:
         vs = VectorSearch()
         report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
     finally:
         sys.meta_path.remove(hook)
-        if saved is not None:
-            sys.modules["rag"] = saved
+        for name in ("rag", "rag.pipeline"):
+            module = saved[name]
+            if module is not None:
+                sys.modules[name] = module
     assert report["ok"] is False
     assert report["reason_code"] == VEC_DB_MISSING
     assert "available nahi" in report["error"]     # purana contract kayam
