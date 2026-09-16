@@ -6,6 +6,8 @@ on:
       - integration/review-pr82-on-current-stack
     paths:
       - .github/workflows/temp-pr82-merge-diagnostic.yml
+      - tests/test_repo_hygiene.py
+      - tests/test_vector_ingest_hygiene.py
 
 permissions:
   contents: write
