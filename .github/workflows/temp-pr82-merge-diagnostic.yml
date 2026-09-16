@@ -21,7 +21,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Merge historical PR82 head without committing
+      - name: Create clean local validation merge of historical PR82 head
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
@@ -29,11 +29,13 @@ jobs:
           git fetch origin codex/answer-scope-20260908
           git merge --no-commit --no-ff origin/codex/answer-scope-20260908
           test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge: locally validate PR82 against current stack"
+          test -z "$(git status --porcelain)"
       - name: Install repository and test dependencies
         run: |
           python -m pip install -q -r requirements.txt
           python -m pip install -q pytest
-      - name: Run full pytest regression before integration commit
+      - name: Run full pytest regression before any push
         shell: bash
         run: |
           set -o pipefail
@@ -47,9 +49,18 @@ jobs:
           if-no-files-found: error
           retention-days: 3
       - name: Run legacy strict research-engine regression
-        run: python test_research_engine.py
-      - name: Commit validated integration merge
         shell: bash
         run: |
-          git commit -m "merge: integrate validated PR82 fixes into current stack"
-          git push origin HEAD:integration/review-pr82-on-current-stack
+          set -o pipefail
+          python test_research_engine.py 2>&1 | tee integration-legacy.log
+      - name: Upload legacy diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr82-integration-legacy-${{ github.run_id }}
+          path: integration-legacy.log
+          if-no-files-found: ignore
+          retention-days: 3
+      - name: Push validated integration merge only after both gates pass
+        shell: bash
+        run: git push origin HEAD:integration/review-pr82-on-current-stack
