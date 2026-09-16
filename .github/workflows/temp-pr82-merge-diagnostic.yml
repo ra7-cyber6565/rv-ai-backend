@@ -28,51 +28,34 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           python - <<'PY'
           from pathlib import Path
-
           path = Path("tests/test_vector_ingest_hygiene.py")
           text = path.read_text(encoding="utf-8")
-          old = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
-    class _NoRag:
-        def find_module(self, name, path=None):
-            return self if name == "rag" or name.startswith("rag.") else None
-
-        def load_module(self, name):
-            raise ImportError("No module named 'chromadb'")
-
-    hook = _NoRag()
-    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
-    sys.meta_path.insert(0, hook)
-    try:
-        vs = VectorSearch()
-        report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
-    finally:
-        sys.meta_path.remove(hook)
-        for name in ("rag", "rag.pipeline"):
-            module = saved[name]
-            if module is not None:
-                sys.modules[name] = module
-'''
-          new = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
-    # Python 3.12 no longer makes the legacy find_module/load_module shim a
-    # reliable way to simulate a missing package.  Put a non-package `rag`
-    # module in sys.modules instead: `from rag import pipeline` must then fail
-    # deterministically without importing Chroma or touching the network.
-    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
-    sys.modules["rag"] = types.ModuleType("rag")
-    try:
-        vs = VectorSearch()
-        report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
-    finally:
-        sys.modules.pop("rag.pipeline", None)
-        sys.modules.pop("rag", None)
-        for name in ("rag", "rag.pipeline"):
-            module = saved[name]
-            if module is not None:
-                sys.modules[name] = module
-'''
-          if old not in text:
-              raise SystemExit("expected missing-rag test anchor not found")
-          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          start = text.index("def test_a_missing_vector_database_says_available_nahi_without_the_import_text():")
+          end = text.index("\ndef test_an_empty_file_is_not_blamed_on_the_database():", start)
+          lines = [
+              "def test_a_missing_vector_database_says_available_nahi_without_the_import_text():",
+              "    # Use a non-package rag stub so from rag import pipeline fails",
+              "    # deterministically on Python 3.12 without importing Chroma.",
+              "    saved = {name: sys.modules.pop(name, None) for name in (\"rag.pipeline\", \"rag\")}",
+              "    sys.modules[\"rag\"] = types.ModuleType(\"rag\")",
+              "    try:",
+              "        vs = VectorSearch()",
+              "        report = vs.ingest_chunks([CHUNK], \"meri.pdf\", \"p1\")",
+              "    finally:",
+              "        sys.modules.pop(\"rag.pipeline\", None)",
+              "        sys.modules.pop(\"rag\", None)",
+              "        for name in (\"rag\", \"rag.pipeline\"):",
+              "            module = saved[name]",
+              "            if module is not None:",
+              "                sys.modules[name] = module",
+              "    assert report[\"ok\"] is False",
+              "    assert report[\"reason_code\"] == VEC_DB_MISSING",
+              "    assert \"available nahi\" in report[\"error\"]",
+              "    _assert_user_safe(report[\"error\"])",
+              "",
+          ]
+          replacement = "\n".join(lines)
+          path.write_text(text[:start] + replacement + text[end:], encoding="utf-8")
           PY
           if ! git diff --quiet -- tests/test_vector_ingest_hygiene.py; then
             git add tests/test_vector_ingest_hygiene.py
