@@ -1,4 +1,4 @@
-name: Temporary PR82 merge diagnostic
+name: Temporary PR82 safe integration
 
 on:
   push:
@@ -8,32 +8,35 @@ on:
       - .github/workflows/temp-pr82-merge-diagnostic.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
-  diagnose:
+  integrate:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           ref: integration/review-pr82-on-current-stack
           fetch-depth: 0
-      - name: Fetch historical PR82 head
-        run: git fetch origin codex/answer-scope-20260908
-      - name: Three-way merge diagnostic only
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Merge historical PR82 head without committing
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          set +e
+          git fetch origin codex/answer-scope-20260908
           git merge --no-commit --no-ff origin/codex/answer-scope-20260908
-          rc=$?
-          echo "MERGE_EXIT=$rc"
-          echo "--- UNMERGED FILES ---"
-          git diff --name-only --diff-filter=U | sort
-          echo "--- AUTO-MERGED CHANGED FILES ---"
-          git diff --name-only --cached | sort
-          echo "--- WORKTREE CHANGED FILES ---"
-          git diff --name-only | sort
-          git merge --abort >/dev/null 2>&1 || true
-          exit 0
+          test -z "$(git diff --name-only --diff-filter=U)"
+      - name: Install repository dependencies
+        run: python -m pip install -q -r requirements.txt
+      - name: Run full pytest regression before integration commit
+        run: python -m pytest -q
+      - name: Run legacy strict research-engine regression
+        run: python test_research_engine.py
+      - name: Commit validated integration merge
+        shell: bash
+        run: |
+          git commit -m "merge: integrate validated PR82 fixes into current stack"
+          git push origin HEAD:integration/review-pr82-on-current-stack
