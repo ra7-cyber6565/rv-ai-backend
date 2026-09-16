@@ -34,7 +34,18 @@ jobs:
           python -m pip install -q -r requirements.txt
           python -m pip install -q pytest
       - name: Run full pytest regression before integration commit
-        run: python -m pytest -q
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q --tb=short -ra 2>&1 | tee integration-pytest.log
+      - name: Upload pytest diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr82-integration-pytest-${{ github.run_id }}
+          path: integration-pytest.log
+          if-no-files-found: error
+          retention-days: 3
       - name: Run legacy strict research-engine regression
         run: python test_research_engine.py
       - name: Commit validated integration merge
