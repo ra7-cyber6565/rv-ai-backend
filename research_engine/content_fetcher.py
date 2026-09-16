@@ -51,6 +51,7 @@ import os
 import re
 import shutil
 import tempfile
+from dataclasses import replace
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, quote
 
@@ -224,6 +225,17 @@ class ContentFetcher:
                     "copyright_stance": stance,
                     "read_ceiling": stance.get("read_ceiling") or "",
                     "summary_lane": bool(stance.get("summary_lane"))}
+
+        # Keep citation identity intact while trying explicitly reported OA
+        # copies. Each candidate still passes the same URL/licence/host rules.
+        hints = source.full_text_urls if isinstance(source.full_text_urls, list) else []
+        for hint in hints[:8]:
+            if not isinstance(hint, str) or not hint or hint == url or len(hint) > 2048:
+                continue
+            candidate = replace(source, url=hint, full_text_urls=[])
+            route = self.resolve(candidate)
+            if route.get("ok") or route.get("needs_lookup"):
+                return route
 
         # 1. Wikimedia text projects — official action API se saaf plaintext.
         #    Wikipedia ke saath Wikisource/Wikibooks bhi, kyunki extract JSON ka
@@ -587,9 +599,10 @@ class ContentFetcher:
         """
         entry = {"source_id": source.source_id, "title": source.title[:70],
                  "url": source.url, "ok": False, "reason": "", "chars": 0,
-                 "excerpts": []}
+                 "excerpts": [], "failure_code": "unknown"}
 
         if not self.allow_network:
+            entry["failure_code"] = "network_disabled"
             entry["reason"] = "full-text fetch .env se band hai (ALLOW_FULLTEXT_FETCH=false)"
             return entry
 
@@ -597,6 +610,7 @@ class ContentFetcher:
         if plan.get("needs_lookup"):
             plan = self._europepmc_lookup(plan["needs_lookup"])
         if not plan.get("ok"):
+            entry["failure_code"] = "route_unavailable"
             entry["reason"] = plan.get("reason", "koi free full-text route nahi")
             # Copyright/licence ki wajah se ruke to wo alag baat hai — report me
             # "padh nahi paaye" aur "padhna allowed nahi tha" ek jaise nahi
@@ -615,12 +629,14 @@ class ContentFetcher:
         try:
             downloaded = self._download(plan["url"], plan["kind"], directory)
             if not downloaded["ok"]:
+                entry["failure_code"] = "download_failed"
                 entry["reason"] = f"download fail: {downloaded['error']}"
                 return entry
 
             if plan["kind"] == "wikipedia":
                 text = self._wikipedia_text(downloaded["path"])
                 if not text:
+                    entry["failure_code"] = "empty_extract"
                     entry["reason"] = "Wikipedia API se extract khaali aaya"
                     return entry
                 plain_path = os.path.join(directory, "wikipedia.txt")
@@ -635,11 +651,13 @@ class ContentFetcher:
                 size_bytes=int(downloaded.get("bytes") or 0),
                 large=bool(downloaded.get("large")))
             if not processed.get("ok"):
+                entry["failure_code"] = "processing_failed"
                 entry["reason"] = f"processing fail: {processed.get('error', 'unknown')}"
                 return entry
 
             text = processed.get("text") or ""
             if len(text) < _MIN_USEFUL_CHARS:
+                entry["failure_code"] = "insufficient_text"
                 entry["reason"] = (f"sirf {len(text)} chars mile — itne kam ko "
                                    f"'full text padha' nahi kehna chahiye")
                 return entry
@@ -655,7 +673,7 @@ class ContentFetcher:
             # hisaab, aur §9 ka access-depth line).
             reached_level = classics.cap_read_level("full_text", stance)
 
-            entry.update({"ok": True, "chars": len(text), "excerpts": excerpts,
+            entry.update({"ok": True, "failure_code": "none", "chars": len(text), "excerpts": excerpts,
                           "reason": plan.get("reason", ""),
                           "notes": processed.get("notes", []),
                           "kind": processed.get("kind", plan["kind"]),
@@ -680,6 +698,7 @@ class ContentFetcher:
                           "signals": self.signals_from_text(text)})
             return entry
         except Exception as exc:      # kabhi pipeline na todo
+            entry["failure_code"] = "unexpected_failure"
             entry["reason"] = f"unexpected fetch failure: {public_error(exc)}"
             return entry
         finally:
@@ -818,7 +837,16 @@ class ContentFetcher:
         # full-text banne se roka. Unhe "full text padha gaya" me ginna wahi
         # purani beimaani hoti, isliye ginti alag hai.
         capped = int(report.get("capped") or 0)
-        full_read = max(0, int(report.get("succeeded") or 0) - capped)
+        # A successful extraction can cover only selected pages. Keep those
+        # reads useful, but do not call the entire source read in the headline.
+        sections = sum(
+            1 for entry in report.get("entries", [])
+            if entry.get("ok") and entry.get("streamed")
+            and (entry.get("read_level") or "full_text") == "full_text"
+            and 0 < int((entry.get("selection") or {}).get("pages_kept") or 0)
+            < int((entry.get("selection") or {}).get("pages_total") or 0)
+        )
+        full_read = max(0, int(report.get("succeeded") or 0) - capped - sections)
         bits = [f"{full_read}/{report['attempted']} sources ka full text "
                 f"padha gaya (~{report['chars_read']:,} chars)"]
         if capped:

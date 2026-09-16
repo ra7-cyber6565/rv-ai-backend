@@ -71,19 +71,94 @@ class HostedLiveGateTests(unittest.TestCase):
             f,h=proofs()
             for name,record in [('foundation_gate_ci.json',f),('company_host_latest.json',h)]:
                 (base/'proof'/'audit'/name).write_text(json.dumps(record))
-            with patch.dict(os.environ,env,clear=True),patch.object(gate,'repository_identity',return_value=dict(clean=True,revision=SHA)),patch.object(gate,'preflight',return_value={'ready':True}),patch.object(gate,'run_live_modes') as live,contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(gate.main([]),0);live.assert_not_called()
+            with patch.dict(os.environ,env,clear=True),patch.object(gate,'repository_identity',return_value=dict(clean=True,revision=SHA)),patch.object(gate,'preflight',return_value={'ready':True}),patch.object(gate,'run_live_modes') as live,patch.object(gate,'run_trading_live') as trading,contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(gate.main([]),0);live.assert_not_called();trading.assert_not_called()
                 live.return_value={'COMPANY':dict(passed=True,receipt={'checks':[]})}
                 self.assertEqual(gate.main(['--execute']),1)
+                trading.assert_not_called()
                 live.return_value={m:dict(passed=True,receipt={'checks':[]}) for m in ['COMPANY','COMPANY_PLUS']}
+                trading.return_value={'schema':2,'passed':True,'checks':[
+                    dict(name=name,passed=True) for name in gate.REQUIRED_TRADING_CHECKS]}
                 self.assertEqual(gate.main(['--execute']),0)
+                trading.assert_called_once()
                 result=json.loads((base/'live'/'audit'/'hosted_live_gate.json').read_text())
                 self.assertTrue(result['passed']);self.assertFalse(result['release_ready'])
                 self.assertFalse(result['production_deployed'])
+                trading.return_value={'passed':True}
+                self.assertEqual(gate.main(['--execute']),1)
+                trading.return_value={'schema':2,'passed':False,'checks':[
+                    dict(name=name,passed=False) for name in gate.REQUIRED_TRADING_CHECKS]}
+                self.assertEqual(gate.main(['--execute']),1)
+                trading.side_effect=ValueError('PRIVATE_PROVIDER_BODY')
+                self.assertEqual(gate.main(['--execute']),2)
+                failed=json.loads((base/'live'/'audit'/'hosted_live_gate.json').read_text())
+                self.assertFalse(failed['passed'])
+                self.assertEqual(failed['failure_code'],'hosted_operation_failed')
+                self.assertEqual(failed['diagnostics']['errors'][0]['kind'],'value_error')
+                self.assertTrue(any(frame['module']=='scripts.run_hosted_live_gate'
+                                    for frame in failed['diagnostics']['errors'][0]['frames']))
+                self.assertNotIn('PRIVATE',json.dumps(failed))
 
     def test_missing_eligibility_cannot_execute(self):
         with patch.dict(os.environ,{},clear=True),patch.object(gate,'run_live_modes') as live,contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(gate.main(['--execute']),2);live.assert_not_called()
+
+    def test_preflight_diagnostics_allowlist_blockers_and_reject_private_payloads(self):
+        self.assertIsNone(gate.summarize_preflight({})['storage_ready'])
+        result = gate.summarize_preflight({
+            "ready": False, "storage_validated": True, "storage_ready": True,
+            "model_layers_configured": True, "model_layers_usable_now": "PRIVATE_KEY",
+            "blockers": ["Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)",
+                         "runtime storage is unavailable or unwritable", "PRIVATE_KEY", {"secret": "PRIVATE_SOURCE"}],
+            "path": "PRIVATE_PATH",
+        })
+        self.assertNotIn("PRIVATE", json.dumps(result))
+        self.assertEqual(result["model_layers_configured"], 0)
+        self.assertEqual(result["model_layers_usable_now"], 0)
+        self.assertEqual(result["blocker_codes"], ["gemini_zero_cost_confirmation_required",
+                         "storage_unavailable", "unclassified_preflight_blocker"])
+
+    def test_blocked_preflight_persists_specific_settings_and_storage_without_models(self):
+        with tempfile.TemporaryDirectory() as temp:
+            base = Path(temp)
+            env = dict(environment(), RUNNER_TEMP=temp, INFINITY_DATA_ROOT=str(base/'live'),
+                       INFINITY_PREREQUISITE_ROOT=str(base/'proof'), ZERO_COST_ONLY='true',
+                       GEMINI_API_KEY='PRIVATE_TEST_KEY', GEMINI_ZERO_COST_CONFIRMED="'true'")
+            (base/'proof'/'audit').mkdir(parents=True)
+            f, h = proofs()
+            for name, record in [('foundation_gate_ci.json', f), ('company_host_latest.json', h)]:
+                (base/'proof'/'audit'/name).write_text(json.dumps(record))
+            readiness = dict(ready=False, storage_validated=True, storage_ready=True,
+                             blockers=['Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)'])
+            output = io.StringIO()
+            with patch.dict(os.environ, env, clear=True), patch.object(gate, 'repository_identity', return_value=dict(clean=True, revision=SHA)), patch.object(gate, 'preflight', return_value=readiness), patch.object(gate, 'run_live_modes') as live, patch.object(gate, 'run_trading_live') as trading, contextlib.redirect_stdout(output):
+                self.assertEqual(gate.main(['--execute']), 2)
+            live.assert_not_called(); trading.assert_not_called()
+            result = json.loads((base/'live'/'audit'/'hosted_live_gate.json').read_text())
+            self.assertFalse(result['live_test_performed'])
+            self.assertFalse(result['settings']['checks']['gemini_confirmation_flag_accepted'])
+            self.assertTrue(result['preflight']['storage_ready'])
+            self.assertEqual(result['preflight']['blocker_codes'], ['gemini_zero_cost_confirmation_required'])
+            self.assertNotIn('PRIVATE', output.getvalue())
+
+    def test_trading_receipt_is_allowlisted_and_cannot_self_certify(self):
+        good = {"schema": 2, "passed": True, "checks": [
+            {"name": name, "passed": True, "detail": "PRIVATE_SOURCE"}
+            for name in gate.REQUIRED_TRADING_CHECKS],
+            "summary": {"status": "PRIVATE_KEY", "answer_sha256": "PRIVATE_ANSWER"},
+            "answer": "PRIVATE_ANSWER"}
+        clean = gate.summarize_trading(good)
+        self.assertNotIn("PRIVATE", json.dumps(clean))
+        self.assertTrue(clean["passed"])
+        for change in ("missing", "duplicate", "failed", "bad_type", "schema"):
+            row = copy.deepcopy(good)
+            if change == "missing": row["checks"].pop()
+            elif change == "duplicate": row["checks"][0] = row["checks"][1]
+            elif change == "failed": row["checks"][0]["passed"] = False
+            elif change == "bad_type": row["checks"][0]["passed"] = "true"
+            else: row["schema"] = 1
+            with self.subTest(change=change):
+                self.assertFalse(gate.summarize_trading(row)["passed"])
 
 
 if __name__ == '__main__':

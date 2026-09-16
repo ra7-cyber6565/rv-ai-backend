@@ -31,7 +31,8 @@ def execute(payload, brain_factory=None):
     try:
         from utils.research_runtime import RunContext, RuntimeStore, bind
         wire = payload.get("runtime_context")
-        context = RunContext(RuntimeStore(wire["path"]), wire["project"], wire["run"]) if wire else None
+        context = RunContext(RuntimeStore(wire["path"]), wire["project"], wire["run"],
+                             deadline=wire.get("deadline")) if wire else None
         brain = brain_factory(budget=1)
         with bind(context):
             answer = brain.generate(worker_prompt(payload["role"], question, evidence),

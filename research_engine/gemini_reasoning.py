@@ -23,7 +23,7 @@ from .explain_style import style_block
 from .key_pool import KeyPool
 from .model_errors import (
     AUTH, DAILY_QUOTA, INPUT_TOO_LARGE, INVALID_REQUEST, REQUEST_TIMEOUT,
-    SERVER, FailureLedger,
+    SERVER, RATE_LIMIT, ErrorVerdict, FailureLedger,
 )
 from .model_errors import classify as classify_error
 from .models import EvidencePack
@@ -203,6 +203,7 @@ class GeminiReasoning:
         self.models_tried: List[str] = []
         self.switched_models = 0             # doosre model par kitni baar gaye
         self.same_model_retries = 0          # WAHI model, dobara (asli retry)
+        self.cooldown_recovery_cycles = 0
         # Provider-bound prompt content kabhi audit mein nahi jaata — sirf safe
         # size metadata, taaki live request-limit failures diagnose ho saken.
         self.prompt_compactions = 0
@@ -429,7 +430,7 @@ class GeminiReasoning:
                 return ""
         return ""
 
-    def _one_key_cycle(self, prompt: str, tag: str):
+    def _one_key_cycle(self, prompt: str, tag: str, *, _recover=True, _history=None):
         """
         EK key par poora model-cycle. Lautata hai `(text, key_level_failure)`.
 
@@ -438,6 +439,8 @@ class GeminiReasoning:
         Sirf us halat mein doosri key try karna samajhdaari hai.
         """
         key_level = False
+        history = [] if _history is None else _history
+        recovery_times = {}
         first_model = self.model_name
         try:
             self.model()                        # lazy resolve, taaki naam asli ho
@@ -464,22 +467,38 @@ class GeminiReasoning:
                     self.errors.append(f"{tag}: model '{name}' banaya nahi ja saka: "
                                        f"{type(exc).__name__}: {exc}")
                     continue
-            if model_index:
-                # §14 — switch YAHAN gina jaata hai: jab hum sach mein agle model
-                # par aa gaye aur uspar attempt karne wale hain. Pehle ye sirf
-                # SAFAL hone par ginta tha, isliye "dono model fail" wale run
-                # mein switch 0 dikhta tha — jabki switch hua tha. Aur ye ginti
-                # `same_model_retries` se bilkul alag hai: model badalna retry
-                # nahi hai.
-                self.switched_models += 1
             request_prompt = prompt
             compacted_for_model = False
             timeout_extended = False
             from .gemini_model import call_timeout as _call_timeout
             request_timeout = _call_timeout()
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
-                from utils.research_runtime import reserve_request
-                reserve_request("gemini", request_prompt, 6000)
+                from utils.research_runtime import (current, model_cooldown_scopes,
+                    ModelCooldownActive, reserve_request, remember_model_failure)
+                scopes = model_cooldown_scopes("gemini", self.keys.active(), name) if current() else ()
+                try:
+                    reserve_request("gemini", request_prompt, 6000, cooldown_scopes=scopes)
+                except ModelCooldownActive as cooldown:
+                    # A sibling already observed this failure. No HTTP attempt,
+                    # reservation or success is invented for the skipped call.
+                    v = ErrorVerdict(kind=cooldown.kind, detail="shared_run_cooldown")
+                    self.ledger.add(name, tag, v, attempt=0)
+                    self.ledger.events[-1]["origin"] = "shared_run_cooldown"
+                    self.notes.append(f"{tag}: shared run cooldown ({v.kind}); model request skipped")
+                    if v.kind == AUTH:
+                        return "", True
+                    if v.kind == DAILY_QUOTA:
+                        key_level = True
+                    if v.kind == RATE_LIMIT:
+                        recovery_times[name] = time.time() + cooldown.retry_after
+                    else:
+                        recovery_times.pop(name, None)
+                    break
+                if name in history:
+                    self.same_model_retries += 1
+                if history and name != history[-1]:
+                    self.switched_models += 1
+                history.append(name)
                 self.attempts += 1
                 self.prompt_attempt_log.append({
                     "label": tag,
@@ -495,6 +514,10 @@ class GeminiReasoning:
                     # website par aakhir mein "server se baat nahi ho paayi"
                     # aata tha).
                     from .gemini_model import generate as _generate
+                    from utils.research_runtime import remaining_seconds
+                    left = remaining_seconds()
+                    if left is not None:
+                        request_timeout = min(request_timeout, left)
                     response = _generate(
                         self._model, request_prompt, timeout=request_timeout
                     )
@@ -513,6 +536,15 @@ class GeminiReasoning:
                     return text, False
                 except Exception as exc:        # noqa: BLE001
                     v = classify_error(exc)
+                    # Model/key scope prevents one unavailable model from
+                    # disabling other models or another user's credentials.
+                    delay = v.retry_after or _BACKOFF_SECONDS[min(attempt, len(_BACKOFF_SECONDS)-1)]
+                    remember_model_failure("gemini", scopes, v.kind,
+                                           retry_after=delay if v.kind == RATE_LIMIT else 0)
+                    if v.kind == RATE_LIMIT:
+                        recovery_times[name] = time.time() + delay
+                    else:
+                        recovery_times.pop(name, None)
                     self.ledger.add(name, tag, v, attempt=attempt + 1)
                     self.errors.append(
                         f"{tag} failed (model={name}, try={attempt + 1}, "
@@ -533,7 +565,6 @@ class GeminiReasoning:
                                 request_prompt = compact_prompt
                                 compacted_for_model = True
                                 self.prompt_compactions += 1
-                                self.same_model_retries += 1
                                 self.notes.append(
                                     f"{tag}: '{name}' ki large request "
                                     f"({v.kind}) ke baad source IDs/rules bachakar "
@@ -555,7 +586,6 @@ class GeminiReasoning:
                             )
                             timeout_extended = True
                             self.timeout_extensions += 1
-                            self.same_model_retries += 1
                             self.notes.append(
                                 f"{tag}: compact primary timeout ke baad "
                                 f"{request_timeout}s ka ek bounded recovery attempt")
@@ -595,9 +625,19 @@ class GeminiReasoning:
                         # §14 — ASLI retry yahi hai: wahi model, dobara. Isse
                         # alag se ginna zaroori hai, warna model fallback bhi
                         # "retry" ban kar hisaab jhootha kar deta hai.
-                        self.same_model_retries += 1
                         continue
                     break                       # is model par bas — agla model
+        # Try healthy fallbacks first. If the whole cycle produced no output,
+        # one bounded recovery cycle may wait for an observed minute cooldown.
+        # A temporary hold must not leave the chief with zero attempts forever.
+        if _recover and recovery_times:
+            from utils.research_runtime import wait_for_model_retry
+            if wait_for_model_retry(max(0.0, min(recovery_times.values()) - time.time())):
+                self.cooldown_recovery_cycles += 1
+                self._build(first_model)
+                text, recovered_key_level = self._one_key_cycle(
+                    prompt, tag, _recover=False, _history=history)
+                return text, key_level or recovered_key_level
         return "", key_level
 
     # ── §14: pass-level sach (maanga vs mila) ────────────────────────────────
@@ -684,6 +724,7 @@ class GeminiReasoning:
             # `failed_http_attempts` hai)
             "failed_attempts": failed_http,
             "same_model_retries": self.same_model_retries,
+            "cooldown_recovery_cycles": self.cooldown_recovery_cycles,
             # `retries` ab SIRF asli retry hai (pehle isme model switch bhi
             # ghusa hua tha)
             "retries": self.same_model_retries,
@@ -691,11 +732,8 @@ class GeminiReasoning:
             "model_switches": self.switched_models,
             # §8 — free key ka hisaab. `key_switches` ko kabhi "retry" mat
             # padho: nayi key par jaana pehli koshish hoti hai, dobari nahi.
-            # Isliye identity ab ye hai:
-            #   actual_http_attempts
-            #     == (1 + key_switches) + same_model_retries + model_switches
-            # Ek hi key wale setup mein key_switches = 0, yaani purana formula
-            # jaisa ka waisa.
+            # HTTP attempts are counted at admission. Skipped cooldowns and
+            # logical passes cannot be used to infer an extra HTTP attempt.
             "keys_available": self.keys.count,
             "key_switches": self.key_switches,
             "active_key": self.keys.label(),      # sirf label — value kabhi nahi
@@ -709,6 +747,8 @@ class GeminiReasoning:
                     "label": str(row.get("label") or ""),
                     "kind": str(row.get("kind") or ""),
                     "attempt": int(row.get("attempt") or 0),
+                    **({"origin": "shared_run_cooldown"}
+                       if row.get("origin") == "shared_run_cooldown" else {}),
                 }
                 for row in self.ledger.events[:20]
                 if isinstance(row, dict)

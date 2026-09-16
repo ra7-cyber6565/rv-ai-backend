@@ -134,6 +134,7 @@ def _pack(sources, full_text=True, planned=3, done=3):
     if full_text:
         for s in pack.sources:
             s.full_text_chars = 4000
+            s.read_level = "full_text"  # same explicit upgrade as ContentFetcher
     pack.reasoning_planned = planned
     pack.reasoning_done = done
     return ev, pack
