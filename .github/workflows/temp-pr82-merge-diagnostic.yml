@@ -1,0 +1,37 @@
+name: Temporary PR82 merge diagnostic
+
+on:
+  push:
+    branches:
+      - integration/review-pr82-on-current-stack
+    paths:
+      - .github/workflows/temp-pr82-merge-diagnostic.yml
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/review-pr82-on-current-stack
+          fetch-depth: 0
+      - name: Fetch historical PR82 head
+        run: git fetch origin codex/answer-scope-20260908
+      - name: Three-way merge diagnostic only
+        shell: bash
+        run: |
+          set +e
+          git merge --no-commit --no-ff origin/codex/answer-scope-20260908
+          rc=$?
+          echo "MERGE_EXIT=$rc"
+          echo "--- UNMERGED FILES ---"
+          git diff --name-only --diff-filter=U | sort
+          echo "--- AUTO-MERGED CHANGED FILES ---"
+          git diff --name-only --cached | sort
+          echo "--- WORKTREE CHANGED FILES ---"
+          git diff --name-only | sort
+          git merge --abort >/dev/null 2>&1 || true
+          exit 0
