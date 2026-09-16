@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-16",
+  "repository": "ra7-cyber6565/rv-ai-backend",
+  "production_branch": "main",
+  "production_main_sha": "3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a",
+  "production_main_source": "PR #84 split durable/ephemeral storage merge",
+  "railway": {
+    "project_id": "568ca4c8-f937-4c7c-9d3d-6c9bf422887c",
+    "environment_id": "a911dd49-980f-4722-a6d8-b6c176d1c439",
+    "service_id": "3593244e-5f06-42a3-987b-addf4440833e",
+    "latest_deployment_id": "1dc8fc98-6f64-4991-8c84-4f0cd8c55093",
+    "latest_deployment_status": "SUCCESS",
+    "attached_volumes": [],
+    "persistence_blocker": "No Railway volume is attached; /data persistence is not proven."
+  },
+  "validated_open_stack": [
+    {
+      "pr": 86,
+      "head": "9769f661347f39a23d2d6ae92a0fb0b5fa408e28",
+      "base": "main",
+      "mergeable": true,
+      "purpose": "Replace PyTorch sentence-transformers path with Chroma ONNX embedding backend",
+      "ci": {
+        "foundation": 1661,
+        "ai1": 296,
+        "ai2": 290,
+        "anti_confirmation": 442,
+        "model_reality": 465,
+        "all_success": true
+      }
+    },
+    {
+      "pr": 87,
+      "head": "b198946681f2429190666c09d4fc6294606d3050",
+      "base": "fix/remove-unused-sentence-transformers",
+      "mergeable": true,
+      "purpose": "Guard durable Chroma and checkpoint writes by shared quota",
+      "ci": {
+        "foundation": 1664,
+        "ai1": 299,
+        "ai2": 293,
+        "anti_confirmation": 445,
+        "model_reality": 468,
+        "all_success": true
+      }
+    },
+    {
+      "pr": 89,
+      "head": "47b91b8004ae580cc7ed381b6ddc8ea62c65e015",
+      "base": "fix/durable-write-quota-hardening",
+      "mergeable": true,
+      "purpose": "Fail-closed hosted MAXIMUM six-specialist + chief acceptance harness",
+      "ci": {
+        "foundation": 1669,
+        "ai1": 304,
+        "ai2": 298,
+        "anti_confirmation": 450,
+        "model_reality": 473,
+        "all_success": true
+      }
+    },
+    {
+      "pr": 91,
+      "head": "3b897c5f6225d431a7c09c1e87edae5ea68690be",
+      "base": "test/maximum-live-acceptance",
+      "mergeable": true,
+      "purpose": "Frozen held-out comparative quality release gate",
+      "ci": {
+        "foundation": 1672,
+        "ai1": 307,
+        "ai2": 301,
+        "anti_confirmation": 453,
+        "model_reality": 476,
+        "all_success": true
+      }
+    },
+    {
+      "pr": 93,
+      "head": "2be80631c8c9774a3e2f576cbda0f4cf947462da",
+      "base": "test/heldout-quality-release-gate",
+      "mergeable": true,
+      "purpose": "Chroma/PostHog and Transformers warning/privacy hygiene",
+      "ci": {
+        "foundation": 1676,
+        "ai1": 311,
+        "ai2": 305,
+        "anti_confirmation": 457,
+        "model_reality": 480,
+        "all_success": true
+      }
+    },
+    {
+      "pr": 95,
+      "head": "fae37d10befbfb562b57eb4bea4abf093af1fd1d",
+      "base": "fix/runtime-warning-hygiene",
+      "mergeable": true,
+      "purpose": "Blind held-out generation capture plus independent grading seal",
+      "ci": {
+        "foundation": 1678,
+        "ai1": 313,
+        "ai2": 307,
+        "anti_confirmation": 459,
+        "model_reality": 482,
+        "all_success": true
+      }
+    }
+  ],
+  "persistence_harness": {
+    "pr": 85,
+    "head": "4c9188a03384ee85dc95db96357c3ba6824848d8",
+    "base": "main",
+    "mergeable": true,
+    "ci": {
+      "foundation": 1653,
+      "ai1": 288,
+      "ai2": 282,
+      "anti_confirmation": 434,
+      "model_reality": 457,
+      "all_success": true
+    },
+    "latest_empirical_restart_result": "FAIL before volume attachment: same completed job returned 404 after redeploy"
+  },
+  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95],
+  "persistence_harness_merge": "PR #85 is independent of the stacked feature chain and may be merged separately only under explicit production authorization.",
+  "live_acceptance_after_volume_and_deploy": [
+    "Verify Railway service reports a real attached volume mounted at /data",
+    "Run persistence phase 1 on one completed job and save private same-job token/state",
+    "Perform controlled redeploy only under explicit production authorization",
+    "Run persistence phase 2 using same job ID and same token; require identical semantic digest",
+    "Measure actual production image/build size after ONNX migration",
+    "Verify runtime warning disappearance without hiding unrelated warnings",
+    "Run hosted MAXIMUM receipt requiring exactly 6/6 specialist roles plus chief passes and exact accounting",
+    "Run frozen private baseline/candidate held-out campaign, independent grading seal, then release gate PASS/FAIL/INCONCLUSIVE"
+  ],
+  "truth_boundaries": [
+    "No attached Railway volume means persistence is not fixed.",
+    "CI success does not prove hosted six-worker execution.",
+    "Held-out gate infrastructure does not prove a real quality win until an actual frozen campaign is graded.",
+    "ONNX code validation does not prove production image size until a real production build is measured.",
+    "Hosted-live Foundation steps that are skipped are not live proof.",
+    "No open PR in this lock is merged to main as of this record."
+  ],
+  "production_authorization_phrase": "production deploy authorize",
+  "generic_strt_or_aage_authorizes_production": false
+}
