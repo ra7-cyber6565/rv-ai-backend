@@ -57,6 +57,10 @@ def _safe_best_sentence(source, terms: Sequence[str], cues: Sequence[str] = ()) 
     best = ""
     best_score = -1
     for sent in _safe_sentences(source):
+        # Preserve the current evidence-before-generation rule: a source that
+        # merely asks the user's question has not supplied an explanation.
+        if sent.rstrip().endswith(('?', '？')):
+            continue
         score = _local._score_sentence(sent, terms)
         if cues:
             low = sent.lower()
