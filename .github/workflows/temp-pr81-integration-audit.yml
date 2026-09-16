@@ -1,0 +1,52 @@
+name: Temporary PR81 integration audit
+
+on:
+  push:
+    branches:
+      - integration/review-pr81-on-pr103
+    paths:
+      - .github/workflows/temp-pr81-integration-audit.yml
+      - tests/test_pr81_cross_review_integration_audit.py
+      - tools/pr81_cross_review_integration_patch.py
+
+permissions:
+  contents: write
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/review-pr81-on-pr103
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create clean local PR81 merge candidate
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/live-trading-acceptance-20260908
+          git merge --no-commit --no-ff origin/fix/live-trading-acceptance-20260908
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge: locally audit PR81 on PR103"
+          test -z "$(git status --porcelain)"
+      - name: Install repository and test dependencies
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q pytest
+      - name: Run measured cross-review audit regressions
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m pytest -q tests/test_pr81_cross_review_integration_audit.py --tb=short -ra 2>&1 | tee pr81-audit.log
+      - name: Upload audit log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr81-cross-review-audit-${{ github.run_id }}
+          path: pr81-audit.log
+          if-no-files-found: ignore
+          retention-days: 3
