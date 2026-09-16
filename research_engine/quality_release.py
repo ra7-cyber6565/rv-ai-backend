@@ -129,7 +129,20 @@ def _quality_reason(report: Mapping[str, Any]) -> str:
     for issue in issues:
         if not isinstance(issue, Mapping):
             continue
-        message = " ".join(str(issue.get("message") or "").split())
+        code = issue.get("code")
+        if code == "INCOMPLETE_STATUS_MISMATCH":
+            message = "Required kaam adhoora hai, isliye final answer PARTIAL rakha gaya hai."
+        elif code == "MANDATORY_SECTION_MISSING":
+            names = {"direct_answer": "seedha jawab", "established_knowledge": "established research",
+                     "supporting_evidence": "supporting evidence", "counter_evidence": "against evidence",
+                     "unknowns": "unknowns", "conclusion": "final conclusion", "sources": "source details",
+                     "calculations": "calculations", "original_hypotheses": "original hypotheses"}
+            missing = (issue.get("details") or {}).get("missing_sections") or []
+            message = "Answer mein ye hisse adhure hain: " + ", ".join(names.get(s, "required section") for s in missing)
+        elif code == "CRITICAL_CONDITION_SCOPE_UNRESOLVED":
+            message = "Maangi gayi experimental conditions par verified conclusion abhi nahi bana."
+        else:
+            message = " ".join(str(issue.get("message") or "").split())
         if message and message not in messages:
             messages.append(message)
         if len(messages) == 2:

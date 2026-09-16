@@ -1,7 +1,8 @@
-"""Opt-in company validation on a standard public GitHub-hosted runner.
+"""Opt-in company + PR #81 trading validation on a public GitHub-hosted runner.
 
 Default is preflight only. This runner neither deploys nor connects to a laptop.
-It accepts fixed reviewed-code receipts, never arbitrary commands or questions.
+It accepts fixed reviewed-code receipts and fixed release questions, never
+arbitrary commands or questions.
 """
 from __future__ import annotations
 import argparse
@@ -18,6 +19,10 @@ if str(ROOT) not in sys.path:
 from utils.release_identity import repository_identity, normalize_git_revision
 from scripts.run_company_host import run_live_modes, write_json
 from scripts.run_live_zero_cost_gate import preflight
+from scripts.run_pr81_trading_live_acceptance import run_trading_live
+from scripts.check_hosted_live_settings import inspect_settings
+from utils.live_failure_diagnostics import FAILURE_CODES, exception_diagnostics, sanitize_diagnostics
+from utils.live_result_summary import sanitize_result_summary
 
 REPOSITORY = "ra7-cyber6565/rv-ai-backend"
 REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_smoke",
@@ -27,6 +32,42 @@ REQUIRED_STAGES = {"compileall", "focused_pytest", "all_pytest", "offline_api_sm
 
 class HostedGateBlocked(RuntimeError):
     pass
+
+
+def summarize_preflight(record):
+    """Expose readiness dimensions, never arbitrary blocker text or paths."""
+    raw = record if isinstance(record, dict) else {}
+    messages = {
+        "ZERO_COST_ONLY must be true": "zero_cost_only_required",
+        "INFINITY_DATA_ROOT must be explicit": "storage_root_missing",
+        "INFINITY_DATA_ROOT must be an absolute path": "storage_root_not_absolute",
+        "INFINITY_DATA_ROOT cannot be a filesystem root": "storage_root_unsafe",
+        "INFINITY_DATA_ROOT must be outside the Git repository": "storage_root_inside_repository",
+        "runtime storage is below the configured minimum free space": "storage_free_space_insufficient",
+        "runtime storage is unavailable or unwritable": "storage_unavailable",
+        "no confirmed/free model layer is usable now": "model_layer_not_usable",
+        "Gemini credential(s) present (GEMINI_ZERO_COST_CONFIRMED missing/false)": "gemini_zero_cost_confirmation_required",
+        "GROQ_API_KEY (GROQ_ZERO_COST_CONFIRMED missing/false)": "groq_zero_cost_confirmation_required",
+        "OPENROUTER_API_KEY (OPENROUTER_MODEL is not free-only)": "openrouter_free_model_required",
+        "OLLAMA_BASE_URL (ZERO_COST_ONLY permits localhost only)": "local_ollama_required",
+        "OPENAI_API_KEY": "paid_provider_blocked",
+        "ANTHROPIC_API_KEY": "paid_provider_blocked",
+    }
+    blockers = raw.get("blockers")
+    codes = []
+    for item in blockers if isinstance(blockers, list) else []:
+        code = messages.get(item, "unclassified_preflight_blocker") if type(item) is str else "unclassified_preflight_blocker"
+        if code not in codes:
+            codes.append(code)
+    out = {key: raw.get(key) is True for key in (
+        "ready", "zero_cost_only", "storage_validated"
+    )}
+    out["storage_ready"] = raw.get("storage_ready") if type(raw.get("storage_ready")) is bool else None
+    for key in ("model_layers_configured", "model_layers_usable_now"):
+        value = raw.get(key)
+        out[key] = value if type(value) is int and 0 <= value <= 100 else 0
+    out["blocker_codes"] = codes
+    return out
 
 
 def read_record(path, limit=8_000_000):
@@ -106,14 +147,72 @@ def summarize(results):
                   if isinstance(c, dict) and re.fullmatch(r"[a-z0-9_]{1,100}", str(c.get("name", "")))]
         public[mode] = {"passed": row.get("passed") is True, "checks": checks,
                         "depth_mode": mode}
+        failure_code = receipt.get("failure_code")
+        if type(failure_code) is str and failure_code in FAILURE_CODES:
+            public[mode]["failure_code"] = failure_code
+        if "diagnostics" in receipt:
+            public[mode]["diagnostics"] = sanitize_diagnostics(receipt["diagnostics"])
+        if "summary" in receipt:
+            public[mode]["summary"] = sanitize_result_summary(receipt["summary"])
     return public
+
+
+REQUIRED_TRADING_CHECKS = {
+    "fixed_question_executed", "technical_script_not_creative", "trade_acceptance_active",
+    "python_script_kind_detected", "python_script_delivered", "requested_trade_points_registered",
+    "trade_contract_partition_valid", "threshold_provenance_ran", "unsupported_thresholds_fail_closed",
+    "missing_deliverables_fail_closed", "max_six_specialists_executed", "public_runtime_executed",
+    "chief_execution_observed", "specialist_handoff_semantics", "no_false_scientific_replication",
+}
+
+
+def summarize_trading(record):
+    """Allowlist the live receipt; a bare passed flag cannot certify the lane."""
+    record = record if isinstance(record, dict) else {}
+    checks = record.get("checks")
+    valid = isinstance(checks, list) and len(checks) == len(REQUIRED_TRADING_CHECKS)
+    by_name = {}
+    if valid:
+        for row in checks:
+            if not isinstance(row, dict) or type(row.get("name")) is not str:
+                valid = False
+                break
+            name = row["name"]
+            if name not in REQUIRED_TRADING_CHECKS or name in by_name or type(row.get("passed")) is not bool:
+                valid = False
+                break
+            by_name[name] = row["passed"]
+    valid = valid and set(by_name) == REQUIRED_TRADING_CHECKS and record.get("schema") == 2
+    rows = [{"name": name, "passed": valid and by_name.get(name) is True}
+            for name in sorted(REQUIRED_TRADING_CHECKS)]
+    raw = record.get("summary")
+    raw = raw if isinstance(raw, dict) else {}
+    summary = {"depth_mode": "MAXIMUM"}
+    for key in ("status", "task_assessment"):
+        value = raw.get(key)
+        summary[key] = value if type(value) is str and value in {
+            "COMPLETE", "PARTIAL", "BLOCKED", "FAILED", "INCONCLUSIVE", "NOT_RUN"
+        } else "UNKNOWN"
+    for key in ("trade_gap_count", "unsupported_threshold_count", "requested_trade_point_count",
+                "company_requested_workers", "company_ready_workers"):
+        value = raw.get(key)
+        summary[key] = value if type(value) is int and 0 <= value <= 1_000_000 else 0
+    for key in ("handoff_prepared", "handoff_truncated", "handoff_consumer_observed",
+                "specialist_handoff_missing"):
+        summary[key] = raw.get(key) is True
+    digest = raw.get("answer_sha256")
+    summary["answer_sha256"] = digest if type(digest) is str and re.fullmatch(r"[a-f0-9]{64}", digest) else ""
+    return {"schema": 2, "passed": record.get("passed") is True and all(row["passed"] for row in rows),
+            "checks": rows, "summary": summary, "contains_answer_or_source_text": False,
+            "contains_credentials": False, "backtest_execution_verified": False,
+            "independent_quality_verified": False}
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args(argv)
-    report = {"schema": 1, "created_at_epoch": int(time.time()), "passed": False,
+    report = {"schema": 2, "created_at_epoch": int(time.time()), "passed": False,
               "live_test_performed": False, "quality_benchmark": "NOT_TESTED",
               "production_deployed": False, "release_ready": False,
               "contains_credentials_or_source_text": False}
@@ -139,6 +238,7 @@ def main(argv=None):
                                    read_record(proof_root / "audit" / "company_host_latest.json", 256000), os.environ)
         # No private .env is loaded here. The workflow scopes dedicated credentials
         # to this final step; no credentials are supplied to dependency installation.
+        report["settings"] = inspect_settings(os.environ)
         if not os.environ.get("GEMINI_MODEL", "").strip():
             raise HostedGateBlocked("explicit_model_identifier_required")
         os.environ.update(INFINITY_PRESERVE_STORED_DATA="true", INFINITY_BUILD_EXECUTOR="docker",
@@ -146,6 +246,7 @@ def main(argv=None):
         from utils.storage_paths import configure_process_storage
         configure_process_storage()
         ready = preflight(os.environ, validate_storage=True)
+        report["preflight"] = summarize_preflight(ready)
         if not ready["ready"]:
             raise HostedGateBlocked("confirmed_free_model_or_storage_not_ready")
         report["state"] = "PREFLIGHT_READY"
@@ -153,13 +254,32 @@ def main(argv=None):
             report["live_test_performed"] = True
             results = run_live_modes(raw_root, identity["revision"])
             report["modes"] = summarize(results)
-            report["passed"] = set(results) == {"COMPANY", "COMPANY_PLUS"} and all(r.get("passed") is True for r in results.values())
+            company_passed = (
+                set(results) == {"COMPANY", "COMPANY_PLUS"}
+                and all(r.get("passed") is True for r in results.values())
+            )
+            # Do not spend another six-worker Max allocation after an earlier
+            # company release gate already failed.
+            if company_passed:
+                trading = summarize_trading(run_trading_live())
+            else:
+                trading = {
+                    "passed": False,
+                    "checks": [{"name": "company_prerequisite", "passed": False}],
+                    "summary": {"depth_mode": "MAXIMUM", "status": "NOT_RUN"},
+                    "contains_answer_or_source_text": False,
+                    "contains_credentials": False,
+                }
+            report["trading_max"] = trading
+            report["passed"] = company_passed and trading.get("passed") is True
             report["state"] = "LIVE_GATES_PASSED" if report["passed"] else "LIVE_GATES_FAILED"
         write_json(destination, report)
         print(json.dumps(report, indent=2))
         return 0 if not args.execute or report["passed"] else 1
     except Exception as exc:
         report.update(state="BLOCKED", failure_code=str(exc) if isinstance(exc, HostedGateBlocked) else "hosted_operation_failed")
+        if not isinstance(exc, HostedGateBlocked):
+            report["diagnostics"] = exception_diagnostics(exc)
         if destination is not None:
             try:
                 write_json(destination, report)

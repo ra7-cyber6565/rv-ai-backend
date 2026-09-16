@@ -25,7 +25,7 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 from .locator_policy import exact_locator_available
 
 
-CONTRACT_VERSION = "1.0"
+CONTRACT_VERSION = "1.1"
 
 CATEGORY_WEIGHTS: Dict[str, int] = {
     "requirement_coverage": 10,
@@ -363,6 +363,7 @@ class FinalQualityGate:
                 "MANDATORY_SECTION_MISSING",
                 "REQUESTED_DELIVERABLE_MISSING",
                 "INCOMPLETE_STATUS_MISMATCH",
+                "CRITICAL_CONDITION_SCOPE_UNRESOLVED",
             }
             for issue in state.issues
         )
@@ -444,6 +445,15 @@ class FinalQualityGate:
             )
 
         status = str(data.get("status") or "").strip().upper()
+        verification = _plain_mapping(data.get("verification"))
+        evidence_first = _plain_mapping(verification.get("evidence_first_audit"))
+        enforcement = _plain_mapping(evidence_first.get("critical_draft_enforcement"))
+        scope = _plain_mapping(enforcement.get("condition_scope"))
+        if scope.get("required") is True and scope.get("confirmation_established") is False:
+            state.check("critical_condition_scope_resolved", False)
+            state.issue("CRITICAL_CONDITION_SCOPE_UNRESOLVED", "requirement_coverage", "critical",
+                        "The critical fallback did not establish the requested experimental conditions.",
+                        deduction=CATEGORY_WEIGHTS["requirement_coverage"], hard_cap=60)
         missing_passes = data.get("missing_passes") or []
         inconsistent = status == "COMPLETE" and bool(missing_passes or missing_sections or unmet)
         state.check("completion_status_consistent", not inconsistent)

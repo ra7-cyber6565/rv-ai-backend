@@ -226,6 +226,9 @@ class SourceRecord:
     is_primary: Optional[bool] = None
     citation_count: Optional[int] = None
     full_text_available: bool = False
+    # Provider-reported OA copies, separate from the canonical citation URL.
+    # Metadata availability is not a successful read or an access-control waiver.
+    full_text_urls: List[str] = field(default_factory=list)
 
     # Spec Section 7 ke baaki signals — poori detail quality_signals.py mein.
     # Sabhi ka khaali/None matlab EK HI hai: "signal nahi mila". Ye "signal
@@ -635,12 +638,15 @@ class EvidencePack:
         Ye ginti do tarah se ban sakti hai aur dono asli hain: internet se
         legally-free full text download hua (full_text_chars > 0), ya user ka
         apna uploaded document jo ingest ke waqt poora process hua tha.
+
+        Character count alone cannot override an abstract/licence ceiling or
+        selected-page scope. The source access label and aggregate count must
+        agree; unknown legacy read depth does not prove a complete read.
         """
         return len([
             s for s in self.sources
-            if s.full_text_chars > 0
-            or (s.source_type == SourceType.DOCUMENT
-                and s.reading_level() == "full_text")
+            if s.access_depth() == ACCESS_FULL
+            and (s.full_text_chars > 0 or s.source_type == SourceType.DOCUMENT)
         ])
 
     @property

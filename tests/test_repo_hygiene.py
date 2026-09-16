@@ -1,6 +1,7 @@
 """Static repo-hygiene regression for generated/runtime data."""
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -15,8 +16,20 @@ FORBIDDEN_TRACKED_RUNTIME = (
 )
 
 
+def _is_tracked(path: str) -> bool:
+    """Return whether Git tracks ``path``; ignored runtime output is allowed to exist."""
+    result = subprocess.run(
+        ["git", "ls-files", "--error-unmatch", "--", path],
+        cwd=ROOT,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
 def test_generated_runtime_files_are_not_present_in_source_tree():
-    present = [path for path in FORBIDDEN_TRACKED_RUNTIME if (ROOT / path).exists()]
+    present = [path for path in FORBIDDEN_TRACKED_RUNTIME if _is_tracked(path)]
     assert not present, f"generated runtime files must not ship in source tree: {present}"
 
 

@@ -204,6 +204,10 @@ def _best_sentence(source: SourceRecord, terms: Sequence[str],
     """
     best, best_score = "", -1
     for i, sent in enumerate(_sentences(source.snippet)):
+        # A source asking what causes an effect has not supplied a mechanism.
+        # Keep questions out of deterministic factual/explanatory sections.
+        if sent.rstrip().endswith(("?", "？")):
+            continue
         score = _score_sentence(sent, terms)
         if cues:
             low = sent.lower()

@@ -174,23 +174,23 @@ def test_a_database_write_failure_hides_the_path_but_admits_the_failure():
 
 
 def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
-    class _NoRag:
-        def find_module(self, name, path=None):
-            return self if name == "rag" or name.startswith("rag.") else None
-
-        def load_module(self, name):
-            raise ImportError("No module named 'chromadb'")
-
-    hook = _NoRag()
-    saved = sys.modules.pop("rag", None)
-    sys.meta_path.insert(0, hook)
+    # Python 3.12 no longer gives the old ``find_module`` test hook reliable
+    # control over imports.  Put a real module object named ``rag`` in
+    # sys.modules, but deliberately make it a non-package with no ``pipeline``.
+    # ``from rag import pipeline`` must then fail before Chroma can import or
+    # download anything, which is exactly the missing-package condition wanted.
+    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
+    sys.modules["rag"] = types.ModuleType("rag")
     try:
         vs = VectorSearch()
         report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
     finally:
-        sys.meta_path.remove(hook)
-        if saved is not None:
-            sys.modules["rag"] = saved
+        sys.modules.pop("rag.pipeline", None)
+        sys.modules.pop("rag", None)
+        for name in ("rag", "rag.pipeline"):
+            module = saved[name]
+            if module is not None:
+                sys.modules[name] = module
     assert report["ok"] is False
     assert report["reason_code"] == VEC_DB_MISSING
     assert "available nahi" in report["error"]     # purana contract kayam
