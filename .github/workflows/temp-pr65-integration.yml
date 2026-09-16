@@ -1,0 +1,54 @@
+name: Temporary PR65 integration validation
+
+on:
+  push:
+    branches:
+      - integration/pr65-maturity-on-pr106
+    paths:
+      - .github/workflows/temp-pr65-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/pr65-maturity-on-pr106
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create clean local PR65 merge commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin chatgpt-max-maturity-wave1-20260827
+          git merge --no-commit --no-ff origin/chatgpt-max-maturity-wave1-20260827
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge: integrate maturity A-F independence attestors"
+          test -z "$(git status --porcelain)"
+      - name: Install repository and test dependencies
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q pytest
+      - name: Run focused maturity and independence regressions
+        run: |
+          python -m pytest -q \
+            tests/test_maturity_stage_matrix.py \
+            tests/test_adversarial_independence_attestor.py \
+            tests/test_debate_independence_attestor.py \
+            tests/test_replication_independence_attestor.py \
+            tests/test_maturity_attestation_readiness.py \
+            tests/test_adversarial_science_attestor.py
+      - name: Run full pytest regression
+        run: python -m pytest -q
+      - name: Run legacy strict research-engine regression
+        run: python test_research_engine.py
+      - name: Push validated integration merge only after all gates pass
+        shell: bash
+        run: git push origin HEAD:integration/pr65-maturity-on-pr106
