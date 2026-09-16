@@ -1,0 +1,47 @@
+name: Temporary PR64 integration validation
+
+on:
+  push:
+    branches:
+      - integration/pr64-local-fallback-on-pr103
+    paths:
+      - .github/workflows/temp-pr64-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/pr64-local-fallback-on-pr103
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Create clean local PR64 merge commit
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin chatgpt-local-fallback-safety-20260902
+          git merge --no-commit --no-ff origin/chatgpt-local-fallback-safety-20260902
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge: integrate validated local fallback source guard"
+          test -z "$(git status --porcelain)"
+      - name: Install repository and test dependencies
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q pytest
+      - name: Run focused local fallback safety tests
+        run: python -m pytest -q tests/test_local_reasoning_source_guard.py
+      - name: Run full pytest regression
+        run: python -m pytest -q
+      - name: Run legacy strict research-engine regression
+        run: python test_research_engine.py
+      - name: Push validated integration merge only after all gates pass
+        shell: bash
+        run: git push origin HEAD:integration/pr64-local-fallback-on-pr103
