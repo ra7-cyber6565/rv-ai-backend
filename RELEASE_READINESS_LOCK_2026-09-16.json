@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "recorded_date": "2026-09-16",
   "repository": "ra7-cyber6565/rv-ai-backend",
   "production_branch": "main",
@@ -82,6 +82,17 @@
       "foundation_run_id": 35079189136,
       "authority_files_restored_to_base": ["AGENTS.md", "AI_HANDOFF.md", "WORK_STATUS.md", "docs/INFINITY_REQUIREMENT_LEDGER.md"],
       "truth_boundary": "Branch-only reviewed integration; hosted company live/model probe were skipped and no production merge/deploy occurred."
+    },
+    {
+      "pr": 106,
+      "head": "5a5bd9c423e661d6691b5b87406d246b1a0f80ab",
+      "base": "integration/pr82-runtime-current-stack",
+      "mergeable": true,
+      "purpose": "Integrate no-model/quota fallback source-trust guard while preserving current question-only evidence exclusion",
+      "ci": {"foundation": 1686, "ai1": 321, "ai2": 315, "anti_confirmation": 467, "model_reality": 490, "all_success": true},
+      "foundation_run_id": 35111409663,
+      "precertification": {"run_id": 35110916251, "focused_passed": 28, "full_pytest_passed": 4511, "skipped": 9, "warnings": 11, "subtests_passed": 51, "legacy_passed": 594, "legacy_failed": 0},
+      "truth_boundary": "Branch-only safety integration; no provider call, hosted-live proof, main merge, or Railway mutation."
     }
   ],
   "historical_pr82_integration_audit": {
@@ -96,6 +107,17 @@
     "legacy_strict": {"passed": 594, "failed": 0},
     "baseline_isolation_note": "Two inherited full-suite test-isolation defects were reproduced without PR82 and fixed before the final validated integration: Git-tracked-vs-runtime repo hygiene and deterministic missing-vector-DB simulation under Python 3.12."
   },
+  "historical_pr64_integration_audit": {
+    "historical_pr": 64,
+    "historical_head": "8f14f611a7fd32bb85f3c282fed6e31554807a78",
+    "first_run_id": 35110508178,
+    "first_run_result": "Focused guard passed; full suite had one incompatibility because PR64 safe sentence selection dropped the existing question-only evidence exclusion.",
+    "reconciled_run_id": 35110916251,
+    "reconciliation": "Preserve both source-instruction/retraction safety and the current rule that a sentence ending in ? or ？ cannot supply an explanation.",
+    "focused_tests_passed": 28,
+    "full_pytest": {"passed": 4511, "skipped": 9, "warnings": 11, "subtests_passed": 51},
+    "legacy_strict": {"passed": 594, "failed": 0}
+  },
   "persistence_harness": {
     "pr": 85,
     "head": "4c9188a03384ee85dc95db96357c3ba6824848d8",
@@ -104,9 +126,10 @@
     "ci": {"foundation": 1653, "ai1": 288, "ai2": 282, "anti_confirmation": 434, "model_reality": 457, "all_success": true},
     "latest_empirical_restart_result": "FAIL before volume attachment: same completed job returned 404 after redeploy"
   },
-  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95, 98, 103],
+  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95, 98, 103, 106],
   "persistence_harness_merge": "PR #85 is independent of the stacked feature chain and may be merged separately only under explicit production authorization.",
-  "ci_only_prs_closed_without_merge": [88, 90, 92, 94, 96, 97, 99, 102, 104],
+  "ci_only_prs_closed_without_merge": [88, 90, 92, 94, 96, 97, 99, 102, 104, 107],
+  "superseded_review_prs_closed_without_merge": [105],
   "live_acceptance_after_volume_and_deploy": [
     "Verify Railway service reports a real attached volume mounted at /data",
     "If PR #98 is deployed, require public health storage.persistent_volume_ready=true while keeping restart proof separate",
@@ -125,7 +148,7 @@
     "Held-out gate infrastructure does not prove a real quality win until an actual frozen campaign is graded.",
     "ONNX code validation does not prove production image size until a real production build is measured.",
     "Hosted-live Foundation steps that are skipped are not live proof.",
-    "PR103 exact-head CI and offline integration audit do not authorize or prove production deployment.",
+    "PR103/PR106 exact-head CI and offline integration audits do not authorize or prove production deployment.",
     "No open PR in this lock is merged to main as of this record."
   ],
   "production_authorization_phrase": "production deploy authorize",
