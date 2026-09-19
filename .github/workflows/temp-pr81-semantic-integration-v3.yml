@@ -41,6 +41,7 @@ jobs:
           git checkout --ours research_engine/craft_intent_guard.py tests/test_unified_max_mode.py
           git checkout --theirs scripts/run_pr81_trading_live_acceptance.py tests/test_pr81_trading_live_acceptance.py
           python tools/integrate_pr81_on_current.py
+          python tools/reconcile_pr81_handoff_contract.py
           git add -A
           test -z "$(git diff --name-only --diff-filter=U)"
           git commit -m "merge: integrate PR81 trading and Max cross-review repairs"
@@ -51,7 +52,7 @@ jobs:
           python -m pip install -q pytest
       - name: Run focused PR81 and structured-handoff regressions
         run: |
-          python -m pytest -q tests/test_company_cross_review.py tests/test_company_handoff_guard.py tests/test_company_handoff_runtime_wiring.py tests/test_pr81_structured_handoff_integration.py tests/test_craft_technical_script_guard.py tests/test_hosted_live_gate.py tests/test_live_failure_diagnostics.py tests/test_live_result_summary.py tests/test_pr81_trading_live_acceptance.py tests/test_pr81_worker_diagnostics.py tests/test_task_contract_measured_coverage.py tests/test_trading_hypothesis_structure_guard.py tests/test_trading_threshold_guard.py tests/test_unified_max_mode.py
+          python -m pytest -q tests/test_company_cross_review.py tests/test_company_handoff_guard.py tests/test_company_handoff_runtime_wiring.py tests/test_pr81_structured_handoff_integration.py tests/test_craft_technical_script_guard.py tests/test_hosted_live_gate.py tests/test_live_failure_diagnostics.py tests/test_live_result_summary.py tests/test_pr81_trading_live_acceptance.py tests/test_pr81_worker_diagnostics.py tests/test_research_company.py tests/test_task_contract_measured_coverage.py tests/test_trading_hypothesis_structure_guard.py tests/test_trading_threshold_guard.py tests/test_unified_max_mode.py
       - name: Run full pytest regression
         run: python -m pytest -q
       - name: Run legacy strict research-engine regression
