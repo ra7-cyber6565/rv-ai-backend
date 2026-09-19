@@ -1,0 +1,67 @@
+name: Temporary PR82 Python 3.12 isolation fix
+
+on:
+  push:
+    branches:
+      - integration/review-pr82-on-current-stack
+    paths:
+      - .github/workflows/temp-pr82-python312-test-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/review-pr82-on-current-stack
+      - name: Replace legacy import hook with deterministic Python 3.12-safe blocker
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path("tests/test_vector_ingest_hygiene.py")
+          text = path.read_text(encoding="utf-8")
+          pattern = r"def test_a_missing_vector_database_says_available_nahi_without_the_import_text\(\):.*?(?=\n\ndef test_an_empty_file_is_not_blamed_on_the_database)"
+          replacement = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text(monkeypatch):
+              import builtins
+
+              real_import = builtins.__import__
+
+              def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+                  if name == "rag" or name.startswith("rag."):
+                      raise ImportError("No module named 'chromadb'")
+                  return real_import(name, globals, locals, fromlist, level)
+
+              saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
+              monkeypatch.setattr(builtins, "__import__", blocked_import)
+              try:
+                  vs = VectorSearch()
+                  report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
+              finally:
+                  for name in ("rag", "rag.pipeline"):
+                      module = saved[name]
+                      if module is not None:
+                          sys.modules[name] = module
+              assert report["ok"] is False
+              assert report["reason_code"] == VEC_DB_MISSING
+              assert "available nahi" in report["error"]     # purana contract kayam
+              _assert_user_safe(report["error"])
+          '''
+          updated, count = re.subn(pattern, replacement, text, count=1, flags=re.S)
+          if count != 1:
+              raise SystemExit(f"expected exactly one vector isolation test block, got {count}")
+          path.write_text(updated, encoding="utf-8")
+          PY
+      - name: Commit narrow test-isolation fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_vector_ingest_hygiene.py
+          git commit -m "test: make missing vector DB isolation Python 3.12-safe"
+          git push origin HEAD:integration/review-pr82-on-current-stack
