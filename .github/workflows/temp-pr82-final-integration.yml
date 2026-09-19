@@ -1,4 +1,4 @@
-name: Temporary PR82 final gated integration
+name: Temporary PR82 final integrated-head validation
 
 on:
   push:
@@ -8,10 +8,10 @@ on:
       - .github/workflows/temp-pr82-final-integration.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  integrate:
+  validate:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -22,21 +22,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Create clean local PR82 merge candidate
+      - name: Prove clean integrated PR82 head
         shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           test -z "$(git status --porcelain)"
-          if git merge-base --is-ancestor 92388ad7850edd3933ebdf2325afcd014fead225 HEAD; then
-            echo "PR82 already integrated before validation" >&2
-            exit 2
-          fi
-          git fetch origin codex/answer-scope-20260908
-          git merge --no-commit --no-ff origin/codex/answer-scope-20260908
-          test -z "$(git diff --name-only --diff-filter=U)"
-          git commit -m "merge: integrate validated PR82 fixes into current stack"
-          test -z "$(git status --porcelain)"
+          git merge-base --is-ancestor 92388ad7850edd3933ebdf2325afcd014fead225 HEAD
+          echo "PR82 head is integrated in this exact checkout."
       - name: Install repository and test dependencies
         run: |
           python -m pip install -q -r requirements.txt
@@ -57,12 +48,15 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: pr82-final-integration-${{ github.run_id }}
+          name: pr82-integrated-head-${{ github.run_id }}
           path: |
             pr82-full-pytest.log
             pr82-legacy.log
           if-no-files-found: ignore
           retention-days: 3
-      - name: Push only validated integration merge
+      - name: Confirm clean exact head
         shell: bash
-        run: git push origin HEAD:integration/review-pr82-on-current-stack
+        run: |
+          test -z "$(git status --porcelain)"
+          git merge-base --is-ancestor 92388ad7850edd3933ebdf2325afcd014fead225 HEAD
+          echo "PR82 integrated-head validation passed."
