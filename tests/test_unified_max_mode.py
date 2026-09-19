@@ -74,8 +74,9 @@ def test_public_ui_contract_is_chat_and_max_only():
     # The response transformer replaces the whole mode selector with exactly
     # the two public choices. Legacy backend names can still exist elsewhere.
     assert '<div class="modes">.*?</div>' in source
-    assert 'data-mode="QUICK">Chat</button>' in source
+    assert 'class="on" data-mode="QUICK">Chat</button>' in source
     assert 'data-mode="MAXIMUM">Max</button>' in source
+    assert 'class="on" data-mode="MAXIMUM">Max</button>' not in source
     assert "Public users intentionally see only two choices: Chat and Max." in source
 
 
@@ -104,6 +105,9 @@ block = re.search(r'<div class="modes">(.*?)</div>', html, re.S)
 assert block, "served mode selector missing"
 modes = re.findall(r'data-mode="([^"]+)"', block.group(1))
 assert modes == ["QUICK", "MAXIMUM"], modes
+assert re.search(r'<button[^>]*class="on"[^>]*data-mode="QUICK"', block.group(1)), block.group(1)
+assert not re.search(r'<button[^>]*class="on"[^>]*data-mode="MAXIMUM"', block.group(1)), block.group(1)
+assert 'let mode="QUICK",busy=false,sessionPromise=null;' in html
 for legacy in ("DEEP", "MARATHON", "COMPANY", "COMPANY_PLUS", "CUSTOM"):
     assert f'data-mode="{legacy}"' not in block.group(1)
 '''
