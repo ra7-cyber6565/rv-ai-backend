@@ -85,7 +85,7 @@ jobs:
               raise SystemExit('runtime handoff probe anchor missing')
           text = text.replace(old, new, 1)
           old_assert = '    assert proc.stdout.strip().splitlines()[-1] == "research_engine.company_handoff_guard"\n'
-          new_assert = '''    lines = proc.stdout.strip().splitlines()\n    assert lines[-2] == "research_engine.company_cross_review_wiring"\n    assert lines[-1] == "research_engine.company_handoff_guard"\n'''
+          new_assert = '''    lines = proc.stdout.strip().splitlines()\n    assert lines[-2] == "research_engine.company_cross_review_wiring"\n    assert lines[-1] == "research_engine.research_company"\n'''
           if old_assert not in text:
               raise SystemExit('runtime handoff assertion anchor missing')
           runtime.write_text(text.replace(old_assert, new_assert, 1), encoding='utf-8')
