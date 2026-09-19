@@ -1,0 +1,125 @@
+name: Guarded live persistence restart acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      reviewed_commit:
+        description: Exact 40-character deployed Git SHA to verify before and after restart
+        required: true
+        type: string
+      controlled_restart_authorized:
+        description: Confirm an operator is authorized and ready to perform the controlled Railway restart during this run
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guarded-live-persistence-restart
+  cancel-in-progress: false
+
+jobs:
+  live-persistence-restart:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      BASE_URL: https://web-production-0dd45.up.railway.app
+      REVIEWED_COMMIT: ${{ inputs.reviewed_commit }}
+      STATE_FILE: /tmp/persistence-private-state.json
+      BEFORE_RECEIPT: /tmp/persistence-before.json
+      AFTER_RECEIPT: /tmp/persistence-after.json
+    steps:
+      - name: Require explicit controlled-restart acknowledgement
+        shell: bash
+        run: |
+          if [ "${{ inputs.controlled_restart_authorized }}" != "true" ]; then
+            echo "CONTROLLED_RESTART_NOT_ACKNOWLEDGED"
+            exit 2
+          fi
+          case "$REVIEWED_COMMIT" in
+            [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+            *) echo "INVALID_REVIEWED_COMMIT"; exit 2 ;;
+          esac
+
+      - name: Checkout exact reviewed acceptance code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.reviewed_commit }}
+          persist-credentials: false
+
+      - name: Verify exact clean checkout
+        shell: bash
+        run: |
+          test "$(git rev-parse HEAD)" = "$REVIEWED_COMMIT"
+          test -z "$(git status --porcelain)"
+
+      - name: Phase 1 - refuse ephemeral storage, then create one completed job
+        shell: bash
+        run: |
+          python tools/persistence_acceptance_guarded.py before-restart \
+            --base-url "$BASE_URL" \
+            --expected-build-revision "$REVIEWED_COMMIT" \
+            --state-file "$STATE_FILE" \
+            --receipt-file "$BEFORE_RECEIPT" \
+            --depth-mode QUICK \
+            --timeout-seconds 900 \
+            --poll-seconds 3
+          echo "PHASE1_COMPLETE__PERFORM_AUTHORIZED_CONTROLLED_RAILWAY_RESTART_NOW"
+          cat "$BEFORE_RECEIPT"
+
+      - name: Controlled restart coordination window
+        shell: bash
+        run: |
+          echo "Private capability state remains only on this runner and is never uploaded."
+          echo "The workflow itself does not deploy or restart Railway."
+          sleep 300
+
+      - name: Wait for exact reviewed service to recover
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, time, urllib.request
+          base = os.environ["BASE_URL"].rstrip("/")
+          expected = os.environ["REVIEWED_COMMIT"]
+          deadline = time.monotonic() + 600
+          while time.monotonic() < deadline:
+              try:
+                  with urllib.request.urlopen(base + "/health", timeout=20) as response:
+                      body = json.loads(response.read().decode("utf-8"))
+                  if (
+                      response.status == 200
+                      and isinstance(body, dict)
+                      and str(body.get("build_revision") or "").strip().lower() == expected
+                  ):
+                      storage = body.get("storage") if isinstance(body.get("storage"), dict) else {}
+                      if storage.get("persistent_volume_ready") is True:
+                          print("EXACT_REVIEWED_SERVICE_WITH_VOLUME_RECOVERED")
+                          raise SystemExit(0)
+              except Exception:
+                  pass
+              time.sleep(5)
+          print("EXACT_REVIEWED_SERVICE_WITH_VOLUME_DID_NOT_RECOVER")
+          raise SystemExit(2)
+          PY
+
+      - name: Phase 2 - verify same job, same capability and same semantic result
+        shell: bash
+        run: |
+          python tools/persistence_acceptance_guarded.py after-restart \
+            --base-url "$BASE_URL" \
+            --state-file "$STATE_FILE" \
+            --receipt-file "$AFTER_RECEIPT"
+          cat "$AFTER_RECEIPT"
+
+      - name: Upload sanitized receipts only
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: guarded-persistence-restart-${{ github.run_id }}
+          path: |
+            /tmp/persistence-before.json
+            /tmp/persistence-after.json
+          if-no-files-found: ignore
+          retention-days: 1
