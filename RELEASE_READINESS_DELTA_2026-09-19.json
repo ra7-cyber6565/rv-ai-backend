@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "recorded_date": "2026-09-19",
+  "repository": "ra7-cyber6565/rv-ai-backend",
+  "supersedes_for_current_status_only": "RELEASE_READINESS_LOCK_2026-09-16.json railway/current-tip fields",
+  "production": {
+    "branch": "main",
+    "main_sha": "3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a",
+    "main_source": "PR #84 durable/ephemeral storage split",
+    "main_unchanged_by_this_audit": true
+  },
+  "canonical_reviewed_tip": {
+    "pr": 113,
+    "branch": "integration/pr81-trading-on-pr111",
+    "head": "43c411cad88b226be44892152c0fa624edd8b68e",
+    "draft": true,
+    "stack": [86, 87, 89, 91, 93, 95, 98, 103, 106, 111, 113],
+    "ancestry_note": "PR #103 is based on #98 and carries audited PR82 runtime fixes; #106 is based on #103; #111 is based on #106; #113 is based on #111.",
+    "exact_head_ci": {
+      "foundation": {"run_number": 1690, "run_id": 35427275716, "conclusion": "SUCCESS"},
+      "ai1": {"run_number": 325, "run_id": 35427275860, "conclusion": "SUCCESS"},
+      "ai2": {"run_number": 319, "run_id": 35427275752, "conclusion": "SUCCESS"},
+      "anti_confirmation": {"run_number": 471, "run_id": 35427275733, "conclusion": "SUCCESS"},
+      "model_reality": {"run_number": 494, "run_id": 35427275751, "conclusion": "SUCCESS"}
+    },
+    "foundation_truth": {
+      "advanced_research_regression": "PASS",
+      "strict_zero_cost_gate": "PASS",
+      "windows_launcher_parse": "PASS",
+      "isolated_builds_improvement_localhost_api": "PASS",
+      "hosted_company_live": "SKIPPED",
+      "hosted_model_probe": "SKIPPED"
+    }
+  },
+  "historical_pr82_integration": {
+    "status": "DONE_ON_REVIEWED_STACK",
+    "final_validation_run_id": 35431094182,
+    "validated_head": "adc8345aa9a3ff475e25b11d3c9c3fe9715032a6",
+    "focused_isolation_regressions": "PASS",
+    "full_pytest": "PASS",
+    "legacy_test_research_engine": "PASS",
+    "carried_forward_via_pr": 103
+  },
+  "railway": {
+    "project_id": "568ca4c8-f937-4c7c-9d3d-6c9bf422887c",
+    "environment_id": "a911dd49-980f-4722-a6d8-b6c176d1c439",
+    "service_id": "3593244e-5f06-42a3-987b-addf4440833e",
+    "attached_volumes": [],
+    "persistent_volume_ready": false,
+    "last_pr84_deployment": {
+      "id": "1dc8fc98-6f64-4991-8c84-4f0cd8c55093",
+      "current_status": "REMOVED",
+      "created_at": "2026-09-15T06:23:39.089Z",
+      "removed_at_or_last_updated": "2026-09-19T10:05:29.855Z",
+      "commit": "3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a"
+    },
+    "runtime_end_evidence": [
+      "INFO: Shutting down",
+      "INFO: Waiting for application shutdown.",
+      "INFO: Application shutdown complete.",
+      "INFO: Finished server process [1]",
+      "Stopping Container"
+    ],
+    "crash_cause_proven": false,
+    "removal_cause": "UNKNOWN",
+    "status_endpoint_current_observation": "No active reviewed deployment is proven; status falls back to an older FAILED deployment.",
+    "production_service_healthy_claim_allowed": false,
+    "persistence_blocker": "No Railway Volume is attached at /data, and restart persistence remains unproven."
+  },
+  "remaining_live_acceptance": [
+    "Restore/prove an active Railway deployment only under explicit production authorization.",
+    "Attach a real Railway Volume at /data and verify service status reports it.",
+    "Run same-job/same-token restart persistence acceptance across a controlled redeploy.",
+    "Measure actual production image size after ONNX migration.",
+    "Verify Chroma/PostHog and Transformers warning disappearance on the reviewed deployed revision.",
+    "Run hosted MAXIMUM acceptance requiring exactly 6/6 specialists plus chief passes and exact accounting.",
+    "Run hosted trading acceptance for the reviewed PR #113 revision.",
+    "Run frozen private baseline/candidate held-out campaign, independent grading seal, and release gate decision."
+  ],
+  "truth_boundaries": [
+    "Branch/CI green is not production deployment proof.",
+    "Hosted-live steps that were skipped are not live proof.",
+    "Railway deployment REMOVED is not a crash diagnosis; the exact removal cause is unknown from available evidence.",
+    "No attached Railway Volume means persistence is not fixed.",
+    "No real held-out campaign means no benchmark quality PASS claim.",
+    "No production build measurement means no production image-size claim."
+  ],
+  "production_authorization_phrase": "production deploy authorize",
+  "generic_strt_or_aage_authorizes_production": false
+}
