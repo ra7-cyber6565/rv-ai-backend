@@ -1,0 +1,115 @@
+name: Temporary PR81 semantic integration
+
+on:
+  push:
+    branches:
+      - integration/pr81-trading-on-pr111
+    paths:
+      - .github/workflows/temp-pr81-semantic-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/pr81-trading-on-pr111
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Merge PR81 and resolve only measured conflicts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin fix/live-trading-acceptance-20260908
+          set +e
+          git merge --no-commit --no-ff origin/fix/live-trading-acceptance-20260908
+          merge_rc=$?
+          set -e
+          test "$merge_rc" -ne 0
+          conflicts="$(git diff --name-only --diff-filter=U | sort)"
+          expected="$(printf '%s\n' \
+            research_engine/company_handoff_guard.py \
+            research_engine/craft_intent_guard.py \
+            scripts/run_pr81_trading_live_acceptance.py \
+            tests/test_company_handoff_guard.py \
+            tests/test_pr81_trading_live_acceptance.py \
+            tests/test_unified_max_mode.py | sort)"
+          test "$conflicts" = "$expected"
+
+          # Preserve current-stack lossless specialist handoff and its stronger tests.
+          git checkout --ours research_engine/company_handoff_guard.py tests/test_company_handoff_guard.py
+          # Preserve current technical-script/data guard + trading acceptance wiring;
+          # Round-2 wiring is added explicitly below.
+          git checkout --ours research_engine/craft_intent_guard.py
+          # PR81 owns its fixed hard trading acceptance runner/tests.
+          git checkout --theirs scripts/run_pr81_trading_live_acceptance.py tests/test_pr81_trading_live_acceptance.py
+          # Preserve current unified-Max tests, then port only PR81's new Round-2 assertions.
+          git checkout --ours tests/test_unified_max_mode.py
+
+          python - <<'PY'
+          from pathlib import Path
+
+          craft = Path('research_engine/craft_intent_guard.py')
+          text = craft.read_text(encoding='utf-8')
+          marker = 'from .trading_acceptance_guard import install as _install_trading_acceptance_guard\n_install_trading_acceptance_guard()\n'
+          addition = marker + '''\n# Unified Max Round-2 collaboration reuses the same Company workers and chief.\nfrom .company_cross_review_wiring import install as _install_company_cross_review_wiring\n_install_company_cross_review_wiring()\n'''
+          if 'company_cross_review_wiring' not in text:
+              if marker not in text:
+                  raise SystemExit('craft acceptance wiring anchor missing')
+              text = text.replace(marker, addition, 1)
+              craft.write_text(text, encoding='utf-8')
+
+          test = Path('tests/test_unified_max_mode.py')
+          text = test.read_text(encoding='utf-8')
+          text = text.replace(
+              'def test_maximum_activates_full_company_plus_when_model_layer_is_usable(monkeypatch):',
+              'def test_maximum_activates_full_company_plus_and_round2_when_model_layer_is_usable(monkeypatch):',
+              1,
+          )
+          old = '    assert maximum.gemini_calls == company_plus.gemini_calls == 10\n'
+          new = '''    assert maximum.company_cross_review_agents == 6\n    assert company_plus.gemini_calls == 10\n    assert maximum.gemini_calls == 16\n    assert maximum.to_dict()["company_cross_review_agents"] == 6\n'''
+          if old in text:
+              text = text.replace(old, new, 1)
+          old2 = '    assert maximum.company_agents == 0\n'
+          if old2 in text and 'company_cross_review_agents == 0' not in text:
+              text = text.replace(old2, old2 + '    assert maximum.company_cross_review_agents == 0\n', 1)
+          test.write_text(text, encoding='utf-8')
+          PY
+
+          git add -A
+          test -z "$(git diff --name-only --diff-filter=U)"
+          git commit -m "merge: integrate PR81 trading and Max cross-review repairs"
+          test -z "$(git status --porcelain)"
+      - name: Install dependencies
+        run: |
+          python -m pip install -q -r requirements.txt
+          python -m pip install -q pytest
+      - name: Run focused PR81 and cross-review regressions
+        shell: bash
+        run: |
+          python -m pytest -q \
+            tests/test_company_cross_review.py \
+            tests/test_company_handoff_guard.py \
+            tests/test_company_handoff_runtime_wiring.py \
+            tests/test_craft_technical_script_guard.py \
+            tests/test_pr81_trading_live_acceptance.py \
+            tests/test_pr81_worker_diagnostics.py \
+            tests/test_task_contract_measured_coverage.py \
+            tests/test_trading_hypothesis_structure_guard.py \
+            tests/test_trading_threshold_guard.py \
+            tests/test_unified_max_mode.py
+      - name: Run full pytest regression
+        run: python -m pytest -q
+      - name: Run legacy strict research-engine regression
+        run: python test_research_engine.py
+      - name: Push only after all gates pass
+        shell: bash
+        run: git push origin HEAD:integration/pr81-trading-on-pr111
