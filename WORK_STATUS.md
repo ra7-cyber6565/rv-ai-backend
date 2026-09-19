@@ -2,6 +2,24 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Current continuation — 2026-09-19
+
+- PR #81 is still draft at `1449adfefc5df53edec5368b17efd9e0478d408d`.
+  Review branch `fix/pr81-reviewed-gates-20260919` holds acceptance repairs;
+  it has not changed PR #81, main or a deployed service.
+- Six code/test files repair import-chain verification, canonical mode reading,
+  complete six-role Round-1/Round-2 execution evidence and sanitized cross-review
+  failure diagnostics. All 46 selected deterministic tests pass locally.
+- Exact-revision full CI/live acceptance remains VERIFICATION PENDING. Broad
+  local test attempts were rejected by automatic approval review after Google
+  traffic; none is counted as a pass or retried indirectly through CI here.
+- Provider timeout repair is still open. Preserve confirmed-free fallback and
+  output quality while bounding the whole worker execution window. A proposed
+  blanket one-attempt/3,000-token reduction is not integrated.
+- `docs/PR81_REVIEWED_GATES.md` records the checkpoint and next actions. The
+  remaining shared-state, hypothesis-lifecycle, recursive-research, held-out,
+  persistence, executor and deployed end-to-end requirements remain in scope.
+
 ## Current continuation — ChatGPT, 2026-09-07
 
 - User superseded laptop setup: no further Windows/WSL/Docker installs, no

@@ -6,6 +6,16 @@ research-team path in the existing application. **This ledger does not declare
 the entire specification complete.** A partial status is not an external blocker;
 remaining engineering work is named separately from unavailable live evidence.
 
+2026-09-19 acceptance checkpoint: `fix/pr81-reviewed-gates-20260919`, based on
+PR #81 head `1449adfefc5df53edec5368b17efd9e0478d408d`, repairs the R03/R04/R19/R22
+software gates for canonical mode, six distinct validated specialist reports,
+six distinct peer reviews and complete handoffs. Receipt-only diagnostics now
+retain cross-review failures. Local selected deterministic tests: 46 PASS;
+full CI and live verification remain PENDING. R12/R13 provider timeout/fallback
+repair remains open. No whole requirement is promoted to VERIFIED. See
+`PR81_REVIEWED_GATES.md`; historical PR #79 evidence below is not proof for this
+checkpoint.
+
 2026-09-07 continuation: default-on stored-data preservation and an opt-in
 GitHub-hosted live validation lane are implemented. The user's laptop no longer
 needs to be the test host. See `HOSTED_VALIDATION.md` for configuration, evidence

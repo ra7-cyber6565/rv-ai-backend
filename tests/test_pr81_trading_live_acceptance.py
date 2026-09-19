@@ -6,6 +6,8 @@ missing, and that its public receipt does not copy private answer text.
 """
 from copy import deepcopy
 
+import pytest
+
 from scripts.run_pr81_trading_live_acceptance import (
     CRITICAL_TRADE_POINTS,
     EXPECTED_ROLES,
@@ -46,7 +48,22 @@ def _worker(role):
         "worker_id": "worker-" + role,
         "accounting": {"actual_http_attempts": 1, "successful_calls": 1},
         "accounting_complete": True,
+        "provider_output_capture_complete": True,
         "report": report,
+    }
+
+
+def _review(role):
+    return {
+        "role": role,
+        "phase": "ROUND_2_CROSS_REVIEW",
+        "status": "DRAFT_READY",
+        "worker_id": "cross-review-" + role,
+        "reviewed_roles": sorted(EXPECTED_ROLES - {role}),
+        "accounting": {"actual_http_attempts": 1, "successful_calls": 1},
+        "accounting_complete": True,
+        "provider_output_capture_complete": True,
+        "report": {"review_phase": "ROUND_2_CROSS_REVIEW"},
     }
 
 
@@ -54,8 +71,9 @@ def _result():
     workers = [_worker(role) for role in sorted(EXPECTED_ROLES)]
     return {
         "status": "COMPLETE",
+        "mode": "MAXIMUM",
         "answer": "PRIVATE ANSWER BODY THAT MUST NEVER ENTER THE RECEIPT",
-        "coverage": {"mode": "MAXIMUM"},
+        "coverage": {},
         "task_contract": {
             "task_types": ["research", "coding", "experiment_design"],
             "explicit_min_workers": 6,
@@ -87,6 +105,16 @@ def _result():
         "verification": {
             "research_company": {
                 "workers": workers,
+                "cross_review_requested": True,
+                "requested_cross_reviews": 6,
+                "completed_cross_reviews": 6,
+                "cross_review_status": "REVIEWS_READY",
+                "cross_reviews": [_review(role) for role in sorted(EXPECTED_ROLES)],
+                "cross_review_accounting_complete": True,
+                "cross_review_handoff_prepared": True,
+                "cross_review_handoff_complete": True,
+                "cross_review_handoff_roles": sorted(EXPECTED_ROLES),
+                "cross_review_handoff_truncated_roles": [],
                 "completed_workers": 6,
                 "requested_workers": 6,
                 "handoff_prepared": True,
@@ -195,3 +223,76 @@ def test_missing_isolated_build_receipt_fails():
     report = evaluate_result(result)
     assert report["passed"] is False
     assert "implementation_build_executed" in _failed_checks(report)
+
+
+def test_canonical_mode_is_used_even_when_coverage_omits_mode():
+    report = evaluate_result(_result())
+    assert report["passed"] is True
+    assert report["summary"]["mode"] == "MAXIMUM"
+
+
+@pytest.mark.parametrize("mode", ["", "QUICK"])
+def test_nested_mode_cannot_override_wrong_or_missing_canonical_mode(mode):
+    result = _result()
+    result["mode"] = mode
+    result["coverage"]["mode"] = "MAXIMUM"
+    assert "maximum_mode_executed" in _failed_checks(evaluate_result(result))
+
+
+@pytest.mark.parametrize("phase", ["workers", "cross_reviews"])
+@pytest.mark.parametrize("change", [
+    {"status": "FAILED"},
+    {"report": None},
+    {"provider_output_capture_complete": False},
+    {"accounting_complete": False},
+    {"accounting": {"actual_http_attempts": 0, "successful_calls": 1}},
+    {"accounting": {"actual_http_attempts": 1, "successful_calls": 0}},
+])
+def test_status_labels_cannot_replace_complete_execution_receipts(phase, change):
+    result = _result()
+    company = result["verification"]["research_company"]
+    company[phase][0].update(deepcopy(change))
+    failed = _failed_checks(evaluate_result(result))
+    assert "six_cross_reviews_executed" in failed
+    assert "cross_review_handoff_complete" in failed
+    if phase == "workers":
+        assert "six_specialists_executed" in failed
+        assert "specialist_handoff_complete" in failed
+
+
+def test_missing_cross_reviews_cannot_pass_vacuously():
+    result = _result()
+    result["verification"]["research_company"]["cross_reviews"] = []
+    failed = _failed_checks(evaluate_result(result))
+    assert {"six_cross_reviews_executed", "cross_review_handoff_complete",
+            "company_accounting_complete"} <= failed
+
+
+def test_first_pass_cannot_be_relabelled_as_a_cross_review():
+    result = _result()
+    company = result["verification"]["research_company"]
+    company["cross_reviews"][0]["worker_id"] = company["workers"][0]["worker_id"]
+    assert "six_cross_reviews_executed" in _failed_checks(evaluate_result(result))
+
+
+def test_review_must_inspect_every_other_role():
+    result = _result()
+    company = result["verification"]["research_company"]
+    company["cross_reviews"][0]["reviewed_roles"] = sorted(EXPECTED_ROLES)
+    assert "six_cross_reviews_executed" in _failed_checks(evaluate_result(result))
+
+
+@pytest.mark.parametrize("change", [
+    {"cross_review_requested": False},
+    {"requested_cross_reviews": 0},
+    {"completed_cross_reviews": 5},
+    {"cross_review_status": "PARTIAL"},
+    {"cross_review_handoff_prepared": False},
+    {"cross_review_handoff_complete": False},
+    {"cross_review_handoff_roles": []},
+    {"cross_review_handoff_truncated_roles": ["validation"]},
+])
+def test_missing_or_clipped_cross_review_handoff_fails(change):
+    result = _result()
+    result["verification"]["research_company"].update(deepcopy(change))
+    assert "cross_review_handoff_complete" in _failed_checks(evaluate_result(result))

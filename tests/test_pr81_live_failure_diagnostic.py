@@ -114,3 +114,25 @@ def test_success_receipt_stays_success_without_provider_or_research_calls(tmp_pa
     assert report["failed_checks"] == []
     assert report["additional_research_calls"] == 0
     assert report["additional_model_calls"] == 0
+
+
+def test_cross_review_failures_survive_safe_receipt_summary(tmp_path, monkeypatch):
+    monkeypatch.setattr(diagnostic, "repository_identity", _clean_identity)
+    source = tmp_path / "acceptance.json"
+    _write_source(source, {
+        "schema_version": 1,
+        "passed": False,
+        "checks": [
+            {"name": "six_cross_reviews_executed", "passed": False,
+             "detail": "PRIVATE PEER CRITIQUE"},
+            {"name": "cross_review_handoff_complete", "passed": False},
+        ],
+    })
+
+    report = diagnostic.execute(source)
+
+    assert report["failed_checks"] == [
+        "cross_review_handoff_complete", "six_cross_reviews_executed"
+    ]
+    assert report["additional_model_calls"] == 0
+    assert "PRIVATE PEER CRITIQUE" not in repr(report)

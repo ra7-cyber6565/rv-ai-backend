@@ -2,6 +2,31 @@
 
 **Purpose:** This is the first file any future AI/agent must read before changing this repository. It exists to stop half-finished parallel work, stale completion claims, duplicate implementations, and branch/deployment confusion.
 
+## Current acceptance repair checkpoint — 2026-09-19
+
+- PR #81 remains OPEN / DRAFT / UNMERGED at `1449adfefc5df53edec5368b17efd9e0478d408d`.
+  Current `main` is `831dbc7209253e58bbfa0ec79b9efe8e130bf523`; production was not
+  re-inspected or deployed in this checkpoint. Older deployment statements below
+  are historical evidence only.
+- Review branch `fix/pr81-reviewed-gates-20260919` contains the prepared gate
+  corrections. It is not integrated into PR #81 yet. See
+  `docs/PR81_REVIEWED_GATES.md` for exact scope, reproduction and remaining work.
+- Local deterministic acceptance/wiring tests: **46 PASS**. Full Foundation,
+  hosted/live tests and exact-revision CI: **VERIFICATION PENDING** for this
+  checkpoint. Never inherit the parent revision's CI results.
+- The normal import test checks the Round-2 -> compatibility -> canonical handoff
+  chain. The trading gate reads canonical top-level `mode` and requires complete
+  first-pass and peer-review receipts. Receipt-only diagnostics retain both new
+  cross-review failure names without copying private text.
+- An earlier uncommitted proposal capped Company calls to one provider attempt
+  and reduced worker output to 3,000 tokens. That proposal is not included in
+  this checkpoint; its fallback/deadline/quality tradeoffs need repair and tests
+  before integration. The 46 tests here do not validate that proposal.
+- Automatic approval review rejected broad local test runs after Google endpoint
+  traffic. No full-suite retry, hosted live run or automatic live-triggering push
+  is performed here. Rejected executions are not passes. Before external model
+  tests, obtain informed authorization for the test payload and destination.
+
 ## 1. Current integration authority — updated 2026-09-08
 
 - Repository: `ra7-cyber6565/rv-ai-backend`.

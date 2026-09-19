@@ -43,6 +43,8 @@ _ALLOWED_CHECKS = frozenset({
     "three_structured_hypotheses",
     "six_specialists_executed",
     "specialist_handoff_complete",
+    "six_cross_reviews_executed",
+    "cross_review_handoff_complete",
     "company_accounting_complete",
     "chief_executed",
     "implementation_build_executed",

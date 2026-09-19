@@ -8,7 +8,8 @@ answer text, source text/URLs, prompt, credentials or provider error bodies are
 written to the receipt.
 
 The gate intentionally fails closed. It requires the unified MAXIMUM path to
-actually activate all six specialists, complete the bounded chief handoff,
+actually activate all six specialists and their peer cross-reviews, complete the
+bounded chief handoff,
 produce three structured/testable hypotheses, execute the requested isolated
 implementation build, and satisfy the measured trading contract including the
 lab-backed validation rows. A PARTIAL result is a failed release acceptance,
@@ -210,9 +211,27 @@ def _worker_diagnostics(company: Mapping[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _role_round_executed(workers: Sequence[Mapping[str, Any]]) -> bool:
+    """Require distinct roles, validated full outputs and actual usage receipts."""
+    return (
+        len(workers) == 6
+        and {row.get("role") for row in workers} == EXPECTED_ROLES
+        and len({row.get("worker_id") for row in workers if row.get("worker_id")}) == 6
+        and all(
+            row.get("status") == "DRAFT_READY"
+            and isinstance(row.get("report"), Mapping)
+            and row.get("provider_output_capture_complete") is True
+            and row.get("accounting_complete") is True
+            and _positive_int((row.get("accounting") or {}).get("actual_http_attempts"))
+            and _positive_int((row.get("accounting") or {}).get("successful_calls"))
+            for row in workers
+        )
+    )
+
+
 def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
     """Evaluate only machine-readable evidence; never answer keyword overlap."""
-    coverage = result.get("coverage") or {}
+    reported_mode = str(result.get("mode") or "")
     contract = result.get("task_contract") or {}
     verification = result.get("verification") or {}
     company = verification.get("research_company") or {}
@@ -233,6 +252,28 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         str(row.get("worker_id") or "") for row in workers
         if row.get("worker_id")
     }
+    specialists_executed = _role_round_executed(workers)
+    reviews = [
+        row for row in (company.get("cross_reviews") or [])
+        if isinstance(row, Mapping)
+    ]
+    ready_reviews = [row for row in reviews if row.get("status") == "DRAFT_READY"]
+    cross_reviews_executed = (
+        company.get("cross_review_requested") is True
+        and company.get("requested_cross_reviews") == 6
+        and company.get("completed_cross_reviews") == 6
+        and company.get("cross_review_status") == "REVIEWS_READY"
+        and specialists_executed
+        and _role_round_executed(reviews)
+        and worker_ids.isdisjoint({row.get("worker_id") for row in reviews})
+        and all(
+            row.get("phase") == "ROUND_2_CROSS_REVIEW"
+            and row["report"].get("review_phase") == "ROUND_2_CROSS_REVIEW"
+            and len(row.get("reviewed_roles") or []) == 5
+            and set(row.get("reviewed_roles") or []) == EXPECTED_ROLES - {row["role"]}
+            for row in reviews
+        )
+    )
     chief = company.get("chief_execution") or {}
     chief_accounting = chief.get("accounting") or {}
     handoff_roles = {
@@ -270,7 +311,7 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         ),
         _safe_check(
             "maximum_mode_executed",
-            str(coverage.get("mode") or "").upper() == "MAXIMUM",
+            reported_mode.upper() == "MAXIMUM",
             "public result reports MAXIMUM mode",
         ),
         _safe_check(
@@ -330,19 +371,13 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         ),
         _safe_check(
             "six_specialists_executed",
-            len(workers) == len(ready_workers) == 6
-            and roles == EXPECTED_ROLES
-            and len(worker_ids) == 6
-            and all(
-                _positive_int((row.get("accounting") or {}).get("actual_http_attempts"))
-                and _positive_int((row.get("accounting") or {}).get("successful_calls"))
-                for row in workers
-            ),
+            specialists_executed,
             f"ready={len(ready_workers)}/6, roles={len(roles)}/6",
         ),
         _safe_check(
             "specialist_handoff_complete",
-            company.get("handoff_prepared") is True
+            specialists_executed
+            and company.get("handoff_prepared") is True
             and not (company.get("handoff_truncated_roles") or [])
             and handoff_roles == EXPECTED_ROLES,
             f"handoff_roles={len(handoff_roles)}/6, "
@@ -350,10 +385,27 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             f"truncated={len(company.get('handoff_truncated_roles') or [])}",
         ),
         _safe_check(
+            "six_cross_reviews_executed",
+            cross_reviews_executed,
+            f"ready={len(ready_reviews)}/6",
+        ),
+        _safe_check(
+            "cross_review_handoff_complete",
+            cross_reviews_executed
+            and company.get("cross_review_handoff_prepared") is True
+            and company.get("cross_review_handoff_complete") is True
+            and len(company.get("cross_review_handoff_roles") or []) == 6
+            and set(company.get("cross_review_handoff_roles") or []) == EXPECTED_ROLES
+            and not (company.get("cross_review_handoff_truncated_roles") or []),
+            "all six complete peer critiques prepared for the chief",
+        ),
+        _safe_check(
             "company_accounting_complete",
             company.get("accounting_complete") is True
-            and all(row.get("accounting_complete") is True for row in workers),
-            "worker usage receipts are complete",
+            and company.get("cross_review_accounting_complete") is True
+            and len(workers) == len(reviews) == 6
+            and all(row.get("accounting_complete") is True for row in workers + reviews),
+            "worker and cross-review usage receipts are complete",
         ),
         _safe_check(
             "chief_executed",
@@ -382,7 +434,7 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
         "checks": checks,
         "summary": {
             "status": str(result.get("status") or ""),
-            "mode": str(coverage.get("mode") or ""),
+            "mode": reported_mode,
             "task_contract_assessment": str(contract.get("assessment") or ""),
             "known_missing_deliverables": len(
                 contract.get("known_missing_deliverables") or []
@@ -402,6 +454,8 @@ def evaluate_result(result: Mapping[str, Any]) -> Dict[str, Any]:
             "first_three_experiment_missing_counts": hypothesis_missing_counts,
             "company_workers": len(workers),
             "company_ready_workers": len(ready_workers),
+            "company_cross_reviews": len(reviews),
+            "company_ready_cross_reviews": len(ready_reviews),
             "worker_diagnostics": worker_diagnostics,
             "handoff_compacted_roles": len(
                 company.get("handoff_compacted_roles") or []

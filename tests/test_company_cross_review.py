@@ -177,3 +177,28 @@ def test_legacy_company_plus_does_not_silently_gain_unbudgeted_second_round(monk
     assert len(calls) == 6
     assert result["cross_review_requested"] is False
     assert result["chief_call_budget"] == 4
+
+
+def test_live_evaluator_accepts_real_company_receipt_shape_with_fixture_provider(monkeypatch):
+    from scripts.run_pr81_trading_live_acceptance import evaluate_result
+
+    _set_model_ready(monkeypatch)
+    result = company.run_company(
+        "Compare the evidence", _packet(), get_depth_config("MAXIMUM"),
+        worker=lambda payload: _envelope(payload["role"]),
+    )
+    company.chief_handoff(result)
+    receipt = evaluate_result({
+        "mode": "MAXIMUM",
+        "verification": {"research_company": result},
+    })
+    checks = {row["name"]: row["passed"] for row in receipt["checks"]}
+
+    assert checks["maximum_mode_executed"] is True
+    assert checks["six_specialists_executed"] is True
+    assert checks["six_cross_reviews_executed"] is True
+    assert checks["specialist_handoff_complete"] is True
+    assert checks["cross_review_handoff_complete"] is True
+    assert checks["company_accounting_complete"] is True
+    # Synthetic Company wiring does not establish live/trading completion.
+    assert receipt["passed"] is False
