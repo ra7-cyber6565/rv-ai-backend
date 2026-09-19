@@ -44,14 +44,9 @@ jobs:
             tests/test_unified_max_mode.py | sort)"
           test "$conflicts" = "$expected"
 
-          # Preserve current-stack lossless specialist handoff and its stronger tests.
           git checkout --ours research_engine/company_handoff_guard.py tests/test_company_handoff_guard.py
-          # Preserve current technical-script/data guard + trading acceptance wiring;
-          # Round-2 wiring is added explicitly below.
           git checkout --ours research_engine/craft_intent_guard.py
-          # PR81 owns its fixed hard trading acceptance runner/tests.
           git checkout --theirs scripts/run_pr81_trading_live_acceptance.py tests/test_pr81_trading_live_acceptance.py
-          # Preserve current unified-Max tests, then port only PR81's new Round-2 assertions.
           git checkout --ours tests/test_unified_max_mode.py
 
           python - <<'PY'
@@ -64,8 +59,7 @@ jobs:
           if 'company_cross_review_wiring' not in text:
               if marker not in text:
                   raise SystemExit('craft acceptance wiring anchor missing')
-              text = text.replace(marker, addition, 1)
-              craft.write_text(text, encoding='utf-8')
+              craft.write_text(text.replace(marker, addition, 1), encoding='utf-8')
 
           test = Path('tests/test_unified_max_mode.py')
           text = test.read_text(encoding='utf-8')
@@ -82,6 +76,19 @@ jobs:
           if old2 in text and 'company_cross_review_agents == 0' not in text:
               text = text.replace(old2, old2 + '    assert maximum.company_cross_review_agents == 0\n', 1)
           test.write_text(text, encoding='utf-8')
+
+          runtime = Path('tests/test_company_handoff_runtime_wiring.py')
+          text = runtime.read_text(encoding='utf-8')
+          old = '''fn = research_company.chief_handoff\nprint(getattr(fn, "__module__", ""))\n'''
+          new = '''fn = research_company.chief_handoff\noriginal = getattr(fn, "__company_cross_review_original__", None)\nprint(getattr(fn, "__module__", ""))\nprint(getattr(original, "__module__", ""))\n'''
+          if old not in text:
+              raise SystemExit('runtime handoff probe anchor missing')
+          text = text.replace(old, new, 1)
+          old_assert = '    assert proc.stdout.strip().splitlines()[-1] == "research_engine.company_handoff_guard"\n'
+          new_assert = '''    lines = proc.stdout.strip().splitlines()\n    assert lines[-2] == "research_engine.company_cross_review_wiring"\n    assert lines[-1] == "research_engine.company_handoff_guard"\n'''
+          if old_assert not in text:
+              raise SystemExit('runtime handoff assertion anchor missing')
+          runtime.write_text(text.replace(old_assert, new_assert, 1), encoding='utf-8')
           PY
 
           git add -A
@@ -93,7 +100,6 @@ jobs:
           python -m pip install -q -r requirements.txt
           python -m pip install -q pytest
       - name: Run focused PR81 and cross-review regressions
-        shell: bash
         run: |
           python -m pytest -q \
             tests/test_company_cross_review.py \
@@ -111,5 +117,4 @@ jobs:
       - name: Run legacy strict research-engine regression
         run: python test_research_engine.py
       - name: Push only after all gates pass
-        shell: bash
         run: git push origin HEAD:integration/pr81-trading-on-pr111
