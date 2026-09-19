@@ -10,6 +10,21 @@ excerpts for the confirmed-₹0 CI/live campaign. Promote reviewed commit
 inspect exact-head core CI and the fixed live Max trading receipts. Status:
 IN PROGRESS / VERIFICATION PENDING. No merge or deployment is claimed.
 
+
+Latest-main reconciliation: the direct `refs/heads/main` is
+`3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a` (PR #84), not the stale base SHA
+returned in PR #81 metadata. Its durable/ephemeral storage split, MB quota
+controls and persistence runbook are merged into this acceptance branch without
+changing their implementation. The combined selected storage/runtime/acceptance
+suite passed 118 tests in 2.65s. The older 831dbc7 main statements below are
+historical. Full CI and live checks must run again on this integrated head.
+
+Production read-only inspection: the September 15 deployment at 3bf8f4a was
+REMOVED on September 19; `/health` currently returns HTTP 404. The service still
+points to this repository's `main`, but an active healthy deployment and durable
+volume are not established. Do not inherit older SUCCESS claims or deploy paid
+resources. Follow `docs/PERSISTENCE_RUNBOOK.md` for the actual-host proof.
+
 ## Current continuation — 2026-09-19
 
 - PR #81 is still draft at `1449adfefc5df53edec5368b17efd9e0478d408d`.

@@ -1,5 +1,7 @@
 # Infinity implementation and acceptance ledger
 
+PR #84 storage code from actual main `3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a` is reconciled into the acceptance branch. Production `/health` is 404 and the last September deployment is REMOVED; production persistence/executor/live claims remain unverified.
+
 2026-09-19 authorized validation: the owner approved sending test prompts and
 public source/repository excerpts to Google Gemini under the existing ₹0 policy.
 PR #81 integration and exact-head CI/live verification may proceed. No requirement
