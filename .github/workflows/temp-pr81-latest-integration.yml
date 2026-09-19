@@ -22,19 +22,36 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Apply only latest PR81 technical commits
+      - name: Apply latest PR81 technical commits with measured semantic resolution
         shell: bash
         run: |
+          set -euo pipefail
+          BASE=43c411cad88b226be44892152c0fa624edd8b68e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin fix/live-trading-acceptance-20260908
-          git cherry-pick --no-commit 7b0a10de7831efbca342ee361ea5fd68170c3a6b 8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8
+
+          if ! git cherry-pick 7b0a10de7831efbca342ee361ea5fd68170c3a6b; then
+            conflicts="$(git diff --name-only --diff-filter=U)"
+            test "$conflicts" = "tests/test_company_handoff_runtime_wiring.py"
+            # PR113 intentionally superseded the old compatibility-facade handoff
+            # with LOSSLESS_SHARED_FIELDS_THEN_HARD_FAIL. Keep its stronger wiring test.
+            git checkout --ours -- tests/test_company_handoff_runtime_wiring.py
+            git add tests/test_company_handoff_runtime_wiring.py
+            GIT_EDITOR=true git cherry-pick --continue
+          fi
+
+          git cherry-pick 8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8
           test -z "$(git diff --name-only --diff-filter=U)"
-          # Preserve the current integration authority instead of importing stale PR81 handoff state.
-          git restore --source=HEAD -- AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
+
+          # Do not import stale branch authority/history into the current stack.
+          git restore --source="$BASE" -- AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
           git rm -f --ignore-unmatch docs/PR81_REVIEWED_GATES.md
+          if ! git diff --quiet || ! git diff --cached --quiet; then
+            git add AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
+            git commit -m "docs: preserve current integration authority"
+          fi
           git diff --check
-          git commit -m "integrate: latest PR81 acceptance and generation-window repairs"
           test -z "$(git status --porcelain)"
       - name: Install repository and test dependencies
         run: |
