@@ -115,3 +115,7 @@ from .company_handoff_guard import install as _install_company_handoff_guard
 _install_company_handoff_guard()
 from .trading_acceptance_guard import install as _install_trading_acceptance_guard
 _install_trading_acceptance_guard()
+
+# Unified Max Round-2 collaboration reuses the same Company workers and chief.
+from .company_cross_review_wiring import install as _install_company_cross_review_wiring
+_install_company_cross_review_wiring()

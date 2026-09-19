@@ -188,7 +188,9 @@ def _website_html() -> str:
 
     Public users intentionally see only two choices: Chat and Max. Max is the
     single unified research entrypoint; legacy depth/company names stay backend
-    compatible but are not separate user decisions.
+    compatible but are not separate user decisions. Max is the default public
+    mode so an ordinary question gets the strongest bounded research path unless
+    the user deliberately selects fast Chat.
 
     `COMPLETE` is an internal lifecycle stage meaning the worker stopped and a
     result is available. It is not proof that the result status is COMPLETE;
@@ -206,20 +208,31 @@ def _website_html() -> str:
 
     # Normal users choose only between quick chat and the unified research
     # orchestrator. Legacy mode names remain accepted by backend APIs so old
-    # clients/tests are not broken.
+    # clients/tests are not broken. Max is selected by default; Chat remains an
+    # explicit opt-in fast path.
     html = re.sub(
         r'<div class="modes">.*?</div>',
         '<div class="modes">\n'
-        '    <button class="on" data-mode="QUICK">Chat</button>\n'
-        '    <button data-mode="MAXIMUM">Max</button>\n'
+        '    <button data-mode="QUICK">Chat</button>\n'
+        '    <button class="on" data-mode="MAXIMUM">Max</button>\n'
         '  </div>',
         html,
         count=1,
         flags=re.S,
     )
     html = html.replace(
+        '<div class="hint" id="hint">Chat — turant seedha jawab.</div>',
+        '<div class="hint" id="hint">Max — strongest bounded research pehle chalegi; Chat chuno to turant seedha jawab milega.</div>',
+        1,
+    )
+    html = html.replace(
+        'let mode="QUICK",busy=false,sessionPromise=null;',
+        'let mode="MAXIMUM",busy=false,sessionPromise=null;',
+        1,
+    )
+    html = html.replace(
         "Normal baat ke liye Chat. Sources aur cross-check ke liye Deep/Max; books, archives aur specialist lanes ke liye Marathon.",
-        "Normal baat ke liye Chat. Max ek unified full-research run hai: deep search, long research rounds, books/PDFs, specialist agents, validation, red-team aur final synthesis saath chalte hain.",
+        "Default Max hai: pehle strongest bounded research chalegi. Sirf jab turant seedha jawab chahiye tab Chat chuno. Max deep search, long research rounds, books/PDFs, specialist agents, validation, red-team aur final synthesis ko relevance ke hisaab se saath chalata hai.",
         1,
     )
     html = html.replace(

@@ -158,11 +158,13 @@ def summarize(results):
 
 
 REQUIRED_TRADING_CHECKS = {
-    "fixed_question_executed", "technical_script_not_creative", "trade_acceptance_active",
-    "python_script_kind_detected", "python_script_delivered", "requested_trade_points_registered",
-    "trade_contract_partition_valid", "threshold_provenance_ran", "unsupported_thresholds_fail_closed",
-    "missing_deliverables_fail_closed", "max_six_specialists_executed", "public_runtime_executed",
-    "chief_execution_observed", "specialist_handoff_semantics", "no_false_scientific_replication",
+    "status_complete", "maximum_mode_executed", "coding_not_creative",
+    "six_workers_requested", "task_contract_complete", "threshold_provenance",
+    "trade_contract_ran", "critical_trade_contract", "no_chased_win_rate",
+    "trading_reality_boundaries", "three_structured_hypotheses",
+    "six_specialists_executed", "specialist_handoff_complete",
+    "company_accounting_complete", "chief_executed",
+    "implementation_build_executed", "no_false_replication",
 }
 
 
@@ -182,7 +184,7 @@ def summarize_trading(record):
                 valid = False
                 break
             by_name[name] = row["passed"]
-    valid = valid and set(by_name) == REQUIRED_TRADING_CHECKS and record.get("schema") == 2
+    valid = valid and set(by_name) == REQUIRED_TRADING_CHECKS and record.get("schema") == 3
     rows = [{"name": name, "passed": valid and by_name.get(name) is True}
             for name in sorted(REQUIRED_TRADING_CHECKS)]
     raw = record.get("summary")
@@ -202,7 +204,7 @@ def summarize_trading(record):
         summary[key] = raw.get(key) is True
     digest = raw.get("answer_sha256")
     summary["answer_sha256"] = digest if type(digest) is str and re.fullmatch(r"[a-f0-9]{64}", digest) else ""
-    return {"schema": 2, "passed": record.get("passed") is True and all(row["passed"] for row in rows),
+    return {"schema": 3, "passed": record.get("passed") is True and all(row["passed"] for row in rows),
             "checks": rows, "summary": summary, "contains_answer_or_source_text": False,
             "contains_credentials": False, "backtest_execution_verified": False,
             "independent_quality_verified": False}
