@@ -1,6 +1,6 @@
 {
-  "schema_version": 4,
-  "recorded_date": "2026-09-16",
+  "schema_version": 5,
+  "recorded_date": "2026-09-19",
   "repository": "ra7-cyber6565/rv-ai-backend",
   "production_branch": "main",
   "production_main_sha": "3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a",
@@ -12,6 +12,7 @@
     "latest_deployment_id": "1dc8fc98-6f64-4991-8c84-4f0cd8c55093",
     "latest_deployment_status": "SUCCESS",
     "attached_volumes": [],
+    "verified_date": "2026-09-19",
     "persistence_blocker": "No Railway volume is attached; /data persistence is not proven."
   },
   "validated_open_stack": [
@@ -68,7 +69,7 @@
       "head": "68497e104fb6b42663f13d02705c23c5027cf47f",
       "base": "test/heldout-campaign-capture",
       "mergeable": true,
-      "purpose": "Expose path-free Railway runtime volume attachment and durable-root mount attestation",
+      "purpose": "Railway runtime volume attachment and durable-root mount attestation",
       "ci": {"foundation": 1680, "ai1": 315, "ai2": 309, "anti_confirmation": 461, "model_reality": 484, "all_success": true},
       "truth_boundary": "persistent_volume_ready is runtime attachment/mount attestation only, not restart persistence proof"
     },
@@ -80,43 +81,62 @@
       "purpose": "Integrate audited historical PR82 runtime/validation fixes while preserving current continuation-authority files",
       "ci": {"foundation": 1684, "ai1": 319, "ai2": 313, "anti_confirmation": 465, "model_reality": 488, "all_success": true},
       "foundation_run_id": 35079189136,
-      "authority_files_restored_to_base": ["AGENTS.md", "AI_HANDOFF.md", "WORK_STATUS.md", "docs/INFINITY_REQUIREMENT_LEDGER.md"],
-      "truth_boundary": "Branch-only reviewed integration; hosted company live/model probe were skipped and no production merge/deploy occurred."
+      "truth_boundary": "Branch-only reviewed integration; hosted company live/model probe skipped; no production merge/deploy."
     },
     {
       "pr": 106,
       "head": "5a5bd9c423e661d6691b5b87406d246b1a0f80ab",
       "base": "integration/pr82-runtime-current-stack",
       "mergeable": true,
-      "purpose": "Integrate no-model/quota fallback source-trust guard while preserving current question-only evidence exclusion",
+      "purpose": "Integrate no-model/quota fallback source-trust guard while preserving question-only evidence exclusion",
       "ci": {"foundation": 1686, "ai1": 321, "ai2": 315, "anti_confirmation": 467, "model_reality": 490, "all_success": true},
       "foundation_run_id": 35111409663,
-      "precertification": {"run_id": 35110916251, "focused_passed": 28, "full_pytest_passed": 4511, "skipped": 9, "warnings": 11, "subtests_passed": 51, "legacy_passed": 594, "legacy_failed": 0},
-      "truth_boundary": "Branch-only safety integration; no provider call, hosted-live proof, main merge, or Railway mutation."
+      "truth_boundary": "Branch-only safety integration; no provider call, hosted proof, main merge, or Railway mutation."
+    },
+    {
+      "pr": 111,
+      "head": "fd2f3347e2214a2d8226525014b46b8a32a90122",
+      "base": "integration/pr64-local-fallback-on-pr103",
+      "mergeable": true,
+      "purpose": "Integrate maturity A-F evidence integrity and independent-attestation hardening",
+      "ci": {"foundation": 1689, "ai1": 324, "ai2": 318, "anti_confirmation": 470, "model_reality": 493, "all_success": true},
+      "foundation_run_id": 35422363070,
+      "precertification": {"focused_passed": 60, "full_pytest_passed": 4553, "skipped": 9, "subtests_passed": 51, "legacy_passed": 594, "legacy_failed": 0},
+      "truth_boundary": "Offline/CI independence proof is not real-world independent replication or production proof."
+    },
+    {
+      "pr": 113,
+      "head": "43c411cad88b226be44892152c0fa624edd8b68e",
+      "base": "integration/pr65-maturity-on-pr106-v2",
+      "mergeable": true,
+      "draft": true,
+      "purpose": "Integrate PR81 Max trading/cross-review hardening while preserving current lossless handoff guard",
+      "ci": {"foundation": 1690, "ai1": 325, "ai2": 319, "anti_confirmation": 471, "model_reality": 494, "all_success": true},
+      "foundation_run_id": 35427275716,
+      "semantic_integration": {"run_id": 35427011879, "merge_commit": "9a0845660a44a2a855ba37e60fdfaad0ca3ddc2d", "focused_passed": 110, "focused_subtests_passed": 24, "full_pytest_passed": 4565, "skipped": 9, "full_subtests_passed": 51, "legacy_passed": 594, "legacy_failed": 0},
+      "truth_boundary": "Offline/CI proof only; hosted trading acceptance and production execution remain unproven."
     }
   ],
-  "historical_pr82_integration_audit": {
-    "historical_pr": 82,
-    "historical_head": "92388ad7850edd3933ebdf2325afcd014fead225",
-    "disposable_merge_commit": "7236baa49705148bea1c46248b3d243efef29898",
-    "audit_run_id": 35074603914,
-    "audit_job_id": 104723893221,
-    "git_conflicts": 0,
-    "focused_tests_passed": 20,
-    "full_pytest": {"passed": 4505, "skipped": 9, "warnings": 11, "subtests_passed": 51},
-    "legacy_strict": {"passed": 594, "failed": 0},
-    "baseline_isolation_note": "Two inherited full-suite test-isolation defects were reproduced without PR82 and fixed before the final validated integration: Git-tracked-vs-runtime repo hygiene and deterministic missing-vector-DB simulation under Python 3.12."
-  },
-  "historical_pr64_integration_audit": {
-    "historical_pr": 64,
-    "historical_head": "8f14f611a7fd32bb85f3c282fed6e31554807a78",
-    "first_run_id": 35110508178,
-    "first_run_result": "Focused guard passed; full suite had one incompatibility because PR64 safe sentence selection dropped the existing question-only evidence exclusion.",
-    "reconciled_run_id": 35110916251,
-    "reconciliation": "Preserve both source-instruction/retraction safety and the current rule that a sentence ending in ? or ？ cannot supply an explanation.",
-    "focused_tests_passed": 28,
-    "full_pytest": {"passed": 4511, "skipped": 9, "warnings": 11, "subtests_passed": 51},
-    "legacy_strict": {"passed": 594, "failed": 0}
+  "historical_integration_audits": {
+    "pr82": {
+      "historical_head": "92388ad7850edd3933ebdf2325afcd014fead225",
+      "audit_run_id": 35074603914,
+      "git_conflicts": 0,
+      "focused_tests_passed": 20,
+      "full_pytest": {"passed": 4505, "skipped": 9, "subtests_passed": 51},
+      "legacy_strict": {"passed": 594, "failed": 0},
+      "note": "Two inherited test-isolation defects were reproduced without PR82 and fixed before final integration."
+    },
+    "pr64": {
+      "historical_head": "8f14f611a7fd32bb85f3c282fed6e31554807a78",
+      "reconciled_run_id": 35110916251,
+      "note": "Preserved source-instruction/retraction safety plus current question-only evidence exclusion."
+    },
+    "pr81": {
+      "historical_pr": 81,
+      "integration_run_id": 35427011879,
+      "note": "Preserved useful trading/Round-2 cross-review repairs while superseding historical lossy structured-compaction expectations with current LOSSLESS_SHARED_FIELDS_THEN_HARD_FAIL contract."
+    }
   },
   "persistence_harness": {
     "pr": 85,
@@ -126,29 +146,29 @@
     "ci": {"foundation": 1653, "ai1": 288, "ai2": 282, "anti_confirmation": 434, "model_reality": 457, "all_success": true},
     "latest_empirical_restart_result": "FAIL before volume attachment: same completed job returned 404 after redeploy"
   },
-  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95, 98, 103, 106],
+  "required_merge_order_if_explicitly_authorized": [86, 87, 89, 91, 93, 95, 98, 103, 106, 111, 113],
   "persistence_harness_merge": "PR #85 is independent of the stacked feature chain and may be merged separately only under explicit production authorization.",
-  "ci_only_prs_closed_without_merge": [88, 90, 92, 94, 96, 97, 99, 102, 104, 107],
-  "superseded_review_prs_closed_without_merge": [105],
+  "ci_only_prs_closed_without_merge": [88, 90, 92, 94, 96, 97, 99, 102, 104, 107, 114],
   "live_acceptance_after_volume_and_deploy": [
     "Verify Railway service reports a real attached volume mounted at /data",
-    "If PR #98 is deployed, require public health storage.persistent_volume_ready=true while keeping restart proof separate",
+    "Require public health persistent_volume_ready=true if PR #98 is deployed, while keeping restart proof separate",
     "Run persistence phase 1 on one completed job and save private same-job token/state",
     "Perform controlled redeploy only under explicit production authorization",
-    "Run persistence phase 2 using same job ID and same token; require identical semantic digest",
+    "Run persistence phase 2 with same job ID/token and require identical semantic digest",
     "Measure actual production image/build size after ONNX migration",
     "Verify runtime warning disappearance without hiding unrelated warnings",
     "Run hosted MAXIMUM receipt requiring exactly 6/6 specialist roles plus chief passes and exact accounting",
+    "Run fixed hosted trading acceptance for the reviewed PR113 deployment",
     "Run frozen private baseline/candidate held-out campaign, independent grading seal, then release gate PASS/FAIL/INCONCLUSIVE"
   ],
   "truth_boundaries": [
     "No attached Railway volume means persistence is not fixed.",
     "Runtime Railway volume markers prove attachment/mount intent for a container start, not state survival across redeploys.",
-    "CI success does not prove hosted six-worker execution.",
+    "CI success does not prove hosted six-worker execution or hosted trading acceptance.",
     "Held-out gate infrastructure does not prove a real quality win until an actual frozen campaign is graded.",
     "ONNX code validation does not prove production image size until a real production build is measured.",
     "Hosted-live Foundation steps that are skipped are not live proof.",
-    "PR103/PR106 exact-head CI and offline integration audits do not authorize or prove production deployment.",
+    "Exact-head CI on PR103/106/111/113 does not authorize or prove production deployment.",
     "No open PR in this lock is merged to main as of this record."
   ],
   "production_authorization_phrase": "production deploy authorize",
