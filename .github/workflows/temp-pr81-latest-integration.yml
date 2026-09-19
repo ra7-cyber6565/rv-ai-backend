@@ -34,7 +34,6 @@ jobs:
           if ! git cherry-pick 7b0a10de7831efbca342ee361ea5fd68170c3a6b; then
             conflicts="$(git diff --name-only --diff-filter=U)"
             test "$conflicts" = "tests/test_company_handoff_runtime_wiring.py"
-            # PR113's lossless handoff guard supersedes the historical facade test.
             git checkout --ours -- tests/test_company_handoff_runtime_wiring.py
             git add tests/test_company_handoff_runtime_wiring.py
             GIT_EDITOR=true git cherry-pick --continue
@@ -49,13 +48,31 @@ jobs:
             expected="$(printf '%s\n' research_engine/company_worker.py research_engine/gemini_reasoning.py research_engine/research_company.py utils/research_runtime.py | sort)"
             test "$conflicts" = "$expected"
             python .github/temp_pr81_semantic_resolve.py
+            python - <<'PY'
+          from pathlib import Path
+          path = Path("research_engine/gemini_reasoning.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''                try:
+                    reserve_request("gemini", request_prompt, 6000, cooldown_scopes=scopes)
+                except ModelCooldownActive as cooldown:
+          '''
+          new = '''                try:
+                    if scopes:
+                        reserve_request("gemini", request_prompt, 6000, cooldown_scopes=scopes)
+                    else:
+                        reserve_request("gemini", request_prompt, 6000)
+                except ModelCooldownActive as cooldown:
+          '''
+          assert text.count(old) == 1
+          text = text.replace(old, new, 1)
+          compile(text, str(path), "exec")
+          path.write_text(text, encoding="utf-8")
+          PY
             git add research_engine/company_worker.py research_engine/gemini_reasoning.py \
               research_engine/research_company.py utils/research_runtime.py
             GIT_EDITOR=true git cherry-pick --continue
           fi
 
-          # Preserve the current integrated continuation authority; PR81 branch
-          # history/authorization text is not imported into this stack.
           git restore --source="$BASE" -- AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
           git rm -f --ignore-unmatch docs/PR81_REVIEWED_GATES.md
           git add AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
