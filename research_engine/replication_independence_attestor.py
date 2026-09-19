@@ -585,6 +585,18 @@ def attest_replication_independence(
     elif prior_anchor_token or prior_revision:
         raise ValueError("prior anchor/revision supplied for an empty maturity ledger")
 
+    implementation_sha256 = _hash_tracked_regular(
+        root, tracked, _IMPLEMENTATION_SUBJECT
+    )
+    subject_sha256 = _sha({
+        "revision": revision,
+        "execution_receipt_sha256": receipt.sha256,
+        "campaign_hash": receipt.campaign_hash,
+        "protocol_hash": receipt.protocol_hash,
+        "group_manifest_hash": receipt.group_manifest_hash,
+        "implementation_sha256": implementation_sha256,
+        "proof_kind": _PROOF_KIND.value,
+    })
     ledger = ProofLedger(str(ledger_target), integrity_key=integrity_key)
     existing = _existing_adds(ledger)
     receipt_id = f"repind:{receipt.sha256[:16]}:{_CAPABILITY_ID}"
@@ -593,6 +605,7 @@ def attest_replication_independence(
         "capability_id": _CAPABILITY_ID,
         "proof_kind": _PROOF_KIND.value,
         "subject": _SUBJECT,
+        "subject_sha256": subject_sha256,
         "verifier": _VERIFIER,
         "reference": reference,
         "implementation_revision": revision,
@@ -610,6 +623,7 @@ def attest_replication_independence(
             capability_id=_CAPABILITY_ID,
             proof_kind=_PROOF_KIND,
             subject=_SUBJECT,
+            subject_sha256=subject_sha256,
             verifier=_VERIFIER,
             observed_at=current_time,
             reference=reference,
