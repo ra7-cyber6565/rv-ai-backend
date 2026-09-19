@@ -174,31 +174,16 @@ def test_a_database_write_failure_hides_the_path_but_admits_the_failure():
 
 
 def test_a_missing_vector_database_says_available_nahi_without_the_import_text(monkeypatch):
-    import builtins
+    def missing_rag(_self):
+        raise ImportError("No module named 'chromadb'")
 
-    real_import = builtins.__import__
-
-    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
-        if name == "rag" or name.startswith("rag."):
-            raise ImportError("No module named 'chromadb'")
-        return real_import(name, globals, locals, fromlist, level)
-
-    saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
-    monkeypatch.setattr(builtins, "__import__", blocked_import)
-    try:
-        vs = VectorSearch()
-        report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
-    finally:
-        for name in ("rag", "rag.pipeline"):
-            module = saved[name]
-            if module is not None:
-                sys.modules[name] = module
+    monkeypatch.setattr(VectorSearch, "_rag", missing_rag)
+    vs = VectorSearch()
+    report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
     assert report["ok"] is False
     assert report["reason_code"] == VEC_DB_MISSING
-    assert "available nahi" in report["error"]     # purana contract kayam
+    assert "available nahi" in report["error"]
     _assert_user_safe(report["error"])
-
-
 def test_an_empty_file_is_not_blamed_on_the_database():
     vs = VectorSearch()
     vs._pipeline = _pipeline("lazy")
