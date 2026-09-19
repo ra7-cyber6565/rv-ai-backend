@@ -11,17 +11,21 @@
 - Review branch `fix/pr81-reviewed-gates-20260919` contains the prepared gate
   corrections. It is not integrated into PR #81 yet. See
   `docs/PR81_REVIEWED_GATES.md` for exact scope, reproduction and remaining work.
-- Local deterministic acceptance/wiring tests: **46 PASS**. Full Foundation,
+- Local deterministic acceptance/wiring/router/deadline tests: **108 PASS**. Full Foundation,
   hosted/live tests and exact-revision CI: **VERIFICATION PENDING** for this
   checkpoint. Never inherit the parent revision's CI results.
 - The normal import test checks the Round-2 -> compatibility -> canonical handoff
   chain. The trading gate reads canonical top-level `mode` and requires complete
   first-pass and peer-review receipts. Receipt-only diagnostics retain both new
   cross-review failure names without copying private text.
+- Worker deadline repair now shares a parent-owned elapsed-time window across
+  model discovery, retries, backup keys and provider fallbacks. Cooperative
+  expiry preserves numeric usage; hard process death still means UNKNOWN usage.
+  The 6,000-token output ceiling and eligible free fallback remain available.
 - An earlier uncommitted proposal capped Company calls to one provider attempt
   and reduced worker output to 3,000 tokens. That proposal is not included in
   this checkpoint; its fallback/deadline/quality tradeoffs need repair and tests
-  before integration. The 46 tests here do not validate that proposal.
+  before integration. The 108 selected tests do not validate that proposal.
 - Automatic approval review rejected broad local test runs after Google endpoint
   traffic. No full-suite retry, hosted live run or automatic live-triggering push
   is performed here. Rejected executions are not passes. Before external model

@@ -9,13 +9,16 @@ This file is the coordination source of truth for multi-agent work.
   it has not changed PR #81, main or a deployed service.
 - Six code/test files repair import-chain verification, canonical mode reading,
   complete six-role Round-1/Round-2 execution evidence and sanitized cross-review
-  failure diagnostics. All 46 selected deterministic tests pass locally.
+  failure diagnostics. The first checkpoint is `7b0a10de7831efbca342ee361ea5fd68170c3a6b`.
 - Exact-revision full CI/live acceptance remains VERIFICATION PENDING. Broad
   local test attempts were rejected by automatic approval review after Google
   traffic; none is counted as a pass or retried indirectly through CI here.
-- Provider timeout repair is still open. Preserve confirmed-free fallback and
-  output quality while bounding the whole worker execution window. A proposed
-  blanket one-attempt/3,000-token reduction is not integrated.
+- Worker timeout repair is implemented and locally verified: parent-owned
+  generation window, bounded discovery/retry/fallback timeouts, preserved
+  cooperative accounting and no phantom retry counts. **108 selected tests
+  PASS** (including 17 new injected-clock/provider regressions). Real provider
+  verification is pending. The 6,000-token ceiling and free fallback remain;
+  the earlier one-attempt/3,000-token proposal is not integrated.
 - `docs/PR81_REVIEWED_GATES.md` records the checkpoint and next actions. The
   remaining shared-state, hypothesis-lifecycle, recursive-research, held-out,
   persistence, executor and deployed end-to-end requirements remain in scope.

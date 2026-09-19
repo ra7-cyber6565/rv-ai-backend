@@ -25,7 +25,9 @@ This file performs no network call at import time.  Provider HTTP libraries are
 imported lazily inside ``generate``.
 """
 from __future__ import annotations
-from utils.research_runtime import RuntimeBlocked
+from utils.research_runtime import (
+    GenerationDeadline, RuntimeBlocked, bounded_http_timeout, bounded_request_timeout,
+)
 
 import os
 import re
@@ -170,6 +172,7 @@ class OpenAICompatibleFreeProvider(ReasoningProvider):
             if self.name == "openrouter":
                 headers["X-Title"] = "Infinity Research AI"
             from utils.research_runtime import reserve_request
+            timeout = bounded_http_timeout(10, self.timeout)
             reserve_request(self.name, prompt, 6000)
             response = requests.post(
                 self.endpoint,
@@ -181,7 +184,7 @@ class OpenAICompatibleFreeProvider(ReasoningProvider):
                     "max_tokens": 6000,
                     "stream": False,
                 },
-                timeout=(10, self.timeout),
+                timeout=timeout,
             )
             status = int(getattr(response, "status_code", 0) or 0)
             if status == 200:
@@ -234,6 +237,8 @@ class OpenAICompatibleFreeProvider(ReasoningProvider):
                 kind="provider_error", human=f"{self.name} request complete nahi hui.",
                 technical=f"HTTP {status} {detail}",
             )
+        except GenerationDeadline:
+            raise
         except RuntimeBlocked:
             return ProviderResult(provider=self.name, model=self.model, attempts=0,
                 kind="application_budget", human="Shared research budget unavailable.", block_for_run=True)
@@ -275,6 +280,7 @@ class OllamaProvider(ReasoningProvider):
             import requests  # lazy
 
             from utils.research_runtime import reserve_request
+            timeout = bounded_http_timeout(3, self.timeout)
             reserve_request("ollama", prompt, 6000)
             response = requests.post(
                 f"{self.base_url}/api/chat",
@@ -285,7 +291,7 @@ class OllamaProvider(ReasoningProvider):
                     "think": False,
                     "options": {"temperature": 0.15, "num_predict": 6000},
                 },
-                timeout=(3, self.timeout),
+                timeout=timeout,
             )
             status = int(getattr(response, "status_code", 0) or 0)
             if status == 200:
@@ -306,6 +312,8 @@ class OllamaProvider(ReasoningProvider):
                        else "Local Ollama response available nahi hua."),
                 technical=f"HTTP {status} {detail}", block_for_run=status == 404,
             )
+        except GenerationDeadline:
+            raise
         except RuntimeBlocked:
             return ProviderResult(provider=self.name, model=self.model, attempts=0,
                 kind="application_budget", human="Shared research budget unavailable.", block_for_run=True)
@@ -444,6 +452,7 @@ class ResilientReasoning(_GeminiReasoning):
         for provider in self.fallback_providers:
             if provider.name in self.blocked_providers:
                 continue
+            bounded_request_timeout(1)
             attempted_provider = True
             self.provider_attempts[provider.name] = self.provider_attempts.get(provider.name, 0) + 1
             result = provider.generate(prompt, tag)

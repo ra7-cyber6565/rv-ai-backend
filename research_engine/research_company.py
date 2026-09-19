@@ -151,6 +151,10 @@ def _safe_accounting(raw) -> Dict:
 def process_worker(payload: Dict, timeout: float = 180) -> Dict:
     """A killed worker can have spent calls; missing accounting must stay UNKNOWN."""
     try:
+        # Parent-owned absolute cutoff includes child startup. Leave time for
+        # report/accounting serialization before the hard process deadline.
+        payload = dict(payload, generation_deadline=time.time() +
+                       max(0.0, timeout - min(10.0, timeout / 10)))
         completed = subprocess.run(
             [sys.executable, "-m", "research_engine.company_worker"],
             input=json.dumps(payload, ensure_ascii=False), capture_output=True,

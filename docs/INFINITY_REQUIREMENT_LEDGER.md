@@ -1,5 +1,7 @@
 # Infinity implementation and acceptance ledger
 
+**2026-09-19 runtime follow-up:** R03/R04/R19/R22 now also have locally tested worker generation-window/accounting repairs. 108 selected offline tests PASS, including 17 new injected-clock/SDK/HTTP cases. Parent hard process death remains UNKNOWN; full CI, real Max, integration and deployment are still VERIFICATION PENDING. No whole requirement is promoted by these unit receipts.
+
 Specification: user attachment `Pasted markdown(20260905-064523).md`, received
 2026-09-05. Scope: all 22 sections remain tracked. PR #79 implements a bounded
 research-team path in the existing application. **This ledger does not declare
@@ -12,7 +14,7 @@ software gates for canonical mode, six distinct validated specialist reports,
 six distinct peer reviews and complete handoffs. Receipt-only diagnostics now
 retain cross-review failures. Local selected deterministic tests: 46 PASS;
 full CI and live verification remain PENDING. R12/R13 provider timeout/fallback
-repair remains open. No whole requirement is promoted to VERIFIED. See
+repair has the locally tested follow-up above; live verification remains open. No whole requirement is promoted to VERIFIED. See
 `PR81_REVIEWED_GATES.md`; historical PR #79 evidence below is not proof for this
 checkpoint.
 

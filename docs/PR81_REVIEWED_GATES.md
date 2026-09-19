@@ -5,7 +5,7 @@ Status: REVIEW CHECKPOINT / NOT INTEGRATED / FULL VERIFICATION PENDING.
 ## Revision and evidence
 
 - Parent: `1449adfefc5df53edec5368b17efd9e0478d408d`.
-- Intended review branch: `fix/pr81-reviewed-gates-20260919`.
+- Review branch: `fix/pr81-reviewed-gates-20260919`.
 - PR #81 remains OPEN, DRAFT, mergeable and unmerged at the parent.
 - Current main read from GitHub: `831dbc7209253e58bbfa0ec79b9efe8e130bf523`.
 - On the parent, AI-1, AI-2, Model Reality and Anti-confirmation passed;
@@ -31,9 +31,10 @@ Status: REVIEW CHECKPOINT / NOT INTEGRATED / FULL VERIFICATION PENDING.
 5. Both cross-review check names survive the existing receipt-only diagnostic
    allowlist. Free-form peer text is never copied to its public summary.
 
-The implementation reuses the existing Company, cross-review and handoff paths.
-It adds no model calls and does not change provider selection, retries, output
-ceilings, workflow triggers, deployment configuration or truth-promotion rules.
+The initial acceptance commit `7b0a10de7831efbca342ee361ea5fd68170c3a6b`
+reuses the existing Company, cross-review and handoff paths. That commit changes
+no provider selection/retry policy, output ceilings, workflows or deployment.
+The runtime follow-up below modifies deadline and retry accounting in place.
 
 ## Validation performed
 
@@ -57,7 +58,57 @@ does not claim that the overall trading/live gate passed. No generation SDK or
 actual provider is needed by this selected suite. CI uses Python 3.11 and must
 still verify the integrated revision independently.
 
-## Remaining runtime repair and earlier proposal
+## Runtime repair follow-up — 2026-09-19
+
+The same review branch now includes a cooperative generation window in the
+existing runtime/router. The parent supplies the absolute cutoff, reserving ten
+seconds before its 180-second kill deadline; child startup consumes that window.
+Discovery, generation, retry backoff, key rotation and provider fallbacks consult
+one monotonic remaining-time budget. Nested scopes cannot enlarge it. Existing
+provider eligibility and the 6,000-token output ceiling are preserved.
+
+A 75s + 75s timeout sequence now gives recovery at most the remaining 20 seconds,
+instead of starting a new 180-second request. Fast primary failure can still use
+a confirmed-free provider or backup key. SDK-internal retries are disabled in
+the worker even without a bound durable run. Retry/compaction/recovery counts are
+charged only after a request lease; an adapter rejection before dispatch is not
+reported as an HTTP attempt. Cooperative expiry and rejected central leases keep
+prior numeric receipts. Invalid JSON still cannot become DRAFT_READY.
+
+**108 tests passed in 1.94 seconds**, including the 46 acceptance/wiring cases
+above, 17 new clock/provider regressions, and existing retry/router regression
+cases. Reproduction uses the same small Python environment:
+
+```sh
+python -m pytest -q \
+  tests/test_company_generation_window.py \
+  tests/test_gemini_retry.py \
+  tests/test_reasoning_router.py \
+  tests/test_reasoning_router_integration.py \
+  tests/test_pr81_trading_live_acceptance.py \
+  tests/test_pr81_live_failure_diagnostic.py \
+  tests/test_pr81_worker_diagnostics.py \
+  tests/test_company_cross_review.py \
+  tests/test_company_handoff_runtime_wiring.py
+git diff --check
+```
+
+These tests use injected clocks, SDKs and HTTP responses; no actual model call
+was made. They cover slow timeout/recovery, successful compact recovery, fast
+primary-to-free fallback, hosted/local fallback timeout allocation, discovery
+using the same budget, backup-key rotation, exhausted central lease, backoff
+expiry, no phantom last-slot retry, unsupported unbounded adapters, expired
+parent cutoff, invalid JSON, hard process death, fallback-only expiry accounting
+and nested-window isolation.
+
+This is cooperative bounding, not proof that an arbitrary SDK, DNS lookup,
+paginated discovery or a trickling HTTP body must stop at an exact wall-clock
+instant. The parent's hard subprocess timeout remains the final boundary and
+still marks killed-process accounting incomplete/UNKNOWN. Real SDK compatibility,
+provider latency, structured-output quality and full exact-revision CI are
+VERIFICATION PENDING. No merge, deployment or live acceptance is claimed.
+
+## Measured defect and rejected earlier proposal
 
 The worker subprocess has a 180-second outer deadline. The Gemini loop can make
 75-second calls and then a 180-second recovery call; a process can therefore be
@@ -80,11 +131,9 @@ Do not apply that proposal blindly:
 - Retry and compaction counters must count dispatched retries, not merely a
   proposed retry when no attempt slot remains.
 
-Next repair should bound total elapsed generation across the existing router,
-preserve useful eligible fallbacks and full structured output, and retain honest
-usage on cooperative timeout. Test fast primary failure with a successful free
-fallback, slow request/recovery, backup keys, exhausted central leases, invalid
-JSON and process death using injected clocks/providers before live validation.
+The runtime follow-up above implements and locally tests this repair within
+the existing router. The next evidence required is actual provider compatibility
+and a complete live Max receipt on the integrated revision.
 
 ## Execution boundary and next steps
 
@@ -101,7 +150,7 @@ this checkpoint does not dispatch workflows. PR #81's branch automatically runs
 the live trading gate on push, so promoting these changes there would itself
 start external model execution. No promotion, merge or deploy is claimed here.
 
-After resolving the execution boundary: finish runtime repair, integrate the
+After resolving the execution boundary: verify the runtime repair, integrate the
 reviewed changes without overwriting other work, run exact-revision full gates,
 inspect one real Max receipt, then continue the broader handoff's shared-state,
 hypothesis lifecycle, recursive research, held-out evaluation, durable storage,
