@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Fail-closed Railway persistence acceptance entrypoint.
 
-This is a thin safety wrapper around ``tools.persistence_acceptance``.  The
+This is a thin safety wrapper around ``tools.persistence_acceptance``. The
 underlying two-phase client owns the public API requests, private capability
-state, and stable-result hashing.  This wrapper adds the production preconditions
+state, and stable-result hashing. This wrapper adds the production preconditions
 that the historical harness lacked:
 
 * the deployed build must equal one explicitly reviewed full Git SHA;
@@ -12,8 +12,8 @@ that the historical harness lacked:
 * the runtime mount must match the configured durable root; and
 * ``persistent_volume_ready`` must be true before *every* phase health read.
 
-The wrapper never restarts or deploys Railway.  A controlled restart remains an
-operator action between phases.  It never uploads or prints the private job
+The wrapper never restarts or deploys Railway. A controlled restart remains an
+operator action between phases. It never uploads or prints the private job
 capability.
 """
 from __future__ import annotations
@@ -34,6 +34,7 @@ _VOLUME_FIELDS = (
     "railway_volume_mount_matches_durable_root",
     "persistent_volume_ready",
 )
+_BASE_STORAGE_RECEIPT = core._storage_receipt
 
 
 class GuardedAcceptanceError(RuntimeError):
@@ -49,7 +50,7 @@ def _reviewed_sha(value: object) -> str:
 
 def storage_receipt(health: dict[str, Any]) -> dict[str, Any]:
     """Extend the historical sanitized receipt with path-free Volume booleans."""
-    receipt = dict(core._storage_receipt(health))
+    receipt = dict(_BASE_STORAGE_RECEIPT(health))
     storage = health.get("storage")
     if not isinstance(storage, dict):
         return receipt
@@ -64,7 +65,7 @@ def validate_persistent_health(
     *,
     expected_build_revision: str,
 ) -> dict[str, Any]:
-    """Fail closed unless this exact reviewed Railway build has a real /data Volume."""
+    """Fail closed unless this exact reviewed Railway build has a real Volume."""
     expected = _reviewed_sha(expected_build_revision)
     if not isinstance(health, dict):
         raise GuardedAcceptanceError("health_not_object")
@@ -103,7 +104,7 @@ def _state_revision(path: str) -> str:
 
 
 def _run_with_guard(args: argparse.Namespace, expected_revision: str) -> dict[str, Any]:
-    """Inject the same exact-build/Volume validation into every core health read."""
+    """Inject the exact-build/Volume validation into every core health read."""
     original_health = core._health
     original_receipt = core._storage_receipt
 
