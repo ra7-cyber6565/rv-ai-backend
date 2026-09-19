@@ -173,25 +173,31 @@ def test_a_database_write_failure_hides_the_path_but_admits_the_failure():
     assert "/data/chroma_db" in vs.last_error      # debugging ke liye andar hai
 
 
-def test_a_missing_vector_database_says_available_nahi_without_the_import_text():
-    # Use a non-package rag stub so from rag import pipeline fails
-    # deterministically on Python 3.12 without importing Chroma.
+def test_a_missing_vector_database_says_available_nahi_without_the_import_text(monkeypatch):
+    import builtins
+
+    real_import = builtins.__import__
+
+    def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "rag" or name.startswith("rag."):
+            raise ImportError("No module named 'chromadb'")
+        return real_import(name, globals, locals, fromlist, level)
+
     saved = {name: sys.modules.pop(name, None) for name in ("rag.pipeline", "rag")}
-    sys.modules["rag"] = types.ModuleType("rag")
+    monkeypatch.setattr(builtins, "__import__", blocked_import)
     try:
         vs = VectorSearch()
         report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
     finally:
-        sys.modules.pop("rag.pipeline", None)
-        sys.modules.pop("rag", None)
         for name in ("rag", "rag.pipeline"):
             module = saved[name]
             if module is not None:
                 sys.modules[name] = module
     assert report["ok"] is False
     assert report["reason_code"] == VEC_DB_MISSING
-    assert "available nahi" in report["error"]
+    assert "available nahi" in report["error"]     # purana contract kayam
     _assert_user_safe(report["error"])
+
 
 def test_an_empty_file_is_not_blamed_on_the_database():
     vs = VectorSearch()
