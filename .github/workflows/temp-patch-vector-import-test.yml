@@ -17,7 +17,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: integration/review-pr82-on-current-stack
-      - name: Replace legacy meta-path simulation with deterministic import block
+      - name: Replace brittle import simulation with direct lazy-loader failure
         shell: bash
         run: |
           python - <<'PY'
@@ -25,19 +25,13 @@ jobs:
 
           path = Path('tests/test_vector_ingest_hygiene.py')
           text = path.read_text(encoding='utf-8')
-          start = text.index('def test_a_missing_vector_database_says_available_nahi_without_the_import_text():')
+          start = text.index('def test_a_missing_vector_database_says_available_nahi_without_the_import_text(monkeypatch):')
           end = text.index('\ndef test_an_empty_file_is_not_blamed_on_the_database():', start)
           replacement = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text(monkeypatch):
-              import builtins
+              def missing_rag(_self):
+                  raise ImportError("No module named 'chromadb'")
 
-              real_import = builtins.__import__
-
-              def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
-                  if name == "rag" or name.startswith("rag."):
-                      raise ImportError("No module named 'chromadb'")
-                  return real_import(name, globals, locals, fromlist, level)
-
-              monkeypatch.setattr(builtins, "__import__", blocked_import)
+              monkeypatch.setattr(VectorSearch, "_rag", missing_rag)
               vs = VectorSearch()
               report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
               assert report["ok"] is False
@@ -56,5 +50,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add tests/test_vector_ingest_hygiene.py
           git diff --cached --check
-          git commit -m "test: isolate missing vector database import deterministically"
+          git commit -m "test: isolate missing vector database without imports"
           git push origin HEAD:integration/review-pr82-on-current-stack
