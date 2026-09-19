@@ -1,6 +1,6 @@
 # PR #81 reviewed acceptance repairs — 2026-09-19
 
-Status: REVIEW CHECKPOINT / NOT INTEGRATED / FULL VERIFICATION PENDING.
+Status: AUTHORIZED FOR PR #81 INTEGRATION / FULL VERIFICATION PENDING.
 
 ## Revision and evidence
 
@@ -135,7 +135,18 @@ The runtime follow-up above implements and locally tests this repair within
 the existing router. The next evidence required is actual provider compatibility
 and a complete live Max receipt on the integrated revision.
 
-## Execution boundary and next steps
+## Owner authorization — 2026-09-19
+
+After the automatic-review rejection and payload/destination were explained,
+the owner explicitly authorized test prompts and public source/repository excerpts
+to Google Gemini for confirmed-₹0 CI/live verification. Promote the reviewed
+acceptance/runtime commits through `8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8`
+into the existing PR branch and inspect the resulting exact-head receipts.
+The permission boundary below is historical; no repeated approval is required for
+this authorized campaign. Paid fallbacks, secret exposure and private research
+disclosure remain outside scope.
+
+## Historical execution boundary and next steps
 
 Automatic approval review rejected earlier broad local test executions after
 Google generative-language endpoint traffic. Even blank credentials/offline

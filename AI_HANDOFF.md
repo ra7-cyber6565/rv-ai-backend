@@ -2,6 +2,21 @@
 
 **Purpose:** This is the first file any future AI/agent must read before changing this repository. It exists to stop half-finished parallel work, stale completion claims, duplicate implementations, and branch/deployment confusion.
 
+## Authorized integration and live verification — 2026-09-19
+
+The owner explicitly approved sending test prompts and public source/repository
+excerpts to Google Gemini for confirmed-₹0 CI/live checks after the earlier
+automatic approval rejection was explained. That execution boundary is resolved
+for this test campaign; do not request the same permission again. Preserve all
+zero-cost guards and never expose credentials or private user research.
+
+Integrate the reviewed acceptance/runtime commits through
+`8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8` into the existing PR #81 branch.
+The branch push dispatches its fixed trading Max live workflow and the five
+required PR gates. Exact resulting-head CI/live evidence is VERIFICATION PENDING;
+108 offline tests are not a live acceptance result. Keep the PR draft until the
+required real gates pass. Main/deployment have not changed at this checkpoint.
+
 ## Current acceptance repair checkpoint — 2026-09-19
 
 - PR #81 remains OPEN / DRAFT / UNMERGED at `1449adfefc5df53edec5368b17efd9e0478d408d`.

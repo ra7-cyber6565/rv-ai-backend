@@ -1,5 +1,10 @@
 # Infinity implementation and acceptance ledger
 
+2026-09-19 authorized validation: the owner approved sending test prompts and
+public source/repository excerpts to Google Gemini under the existing ₹0 policy.
+PR #81 integration and exact-head CI/live verification may proceed. No requirement
+is promoted until its own receipt is inspected.
+
 **2026-09-19 runtime follow-up:** R03/R04/R19/R22 now also have locally tested worker generation-window/accounting repairs. 108 selected offline tests PASS, including 17 new injected-clock/SDK/HTTP cases. Parent hard process death remains UNKNOWN; full CI, real Max, integration and deployment are still VERIFICATION PENDING. No whole requirement is promoted by these unit receipts.
 
 Specification: user attachment `Pasted markdown(20260905-064523).md`, received
