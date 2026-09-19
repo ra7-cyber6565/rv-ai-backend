@@ -1,0 +1,60 @@
+name: Temporary patch vector import isolation test
+
+on:
+  push:
+    branches:
+      - integration/review-pr82-on-current-stack
+    paths:
+      - .github/workflows/temp-patch-vector-import-test.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: integration/review-pr82-on-current-stack
+      - name: Replace legacy meta-path simulation with deterministic import block
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('tests/test_vector_ingest_hygiene.py')
+          text = path.read_text(encoding='utf-8')
+          start = text.index('def test_a_missing_vector_database_says_available_nahi_without_the_import_text():')
+          end = text.index('\ndef test_an_empty_file_is_not_blamed_on_the_database():', start)
+          replacement = '''def test_a_missing_vector_database_says_available_nahi_without_the_import_text(monkeypatch):
+              import builtins
+
+              real_import = builtins.__import__
+
+              def blocked_import(name, globals=None, locals=None, fromlist=(), level=0):
+                  if name == "rag" or name.startswith("rag."):
+                      raise ImportError("No module named 'chromadb'")
+                  return real_import(name, globals, locals, fromlist, level)
+
+              monkeypatch.setattr(builtins, "__import__", blocked_import)
+              vs = VectorSearch()
+              report = vs.ingest_chunks([CHUNK], "meri.pdf", "p1")
+              assert report["ok"] is False
+              assert report["reason_code"] == VEC_DB_MISSING
+              assert "available nahi" in report["error"]
+              _assert_user_safe(report["error"])
+          '''
+          replacement = '\n'.join(line[10:] if line.startswith('          ') else line for line in replacement.splitlines()) + '\n'
+          path.write_text(text[:start] + replacement + text[end + 1:], encoding='utf-8')
+          PY
+          python -m py_compile tests/test_vector_ingest_hygiene.py
+      - name: Commit test-isolation fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add tests/test_vector_ingest_hygiene.py
+          git diff --cached --check
+          git commit -m "test: isolate missing vector database import deterministically"
+          git push origin HEAD:integration/review-pr82-on-current-stack
