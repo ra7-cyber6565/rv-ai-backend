@@ -44,6 +44,9 @@ jobs:
             tests/test_unified_max_mode.py | sort)"
           test "$conflicts" = "$expected"
 
+          # Keep the current stack's lossless specialist handoff guard and technical
+          # script/data boundary.  Import PR81's stronger trading runner and all
+          # non-conflicting runtime fixes, then wire Round-2 explicitly.
           git checkout --ours research_engine/company_handoff_guard.py tests/test_company_handoff_guard.py
           git checkout --ours research_engine/craft_intent_guard.py
           git checkout --theirs scripts/run_pr81_trading_live_acceptance.py tests/test_pr81_trading_live_acceptance.py
@@ -52,6 +55,7 @@ jobs:
           python - <<'PY'
           from pathlib import Path
 
+          # 1) Install Round-2 after the existing technical/trading guards.
           craft = Path('research_engine/craft_intent_guard.py')
           text = craft.read_text(encoding='utf-8')
           marker = 'from .trading_acceptance_guard import install as _install_trading_acceptance_guard\n_install_trading_acceptance_guard()\n'
@@ -61,6 +65,7 @@ jobs:
                   raise SystemExit('craft acceptance wiring anchor missing')
               craft.write_text(text.replace(marker, addition, 1), encoding='utf-8')
 
+          # 2) Preserve current unified-Max tests, but assert PR81's 6+6+4 budget.
           test = Path('tests/test_unified_max_mode.py')
           text = test.read_text(encoding='utf-8')
           text = text.replace(
@@ -77,6 +82,9 @@ jobs:
               text = text.replace(old2, old2 + '    assert maximum.company_cross_review_agents == 0\n', 1)
           test.write_text(text, encoding='utf-8')
 
+          # 3) Normal package import now has a Round-2 wrapper around the canonical
+          # research_company handoff.  Prove both layers instead of demanding the
+          # compatibility guard be the final function object.
           runtime = Path('tests/test_company_handoff_runtime_wiring.py')
           text = runtime.read_text(encoding='utf-8')
           old = '''fn = research_company.chief_handoff\nprint(getattr(fn, "__module__", ""))\n'''
@@ -89,6 +97,41 @@ jobs:
           if old_assert not in text:
               raise SystemExit('runtime handoff assertion anchor missing')
           runtime.write_text(text.replace(old_assert, new_assert, 1), encoding='utf-8')
+
+          # 4) PR81's hard runner supersedes the old evaluator, but the current
+          # hosted gate calls run_trading_live().  Expose a compatibility entrypoint
+          # that returns the *stronger* evaluator as a new schema-3 receipt.
+          runner = Path('scripts/run_pr81_trading_live_acceptance.py')
+          text = runner.read_text(encoding='utf-8')
+          if 'def run_trading_live()' not in text:
+              anchor = '\n\ndef _write(path: Path, payload: Mapping[str, Any]) -> None:\n'
+              facade = '''\n\ndef run_trading_live() -> Dict[str, Any]:\n    """Hosted-gate compatibility facade over the stronger PR81 Max evaluator."""\n    receipt = dict(evaluate_result(run_live()))\n    receipt["schema"] = 3\n    return receipt\n'''
+              if anchor not in text:
+                  raise SystemExit('trading compatibility insertion anchor missing')
+              runner.write_text(text.replace(anchor, facade + anchor, 1), encoding='utf-8')
+
+          # 5) Upgrade the current hosted gate's allowlist from the old weaker
+          # schema to the exact stronger PR81 checks.  Raw details remain excluded.
+          hosted = Path('scripts/run_hosted_live_gate.py')
+          text = hosted.read_text(encoding='utf-8')
+          start = text.index('REQUIRED_TRADING_CHECKS = {')
+          end = text.index('\n\n\ndef summarize_trading', start)
+          stronger = '''REQUIRED_TRADING_CHECKS = {\n    "status_complete", "maximum_mode_executed", "coding_not_creative",\n    "six_workers_requested", "task_contract_complete", "threshold_provenance",\n    "trade_contract_ran", "critical_trade_contract", "no_chased_win_rate",\n    "trading_reality_boundaries", "three_structured_hypotheses",\n    "six_specialists_executed", "specialist_handoff_complete",\n    "company_accounting_complete", "chief_executed",\n    "implementation_build_executed", "no_false_replication",\n}'''
+          text = text[:start] + stronger + text[end:]
+          text = text.replace('record.get("schema") == 2', 'record.get("schema") == 3', 1)
+          old_return = 'return {"schema": 2, "passed": record.get("passed") is True and all(row["passed"] for row in rows),'
+          new_return = 'return {"schema": 3, "passed": record.get("passed") is True and all(row["passed"] for row in rows),'
+          if old_return not in text:
+              raise SystemExit('hosted trading receipt return anchor missing')
+          hosted.write_text(text.replace(old_return, new_return, 1), encoding='utf-8')
+
+          # 6) Update only trading-fixture schemas in the hosted gate tests.
+          ht = Path('tests/test_hosted_live_gate.py')
+          text = ht.read_text(encoding='utf-8')
+          text = text.replace("{'schema':2,'passed':True,'checks':[", "{'schema':3,'passed':True,'checks':[")
+          text = text.replace("{'schema':2,'passed':False,'checks':[", "{'schema':3,'passed':False,'checks':[")
+          text = text.replace('{"schema": 2, "passed": True, "checks": [', '{"schema": 3, "passed": True, "checks": [')
+          ht.write_text(text, encoding='utf-8')
           PY
 
           git add -A
@@ -99,13 +142,16 @@ jobs:
         run: |
           python -m pip install -q -r requirements.txt
           python -m pip install -q pytest
-      - name: Run focused PR81 and cross-review regressions
+      - name: Run focused PR81, hosted-gate and cross-review regressions
         run: |
           python -m pytest -q \
             tests/test_company_cross_review.py \
             tests/test_company_handoff_guard.py \
             tests/test_company_handoff_runtime_wiring.py \
             tests/test_craft_technical_script_guard.py \
+            tests/test_hosted_live_gate.py \
+            tests/test_live_failure_diagnostics.py \
+            tests/test_live_result_summary.py \
             tests/test_pr81_trading_live_acceptance.py \
             tests/test_pr81_worker_diagnostics.py \
             tests/test_task_contract_measured_coverage.py \
