@@ -2,6 +2,50 @@
 
 This file is the coordination source of truth for multi-agent work.
 
+## Authorized execution continuation — 2026-09-19
+
+Owner approval now covers Google Gemini test prompts and public source/repository
+excerpts for the confirmed-₹0 CI/live campaign. Promote reviewed commit
+`8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8` into the existing PR #81 branch, then
+inspect exact-head core CI and the fixed live Max trading receipts. Status:
+IN PROGRESS / VERIFICATION PENDING. No merge or deployment is claimed.
+
+
+Latest-main reconciliation: the direct `refs/heads/main` is
+`3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a` (PR #84), not the stale base SHA
+returned in PR #81 metadata. Its durable/ephemeral storage split, MB quota
+controls and persistence runbook are merged into this acceptance branch without
+changing their implementation. The combined selected storage/runtime/acceptance
+suite passed 118 tests in 2.65s. The older 831dbc7 main statements below are
+historical. Full CI and live checks must run again on this integrated head.
+
+Production read-only inspection: the September 15 deployment at 3bf8f4a was
+REMOVED on September 19; `/health` currently returns HTTP 404. The service still
+points to this repository's `main`, but an active healthy deployment and durable
+volume are not established. Do not inherit older SUCCESS claims or deploy paid
+resources. Follow `docs/PERSISTENCE_RUNBOOK.md` for the actual-host proof.
+
+## Current continuation — 2026-09-19
+
+- PR #81 is still draft at `1449adfefc5df53edec5368b17efd9e0478d408d`.
+  Review branch `fix/pr81-reviewed-gates-20260919` holds acceptance repairs;
+  it has not changed PR #81, main or a deployed service.
+- Six code/test files repair import-chain verification, canonical mode reading,
+  complete six-role Round-1/Round-2 execution evidence and sanitized cross-review
+  failure diagnostics. The first checkpoint is `7b0a10de7831efbca342ee361ea5fd68170c3a6b`.
+- Exact-revision full CI/live acceptance remains VERIFICATION PENDING. Broad
+  local test attempts were rejected by automatic approval review after Google
+  traffic; none is counted as a pass or retried indirectly through CI here.
+- Worker timeout repair is implemented and locally verified: parent-owned
+  generation window, bounded discovery/retry/fallback timeouts, preserved
+  cooperative accounting and no phantom retry counts. **108 selected tests
+  PASS** (including 17 new injected-clock/provider regressions). Real provider
+  verification is pending. The 6,000-token ceiling and free fallback remain;
+  the earlier one-attempt/3,000-token proposal is not integrated.
+- `docs/PR81_REVIEWED_GATES.md` records the checkpoint and next actions. The
+  remaining shared-state, hypothesis-lifecycle, recursive-research, held-out,
+  persistence, executor and deployed end-to-end requirements remain in scope.
+
 ## Current continuation — ChatGPT, 2026-09-07
 
 - User superseded laptop setup: no further Windows/WSL/Docker installs, no

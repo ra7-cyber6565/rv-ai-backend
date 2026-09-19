@@ -1,10 +1,29 @@
 # Infinity implementation and acceptance ledger
 
+PR #84 storage code from actual main `3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a` is reconciled into the acceptance branch. Production `/health` is 404 and the last September deployment is REMOVED; production persistence/executor/live claims remain unverified.
+
+2026-09-19 authorized validation: the owner approved sending test prompts and
+public source/repository excerpts to Google Gemini under the existing ₹0 policy.
+PR #81 integration and exact-head CI/live verification may proceed. No requirement
+is promoted until its own receipt is inspected.
+
+**2026-09-19 runtime follow-up:** R03/R04/R19/R22 now also have locally tested worker generation-window/accounting repairs. 108 selected offline tests PASS, including 17 new injected-clock/SDK/HTTP cases. Parent hard process death remains UNKNOWN; full CI, real Max, integration and deployment are still VERIFICATION PENDING. No whole requirement is promoted by these unit receipts.
+
 Specification: user attachment `Pasted markdown(20260905-064523).md`, received
 2026-09-05. Scope: all 22 sections remain tracked. PR #79 implements a bounded
 research-team path in the existing application. **This ledger does not declare
 the entire specification complete.** A partial status is not an external blocker;
 remaining engineering work is named separately from unavailable live evidence.
+
+2026-09-19 acceptance checkpoint: `fix/pr81-reviewed-gates-20260919`, based on
+PR #81 head `1449adfefc5df53edec5368b17efd9e0478d408d`, repairs the R03/R04/R19/R22
+software gates for canonical mode, six distinct validated specialist reports,
+six distinct peer reviews and complete handoffs. Receipt-only diagnostics now
+retain cross-review failures. Local selected deterministic tests: 46 PASS;
+full CI and live verification remain PENDING. R12/R13 provider timeout/fallback
+repair has the locally tested follow-up above; live verification remains open. No whole requirement is promoted to VERIFIED. See
+`PR81_REVIEWED_GATES.md`; historical PR #79 evidence below is not proof for this
+checkpoint.
 
 2026-09-07 continuation: default-on stored-data preservation and an opt-in
 GitHub-hosted live validation lane are implemented. The user's laptop no longer

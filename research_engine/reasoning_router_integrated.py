@@ -19,6 +19,7 @@ import os
 from typing import Dict, Iterable, List, Optional
 
 from utils.provider_health import provider_health
+from utils.research_runtime import GenerationDeadline, RuntimeBlocked
 from utils.zero_cost_guard import gemini_credentials_configured, zero_cost_enabled
 
 from .reasoning_router import (
@@ -121,7 +122,23 @@ class ResilientReasoning(_Router):
         events_before = len(getattr(getattr(self, "ledger", None), "events", []) or [])
         provider_switches_before = int(getattr(self, "provider_switches", 0) or 0)
 
-        text = super().generate(prompt, label)
+        try:
+            text = super().generate(prompt, label)
+        except RuntimeBlocked as exc:
+            # A fallback-only pass may stop before the normal reconciliation
+            # below. Keep its completed attempts and requested-pass receipt.
+            self._router_last_success = False
+            self._router_last_failure_kind = (
+                "generation_deadline" if isinstance(exc, GenerationDeadline) else "application_budget"
+            )
+            self._redact_new_primary_errors(errors_before, tag)
+            if len(self.pass_log) == before_log:
+                self.pass_log.append({"label": tag, "ok": False,
+                    "http_attempts": max(0, self.attempts - attempts_before), "model": ""})
+            else:
+                self.pass_log[-1].update(ok=False,
+                    http_attempts=max(0, self.attempts - attempts_before))
+            raise
         # A successful later model/provider saves this logical pass. Earlier
         # failed model attempts remain in accounting, but must not leave a stale
         # public failure reason after real output was produced.

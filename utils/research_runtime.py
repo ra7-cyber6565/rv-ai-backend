@@ -26,6 +26,53 @@ class ResearchCancelled(RuntimeBlocked):
     pass
 
 
+class GenerationDeadline(RuntimeBlocked):
+    """The cooperative worker window ended before another request dispatch."""
+
+
+_GENERATION_DEADLINE = contextvars.ContextVar("generation_deadline", default=None)
+
+
+@contextlib.contextmanager
+def generation_window(seconds):
+    """Share one elapsed-time budget across discovery, retries and fallbacks.
+
+    This cooperative limit complements the parent's hard process timeout; a
+    non-cooperating SDK/process still has UNKNOWN accounting if it is killed.
+    Nested scopes may shorten the window, never extend it.
+    """
+    deadline = time.monotonic() + max(0.0, float(seconds))
+    outer = _GENERATION_DEADLINE.get()
+    token = _GENERATION_DEADLINE.set(min(deadline, outer) if outer is not None else deadline)
+    try:
+        yield
+    finally:
+        _GENERATION_DEADLINE.reset(token)
+
+
+def generation_window_active():
+    return _GENERATION_DEADLINE.get() is not None
+
+
+def bounded_request_timeout(seconds):
+    deadline = _GENERATION_DEADLINE.get()
+    if deadline is None:
+        return seconds
+    remaining = deadline - time.monotonic()
+    if remaining <= 0.1:
+        raise GenerationDeadline("worker generation window exhausted")
+    return min(float(seconds), remaining)
+
+
+def bounded_http_timeout(connect, read):
+    """Share remaining time between connection setup and a provider read."""
+    if not generation_window_active():
+        return (connect, read)
+    remaining = bounded_request_timeout(connect + read)
+    connection = min(float(connect), remaining / 4)
+    return (connection, min(float(read), remaining - connection))
+
+
 def digest(value):
     return hashlib.sha256(json.dumps(_encode(value), sort_keys=True, ensure_ascii=False,
                                     separators=(",", ":"), default=str).encode()).hexdigest()

@@ -2,6 +2,65 @@
 
 **Purpose:** This is the first file any future AI/agent must read before changing this repository. It exists to stop half-finished parallel work, stale completion claims, duplicate implementations, and branch/deployment confusion.
 
+## Authorized integration and live verification — 2026-09-19
+
+The owner explicitly approved sending test prompts and public source/repository
+excerpts to Google Gemini for confirmed-₹0 CI/live checks after the earlier
+automatic approval rejection was explained. That execution boundary is resolved
+for this test campaign; do not request the same permission again. Preserve all
+zero-cost guards and never expose credentials or private user research.
+
+Integrate the reviewed acceptance/runtime commits through
+`8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8` into the existing PR #81 branch.
+The branch push dispatches its fixed trading Max live workflow and the five
+required PR gates. Exact resulting-head CI/live evidence is VERIFICATION PENDING;
+108 offline tests are not a live acceptance result. Keep the PR draft until the
+required real gates pass. Main/deployment have not changed at this checkpoint.
+
+
+Latest-main reconciliation: the direct `refs/heads/main` is
+`3bf8f4a2ec5ff9c61daea2dadd536f7cbd42ed9a` (PR #84), not the stale base SHA
+returned in PR #81 metadata. Its durable/ephemeral storage split, MB quota
+controls and persistence runbook are merged into this acceptance branch without
+changing their implementation. The combined selected storage/runtime/acceptance
+suite passed 118 tests in 2.65s. The older 831dbc7 main statements below are
+historical. Full CI and live checks must run again on this integrated head.
+
+Production read-only inspection: the September 15 deployment at 3bf8f4a was
+REMOVED on September 19; `/health` currently returns HTTP 404. The service still
+points to this repository's `main`, but an active healthy deployment and durable
+volume are not established. Do not inherit older SUCCESS claims or deploy paid
+resources. Follow `docs/PERSISTENCE_RUNBOOK.md` for the actual-host proof.
+
+## Current acceptance repair checkpoint — 2026-09-19
+
+- PR #81 remains OPEN / DRAFT / UNMERGED at `1449adfefc5df53edec5368b17efd9e0478d408d`.
+  Current `main` is `831dbc7209253e58bbfa0ec79b9efe8e130bf523`; production was not
+  re-inspected or deployed in this checkpoint. Older deployment statements below
+  are historical evidence only.
+- Review branch `fix/pr81-reviewed-gates-20260919` contains the prepared gate
+  corrections. It is not integrated into PR #81 yet. See
+  `docs/PR81_REVIEWED_GATES.md` for exact scope, reproduction and remaining work.
+- Local deterministic acceptance/wiring/router/deadline tests: **108 PASS**. Full Foundation,
+  hosted/live tests and exact-revision CI: **VERIFICATION PENDING** for this
+  checkpoint. Never inherit the parent revision's CI results.
+- The normal import test checks the Round-2 -> compatibility -> canonical handoff
+  chain. The trading gate reads canonical top-level `mode` and requires complete
+  first-pass and peer-review receipts. Receipt-only diagnostics retain both new
+  cross-review failure names without copying private text.
+- Worker deadline repair now shares a parent-owned elapsed-time window across
+  model discovery, retries, backup keys and provider fallbacks. Cooperative
+  expiry preserves numeric usage; hard process death still means UNKNOWN usage.
+  The 6,000-token output ceiling and eligible free fallback remain available.
+- An earlier uncommitted proposal capped Company calls to one provider attempt
+  and reduced worker output to 3,000 tokens. That proposal is not included in
+  this checkpoint; its fallback/deadline/quality tradeoffs need repair and tests
+  before integration. The 108 selected tests do not validate that proposal.
+- Automatic approval review rejected broad local test runs after Google endpoint
+  traffic. No full-suite retry, hosted live run or automatic live-triggering push
+  is performed here. Rejected executions are not passes. Before external model
+  tests, obtain informed authorization for the test payload and destination.
+
 ## 1. Current integration authority — updated 2026-09-08
 
 - Repository: `ra7-cyber6565/rv-ai-backend`.

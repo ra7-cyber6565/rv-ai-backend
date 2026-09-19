@@ -16,6 +16,7 @@ from __future__ import annotations
 import os
 import time
 from typing import Dict, List, Optional
+from utils.research_runtime import RuntimeBlocked, bounded_request_timeout
 
 from .citation import CITATION_INSTRUCTION
 from .claim_labels import LABEL_RULE_PROMPT
@@ -254,6 +255,7 @@ class GeminiReasoning:
         tha, kaunsa naam 404 de raha tha, auth fail hua tha — ye sab key ke saath
         badalta hai. Isliye sab saaf karke naye sire se model resolve karte hain.
         """
+        bounded_request_timeout(1)
         if not self.keys.has_backup():
             return False
         dead = self.keys.label()
@@ -371,7 +373,13 @@ class GeminiReasoning:
         """
         tag = label or "gemini"
         attempts_before = self.attempts
-        text = self._generate(prompt, label)
+        try:
+            text = self._generate(prompt, label)
+        except RuntimeBlocked:
+            self.pass_log.append({"label": tag, "ok": False,
+                                  "http_attempts": max(0, self.attempts - attempts_before),
+                                  "model": ""})
+            raise
         # QuotaExhausted yahan tak pahunchta hi nahi (upar se raise hota hai) —
         # aur wo theek hai: budget khatam wala pass maanga hi nahi gaya tha,
         # isliye use "khaali laut aaya" ginna galat hota.
@@ -412,7 +420,8 @@ class GeminiReasoning:
             return ""
 
         # ek pass ke andar zyada se zyada itni key try hongi (kataar ki lambai)
-        for _ in range(max(1, self.keys.count)):
+        for key_index in range(max(1, self.keys.count)):
+            bounded_request_timeout(1)
             text, key_level = self._one_key_cycle(prompt, tag)
             if text:
                 return text
@@ -420,7 +429,7 @@ class GeminiReasoning:
                 # dikkat key ki nahi thi (safety block, khaali jawab, setup) —
                 # nayi key bhi wahi jawab degi, isliye key barbaad mat karo
                 return ""
-            if not self._switch_key(tag, "free limit khatam"):
+            if key_index + 1 >= max(1, self.keys.count) or not self._switch_key(tag, "free limit khatam"):
                 if self.keys.count > 1:
                     self.notes.append(
                         f"{tag}: saari {self.keys.count} free keys ki limit "
@@ -440,7 +449,10 @@ class GeminiReasoning:
         key_level = False
         first_model = self.model_name
         try:
+            bounded_request_timeout(1)
             self.model()                        # lazy resolve, taaki naam asli ho
+        except RuntimeBlocked:
+            raise
         except Exception as exc:                # noqa: BLE001
             self.errors.append(f"{tag} failed: model setup: "
                                f"{type(exc).__name__}: {exc}")
@@ -455,6 +467,7 @@ class GeminiReasoning:
             return "", bool(self.blocked)
 
         for model_index, name in enumerate(order):
+            bounded_request_timeout(1)
             if name not in self.models_tried:
                 self.models_tried.append(name)
             if name != self.model_name:
@@ -464,29 +477,38 @@ class GeminiReasoning:
                     self.errors.append(f"{tag}: model '{name}' banaya nahi ja saka: "
                                        f"{type(exc).__name__}: {exc}")
                     continue
-            if model_index:
-                # §14 — switch YAHAN gina jaata hai: jab hum sach mein agle model
-                # par aa gaye aur uspar attempt karne wale hain. Pehle ye sirf
-                # SAFAL hone par ginta tha, isliye "dono model fail" wale run
-                # mein switch 0 dikhta tha — jabki switch hua tha. Aur ye ginti
-                # `same_model_retries` se bilkul alag hai: model badalna retry
-                # nahi hai.
-                self.switched_models += 1
             request_prompt = prompt
             compacted_for_model = False
             timeout_extended = False
+            compaction_counted = False
+            extension_counted = False
             from .gemini_model import call_timeout as _call_timeout
             request_timeout = _call_timeout()
             for attempt in range(len(_BACKOFF_SECONDS) + 1):
                 from utils.research_runtime import reserve_request
+                attempt_timeout = bounded_request_timeout(request_timeout)
                 reserve_request("gemini", request_prompt, 6000)
+                counts_before_dispatch = (self.attempts, self.same_model_retries,
+                                          self.switched_models, self.prompt_compactions,
+                                          self.timeout_extensions)
+                # Count retries/recoveries only when they get a dispatch lease.
+                if attempt:
+                    self.same_model_retries += 1
+                elif model_index:
+                    self.switched_models += 1
+                if compacted_for_model and not compaction_counted:
+                    self.prompt_compactions += 1
+                    compaction_counted = True
+                if timeout_extended and not extension_counted:
+                    self.timeout_extensions += 1
+                    extension_counted = True
                 self.attempts += 1
                 self.prompt_attempt_log.append({
                     "label": tag,
                     "model": name,
                     "chars": len(request_prompt),
                     "compacted": compacted_for_model,
-                    "timeout_seconds": request_timeout,
+                    "timeout_seconds": attempt_timeout,
                 })
                 try:
                     # Bandhi hui waqt-seema ke saath. Latki hui call ab TRANSIENT
@@ -496,7 +518,7 @@ class GeminiReasoning:
                     # aata tha).
                     from .gemini_model import generate as _generate
                     response = _generate(
-                        self._model, request_prompt, timeout=request_timeout
+                        self._model, request_prompt, timeout=attempt_timeout
                     )
                     text = (getattr(response, "text", "") or "").strip()
                     if not text:
@@ -511,6 +533,13 @@ class GeminiReasoning:
                     elif attempt:
                         self.notes.append(f"{tag}: {attempt + 1} koshish ke baad chala")
                     return text, False
+                except RuntimeBlocked:
+                    # Adapter checks can reject an expired window/unsupported
+                    # SDK after the central lease but before HTTP dispatch.
+                    (self.attempts, self.same_model_retries, self.switched_models,
+                     self.prompt_compactions, self.timeout_extensions) = counts_before_dispatch
+                    self.prompt_attempt_log.pop()
+                    raise
                 except Exception as exc:        # noqa: BLE001
                     v = classify_error(exc)
                     self.ledger.add(name, tag, v, attempt=attempt + 1)
@@ -527,13 +556,11 @@ class GeminiReasoning:
                         # request ko input error, deadline ya 5xx diya to usi
                         # failed provider-copy ko source IDs/rules bachakar ek
                         # baar compact karo; unchanged blind retries mat bhejo.
-                        if not compacted_for_model:
+                        if not compacted_for_model and attempt < len(_BACKOFF_SECONDS):
                             compact_prompt = _compact_prompt(request_prompt)
                             if len(compact_prompt) < len(request_prompt):
                                 request_prompt = compact_prompt
                                 compacted_for_model = True
-                                self.prompt_compactions += 1
-                                self.same_model_retries += 1
                                 self.notes.append(
                                     f"{tag}: '{name}' ki large request "
                                     f"({v.kind}) ke baad source IDs/rules bachakar "
@@ -554,8 +581,6 @@ class GeminiReasoning:
                                 request_timeout, _timeout_recovery_seconds()
                             )
                             timeout_extended = True
-                            self.timeout_extensions += 1
-                            self.same_model_retries += 1
                             self.notes.append(
                                 f"{tag}: compact primary timeout ke baad "
                                 f"{request_timeout}s ka ek bounded recovery attempt")
@@ -591,11 +616,9 @@ class GeminiReasoning:
                                 f"{tag}: '{name}' ne {v.retry_after:.0f}s wait "
                                 f"maanga — itna rukne se behtar agla model")
                             break
-                        time.sleep(min(wait, _MAX_SLEEP_SECONDS))
-                        # §14 — ASLI retry yahi hai: wahi model, dobara. Isse
-                        # alag se ginna zaroori hai, warna model fallback bhi
-                        # "retry" ban kar hisaab jhootha kar deta hai.
-                        self.same_model_retries += 1
+                        time.sleep(bounded_request_timeout(min(wait, _MAX_SLEEP_SECONDS)))
+                        # Dispatch at the loop head counts the retry only if a
+                        # request lease and time remain after this backoff.
                         continue
                     break                       # is model par bas — agla model
         return "", key_level
