@@ -91,6 +91,7 @@ def test_overlong_handoff_keeps_every_role_and_blocks_complete_review():
     result = company.run_company("Q", packet(), get_depth_config("COMPANY"), worker=lambda p: envelope(verbose))
     handoff = company.chief_handoff(result)
     assert len(result["handoff_truncated_roles"]) == 4
+    assert result["handoff_compacted_roles"] == []
     assert all(role in handoff for role, _ in company.ROLES[:4])
     passes = {"planned_passes": [], "done_passes": [], "notes": [], "api_accounting": {}}
     company.attach_company_passes(passes, result)

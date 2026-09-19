@@ -77,7 +77,7 @@ class HostedLiveGateTests(unittest.TestCase):
                 self.assertEqual(gate.main(['--execute']),1)
                 trading.assert_not_called()
                 live.return_value={m:dict(passed=True,receipt={'checks':[]}) for m in ['COMPANY','COMPANY_PLUS']}
-                trading.return_value={'schema':2,'passed':True,'checks':[
+                trading.return_value={'schema':3,'passed':True,'checks':[
                     dict(name=name,passed=True) for name in gate.REQUIRED_TRADING_CHECKS]}
                 self.assertEqual(gate.main(['--execute']),0)
                 trading.assert_called_once()
@@ -86,7 +86,7 @@ class HostedLiveGateTests(unittest.TestCase):
                 self.assertFalse(result['production_deployed'])
                 trading.return_value={'passed':True}
                 self.assertEqual(gate.main(['--execute']),1)
-                trading.return_value={'schema':2,'passed':False,'checks':[
+                trading.return_value={'schema':3,'passed':False,'checks':[
                     dict(name=name,passed=False) for name in gate.REQUIRED_TRADING_CHECKS]}
                 self.assertEqual(gate.main(['--execute']),1)
                 trading.side_effect=ValueError('PRIVATE_PROVIDER_BODY')
@@ -142,7 +142,7 @@ class HostedLiveGateTests(unittest.TestCase):
             self.assertNotIn('PRIVATE', output.getvalue())
 
     def test_trading_receipt_is_allowlisted_and_cannot_self_certify(self):
-        good = {"schema": 2, "passed": True, "checks": [
+        good = {"schema": 3, "passed": True, "checks": [
             {"name": name, "passed": True, "detail": "PRIVATE_SOURCE"}
             for name in gate.REQUIRED_TRADING_CHECKS],
             "summary": {"status": "PRIVATE_KEY", "answer_sha256": "PRIVATE_ANSWER"},
