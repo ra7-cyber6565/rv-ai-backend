@@ -76,12 +76,14 @@ def install() -> None:
     @wraps(prior)
     def guarded_chief_handoff(company: Dict) -> str:
         encoded = []
+        worker_roles = []
         compacted_roles = []
         compact_levels: Dict[str, str] = {}
         truncated_roles = []
         blocked_reasons: Dict[str, str] = {}
         for row in company.get("workers", []):
             role = str(row.get("role") or "unknown")
+            worker_roles.append(role)
             status = str(row.get("status") or "FAILED")
             report = _strip_binary_artifacts(row.get("report"))
             text = _encode(role, status, report)
@@ -105,6 +107,7 @@ def install() -> None:
             encoded.append(text)
 
         company["handoff_prepared"] = True
+        company["handoff_worker_roles"] = worker_roles
         company["handoff_compacted_roles"] = compacted_roles
         company["handoff_compaction_levels"] = compact_levels
         company["handoff_truncated_roles"] = truncated_roles
