@@ -8,95 +8,48 @@ on:
       - .github/workflows/temp-pr81-latest-integration.yml
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  integrate:
+  diagnose:
     runs-on: ubuntu-latest
-    timeout-minutes: 70
     steps:
       - uses: actions/checkout@v4
         with:
           ref: integration/pr81-latest-on-pr113
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Apply latest PR81 technical commits with measured semantic resolution
+      - name: Capture exact semantic conflicts
         shell: bash
         run: |
           set -euo pipefail
-          BASE=43c411cad88b226be44892152c0fa624edd8b68e
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git fetch origin fix/live-trading-acceptance-20260908
-
           if ! git cherry-pick 7b0a10de7831efbca342ee361ea5fd68170c3a6b; then
             conflicts="$(git diff --name-only --diff-filter=U)"
             test "$conflicts" = "tests/test_company_handoff_runtime_wiring.py"
-            # PR113 intentionally superseded the old compatibility-facade handoff
-            # with LOSSLESS_SHARED_FIELDS_THEN_HARD_FAIL. Keep its stronger wiring test.
             git checkout --ours -- tests/test_company_handoff_runtime_wiring.py
             git add tests/test_company_handoff_runtime_wiring.py
             GIT_EDITOR=true git cherry-pick --continue
           fi
-
+          set +e
           git cherry-pick 8febb75fc5ba7d66d2759ddb0bfdf845f14b84f8
-          test -z "$(git diff --name-only --diff-filter=U)"
-
-          # Do not import stale branch authority/history into the current stack.
-          git restore --source="$BASE" -- AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
-          git rm -f --ignore-unmatch docs/PR81_REVIEWED_GATES.md
-          if ! git diff --quiet || ! git diff --cached --quiet; then
-            git add AI_HANDOFF.md WORK_STATUS.md docs/INFINITY_REQUIREMENT_LEDGER.md
-            git commit -m "docs: preserve current integration authority"
-          fi
-          git diff --check
-          test -z "$(git status --porcelain)"
-      - name: Install repository and test dependencies
-        run: |
-          python -m pip install -q -r requirements.txt
-          python -m pip install -q pytest
-      - name: Run focused PR81 and handoff regressions
-        run: |
-          python -m pytest -q \
-            tests/test_pr81_trading_live_acceptance.py \
-            tests/test_pr81_live_failure_diagnostic.py \
-            tests/test_pr81_worker_diagnostics.py \
-            tests/test_company_cross_review.py \
-            tests/test_company_handoff_runtime_wiring.py \
-            tests/test_company_generation_window.py \
-            tests/test_gemini_retry.py \
-            tests/test_reasoning_router.py \
-            tests/test_reasoning_router_integration.py \
-            tests/test_company_handoff_guard.py \
-            tests/test_research_company.py
-      - name: Run full pytest regression
-        shell: bash
-        run: |
-          set -o pipefail
-          python -m pytest -q --tb=short -ra 2>&1 | tee latest-pr81-pytest.log
-      - name: Upload pytest receipt
-        if: always()
+          status=$?
+          set -e
+          test "$status" -ne 0
+          mkdir -p conflict-snapshot
+          git diff --name-only --diff-filter=U | tee conflict-snapshot/conflicts.txt
+          while IFS= read -r file; do
+            [ -n "$file" ] || continue
+            safe="${file//\//__}"
+            git show ":1:$file" > "conflict-snapshot/${safe}.base" || true
+            git show ":2:$file" > "conflict-snapshot/${safe}.current" || true
+            git show ":3:$file" > "conflict-snapshot/${safe}.incoming" || true
+          done < conflict-snapshot/conflicts.txt
+      - name: Upload semantic conflict snapshot
         uses: actions/upload-artifact@v4
         with:
-          name: latest-pr81-pytest-${{ github.run_id }}
-          path: latest-pr81-pytest.log
-          if-no-files-found: ignore
+          name: pr81-runtime-conflicts-${{ github.run_id }}
+          path: conflict-snapshot/
+          if-no-files-found: error
           retention-days: 3
-      - name: Run legacy strict research-engine regression
-        shell: bash
-        run: |
-          set -o pipefail
-          python test_research_engine.py 2>&1 | tee latest-pr81-legacy.log
-      - name: Upload legacy receipt
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: latest-pr81-legacy-${{ github.run_id }}
-          path: latest-pr81-legacy.log
-          if-no-files-found: ignore
-          retention-days: 3
-      - name: Push only fully validated integration
-        shell: bash
-        run: git push origin HEAD:integration/pr81-latest-on-pr113
