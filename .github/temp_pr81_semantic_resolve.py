@@ -24,7 +24,7 @@ def write_checked(path: str, text: str) -> None:
 
 def resolve_company_worker() -> None:
     path = "research_engine/company_worker.py"
-    text = stage(3, path)  # incoming generation-window implementation
+    text = stage(3, path)
     old = '        context = RunContext(RuntimeStore(wire["path"]), wire["project"], wire["run"]) if wire else None\n'
     new = (
         '        context = RunContext(RuntimeStore(wire["path"]), wire["project"], wire["run"],\n'
@@ -36,7 +36,7 @@ def resolve_company_worker() -> None:
 
 def resolve_research_company() -> None:
     path = "research_engine/research_company.py"
-    text = stage(2, path)  # current stack: cooldown/report-validation/deadline guards
+    text = stage(2, path)
     old = '    try:\n        payload = dict(payload)\n'
     new = (
         '    try:\n'
@@ -53,7 +53,7 @@ def resolve_research_company() -> None:
 
 def resolve_runtime() -> None:
     path = "utils/research_runtime.py"
-    text = stage(2, path)  # current durable-quota + model-cooldown implementation
+    text = stage(2, path)
     anchor = (
         'class ResearchCancelled(RuntimeBlocked):\n'
         '    pass\n\n\n'
@@ -140,7 +140,7 @@ class ModelCooldownActive(RuntimeBlocked):
 
 def resolve_gemini_reasoning() -> None:
     path = "research_engine/gemini_reasoning.py"
-    text = Path(path).read_text(encoding="utf-8")  # includes Git conflict markers
+    text = Path(path).read_text(encoding="utf-8")
     pattern = re.compile(r'^<<<<<<< .*?\n(.*?)^=======\n(.*?)^>>>>>>> .*?\n', re.M | re.S)
 
     dispatch = '''                from utils.research_runtime import (
@@ -152,7 +152,10 @@ def resolve_gemini_reasoning() -> None:
                 attempt_timeout = bounded_request_timeout(effective_timeout)
                 scopes = model_cooldown_scopes("gemini", self.keys.active(), name) if current() else ()
                 try:
-                    reserve_request("gemini", request_prompt, 6000, cooldown_scopes=scopes)
+                    if scopes:
+                        reserve_request("gemini", request_prompt, 6000, cooldown_scopes=scopes)
+                    else:
+                        reserve_request("gemini", request_prompt, 6000)
                 except ModelCooldownActive as cooldown:
                     # A sibling already observed this failure. No HTTP attempt,
                     # reservation or success is invented for the skipped call.
@@ -173,7 +176,6 @@ def resolve_gemini_reasoning() -> None:
                                           self.switched_models, self.prompt_compactions,
                                           self.timeout_extensions)
                 history_before_dispatch = len(history)
-                # Counters advance only after an application request lease exists.
                 if name in history:
                     self.same_model_retries += 1
                 if history and name != history[-1]:
@@ -206,8 +208,6 @@ def resolve_gemini_reasoning() -> None:
     text = pattern.sub(choose, text)
     assert seen == 4
 
-    # attempt_timeout already uses min(run remaining, generation remaining); do
-    # not mutate request_timeout again immediately before dispatch.
     old = (
         '                    from .gemini_model import generate as _generate\n'
         '                    from utils.research_runtime import remaining_seconds\n'
@@ -223,8 +223,6 @@ def resolve_gemini_reasoning() -> None:
     assert text.count(old) == 1
     text = text.replace(old, new, 1)
 
-    # An adapter can reject after central reservation but before HTTP dispatch.
-    # Restore all local counters and history so no phantom retry/switch is claimed.
     old = (
         '                    self.prompt_attempt_log.pop()\n'
         '                    raise\n'
